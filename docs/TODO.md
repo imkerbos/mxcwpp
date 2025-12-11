@@ -366,49 +366,51 @@
 
 ### API 接口问题
 
-#### 1. POST /api/v1/policies 创建策略接口失败（HTTP 400）
+#### 1. POST /api/v1/policies 创建策略接口失败（HTTP 400）✅ 已修复
 
 **问题描述**：
 - 在 API 测试中发现 `POST /api/v1/policies` 接口返回 HTTP 400 错误
 - 测试时间：2025-12-11
 - 测试场景：创建新策略时失败
+- 根本原因：`RuleData` 结构体中的 `CheckConfig` 字段有 `binding:"required"` 标记，导致缺少该字段时请求体验证失败
 
-**可能原因**：
-- 请求数据格式验证问题
-- 必填字段缺失或格式不正确
-- 数据验证逻辑错误
+**修复方案**：
+- ✅ [x] 移除 `CheckConfig` 的 `binding:"required"` 标记（改为可选字段）
+- ✅ [x] 在 `CreatePolicy` 方法中添加手动的字段验证，确保规则的 `RuleID` 和 `Title` 必填
+- ✅ [x] 添加了测试用例 `TestCreatePolicyAPI_ValidRequest` 和 `TestCreatePolicyAPI_NoCheckConfig`
+- ✅ [x] 修复后编译通过，测试验证成功
 
-**待修复**：
-- [ ] 检查 `internal/server/manager/api/policies.go` 中的 `CreatePolicy` 方法
-- [ ] 验证请求数据格式和验证逻辑
-- [ ] 检查错误响应信息，确保返回清晰的错误提示
-- [ ] 添加单元测试覆盖创建策略的各种场景
+**修复提交**：
+- 文件：`internal/server/manager/api/policies.go`（第 140 行移除 binding 标记，第 156-184 行添加验证逻辑）
+- 测试：`internal/server/manager/api/integration_test.go`（添加新测试函数）
+- 修复时间：2025-12-11 18:45
 
 ---
 
-#### 2. POST /api/v1/tasks/:task_id/run 运行任务接口失败（HTTP 400）
+#### 2. POST /api/v1/tasks/:task_id/run 运行任务接口失败（HTTP 400）✅ 已修复
 
 **问题描述**：
 - 在 API 测试中发现 `POST /api/v1/tasks/:task_id/run` 接口返回 HTTP 400 错误
 - 测试时间：2025-12-11
 - 测试场景：尝试运行一个已经是 `running` 状态的任务时失败
+- 根本原因：当任务已在运行中时，API 返回 HTTP 400，这在 RESTful 语义上不正确，应该返回 HTTP 409 Conflict
 
-**可能原因**：
-- 任务状态验证逻辑过于严格
-- 不允许重复运行正在执行的任务（这是正常行为，但错误提示可能不清晰）
-- 任务状态检查逻辑问题
+**修复方案**：
+- ✅ [x] 将任务已在运行中时的响应状态码从 `400` 改为 `409 Conflict`（第 264 行）
+- ✅ [x] 改进错误消息为"任务正在执行中，无法重复执行"（第 266 行）
+- ✅ [x] 添加了测试用例 `TestRunTaskAPI_Running` 和 `TestRunTaskAPI_Success`
+- ✅ [x] 修复后编译通过，测试验证成功
 
-**待修复**：
-- [ ] 检查 `internal/server/manager/api/tasks.go` 中的 `RunTask` 方法
-- [ ] 验证任务状态检查逻辑
-- [ ] 如果任务已在运行中，应该返回更友好的错误提示（如 HTTP 409 Conflict）
-- [ ] 添加单元测试覆盖各种任务状态场景（pending、running、completed、failed）
+**修复提交**：
+- 文件：`internal/server/manager/api/tasks.go`（第 264-267 行修改）
+- 测试：`internal/server/manager/api/integration_test.go`（添加新测试函数）
+- 修复时间：2025-12-11 18:45
 
 ---
 
 ## Server 端开发详细任务分解
 
-> **当前重点**：Phase 1.2 Server 开发
+> **当前重点**：Phase 1.2 Server 开发 + API 修复
 
 ### 任务 1：数据库模型设计（优先级：P0）✅
 
