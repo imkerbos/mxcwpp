@@ -80,8 +80,9 @@
                   <SafetyOutlined />
                 </template>
                 <template #title>基线安全</template>
+                <a-menu-item key="policy-groups">策略组管理</a-menu-item>
                 <a-menu-item key="policies">基线检查</a-menu-item>
-                <a-menu-item key="tasks">扫描任务</a-menu-item>
+                <a-menu-item key="tasks">任务执行</a-menu-item>
               </a-sub-menu>
               <a-menu-item key="alerts">
                 <template #icon>
@@ -222,6 +223,9 @@ watch(
     } else if (name === 'BusinessLines') {
       selectedKeys.value = ['business-lines']
       openKeys.value = ['assets-menu']
+    } else if (name === 'PolicyGroups') {
+      selectedKeys.value = ['policy-groups']
+      openKeys.value = ['baseline-menu']
     } else if (name === 'Policies' || name === 'PolicyDetail') {
       selectedKeys.value = ['policies']
       openKeys.value = ['baseline-menu']
@@ -270,6 +274,8 @@ const handleMenuClick = ({ key }: { key: string }) => {
     router.push('/hosts')
   } else if (key === 'business-lines') {
     router.push('/business-lines')
+  } else if (key === 'policy-groups') {
+    router.push('/policy-groups')
   } else if (key === 'policies') {
     router.push('/policies')
   } else if (key === 'tasks') {

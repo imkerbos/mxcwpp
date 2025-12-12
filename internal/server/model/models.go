@@ -7,6 +7,7 @@ var (
 	// 所有模型列表，用于数据库迁移
 	AllModels = []interface{}{
 		&Host{},
+		&PolicyGroup{},
 		&Policy{},
 		&Rule{},
 		&ScanResult{},

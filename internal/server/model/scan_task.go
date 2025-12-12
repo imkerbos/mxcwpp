@@ -69,6 +69,7 @@ type ScanTask struct {
 	CreatedAt    time.Time    `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt    time.Time    `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 	ExecutedAt   *time.Time   `gorm:"column:executed_at;type:timestamp" json:"executed_at"`
+	CompletedAt  *time.Time   `gorm:"column:completed_at;type:timestamp" json:"completed_at"`
 }
 
 // TableName 指定表名

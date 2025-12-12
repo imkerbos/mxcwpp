@@ -13,6 +13,7 @@ type Policy struct {
 	OSFamily    StringArray `gorm:"column:os_family;type:json" json:"os_family"`
 	OSVersion   string      `gorm:"column:os_version;type:varchar(50)" json:"os_version"`
 	Enabled     bool        `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`
+	GroupID     string      `gorm:"column:group_id;type:varchar(64);index" json:"group_id"` // 所属策略组ID
 	CreatedAt   time.Time   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt   time.Time   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 

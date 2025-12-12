@@ -53,10 +53,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '基线检查详情' },
       },
       {
+        path: 'policy-groups',
+        name: 'PolicyGroups',
+        component: () => import('@/views/PolicyGroups/index.vue'),
+        meta: { title: '策略组管理' },
+      },
+      {
         path: 'tasks',
         name: 'Tasks',
         component: () => import('@/views/Tasks/index.vue'),
-        meta: { title: '扫描任务' },
+        meta: { title: '任务执行' },
       },
       {
         path: 'system/collection',

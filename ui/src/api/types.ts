@@ -77,6 +77,37 @@ export interface HostDetail extends Host {
   network_interfaces?: string // JSON 字符串，解析后为 NetworkInterfaceInfo[]
 }
 
+// 策略组相关类型
+export interface PolicyGroup {
+  id: string
+  name: string
+  description: string
+  icon?: string
+  color?: string
+  sort_order: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  policies?: Policy[]
+  // 统计数据
+  policy_count?: number
+  rule_count?: number
+  pass_rate?: number
+  host_count?: number
+}
+
+export interface PolicyGroupStatistics {
+  group_id: string
+  policy_count: number
+  rule_count: number
+  host_count: number
+  pass_rate: number
+  pass_count: number
+  fail_count: number
+  risk_count: number
+  last_check_time?: string
+}
+
 // 策略相关类型
 export interface Policy {
   id: string
@@ -86,6 +117,7 @@ export interface Policy {
   os_family: string[]
   os_version: string
   enabled: boolean
+  group_id?: string // 所属策略组ID
   rule_count?: number
   rules?: Rule[]
   created_at: string
@@ -119,17 +151,19 @@ export interface FixConfig {
 export interface ScanTask {
   task_id: string
   name: string
-  type: 'manual' | 'scheduled'
+  type: 'manual' | 'scheduled' | 'baseline'
   target_type: 'all' | 'host_ids' | 'os_family'
   target_config: {
     host_ids?: string[]
     os_family?: string[]
   }
+  target_hosts?: string[] // 目标主机 ID 列表
   policy_id: string
-  rule_ids: string[]
+  rule_ids?: string[]
   status: 'pending' | 'running' | 'completed' | 'failed'
   created_at: string
   executed_at?: string
+  completed_at?: string
   updated_at: string
 }
 
