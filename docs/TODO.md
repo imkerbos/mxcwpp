@@ -310,7 +310,7 @@
 
 - [x] Prometheus 指标导出 - 已完成：Prometheus 查询客户端和混合查询服务
 - [ ] 告警对接（Webhook、Lark、邮件等）
-- [ ] CMDB 集成
+- [x] CMDB 集成 - 已完成：CMDB 对接文档（`docs/CMDB_INTEGRATION.md`）
 - [ ] 日志系统集成（ELK/Loki）
 
 ---
@@ -332,6 +332,21 @@
 10. ✅ Phase 1.2.1：数据库模型设计（Host、Policy、Rule、ScanResult、ScanTask）
 11. ✅ Phase 1.2.2 AgentCenter 基础框架：主程序、配置加载、日志初始化、数据库连接、gRPC Server、mTLS 配置
 12. ✅ Phase 1.2.2 AgentCenter Transfer 服务：双向流、连接管理、心跳数据处理、检测结果处理
+13. ✅ Phase 1.2.3 **Baseline 任务执行流程完善** - 2025-12-12 完成
+    - ✅ Baseline Plugin 添加 task_id 到检测结果
+    - ✅ Baseline Plugin 发送任务完成信号 (DataType=8001)
+    - ✅ Server 端处理任务完成信号并更新任务状态
+    - ✅ Server 端检测结果去重（UPSERT 机制）
+    - ✅ 任务超时控制（默认 1 小时）
+    - ✅ 任务状态自动流转（pending → running → completed/failed）
+14. ✅ Phase 2.3 **任务执行页面 UI 改进** - 2025-12-12 完成
+    - ✅ 将「扫描任务」改名为「任务执行」（路由、菜单、页面标题）
+    - ✅ 丰富任务过滤条件（任务类型、状态、任务名称筛选）
+    - ✅ 实现「执行」按钮功能（确认弹窗、加载状态、成功/失败提示）
+    - ✅ 实现任务详情查看功能（任务信息、目标主机、时间信息）
+    - ✅ 实现任务进度显示（执行中显示进度条）
+    - ✅ 实现执行结果统计（通过/失败/错误数量）
+    - ✅ 自动刷新功能（任务执行中时自动刷新列表）
 
 **下一步**：
 1. ✅ Phase 1.1 继续：完善 Baseline Plugin（file_line_match、sysctl、service_status 检查器）- 已完成
