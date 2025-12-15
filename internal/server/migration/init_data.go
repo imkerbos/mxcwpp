@@ -15,6 +15,9 @@ import (
 	"github.com/mxcsec-platform/mxcsec-platform/plugins/baseline/engine"
 )
 
+// DefaultPolicyGroupID 默认策略组ID
+const DefaultPolicyGroupID = "system-baseline"
+
 // InitDefaultData 初始化默认数据（策略和规则）
 func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
 	if logger == nil {
@@ -22,6 +25,16 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
 	}
 
 	logger.Info("开始初始化默认数据", zap.String("policy_dir", policyDir))
+
+	// 初始化默认策略组（始终执行，确保策略组存在）
+	if err := initDefaultPolicyGroup(db, logger); err != nil {
+		return fmt.Errorf("初始化默认策略组失败: %w", err)
+	}
+
+	// 初始化默认插件配置（始终执行，确保插件配置存在）
+	if err := initDefaultPluginConfigs(db, logger); err != nil {
+		return fmt.Errorf("初始化默认插件配置失败: %w", err)
+	}
 
 	// 检查是否已有策略数据
 	var count int64
@@ -31,6 +44,10 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
 
 	if count > 0 {
 		logger.Info("数据库中已存在策略数据，跳过策略初始化", zap.Int64("count", count))
+		// 检查并更新已存在策略的 group_id（如果为空）
+		if err := associateExistingPoliciesWithGroup(db, logger); err != nil {
+			logger.Warn("关联已存在策略到默认策略组失败", zap.Error(err))
+		}
 	} else {
 
 		// 从示例策略文件加载
@@ -44,9 +61,9 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
 			return fmt.Errorf("加载策略文件失败: %w", err)
 		}
 
-		// 保存到数据库
+		// 保存到数据库（关联到默认策略组）
 		for _, policy := range policies {
-			if err := savePolicyToDB(db, policy, logger); err != nil {
+			if err := savePolicyToDB(db, policy, DefaultPolicyGroupID, logger); err != nil {
 				return fmt.Errorf("保存策略 %s 失败: %w", policy.ID, err)
 			}
 			logger.Info("策略初始化成功", zap.String("policy_id", policy.ID), zap.String("name", policy.Name))
@@ -150,7 +167,7 @@ func loadPoliciesFromDir(dir string, logger *zap.Logger) ([]*engine.Policy, erro
 }
 
 // savePolicyToDB 保存策略到数据库
-func savePolicyToDB(db *gorm.DB, policy *engine.Policy, logger *zap.Logger) error {
+func savePolicyToDB(db *gorm.DB, policy *engine.Policy, groupID string, logger *zap.Logger) error {
 	// 转换 Policy 模型
 	dbPolicy := &model.Policy{
 		ID:          policy.ID,
@@ -160,6 +177,7 @@ func savePolicyToDB(db *gorm.DB, policy *engine.Policy, logger *zap.Logger) erro
 		OSFamily:    model.StringArray(policy.OSFamily),
 		OSVersion:   policy.OSVersion,
 		Enabled:     policy.Enabled,
+		GroupID:     groupID, // 关联到策略组
 	}
 
 	// 创建策略
@@ -206,6 +224,146 @@ func savePolicyToDB(db *gorm.DB, policy *engine.Policy, logger *zap.Logger) erro
 		if err := db.Create(dbRule).Error; err != nil {
 			return fmt.Errorf("创建规则 %s 失败: %w", rule.RuleID, err)
 		}
+	}
+
+	return nil
+}
+
+// initDefaultPolicyGroup 初始化默认策略组
+func initDefaultPolicyGroup(db *gorm.DB, logger *zap.Logger) error {
+	// 检查默认策略组是否存在
+	var group model.PolicyGroup
+	err := db.Where("id = ?", DefaultPolicyGroupID).First(&group).Error
+
+	if err == nil {
+		// 默认策略组已存在
+		logger.Info("默认策略组已存在", zap.String("group_id", DefaultPolicyGroupID), zap.String("name", group.Name))
+		return nil
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("检查默认策略组失败: %w", err)
+	}
+
+	// 创建默认策略组
+	defaultGroup := &model.PolicyGroup{
+		ID:          DefaultPolicyGroupID,
+		Name:        "系统基线组",
+		Description: "系统内置的基线检查策略组，包含 Linux 操作系统安全基线检查策略",
+		Icon:        "🛡",
+		Color:       "#1890ff",
+		SortOrder:   0,
+		Enabled:     true,
+	}
+
+	if err := db.Create(defaultGroup).Error; err != nil {
+		return fmt.Errorf("创建默认策略组失败: %w", err)
+	}
+
+	logger.Info("默认策略组初始化成功",
+		zap.String("group_id", defaultGroup.ID),
+		zap.String("name", defaultGroup.Name),
+	)
+	return nil
+}
+
+// associateExistingPoliciesWithGroup 将没有分组的策略关联到默认策略组
+func associateExistingPoliciesWithGroup(db *gorm.DB, logger *zap.Logger) error {
+	// 查找没有分组的策略
+	result := db.Model(&model.Policy{}).
+		Where("group_id IS NULL OR group_id = ''").
+		Update("group_id", DefaultPolicyGroupID)
+
+	if result.Error != nil {
+		return fmt.Errorf("更新策略分组失败: %w", result.Error)
+	}
+
+	if result.RowsAffected > 0 {
+		logger.Info("已将未分组策略关联到默认策略组",
+			zap.Int64("count", result.RowsAffected),
+			zap.String("group_id", DefaultPolicyGroupID),
+		)
+	}
+
+	return nil
+}
+
+// initDefaultPluginConfigs 初始化默认插件配置
+func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger) error {
+	// 定义默认插件配置
+	// 开发环境：插件构建到 /workspace/dist/plugins/
+	// 生产环境：需要改为实际的下载 URL
+	defaultPlugins := []model.PluginConfig{
+		{
+			Name:        "baseline",
+			Type:        model.PluginTypeBaseline,
+			Version:     "1.0.1", // 版本更新，触发 URL 更新
+			SHA256:      "",      // 暂时为空，后续可以添加校验
+			Signature:   "",
+			DownloadURLs: model.StringArray{
+				// 开发环境：使用 workspace 挂载路径
+				"file:///workspace/dist/plugins/baseline",
+			},
+			Detail:      `{"check_interval": 3600}`,
+			Enabled:     true,
+			Description: "Linux 基线安全检查插件，执行操作系统安全配置检查",
+		},
+		{
+			Name:        "collector",
+			Type:        model.PluginTypeCollector,
+			Version:     "1.0.1",
+			SHA256:      "",
+			Signature:   "",
+			DownloadURLs: model.StringArray{
+				"file:///workspace/dist/plugins/collector",
+			},
+			Detail:      `{"collect_interval": 300}`,
+			Enabled:     true,
+			Description: "资产采集插件，采集主机进程、端口、用户等信息",
+		},
+	}
+
+	for _, plugin := range defaultPlugins {
+		// 检查插件是否已存在
+		var existing model.PluginConfig
+		err := db.Where("name = ?", plugin.Name).First(&existing).Error
+
+		if err == nil {
+			// 插件已存在，检查是否需要更新版本
+			if existing.Version != plugin.Version {
+				existing.Version = plugin.Version
+				existing.SHA256 = plugin.SHA256
+				existing.DownloadURLs = plugin.DownloadURLs
+				existing.Detail = plugin.Detail
+				if err := db.Save(&existing).Error; err != nil {
+					return fmt.Errorf("更新插件配置 %s 失败: %w", plugin.Name, err)
+				}
+				logger.Info("插件配置已更新",
+					zap.String("name", plugin.Name),
+					zap.String("version", plugin.Version),
+				)
+			} else {
+				logger.Debug("插件配置已存在，跳过",
+					zap.String("name", plugin.Name),
+					zap.String("version", existing.Version),
+				)
+			}
+			continue
+		}
+
+		if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("检查插件配置 %s 失败: %w", plugin.Name, err)
+		}
+
+		// 创建新的插件配置
+		if err := db.Create(&plugin).Error; err != nil {
+			return fmt.Errorf("创建插件配置 %s 失败: %w", plugin.Name, err)
+		}
+		logger.Info("插件配置初始化成功",
+			zap.String("name", plugin.Name),
+			zap.String("type", string(plugin.Type)),
+			zap.String("version", plugin.Version),
+		)
 	}
 
 	return nil
