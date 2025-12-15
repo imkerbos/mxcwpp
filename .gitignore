@@ -15,12 +15,12 @@
 *.dylib
 bin/
 dist/
-agent
-agentcenter
-manager
-baseline-plugin
-baseline
-collector-plugin
+/agent
+/agentcenter
+/manager
+/baseline-plugin
+/baseline
+/collector-plugin
 
 # 测试相关
 *.test
