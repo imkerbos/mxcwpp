@@ -328,3 +328,4 @@ docs/.doctrees/
 # 保留 Cursor 规则文件
 !.cursor/rules/
 !.cursor/rules/**/*
+CLAUDE.md
