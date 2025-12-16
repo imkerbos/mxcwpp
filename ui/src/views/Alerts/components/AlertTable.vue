@@ -111,6 +111,25 @@
         />
       </a-form-item>
     </a-modal>
+
+    <!-- 忽略确认对话框 -->
+    <a-modal
+      v-model:open="ignoreModalVisible"
+      title="确认忽略"
+      @ok="handleIgnoreConfirm"
+      @cancel="ignoreModalVisible = false"
+      ok-text="确认忽略"
+      :ok-button-props="{ danger: true }"
+    >
+      <p>确定要忽略告警「{{ ignoreAlert?.title }}」吗？</p>
+      <p style="color: #8c8c8c; font-size: 13px;">忽略后告警将移至历史记录。</p>
+      <a-alert
+        type="warning"
+        message="忽略告警不会解决实际的安全问题，建议优先解决告警。"
+        show-icon
+        style="margin-top: 12px"
+      />
+    </a-modal>
   </div>
 </template>
 
@@ -140,7 +159,9 @@ const emit = defineEmits<{
 const router = useRouter()
 const localFilters = ref({ ...props.filters })
 const resolveModalVisible = ref(false)
+const ignoreModalVisible = ref(false)
 const currentAlert = ref<Alert | null>(null)
+const ignoreAlert = ref<Alert | null>(null)
 const resolveReason = ref('')
 
 watch(
@@ -274,7 +295,16 @@ const handleResolveConfirm = () => {
 }
 
 const handleIgnoreClick = (alert: Alert) => {
-  emit('ignore', alert)
+  ignoreAlert.value = alert
+  ignoreModalVisible.value = true
+}
+
+const handleIgnoreConfirm = () => {
+  if (ignoreAlert.value) {
+    emit('ignore', ignoreAlert.value)
+    ignoreModalVisible.value = false
+    ignoreAlert.value = null
+  }
 }
 </script>
 

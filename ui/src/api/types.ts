@@ -29,6 +29,7 @@ export interface Host {
   tags?: string[]
   is_container?: boolean // 是否为容器环境
   container_id?: string // 容器ID
+  business_line?: string // 业务线
 }
 
 // 磁盘信息类型（用于 Host 的 disk_info 字段）
@@ -108,6 +109,13 @@ export interface PolicyGroupStatistics {
   last_check_time?: string
 }
 
+// OS 版本要求类型
+export interface OSRequirement {
+  os_family: string   // rocky, centos, debian 等
+  min_version?: string // 最小版本（含）
+  max_version?: string // 最大版本（含）
+}
+
 // 策略相关类型
 export interface Policy {
   id: string
@@ -116,6 +124,8 @@ export interface Policy {
   description: string
   os_family: string[]
   os_version: string
+  os_requirements?: OSRequirement[] // 详细 OS 版本要求
+  target_type?: 'host' | 'container' | 'all' // 适用目标：主机/容器/全部
   enabled: boolean
   group_id?: string // 所属策略组ID
   rule_count?: number
@@ -131,6 +141,8 @@ export interface Rule {
   title: string
   description: string
   severity: 'critical' | 'high' | 'medium' | 'low'
+  enabled: boolean
+  target_type?: 'host' | 'container' | 'all' // 适用目标：主机/容器/全部
   check_config: CheckConfig
   fix_config: FixConfig
   created_at: string
@@ -138,12 +150,21 @@ export interface Rule {
 }
 
 export interface CheckConfig {
-  type: string
+  condition?: 'all' | 'any'
+  rules?: CheckRule[]
+  type?: string
   [key: string]: any
+}
+
+export interface CheckRule {
+  type: string
+  param: string[]
+  result?: string
 }
 
 export interface FixConfig {
   suggestion?: string
+  command?: string
   [key: string]: any
 }
 
@@ -158,6 +179,8 @@ export interface ScanTask {
     os_family?: string[]
   }
   target_hosts?: string[] // 目标主机 ID 列表
+  matched_host_count?: number // 匹配的主机数量（在线）
+  total_host_count?: number // 总目标主机数量（包括离线）
   policy_id: string
   rule_ids?: string[]
   status: 'pending' | 'running' | 'completed' | 'failed'

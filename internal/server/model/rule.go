@@ -3,7 +3,6 @@ package model
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"time"
 )
 
 // CheckConfig 检查配置（JSON 格式）
@@ -69,10 +68,12 @@ type Rule struct {
 	Title       string      `gorm:"column:title;type:varchar(255)" json:"title"`
 	Description string      `gorm:"column:description;type:text" json:"description"`
 	Severity    string      `gorm:"column:severity;type:varchar(20)" json:"severity"`
+	Enabled     bool        `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`
+	TargetType  string      `gorm:"column:target_type;type:varchar(20);default:'all'" json:"target_type"` // host/container/all
 	CheckConfig CheckConfig `gorm:"column:check_config;type:json" json:"check_config"`
 	FixConfig   FixConfig   `gorm:"column:fix_config;type:json" json:"fix_config"`
-	CreatedAt   time.Time   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt   time.Time   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt   LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt   LocalTime   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 
 	// 关联关系
 	Policy Policy `gorm:"foreignKey:PolicyID;references:ID" json:"policy,omitempty"`

@@ -59,6 +59,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '策略组管理' },
       },
       {
+        path: 'policy-groups/policies/:policyId/rules',
+        name: 'PolicyRules',
+        component: () => import('@/views/PolicyGroups/PolicyRules.vue'),
+        meta: { title: '规则管理' },
+      },
+      {
         path: 'tasks',
         name: 'Tasks',
         component: () => import('@/views/Tasks/index.vue'),
@@ -123,6 +129,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Alerts',
         component: () => import('@/views/Alerts/index.vue'),
         meta: { title: '告警管理' },
+      },
+      {
+        path: 'alerts/:alertId',
+        name: 'AlertDetail',
+        component: () => import('@/views/Alerts/Detail.vue'),
+        meta: { title: '告警详情' },
       },
     ],
   },

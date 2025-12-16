@@ -42,4 +42,9 @@ export const tasksApi = {
   cancel: (taskId: string) => {
     return apiClient.post<ScanTask>(`/tasks/${taskId}/cancel`)
   },
+
+  // 删除任务
+  delete: (taskId: string) => {
+    return apiClient.delete(`/tasks/${taskId}`)
+  },
 }

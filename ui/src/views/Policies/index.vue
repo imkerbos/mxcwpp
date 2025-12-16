@@ -46,6 +46,18 @@
       <!-- 搜索区域 -->
       <div class="filter-bar">
         <a-select
+          v-model:value="filters.groupId"
+          placeholder="全部策略组"
+          style="width: 160px"
+          allow-clear
+          @change="handleGroupChange"
+        >
+          <a-select-option value="">全部策略组</a-select-option>
+          <a-select-option v-for="group in policyGroups" :key="group.id" :value="group.id">
+            {{ group.name }}
+          </a-select-option>
+        </a-select>
+        <a-select
           v-model:value="filters.riskStatus"
           placeholder="全部"
           style="width: 120px"
@@ -85,6 +97,7 @@
         :loading="loading"
         row-key="id"
         :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+        :scroll="{ x: 800 }"
         class="policies-table"
       >
         <template #bodyCell="{ column, record }">
@@ -99,10 +112,10 @@
             {{ getLastCheckTime(record) || '-' }}
           </template>
           <template v-else-if="column.key === 'action'">
-            <a-space>
-              <a-button type="link" @click="handleViewDetail(record)">详情</a-button>
-              <a-button type="link" @click="handleRecheck(record)">重新检查</a-button>
-            </a-space>
+            <span class="action-cell">
+              <a-button type="link" size="small" @click="handleViewDetail(record)">详情</a-button>
+              <a-button type="link" size="small" @click="handleRecheck(record)">重新检查</a-button>
+            </span>
           </template>
         </template>
       </a-table>
@@ -114,6 +127,196 @@
       :policy="currentPolicy"
       @success="handleModalSuccess"
     />
+
+    <!-- 立即检查对话框 -->
+    <a-modal
+      v-model:open="checkNowVisible"
+      title="立即检查"
+      width="800px"
+      @ok="handleConfirmCheckNow"
+      @cancel="handleCancelCheckNow"
+      :confirm-loading="checkNowLoading"
+    >
+      <a-form :model="checkNowForm" layout="vertical">
+        <!-- 策略选择方式 -->
+        <a-form-item label="选择方式">
+          <a-radio-group v-model:value="checkNowForm.selection_mode" @change="handleSelectionModeChange">
+            <a-radio value="group">按策略组选择</a-radio>
+            <a-radio value="custom">自定义选择</a-radio>
+          </a-radio-group>
+        </a-form-item>
+
+        <!-- 按策略组选择 -->
+        <a-form-item
+          v-if="checkNowForm.selection_mode === 'group'"
+          label="选择策略组"
+          :rules="[{ required: true, message: '请选择策略组' }]"
+        >
+          <a-checkbox-group v-model:value="checkNowForm.group_ids" style="width: 100%" @change="handleGroupSelectionChange">
+            <a-row :gutter="[8, 8]">
+              <a-col :span="12" v-for="group in enabledPolicyGroups" :key="group.id">
+                <a-checkbox :value="group.id">
+                  <span
+                    class="group-icon-small"
+                    :style="{ backgroundColor: group.color || '#1890ff' }"
+                  >
+                    {{ group.icon || group.name.charAt(0) }}
+                  </span>
+                  {{ group.name }}
+                  <a-tag size="small" style="margin-left: 4px">{{ group.policy_count || 0 }}个策略</a-tag>
+                </a-checkbox>
+              </a-col>
+            </a-row>
+          </a-checkbox-group>
+          <div style="margin-top: 8px">
+            <a-button type="link" size="small" @click="handleSelectAllGroups">全选</a-button>
+            <a-button type="link" size="small" @click="handleDeselectAllGroups">取消全选</a-button>
+          </div>
+        </a-form-item>
+
+        <!-- 自定义选择策略 -->
+        <a-form-item
+          v-if="checkNowForm.selection_mode === 'custom'"
+          label="选择检查基线"
+          :rules="[{ required: true, message: '请选择至少一个检查基线' }]"
+        >
+          <a-checkbox-group v-model:value="checkNowForm.policy_ids" style="width: 100%">
+            <div v-for="group in policyGroupsWithPolicies" :key="group.id" style="margin-bottom: 12px">
+              <div style="font-weight: 500; margin-bottom: 8px; display: flex; align-items: center;">
+                <span
+                  class="group-icon-small"
+                  :style="{ backgroundColor: group.color || '#1890ff' }"
+                >
+                  {{ group.icon || group.name.charAt(0) }}
+                </span>
+                <span style="margin-left: 8px">{{ group.name }}</span>
+                <a-button type="link" size="small" @click="handleSelectGroupPolicies(group.id)">全选</a-button>
+                <a-button type="link" size="small" @click="handleDeselectGroupPolicies(group.id)">取消</a-button>
+              </div>
+              <a-row :gutter="[8, 8]" style="padding-left: 28px">
+                <a-col :span="12" v-for="policy in group.policies" :key="policy.id">
+                  <a-checkbox :value="policy.id" :disabled="!policy.enabled">
+                    {{ policy.name }}
+                    <a-tag size="small" style="margin-left: 4px">{{ policy.rule_count || 0 }}项</a-tag>
+                    <a-tag v-if="!policy.enabled" size="small" color="default">已禁用</a-tag>
+                  </a-checkbox>
+                </a-col>
+              </a-row>
+            </div>
+            <div v-if="ungroupedPolicies.length > 0" style="margin-bottom: 12px">
+              <div style="font-weight: 500; margin-bottom: 8px; color: #999;">
+                未分组策略
+                <a-button type="link" size="small" @click="handleSelectUngroupedPolicies">全选</a-button>
+                <a-button type="link" size="small" @click="handleDeselectUngroupedPolicies">取消</a-button>
+              </div>
+              <a-row :gutter="[8, 8]" style="padding-left: 28px">
+                <a-col :span="12" v-for="policy in ungroupedPolicies" :key="policy.id">
+                  <a-checkbox :value="policy.id" :disabled="!policy.enabled">
+                    {{ policy.name }}
+                    <a-tag size="small" style="margin-left: 4px">{{ policy.rule_count || 0 }}项</a-tag>
+                    <a-tag v-if="!policy.enabled" size="small" color="default">已禁用</a-tag>
+                  </a-checkbox>
+                </a-col>
+              </a-row>
+            </div>
+          </a-checkbox-group>
+          <div style="margin-top: 8px">
+            <a-button type="link" size="small" @click="handleSelectAllPolicies">全选所有</a-button>
+            <a-button type="link" size="small" @click="handleDeselectAllPolicies">取消全选</a-button>
+          </div>
+        </a-form-item>
+
+        <a-divider />
+
+        <!-- 主机范围 -->
+        <a-form-item label="主机范围" :rules="[{ required: true, message: '请选择主机范围' }]">
+          <a-radio-group v-model:value="checkNowForm.target_type" @change="handleTargetTypeChange">
+            <a-radio value="all">全部主机</a-radio>
+            <a-radio value="business_line">按业务线</a-radio>
+            <a-radio value="tags">按标签</a-radio>
+            <a-radio value="os_family">按操作系统</a-radio>
+            <a-radio value="host_ids">指定主机</a-radio>
+          </a-radio-group>
+        </a-form-item>
+
+        <!-- 业务线选择 -->
+        <a-form-item
+          v-if="checkNowForm.target_type === 'business_line'"
+          label="选择业务线"
+        >
+          <a-select
+            v-model:value="checkNowForm.business_lines"
+            mode="multiple"
+            placeholder="选择业务线"
+            :loading="businessLinesLoading"
+            style="width: 100%"
+          >
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
+              {{ bl.name }} ({{ bl.host_count || 0 }}台)
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+
+        <!-- 标签选择 -->
+        <a-form-item
+          v-if="checkNowForm.target_type === 'tags'"
+          label="选择标签"
+        >
+          <a-select
+            v-model:value="checkNowForm.tags"
+            mode="multiple"
+            placeholder="选择或输入标签"
+            style="width: 100%"
+            :options="tagOptions"
+          />
+        </a-form-item>
+
+        <!-- 操作系统选择 -->
+        <a-form-item
+          v-if="checkNowForm.target_type === 'os_family'"
+          label="选择操作系统"
+        >
+          <a-select
+            v-model:value="checkNowForm.os_family"
+            mode="multiple"
+            placeholder="选择操作系统"
+            :options="osOptions"
+          />
+        </a-form-item>
+
+        <!-- 指定主机 -->
+        <a-form-item
+          v-if="checkNowForm.target_type === 'host_ids'"
+          label="选择主机"
+        >
+          <a-select
+            v-model:value="checkNowForm.host_ids"
+            mode="multiple"
+            placeholder="选择主机"
+            :options="hostOptions"
+            :loading="hostsLoading"
+            show-search
+            :filter-option="filterHostOption"
+          />
+        </a-form-item>
+
+        <a-alert
+          type="info"
+          show-icon
+          style="margin-top: 16px"
+        >
+          <template #message>
+            <span v-if="checkNowForm.selection_mode === 'group'">
+              已选择 {{ checkNowForm.group_ids.length }} 个策略组（共 {{ getSelectedPoliciesCount() }} 个策略），
+            </span>
+            <span v-else>
+              已选择 {{ checkNowForm.policy_ids.length }} 个策略，
+            </span>
+            {{ getTargetHostsDescription() }}
+          </template>
+        </a-alert>
+      </a-form>
+    </a-modal>
 
     <!-- 自动检查配置对话框 -->
     <a-modal
@@ -293,8 +496,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import {
   SettingOutlined,
   SearchOutlined,
@@ -304,18 +507,24 @@ import {
 import type { FormInstance } from 'ant-design-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { policiesApi } from '@/api/policies'
+import { policyGroupsApi } from '@/api/policy-groups'
 import { resultsApi } from '@/api/results'
 import { tasksApi } from '@/api/tasks'
-import type { Policy, ScanResult } from '@/api/types'
+import { hostsApi } from '@/api/hosts'
+import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
+import type { Policy, ScanResult, PolicyGroup, Host } from '@/api/types'
 import { message } from 'ant-design-vue'
 import PolicyModal from './components/PolicyModal.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const policies = ref<Policy[]>([])
+const policyGroups = ref<PolicyGroup[]>([])
 const policyStats = ref<Map<string, PolicyStats>>(new Map())
 const filters = reactive({
+  groupId: '' as string,
   riskStatus: 'all' as 'all' | 'risk' | 'no-risk',
   keyword: '',
 })
@@ -328,6 +537,25 @@ const currentPolicy = ref<Policy | null>(null)
 const editingTask = ref<ScanTask | null>(null)
 const scheduledTasks = ref<ScanTask[]>([])
 const taskFormRef = ref<FormInstance>()
+
+// 立即检查对话框
+const checkNowVisible = ref(false)
+const checkNowLoading = ref(false)
+const hostsLoading = ref(false)
+const businessLinesLoading = ref(false)
+const hosts = ref<Host[]>([])
+const businessLines = ref<BusinessLine[]>([])
+const allPolicies = ref<Policy[]>([]) // 所有策略（用于自定义选择）
+const checkNowForm = reactive({
+  selection_mode: 'group' as 'group' | 'custom',
+  group_ids: [] as string[],
+  policy_ids: [] as string[],
+  target_type: 'all' as 'all' | 'business_line' | 'tags' | 'os_family' | 'host_ids',
+  business_lines: [] as string[],
+  tags: [] as string[],
+  os_family: [] as string[],
+  host_ids: [] as string[],
+})
 
 const taskForm = reactive({
   name: '',
@@ -345,6 +573,46 @@ const policyOptions = computed(() => {
   return policies.value.map((p) => ({
     label: p.name,
     value: p.id,
+  }))
+})
+
+const enabledPolicies = computed(() => {
+  return policies.value.filter((p) => p.enabled)
+})
+
+// 启用的策略组
+const enabledPolicyGroups = computed(() => {
+  return policyGroups.value.filter((g) => g.enabled)
+})
+
+// 策略组（含策略列表）
+const policyGroupsWithPolicies = computed(() => {
+  return policyGroups.value.map(group => ({
+    ...group,
+    policies: allPolicies.value.filter(p => p.group_id === group.id)
+  })).filter(g => g.policies.length > 0)
+})
+
+// 未分组的策略
+const ungroupedPolicies = computed(() => {
+  return allPolicies.value.filter(p => !p.group_id && p.enabled)
+})
+
+// 标签选项（从主机中提取）
+const tagOptions = computed(() => {
+  const tags = new Set<string>()
+  hosts.value.forEach(h => {
+    if (h.tags) {
+      h.tags.forEach(t => tags.add(t))
+    }
+  })
+  return Array.from(tags).map(t => ({ label: t, value: t }))
+})
+
+const hostOptions = computed(() => {
+  return hosts.value.map((h) => ({
+    label: `${h.hostname} (${h.ipv4?.[0] || h.host_id})`,
+    value: h.host_id,
   }))
 })
 
@@ -524,7 +792,13 @@ const getLastCheckTime = (policy: Policy): string => {
 const loadPolicies = async () => {
   loading.value = true
   try {
-    const response = (await policiesApi.list()) as unknown as {
+    // 构建查询参数
+    const params: { group_id?: string } = {}
+    if (filters.groupId) {
+      params.group_id = filters.groupId
+    }
+
+    const response = (await policiesApi.list(params)) as unknown as {
       items: Policy[]
     }
     policies.value = response.items
@@ -537,6 +811,46 @@ const loadPolicies = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 加载策略组列表
+const loadPolicyGroups = async () => {
+  try {
+    const response = await policyGroupsApi.list() as any
+    policyGroups.value = response.data?.items || response.items || []
+  } catch (error) {
+    console.error('加载策略组列表失败:', error)
+  }
+}
+
+// 加载主机列表
+const loadHosts = async () => {
+  hostsLoading.value = true
+  try {
+    const response = await hostsApi.list({ page_size: 1000 }) as any
+    hosts.value = response.items || []
+  } catch (error) {
+    console.error('加载主机列表失败:', error)
+  } finally {
+    hostsLoading.value = false
+  }
+}
+
+// 处理策略组筛选变化
+const handleGroupChange = () => {
+  // 更新 URL 参数
+  if (filters.groupId) {
+    router.replace({ query: { ...route.query, group_id: filters.groupId } })
+  } else {
+    const { group_id, ...rest } = route.query
+    router.replace({ query: rest })
+  }
+  loadPolicies()
+}
+
+// 主机选项过滤
+const filterHostOption = (input: string, option: any) => {
+  return option.label.toLowerCase().includes(input.toLowerCase())
 }
 
 const loadPolicyStats = async () => {
@@ -601,38 +915,282 @@ const handleSearch = () => {
 }
 
 const handleCheckNow = async () => {
+  // 打开立即检查对话框
+  checkNowForm.selection_mode = 'group'
+  checkNowForm.group_ids = []
+  checkNowForm.policy_ids = []
+  checkNowForm.target_type = 'all'
+  checkNowForm.business_lines = []
+  checkNowForm.tags = []
+  checkNowForm.os_family = []
+  checkNowForm.host_ids = []
+  checkNowVisible.value = true
+
+  // 加载所有策略（用于自定义选择）
+  if (allPolicies.value.length === 0) {
+    try {
+      const response = await policiesApi.list() as any
+      allPolicies.value = response.items || []
+    } catch (error) {
+      console.error('加载所有策略失败:', error)
+    }
+  }
+
+  // 加载主机列表
+  if (hosts.value.length === 0) {
+    loadHosts()
+  }
+
+  // 加载业务线列表
+  if (businessLines.value.length === 0) {
+    loadBusinessLines()
+  }
+}
+
+// 加载业务线列表
+const loadBusinessLines = async () => {
+  businessLinesLoading.value = true
   try {
-    // 创建立即检查任务
-    if (policies.value.length === 0) {
-      message.warning('没有可用的策略')
+    const response = await businessLinesApi.list({ page_size: 1000 }) as any
+    businessLines.value = response.items || []
+  } catch (error) {
+    console.error('加载业务线列表失败:', error)
+  } finally {
+    businessLinesLoading.value = false
+  }
+}
+
+// 选择方式变更
+const handleSelectionModeChange = () => {
+  // 清空已选择的内容
+  checkNowForm.group_ids = []
+  checkNowForm.policy_ids = []
+}
+
+// 策略组选择变更
+const handleGroupSelectionChange = () => {
+  // 更新策略组选择后的计数
+}
+
+// 目标类型变更
+const handleTargetTypeChange = () => {
+  // 清空相关选择
+  checkNowForm.business_lines = []
+  checkNowForm.tags = []
+  checkNowForm.os_family = []
+  checkNowForm.host_ids = []
+}
+
+// 全选策略组
+const handleSelectAllGroups = () => {
+  checkNowForm.group_ids = enabledPolicyGroups.value.map(g => g.id)
+}
+
+// 取消全选策略组
+const handleDeselectAllGroups = () => {
+  checkNowForm.group_ids = []
+}
+
+// 选择某个策略组下的所有策略
+const handleSelectGroupPolicies = (groupId: string) => {
+  const groupPolicies = allPolicies.value
+    .filter(p => p.group_id === groupId && p.enabled)
+    .map(p => p.id)
+  const newIds = new Set([...checkNowForm.policy_ids, ...groupPolicies])
+  checkNowForm.policy_ids = Array.from(newIds)
+}
+
+// 取消选择某个策略组下的所有策略
+const handleDeselectGroupPolicies = (groupId: string) => {
+  const groupPolicyIds = allPolicies.value
+    .filter(p => p.group_id === groupId)
+    .map(p => p.id)
+  checkNowForm.policy_ids = checkNowForm.policy_ids.filter(id => !groupPolicyIds.includes(id))
+}
+
+// 选择未分组策略
+const handleSelectUngroupedPolicies = () => {
+  const ungroupedIds = ungroupedPolicies.value.map(p => p.id)
+  const newIds = new Set([...checkNowForm.policy_ids, ...ungroupedIds])
+  checkNowForm.policy_ids = Array.from(newIds)
+}
+
+// 取消选择未分组策略
+const handleDeselectUngroupedPolicies = () => {
+  const ungroupedIds = ungroupedPolicies.value.map(p => p.id)
+  checkNowForm.policy_ids = checkNowForm.policy_ids.filter(id => !ungroupedIds.includes(id))
+}
+
+// 获取选中策略组包含的策略数量
+const getSelectedPoliciesCount = () => {
+  let count = 0
+  for (const groupId of checkNowForm.group_ids) {
+    const group = policyGroups.value.find(g => g.id === groupId)
+    if (group) {
+      count += group.policy_count || 0
+    }
+  }
+  return count
+}
+
+// 确认立即检查
+const handleConfirmCheckNow = async () => {
+  // 根据选择模式获取策略ID列表
+  let policyIds: string[] = []
+  if (checkNowForm.selection_mode === 'group') {
+    if (checkNowForm.group_ids.length === 0) {
+      message.warning('请选择至少一个策略组')
       return
     }
-
-    // 为所有启用的策略创建检查任务
-    const enabledPolicies = policies.value.filter((p) => p.enabled)
-    if (enabledPolicies.length === 0) {
-      message.warning('没有启用的策略')
+    // 获取所选策略组下的所有启用策略
+    for (const groupId of checkNowForm.group_ids) {
+      const groupPolicies = allPolicies.value
+        .filter(p => p.group_id === groupId && p.enabled)
+        .map(p => p.id)
+      policyIds.push(...groupPolicies)
+    }
+    if (policyIds.length === 0) {
+      message.warning('所选策略组下没有启用的策略')
       return
     }
+  } else {
+    if (checkNowForm.policy_ids.length === 0) {
+      message.warning('请选择至少一个检查基线')
+      return
+    }
+    policyIds = [...checkNowForm.policy_ids]
+  }
 
-    for (const policy of enabledPolicies) {
+  // 验证目标选择
+  if (checkNowForm.target_type === 'business_line' && checkNowForm.business_lines.length === 0) {
+    message.warning('请选择业务线')
+    return
+  }
+
+  if (checkNowForm.target_type === 'tags' && checkNowForm.tags.length === 0) {
+    message.warning('请选择标签')
+    return
+  }
+
+  if (checkNowForm.target_type === 'os_family' && checkNowForm.os_family.length === 0) {
+    message.warning('请选择操作系统')
+    return
+  }
+
+  if (checkNowForm.target_type === 'host_ids' && checkNowForm.host_ids.length === 0) {
+    message.warning('请选择主机')
+    return
+  }
+
+  checkNowLoading.value = true
+  try {
+    // 根据目标类型构建目标配置
+    let targetType: 'all' | 'host_ids' | 'os_family' = 'all'
+    let targetHostIds: string[] | undefined
+    let targetOsFamily: string[] | undefined
+
+    if (checkNowForm.target_type === 'host_ids') {
+      targetType = 'host_ids'
+      targetHostIds = checkNowForm.host_ids
+    } else if (checkNowForm.target_type === 'os_family') {
+      targetType = 'os_family'
+      targetOsFamily = checkNowForm.os_family
+    } else if (checkNowForm.target_type === 'business_line') {
+      // 按业务线筛选主机
+      targetType = 'host_ids'
+      targetHostIds = hosts.value
+        .filter(h => h.business_line && checkNowForm.business_lines.includes(h.business_line))
+        .map(h => h.host_id)
+      if (targetHostIds.length === 0) {
+        message.warning('所选业务线下没有主机')
+        checkNowLoading.value = false
+        return
+      }
+    } else if (checkNowForm.target_type === 'tags') {
+      // 按标签筛选主机
+      targetType = 'host_ids'
+      targetHostIds = hosts.value
+        .filter(h => h.tags && h.tags.some(t => checkNowForm.tags.includes(t)))
+        .map(h => h.host_id)
+      if (targetHostIds.length === 0) {
+        message.warning('所选标签下没有主机')
+        checkNowLoading.value = false
+        return
+      }
+    }
+
+    // 为每个选中的策略创建检查任务
+    for (const policyId of policyIds) {
+      const policy = allPolicies.value.find(p => p.id === policyId) || policies.value.find(p => p.id === policyId)
       await tasksApi.create({
-        name: `立即检查-${policy.name}`,
+        name: `立即检查-${policy?.name || policyId}`,
         type: 'manual',
         targets: {
-          type: 'all',
+          type: targetType,
+          os_family: targetOsFamily,
+          host_ids: targetHostIds,
         },
-        policy_id: policy.id,
+        policy_id: policyId,
       })
     }
 
-    message.success('检查任务已创建')
+    message.success(`已创建 ${policyIds.length} 个检查任务`)
+    checkNowVisible.value = false
     // 刷新统计数据
     await loadPolicyStats()
   } catch (error) {
     console.error('创建检查任务失败:', error)
     message.error('创建检查任务失败')
+  } finally {
+    checkNowLoading.value = false
   }
+}
+
+// 取消立即检查
+const handleCancelCheckNow = () => {
+  checkNowVisible.value = false
+}
+
+// 全选策略
+const handleSelectAllPolicies = () => {
+  checkNowForm.policy_ids = enabledPolicies.value.map(p => p.id)
+}
+
+// 取消全选策略
+const handleDeselectAllPolicies = () => {
+  checkNowForm.policy_ids = []
+}
+
+// 获取目标主机描述
+const getTargetHostsDescription = () => {
+  if (checkNowForm.target_type === 'all') {
+    return '将检查全部主机'
+  } else if (checkNowForm.target_type === 'business_line') {
+    if (checkNowForm.business_lines.length === 0) {
+      return '请选择业务线'
+    }
+    const selectedBLNames = checkNowForm.business_lines.map(code => {
+      const bl = businessLines.value.find(b => b.code === code)
+      return bl?.name || code
+    })
+    return `将检查业务线: ${selectedBLNames.join(', ')}`
+  } else if (checkNowForm.target_type === 'tags') {
+    if (checkNowForm.tags.length === 0) {
+      return '请选择标签'
+    }
+    return `将检查标签: ${checkNowForm.tags.join(', ')}`
+  } else if (checkNowForm.target_type === 'os_family') {
+    if (checkNowForm.os_family.length === 0) {
+      return '请选择操作系统'
+    }
+    return `将检查 ${checkNowForm.os_family.join(', ')} 系统的主机`
+  } else if (checkNowForm.target_type === 'host_ids') {
+    if (checkNowForm.host_ids.length === 0) {
+      return '请选择主机'
+    }
+    return `将检查 ${checkNowForm.host_ids.length} 台指定主机`
+  }
+  return ''
 }
 
 const handleAutoCheckConfig = () => {
@@ -821,8 +1379,29 @@ const handleModalSuccess = () => {
 }
 
 onMounted(() => {
+  // 从 URL 读取 group_id 参数
+  const groupIdFromUrl = route.query.group_id as string
+  if (groupIdFromUrl) {
+    filters.groupId = groupIdFromUrl
+  }
+
+  // 加载策略组列表
+  loadPolicyGroups()
+  // 加载策略列表
   loadPolicies()
 })
+
+// 监听路由参数变化
+watch(
+  () => route.query.group_id,
+  (newGroupId) => {
+    const groupId = newGroupId as string || ''
+    if (filters.groupId !== groupId) {
+      filters.groupId = groupId
+      loadPolicies()
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -1006,5 +1585,29 @@ onMounted(() => {
 
 .tasks-table :deep(.ant-table-tbody > tr:hover) {
   background: #f5f5f5;
+}
+
+/* 操作列样式 */
+.action-cell {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.action-cell :deep(.ant-btn) {
+  padding: 0 4px;
+}
+
+.group-icon-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  margin-right: 4px;
 }
 </style>

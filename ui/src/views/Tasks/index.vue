@@ -2,12 +2,35 @@
   <div class="tasks-page">
     <div class="page-header">
       <h2>任务执行</h2>
-      <a-button type="primary" @click="handleCreate">
-        <template #icon>
-          <PlusOutlined />
-        </template>
-        新建任务
-      </a-button>
+      <a-space>
+        <a-button
+          v-if="selectedRowKeys.length > 0"
+          danger
+          @click="handleBatchCancel"
+          :loading="batchCanceling"
+        >
+          <template #icon>
+            <StopOutlined />
+          </template>
+          批量取消 ({{ selectedRowKeys.length }})
+        </a-button>
+        <a-button
+          v-if="selectedRowKeys.length > 0"
+          @click="handleBatchDelete"
+          :loading="batchDeleting"
+        >
+          <template #icon>
+            <DeleteOutlined />
+          </template>
+          批量删除 ({{ selectedRowKeys.length }})
+        </a-button>
+        <a-button type="primary" @click="handleCreate">
+          <template #icon>
+            <PlusOutlined />
+          </template>
+          新建任务
+        </a-button>
+      </a-space>
     </div>
 
     <!-- 筛选条件 -->
@@ -54,6 +77,12 @@
             查询
           </a-button>
           <a-button style="margin-left: 8px" @click="handleReset">重置</a-button>
+          <a-button style="margin-left: 8px" @click="handleRefresh" :loading="loading">
+            <template #icon>
+              <ReloadOutlined />
+            </template>
+            刷新
+          </a-button>
         </a-form-item>
       </a-form>
     </a-card>
@@ -64,6 +93,7 @@
       :data-source="tasks"
       :loading="loading"
       :pagination="pagination"
+      :row-selection="rowSelection"
       @change="handleTableChange"
       row-key="task_id"
     >
@@ -147,6 +177,23 @@
       width="900px"
       :footer="null"
     >
+      <template #title>
+        <div class="modal-title-with-refresh">
+          <span>任务详情</span>
+          <a-button
+            type="text"
+            size="small"
+            @click="handleRefreshDetail"
+            :loading="detailRefreshing"
+            class="refresh-detail-btn"
+          >
+            <template #icon>
+              <ReloadOutlined />
+            </template>
+            刷新
+          </a-button>
+        </div>
+      </template>
       <a-descriptions v-if="selectedTask" :column="2" bordered size="small">
         <a-descriptions-item label="任务ID" :span="2">
           <span style="font-family: monospace;">{{ selectedTask.task_id }}</span>
@@ -312,8 +359,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
-import { message } from 'ant-design-vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { message, Modal } from 'ant-design-vue'
 import {
   PlusOutlined,
   SearchOutlined,
@@ -321,10 +368,12 @@ import {
   EyeOutlined,
   SyncOutlined,
   StopOutlined,
+  DeleteOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ExclamationCircleOutlined,
   UnorderedListOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons-vue'
 import { tasksApi } from '@/api/tasks'
 import { resultsApi } from '@/api/results'
@@ -359,6 +408,23 @@ const taskResultStats = reactive({
 const taskLogs = ref<TaskLog[]>([])
 const logsLoading = ref(false)
 const logsContainer = ref<HTMLElement | null>(null)
+const detailRefreshing = ref(false)
+
+// 批量操作相关
+const selectedRowKeys = ref<string[]>([])
+const batchCanceling = ref(false)
+const batchDeleting = ref(false)
+
+// 行选择配置
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  onChange: (keys: string[]) => {
+    selectedRowKeys.value = keys
+  },
+  getCheckboxProps: (record: ScanTask) => ({
+    disabled: false,
+  }),
+}))
 
 // 自动刷新定时器
 let refreshTimer: ReturnType<typeof setInterval> | null = null
@@ -452,7 +518,105 @@ const handleReset = () => {
   filters.type = undefined
   filters.name = undefined
   pagination.current = 1
+  selectedRowKeys.value = []
   loadTasks()
+}
+
+const handleRefresh = () => {
+  loadTasks()
+  message.success('已刷新')
+}
+
+// 批量取消任务
+const handleBatchCancel = () => {
+  const cancelableTasks = tasks.value.filter(
+    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'pending' || t.status === 'running')
+  )
+
+  if (cancelableTasks.length === 0) {
+    message.warning('没有可取消的任务（只有待执行或执行中的任务可以取消）')
+    return
+  }
+
+  Modal.confirm({
+    title: '批量取消任务',
+    content: `确定要取消 ${cancelableTasks.length} 个任务吗？`,
+    okText: '确认取消',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      batchCanceling.value = true
+      let successCount = 0
+      let failCount = 0
+
+      for (const task of cancelableTasks) {
+        try {
+          await tasksApi.cancel(task.task_id)
+          successCount++
+        } catch (error) {
+          console.error(`取消任务 ${task.task_id} 失败:`, error)
+          failCount++
+        }
+      }
+
+      batchCanceling.value = false
+      selectedRowKeys.value = []
+
+      if (failCount === 0) {
+        message.success(`成功取消 ${successCount} 个任务`)
+      } else {
+        message.warning(`成功取消 ${successCount} 个任务，${failCount} 个任务取消失败`)
+      }
+
+      loadTasks()
+    },
+  })
+}
+
+// 批量删除任务
+const handleBatchDelete = () => {
+  const deletableTasks = tasks.value.filter(
+    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'pending' || t.status === 'completed' || t.status === 'failed')
+  )
+
+  if (deletableTasks.length === 0) {
+    message.warning('没有可删除的任务（执行中的任务不能删除）')
+    return
+  }
+
+  Modal.confirm({
+    title: '批量删除任务',
+    content: `确定要删除 ${deletableTasks.length} 个任务吗？此操作不可恢复。`,
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      batchDeleting.value = true
+      let successCount = 0
+      let failCount = 0
+
+      for (const task of deletableTasks) {
+        try {
+          await tasksApi.delete(task.task_id)
+          successCount++
+        } catch (error) {
+          console.error(`删除任务 ${task.task_id} 失败:`, error)
+          failCount++
+        }
+      }
+
+      batchDeleting.value = false
+      selectedRowKeys.value = []
+
+      if (failCount === 0) {
+        message.success(`成功删除 ${successCount} 个任务`)
+      } else {
+        message.warning(`成功删除 ${successCount} 个任务，${failCount} 个任务删除失败`)
+      }
+
+      loadTasks()
+    },
+  })
 }
 
 const handleCreate = () => {
@@ -665,6 +829,17 @@ const formatLogTime = (time: string) => {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+const handleRefreshDetail = async () => {
+  if (!selectedTask.value) return
+  detailRefreshing.value = true
+  try {
+    await refreshTaskDetail(selectedTask.value.task_id)
+    message.success('已刷新')
+  } finally {
+    detailRefreshing.value = false
+  }
 }
 
 const handleModalSuccess = () => {

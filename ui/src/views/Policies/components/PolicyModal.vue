@@ -2,7 +2,7 @@
   <a-modal
     v-model:visible="visible"
     :title="policy ? '编辑策略' : '新建策略'"
-    width="800px"
+    width="900px"
     @ok="handleSubmit"
     @cancel="handleCancel"
   >
@@ -10,8 +10,8 @@
       ref="formRef"
       :model="formData"
       :rules="rules"
-      :label-col="{ span: 6 }"
-      :wrapper-col="{ span: 18 }"
+      :label-col="{ span: 5 }"
+      :wrapper-col="{ span: 19 }"
     >
       <a-form-item label="策略ID" name="id">
         <a-input
@@ -23,6 +23,18 @@
       <a-form-item label="策略名称" name="name">
         <a-input v-model:value="formData.name" placeholder="请输入策略名称" />
       </a-form-item>
+      <a-form-item label="所属策略组" name="group_id">
+        <a-select
+          v-model:value="formData.group_id"
+          placeholder="选择所属策略组（可选）"
+          allow-clear
+          :loading="groupsLoading"
+        >
+          <a-select-option v-for="group in policyGroups" :key="group.id" :value="group.id">
+            {{ group.name }}
+          </a-select-option>
+        </a-select>
+      </a-form-item>
       <a-form-item label="版本" name="version">
         <a-input v-model:value="formData.version" placeholder="请输入版本号" />
       </a-form-item>
@@ -33,20 +45,62 @@
           placeholder="请输入策略描述"
         />
       </a-form-item>
+      <a-form-item label="适用目标" name="target_type">
+        <a-radio-group v-model:value="formData.target_type">
+          <a-radio value="all">全部</a-radio>
+          <a-radio value="host">仅主机</a-radio>
+          <a-radio value="container">仅容器</a-radio>
+        </a-radio-group>
+        <div class="form-tip">选择此策略适用于主机、容器还是全部</div>
+      </a-form-item>
       <a-form-item label="适用OS" name="os_family">
         <a-select
           v-model:value="formData.os_family"
           mode="multiple"
           placeholder="选择适用的操作系统"
+          @change="handleOSFamilyChange"
         >
           <a-select-option value="rocky">Rocky Linux</a-select-option>
           <a-select-option value="centos">CentOS</a-select-option>
           <a-select-option value="oracle">Oracle Linux</a-select-option>
           <a-select-option value="debian">Debian</a-select-option>
+          <a-select-option value="ubuntu">Ubuntu</a-select-option>
+          <a-select-option value="openeuler">openEuler</a-select-option>
+          <a-select-option value="alibaba">Alibaba Cloud Linux</a-select-option>
         </a-select>
       </a-form-item>
-      <a-form-item label="OS版本" name="os_version">
-        <a-input v-model:value="formData.os_version" placeholder="例如: >=7" />
+      <a-form-item label="OS版本要求" name="os_requirements">
+        <div class="os-requirements-list">
+          <div
+            v-for="(req, index) in formData.os_requirements"
+            :key="index"
+            class="os-requirement-item"
+          >
+            <a-tag color="blue">{{ getOSFamilyLabel(req.os_family) }}</a-tag>
+            <span class="version-inputs">
+              <a-input
+                v-model:value="req.min_version"
+                placeholder="最小版本"
+                style="width: 100px"
+                size="small"
+              />
+              <span class="version-separator">~</span>
+              <a-input
+                v-model:value="req.max_version"
+                placeholder="最大版本"
+                style="width: 100px"
+                size="small"
+              />
+            </span>
+            <a-button type="text" danger size="small" @click="removeOSRequirement(index)">
+              <DeleteOutlined />
+            </a-button>
+          </div>
+          <div v-if="formData.os_requirements.length === 0" class="no-requirements">
+            请先选择适用的操作系统
+          </div>
+        </div>
+        <div class="form-tip">配置每个OS的版本范围（留空表示不限制）</div>
       </a-form-item>
       <a-form-item label="启用状态" name="enabled">
         <a-switch v-model:checked="formData.enabled" />
@@ -57,13 +111,16 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, computed } from 'vue'
+import { DeleteOutlined } from '@ant-design/icons-vue'
 import { policiesApi } from '@/api/policies'
-import type { Policy } from '@/api/types'
+import { policyGroupsApi } from '@/api/policy-groups'
+import type { Policy, PolicyGroup, OSRequirement } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue/es/form'
 
 const props = defineProps<{
   visible: boolean
   policy?: Policy | null
+  defaultGroupId?: string
 }>()
 
 const emit = defineEmits<{
@@ -72,13 +129,19 @@ const emit = defineEmits<{
 }>()
 
 const formRef = ref<FormInstance>()
+const policyGroups = ref<PolicyGroup[]>([])
+const groupsLoading = ref(false)
+
 const formData = reactive({
   id: '',
   name: '',
+  group_id: '' as string | undefined,
   version: '',
   description: '',
+  target_type: 'all' as 'host' | 'container' | 'all',
   os_family: [] as string[],
   os_version: '',
+  os_requirements: [] as OSRequirement[],
   enabled: true,
 })
 
@@ -87,27 +150,97 @@ const rules = {
   name: [{ required: true, message: '请输入策略名称', trigger: 'blur' }],
 }
 
+const osFamilyLabels: Record<string, string> = {
+  rocky: 'Rocky Linux',
+  centos: 'CentOS',
+  oracle: 'Oracle Linux',
+  debian: 'Debian',
+  ubuntu: 'Ubuntu',
+  openeuler: 'openEuler',
+  alibaba: 'Alibaba Cloud Linux',
+}
+
+const getOSFamilyLabel = (family: string) => {
+  return osFamilyLabels[family] || family
+}
+
+// 当 OS 列表变化时，更新 OS 版本要求
+const handleOSFamilyChange = (selectedFamilies: string[]) => {
+  // 移除已不在选中列表中的 OS 要求
+  formData.os_requirements = formData.os_requirements.filter(
+    req => selectedFamilies.includes(req.os_family)
+  )
+
+  // 添加新选中的 OS
+  selectedFamilies.forEach(family => {
+    const exists = formData.os_requirements.some(req => req.os_family === family)
+    if (!exists) {
+      formData.os_requirements.push({
+        os_family: family,
+        min_version: '',
+        max_version: '',
+      })
+    }
+  })
+}
+
+const removeOSRequirement = (index: number) => {
+  const removed = formData.os_requirements[index]
+  formData.os_requirements.splice(index, 1)
+  // 同时从 os_family 中移除
+  const familyIndex = formData.os_family.indexOf(removed.os_family)
+  if (familyIndex !== -1) {
+    formData.os_family.splice(familyIndex, 1)
+  }
+}
+
+// 加载策略组列表
+const loadPolicyGroups = async () => {
+  groupsLoading.value = true
+  try {
+    const response = await policyGroupsApi.list() as any
+    policyGroups.value = response.data?.items || response.items || []
+  } catch (error) {
+    console.error('加载策略组列表失败:', error)
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
 watch(
   () => props.visible,
   (visible) => {
     if (visible) {
+      // 加载策略组列表
+      if (policyGroups.value.length === 0) {
+        loadPolicyGroups()
+      }
+
       if (props.policy) {
         // 编辑模式，填充数据
         formData.id = props.policy.id
         formData.name = props.policy.name
+        formData.group_id = props.policy.group_id || undefined
         formData.version = props.policy.version || ''
         formData.description = props.policy.description || ''
+        formData.target_type = props.policy.target_type || 'all'
         formData.os_family = [...props.policy.os_family]
         formData.os_version = props.policy.os_version || ''
+        formData.os_requirements = props.policy.os_requirements
+          ? [...props.policy.os_requirements]
+          : formData.os_family.map(family => ({ os_family: family, min_version: '', max_version: '' }))
         formData.enabled = props.policy.enabled
       } else {
         // 新建模式，重置表单
         formData.id = ''
         formData.name = ''
+        formData.group_id = props.defaultGroupId || undefined
         formData.version = ''
         formData.description = ''
+        formData.target_type = 'all'
         formData.os_family = []
         formData.os_version = ''
+        formData.os_requirements = []
         formData.enabled = true
       }
     }
@@ -123,14 +256,27 @@ const visible = computed({
 const handleSubmit = async () => {
   try {
     await formRef.value?.validate()
+
+    // 清理空的版本要求
+    const cleanedRequirements = formData.os_requirements
+      .filter(req => req.min_version || req.max_version)
+      .map(req => ({
+        os_family: req.os_family,
+        min_version: req.min_version || undefined,
+        max_version: req.max_version || undefined,
+      }))
+
     if (props.policy) {
       // 更新策略
       await policiesApi.update(props.policy.id, {
         name: formData.name,
+        group_id: formData.group_id || undefined,
         version: formData.version,
         description: formData.description,
+        target_type: formData.target_type,
         os_family: formData.os_family,
         os_version: formData.os_version,
+        os_requirements: cleanedRequirements.length > 0 ? cleanedRequirements : undefined,
         enabled: formData.enabled,
       })
     } else {
@@ -138,10 +284,13 @@ const handleSubmit = async () => {
       await policiesApi.create({
         id: formData.id,
         name: formData.name,
+        group_id: formData.group_id || undefined,
         version: formData.version,
         description: formData.description,
+        target_type: formData.target_type,
         os_family: formData.os_family,
         os_version: formData.os_version,
+        os_requirements: cleanedRequirements.length > 0 ? cleanedRequirements : undefined,
         enabled: formData.enabled,
       })
     }
@@ -155,3 +304,42 @@ const handleCancel = () => {
   visible.value = false
 }
 </script>
+
+<style scoped>
+.form-tip {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-top: 4px;
+}
+
+.os-requirements-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.os-requirement-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+
+.version-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.version-separator {
+  color: #8c8c8c;
+}
+
+.no-requirements {
+  color: #8c8c8c;
+  font-size: 13px;
+  padding: 8px 0;
+}
+</style>

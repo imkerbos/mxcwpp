@@ -30,5 +30,6 @@ var (
 		&SystemConfig{},
 		&Notification{},
 		&Alert{},
+		&PluginConfig{},
 	}
 )

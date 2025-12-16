@@ -6,6 +6,7 @@ export const policiesApi = {
   list: (params?: {
     os_family?: string
     enabled?: boolean
+    group_id?: string
   }) => {
     return apiClient.get<{ items: Policy[] }>('/policies', { params })
   },
@@ -24,6 +25,7 @@ export const policiesApi = {
     os_family?: string[]
     os_version?: string
     enabled?: boolean
+    group_id?: string
     rules?: Array<{
       rule_id: string
       category?: string
@@ -45,6 +47,7 @@ export const policiesApi = {
     os_family?: string[]
     os_version?: string
     enabled?: boolean
+    group_id?: string
     rules?: Array<{
       rule_id: string
       category?: string

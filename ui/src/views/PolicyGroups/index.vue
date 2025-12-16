@@ -1,144 +1,261 @@
 <template>
   <div class="policy-groups-page">
-    <div class="page-header">
-      <h2>策略组管理</h2>
-      <a-button type="primary" @click="handleCreate">
-        <template #icon>
-          <PlusOutlined />
-        </template>
-        新建策略组
-      </a-button>
-    </div>
-
-    <!-- 策略组列表 -->
-    <a-spin :spinning="loading">
-      <div class="groups-grid">
-        <a-card
-          v-for="group in policyGroups"
-          :key="group.id"
-          class="group-card"
-          :class="{ disabled: !group.enabled }"
-          hoverable
-        >
-          <template #title>
-            <div class="card-title">
-              <span
-                class="group-icon"
-                :style="{ backgroundColor: group.color || '#1890ff' }"
-              >
-                {{ group.icon || group.name.charAt(0) }}
-              </span>
-              <span class="group-name">{{ group.name }}</span>
-              <a-tag v-if="!group.enabled" color="default">已禁用</a-tag>
-            </div>
+    <!-- 策略组列表视图 -->
+    <template v-if="!currentGroup">
+      <div class="page-header">
+        <h2>策略组管理</h2>
+        <a-button type="primary" @click="handleCreateGroup">
+          <template #icon>
+            <PlusOutlined />
           </template>
-          <template #extra>
-            <a-dropdown>
-              <a-button type="text" size="small">
-                <MoreOutlined />
-              </a-button>
-              <template #overlay>
-                <a-menu @click="({ key }) => handleMenuClick(key, group)">
-                  <a-menu-item key="edit">
-                    <EditOutlined /> 编辑
-                  </a-menu-item>
-                  <a-menu-item key="toggle">
-                    <template v-if="group.enabled">
-                      <StopOutlined /> 禁用
-                    </template>
-                    <template v-else>
-                      <CheckOutlined /> 启用
-                    </template>
-                  </a-menu-item>
-                  <a-menu-divider />
-                  <a-menu-item key="delete" danger>
-                    <DeleteOutlined /> 删除
-                  </a-menu-item>
-                </a-menu>
-              </template>
-            </a-dropdown>
-          </template>
-
-          <p class="group-description">{{ group.description || '暂无描述' }}</p>
-
-          <div class="group-stats">
-            <a-row :gutter="16">
-              <a-col :span="8">
-                <a-statistic title="策略数" :value="group.policy_count || 0" />
-              </a-col>
-              <a-col :span="8">
-                <a-statistic title="检查项" :value="group.rule_count || 0" />
-              </a-col>
-              <a-col :span="8">
-                <a-statistic
-                  title="通过率"
-                  :value="group.pass_rate || 0"
-                  :precision="1"
-                  suffix="%"
-                  :value-style="{ color: getPassRateColor(group.pass_rate || 0) }"
-                />
-              </a-col>
-            </a-row>
-          </div>
-
-          <div class="group-footer">
-            <span class="host-count">
-              <DesktopOutlined /> 检查主机: {{ group.host_count || 0 }}
-            </span>
-            <a-button type="link" size="small" @click="handleViewPolicies(group)">
-              查看策略 <RightOutlined />
-            </a-button>
-          </div>
-        </a-card>
-
-        <!-- 空状态 -->
-        <a-empty
-          v-if="policyGroups.length === 0 && !loading"
-          description="暂无策略组"
-          class="empty-state"
-        >
-          <a-button type="primary" @click="handleCreate">创建策略组</a-button>
-        </a-empty>
+          新建策略组
+        </a-button>
       </div>
-    </a-spin>
+
+      <!-- 策略组列表 -->
+      <a-spin :spinning="loading">
+        <div class="groups-grid">
+          <a-card
+            v-for="group in policyGroups"
+            :key="group.id"
+            class="group-card"
+            :class="{ disabled: !group.enabled }"
+            hoverable
+          >
+            <template #title>
+              <div class="card-title">
+                <span
+                  class="group-icon"
+                  :style="{ backgroundColor: group.color || '#1890ff' }"
+                >
+                  {{ group.icon || group.name.charAt(0) }}
+                </span>
+                <span class="group-name">{{ group.name }}</span>
+                <a-tag v-if="!group.enabled" color="default">已禁用</a-tag>
+              </div>
+            </template>
+            <template #extra>
+              <a-dropdown>
+                <a-button type="text" size="small">
+                  <MoreOutlined />
+                </a-button>
+                <template #overlay>
+                  <a-menu @click="({ key }: { key: string }) => handleMenuClick(key, group)">
+                    <a-menu-item key="edit">
+                      <EditOutlined /> 编辑策略组
+                    </a-menu-item>
+                    <a-menu-item key="toggle">
+                      <template v-if="group.enabled">
+                        <StopOutlined /> 禁用
+                      </template>
+                      <template v-else>
+                        <CheckOutlined /> 启用
+                      </template>
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="delete" danger>
+                      <DeleteOutlined /> 删除策略组
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+            </template>
+
+            <p class="group-description">{{ group.description || '暂无描述' }}</p>
+
+            <div class="group-stats">
+              <a-row :gutter="16">
+                <a-col :span="8">
+                  <a-statistic title="策略数" :value="group.policy_count || 0" />
+                </a-col>
+                <a-col :span="8">
+                  <a-statistic title="检查项" :value="group.rule_count || 0" />
+                </a-col>
+                <a-col :span="8">
+                  <a-statistic
+                    title="通过率"
+                    :value="Math.floor(group.pass_rate || 0)"
+                    :precision="0"
+                    suffix="%"
+                    :value-style="{ color: getPassRateColor(group.pass_rate || 0) }"
+                  />
+                </a-col>
+              </a-row>
+            </div>
+
+            <div class="group-footer">
+              <span class="host-count">
+                <DesktopOutlined /> 检查主机: {{ group.host_count || 0 }}
+              </span>
+              <a-button type="primary" size="small" @click="handleEnterGroup(group)">
+                管理策略 <RightOutlined />
+              </a-button>
+            </div>
+          </a-card>
+
+          <!-- 空状态 -->
+          <a-empty
+            v-if="policyGroups.length === 0 && !loading"
+            description="暂无策略组"
+            class="empty-state"
+          >
+            <a-button type="primary" @click="handleCreateGroup">创建策略组</a-button>
+          </a-empty>
+        </div>
+      </a-spin>
+    </template>
+
+    <!-- 策略管理视图（进入某个策略组后） -->
+    <template v-else>
+      <div class="page-header">
+        <div class="breadcrumb-header">
+          <a-button type="text" @click="handleBackToGroups">
+            <LeftOutlined /> 返回策略组列表
+          </a-button>
+          <a-divider type="vertical" />
+          <span
+            class="group-icon small"
+            :style="{ backgroundColor: currentGroup.color || '#1890ff' }"
+          >
+            {{ currentGroup.icon || currentGroup.name.charAt(0) }}
+          </span>
+          <h2 style="margin: 0; margin-left: 8px;">{{ currentGroup.name }}</h2>
+          <a-tag v-if="!currentGroup.enabled" color="default" style="margin-left: 8px;">已禁用</a-tag>
+        </div>
+        <a-space>
+          <a-button @click="handleEditGroup(currentGroup)">
+            <template #icon>
+              <EditOutlined />
+            </template>
+            编辑策略组
+          </a-button>
+          <a-button type="primary" @click="handleCreatePolicy">
+            <template #icon>
+              <PlusOutlined />
+            </template>
+            新建策略
+          </a-button>
+        </a-space>
+      </div>
+
+      <!-- 策略组描述 -->
+      <a-card :bordered="false" class="group-info-card" v-if="currentGroup.description">
+        <p style="margin: 0; color: #666;">{{ currentGroup.description }}</p>
+      </a-card>
+
+      <!-- 策略列表 -->
+      <a-card title="策略列表" :bordered="false">
+        <template #extra>
+          <a-space>
+            <a-input-search
+              v-model:value="policySearchKeyword"
+              placeholder="搜索策略名称"
+              style="width: 200px"
+              @search="handleSearchPolicies"
+            />
+            <a-button @click="loadGroupPolicies">
+              <template #icon>
+                <ReloadOutlined />
+              </template>
+            </a-button>
+          </a-space>
+        </template>
+
+        <a-table
+          :columns="policyColumns"
+          :data-source="filteredPolicies"
+          :loading="policiesLoading"
+          row-key="id"
+          :scroll="{ x: 900 }"
+          :pagination="{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'name'">
+              <div>
+                <span style="font-weight: 500;">{{ record.name }}</span>
+                <a-tag v-if="!record.enabled" color="default" style="margin-left: 8px;">已禁用</a-tag>
+              </div>
+              <div style="font-size: 12px; color: #999;">{{ record.id }}</div>
+            </template>
+            <template v-else-if="column.key === 'os_family'">
+              <a-tag v-for="os in record.os_family" :key="os" style="margin-right: 4px;">
+                {{ getOSLabel(os) }}
+              </a-tag>
+              <span v-if="!record.os_family || record.os_family.length === 0">-</span>
+            </template>
+            <template v-else-if="column.key === 'enabled'">
+              <a-switch
+                :checked="record.enabled"
+                @change="(checked: boolean) => handleTogglePolicy(record, checked)"
+                size="small"
+              />
+            </template>
+            <template v-else-if="column.key === 'action'">
+              <a-space>
+                <a-button type="link" size="small" @click="handleEnterPolicy(record)">
+                  管理规则
+                </a-button>
+                <a-button type="link" size="small" @click="handleEditPolicy(record)">
+                  编辑
+                </a-button>
+                <a-popconfirm
+                  title="确定要删除此策略吗？"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  @confirm="handleDeletePolicy(record)"
+                >
+                  <a-button type="link" size="small" danger>删除</a-button>
+                </a-popconfirm>
+              </a-space>
+            </template>
+          </template>
+
+          <template #emptyText>
+            <a-empty description="暂无策略">
+              <a-button type="primary" @click="handleCreatePolicy">创建策略</a-button>
+            </a-empty>
+          </template>
+        </a-table>
+      </a-card>
+    </template>
 
     <!-- 创建/编辑策略组对话框 -->
     <a-modal
-      v-model:open="modalVisible"
+      v-model:open="groupModalVisible"
       :title="editingGroup ? '编辑策略组' : '新建策略组'"
-      @ok="handleModalOk"
-      @cancel="handleModalCancel"
-      :confirm-loading="modalLoading"
+      @ok="handleGroupModalOk"
+      @cancel="handleGroupModalCancel"
+      :confirm-loading="groupModalLoading"
     >
       <a-form
-        ref="formRef"
-        :model="formState"
-        :rules="formRules"
+        ref="groupFormRef"
+        :model="groupFormState"
+        :rules="groupFormRules"
         :label-col="{ span: 6 }"
         :wrapper-col="{ span: 18 }"
       >
         <a-form-item label="策略组ID" name="id" v-if="!editingGroup">
           <a-input
-            v-model:value="formState.id"
+            v-model:value="groupFormState.id"
             placeholder="留空自动生成"
           />
         </a-form-item>
         <a-form-item label="策略组名称" name="name">
           <a-input
-            v-model:value="formState.name"
+            v-model:value="groupFormState.name"
             placeholder="例如：系统基线组、应用基线组"
           />
         </a-form-item>
         <a-form-item label="描述" name="description">
           <a-textarea
-            v-model:value="formState.description"
+            v-model:value="groupFormState.description"
             placeholder="策略组描述"
             :rows="3"
           />
         </a-form-item>
         <a-form-item label="图标" name="icon">
           <a-input
-            v-model:value="formState.icon"
+            v-model:value="groupFormState.icon"
             placeholder="单个字符或 emoji"
             :maxlength="2"
             style="width: 100px"
@@ -146,28 +263,36 @@
         </a-form-item>
         <a-form-item label="颜色" name="color">
           <a-input
-            v-model:value="formState.color"
+            v-model:value="groupFormState.color"
             type="color"
             style="width: 100px; padding: 0"
           />
         </a-form-item>
         <a-form-item label="排序" name="sort_order">
           <a-input-number
-            v-model:value="formState.sort_order"
+            v-model:value="groupFormState.sort_order"
             :min="0"
             :max="999"
           />
         </a-form-item>
         <a-form-item label="启用状态" name="enabled">
-          <a-switch v-model:checked="formState.enabled" />
+          <a-switch v-model:checked="groupFormState.enabled" />
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 创建/编辑策略对话框 -->
+    <PolicyModal
+      v-model:visible="policyModalVisible"
+      :policy="editingPolicy"
+      :default-group-id="currentGroup?.id"
+      @success="handlePolicyModalSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
@@ -176,24 +301,36 @@ import {
   DeleteOutlined,
   MoreOutlined,
   RightOutlined,
+  LeftOutlined,
   DesktopOutlined,
   StopOutlined,
   CheckOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons-vue'
 import { policyGroupsApi } from '@/api/policy-groups'
-import type { PolicyGroup } from '@/api/types'
+import { policiesApi } from '@/api/policies'
+import type { PolicyGroup, Policy } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue'
+import PolicyModal from '@/views/Policies/components/PolicyModal.vue'
 
 const router = useRouter()
 
 const loading = ref(false)
 const policyGroups = ref<PolicyGroup[]>([])
-const modalVisible = ref(false)
-const modalLoading = ref(false)
+const currentGroup = ref<PolicyGroup | null>(null)
+const groupModalVisible = ref(false)
+const groupModalLoading = ref(false)
 const editingGroup = ref<PolicyGroup | null>(null)
-const formRef = ref<FormInstance>()
+const groupFormRef = ref<FormInstance>()
 
-const formState = reactive({
+// 策略相关
+const policiesLoading = ref(false)
+const groupPolicies = ref<Policy[]>([])
+const policySearchKeyword = ref('')
+const policyModalVisible = ref(false)
+const editingPolicy = ref<Policy | null>(null)
+
+const groupFormState = reactive({
   id: '',
   name: '',
   description: '',
@@ -203,8 +340,71 @@ const formState = reactive({
   enabled: true,
 })
 
-const formRules = {
+const groupFormRules = {
   name: [{ required: true, message: '请输入策略组名称', trigger: 'blur' }],
+}
+
+const policyColumns = [
+  {
+    title: '策略名称',
+    key: 'name',
+    width: 280,
+    ellipsis: true,
+  },
+  {
+    title: '版本',
+    dataIndex: 'version',
+    key: 'version',
+    width: 80,
+  },
+  {
+    title: '适用系统',
+    key: 'os_family',
+    width: 180,
+  },
+  {
+    title: '检查项',
+    dataIndex: 'rule_count',
+    key: 'rule_count',
+    width: 80,
+    align: 'center' as const,
+  },
+  {
+    title: '启用',
+    key: 'enabled',
+    width: 70,
+    align: 'center' as const,
+  },
+  {
+    title: '操作',
+    key: 'action',
+    width: 200,
+    fixed: 'right' as const,
+  },
+]
+
+const filteredPolicies = computed(() => {
+  if (!policySearchKeyword.value) {
+    return groupPolicies.value
+  }
+  return groupPolicies.value.filter(p =>
+    p.name.toLowerCase().includes(policySearchKeyword.value.toLowerCase()) ||
+    p.id.toLowerCase().includes(policySearchKeyword.value.toLowerCase())
+  )
+})
+
+// 获取 OS 标签
+const getOSLabel = (os: string) => {
+  const osMap: Record<string, string> = {
+    rocky: 'Rocky',
+    centos: 'CentOS',
+    oracle: 'Oracle',
+    debian: 'Debian',
+    ubuntu: 'Ubuntu',
+    openeuler: 'openEuler',
+    alibaba: 'Alibaba',
+  }
+  return osMap[os] || os
 }
 
 // 加载策略组列表
@@ -221,6 +421,22 @@ const loadPolicyGroups = async () => {
   }
 }
 
+// 加载策略组下的策略
+const loadGroupPolicies = async () => {
+  if (!currentGroup.value) return
+
+  policiesLoading.value = true
+  try {
+    const response = await policiesApi.list({ group_id: currentGroup.value.id }) as any
+    groupPolicies.value = response.items || []
+  } catch (error) {
+    console.error('加载策略列表失败:', error)
+    message.error('加载策略列表失败')
+  } finally {
+    policiesLoading.value = false
+  }
+}
+
 // 获取通过率颜色
 const getPassRateColor = (rate: number) => {
   if (rate >= 80) return '#52c41a'
@@ -228,39 +444,58 @@ const getPassRateColor = (rate: number) => {
   return '#f5222d'
 }
 
+// 进入策略组管理
+const handleEnterGroup = (group: PolicyGroup) => {
+  currentGroup.value = group
+  loadGroupPolicies()
+}
+
+// 返回策略组列表
+const handleBackToGroups = () => {
+  currentGroup.value = null
+  policySearchKeyword.value = ''
+  groupPolicies.value = []
+  loadPolicyGroups()
+}
+
+// 搜索策略
+const handleSearchPolicies = () => {
+  // 通过 computed 自动过滤
+}
+
 // 创建策略组
-const handleCreate = () => {
+const handleCreateGroup = () => {
   editingGroup.value = null
-  resetForm()
-  modalVisible.value = true
+  resetGroupForm()
+  groupModalVisible.value = true
 }
 
 // 编辑策略组
-const handleEdit = (group: PolicyGroup) => {
+const handleEditGroup = (group: PolicyGroup) => {
   editingGroup.value = group
-  formState.id = group.id
-  formState.name = group.name
-  formState.description = group.description || ''
-  formState.icon = group.icon || ''
-  formState.color = group.color || '#1890ff'
-  formState.sort_order = group.sort_order || 0
-  formState.enabled = group.enabled
-  modalVisible.value = true
+  groupFormState.id = group.id
+  groupFormState.name = group.name
+  groupFormState.description = group.description || ''
+  groupFormState.icon = group.icon || ''
+  groupFormState.color = group.color || '#1890ff'
+  groupFormState.sort_order = group.sort_order || 0
+  groupFormState.enabled = group.enabled
+  groupModalVisible.value = true
 }
 
 // 菜单点击
 const handleMenuClick = async (key: string, group: PolicyGroup) => {
   if (key === 'edit') {
-    handleEdit(group)
+    handleEditGroup(group)
   } else if (key === 'toggle') {
-    await handleToggle(group)
+    await handleToggleGroup(group)
   } else if (key === 'delete') {
-    handleDelete(group)
+    handleDeleteGroup(group)
   }
 }
 
-// 切换启用状态
-const handleToggle = async (group: PolicyGroup) => {
+// 切换策略组启用状态
+const handleToggleGroup = async (group: PolicyGroup) => {
   try {
     await policyGroupsApi.update(group.id, { enabled: !group.enabled })
     message.success(group.enabled ? '已禁用策略组' : '已启用策略组')
@@ -272,7 +507,7 @@ const handleToggle = async (group: PolicyGroup) => {
 }
 
 // 删除策略组
-const handleDelete = (group: PolicyGroup) => {
+const handleDeleteGroup = (group: PolicyGroup) => {
   Modal.confirm({
     title: '确认删除',
     content: `确定要删除策略组「${group.name}」吗？删除后无法恢复。`,
@@ -296,41 +531,48 @@ const handleDelete = (group: PolicyGroup) => {
   })
 }
 
-// 查看策略组下的策略
-const handleViewPolicies = (group: PolicyGroup) => {
-  router.push({ path: '/policies', query: { group_id: group.id } })
-}
-
-// 提交表单
-const handleModalOk = async () => {
+// 提交策略组表单
+const handleGroupModalOk = async () => {
   try {
-    await formRef.value?.validate()
-    modalLoading.value = true
+    await groupFormRef.value?.validate()
+    groupModalLoading.value = true
 
     if (editingGroup.value) {
       await policyGroupsApi.update(editingGroup.value.id, {
-        name: formState.name,
-        description: formState.description,
-        icon: formState.icon,
-        color: formState.color,
-        sort_order: formState.sort_order,
-        enabled: formState.enabled,
+        name: groupFormState.name,
+        description: groupFormState.description,
+        icon: groupFormState.icon,
+        color: groupFormState.color,
+        sort_order: groupFormState.sort_order,
+        enabled: groupFormState.enabled,
       })
       message.success('更新成功')
+      // 如果当前在策略组详情页，更新当前组信息
+      if (currentGroup.value && currentGroup.value.id === editingGroup.value.id) {
+        currentGroup.value = {
+          ...currentGroup.value,
+          name: groupFormState.name,
+          description: groupFormState.description,
+          icon: groupFormState.icon,
+          color: groupFormState.color,
+          sort_order: groupFormState.sort_order,
+          enabled: groupFormState.enabled,
+        }
+      }
     } else {
       await policyGroupsApi.create({
-        id: formState.id || undefined,
-        name: formState.name,
-        description: formState.description,
-        icon: formState.icon,
-        color: formState.color,
-        sort_order: formState.sort_order,
-        enabled: formState.enabled,
+        id: groupFormState.id || undefined,
+        name: groupFormState.name,
+        description: groupFormState.description,
+        icon: groupFormState.icon,
+        color: groupFormState.color,
+        sort_order: groupFormState.sort_order,
+        enabled: groupFormState.enabled,
       })
       message.success('创建成功')
     }
 
-    modalVisible.value = false
+    groupModalVisible.value = false
     loadPolicyGroups()
   } catch (error: any) {
     if (error?.errorFields) {
@@ -343,26 +585,77 @@ const handleModalOk = async () => {
       message.error('保存策略组失败')
     }
   } finally {
-    modalLoading.value = false
+    groupModalLoading.value = false
   }
 }
 
-// 取消表单
-const handleModalCancel = () => {
-  modalVisible.value = false
-  resetForm()
+// 取消策略组表单
+const handleGroupModalCancel = () => {
+  groupModalVisible.value = false
+  resetGroupForm()
 }
 
-// 重置表单
-const resetForm = () => {
-  formState.id = ''
-  formState.name = ''
-  formState.description = ''
-  formState.icon = ''
-  formState.color = '#1890ff'
-  formState.sort_order = 0
-  formState.enabled = true
-  formRef.value?.resetFields()
+// 重置策略组表单
+const resetGroupForm = () => {
+  groupFormState.id = ''
+  groupFormState.name = ''
+  groupFormState.description = ''
+  groupFormState.icon = ''
+  groupFormState.color = '#1890ff'
+  groupFormState.sort_order = 0
+  groupFormState.enabled = true
+  groupFormRef.value?.resetFields()
+}
+
+// === 策略管理 ===
+
+// 进入策略规则管理页面
+const handleEnterPolicy = (policy: Policy) => {
+  router.push(`/policy-groups/policies/${policy.id}/rules`)
+}
+
+// 创建策略
+const handleCreatePolicy = () => {
+  editingPolicy.value = null
+  policyModalVisible.value = true
+}
+
+// 编辑策略
+const handleEditPolicy = (policy: Policy) => {
+  editingPolicy.value = policy
+  policyModalVisible.value = true
+}
+
+// 切换策略启用状态
+const handleTogglePolicy = async (policy: Policy, checked: boolean) => {
+  try {
+    await policiesApi.update(policy.id, { enabled: checked })
+    message.success(checked ? '已启用策略' : '已禁用策略')
+    loadGroupPolicies()
+  } catch (error) {
+    console.error('更新策略失败:', error)
+    message.error('更新策略失败')
+  }
+}
+
+// 删除策略
+const handleDeletePolicy = async (policy: Policy) => {
+  try {
+    await policiesApi.delete(policy.id)
+    message.success('删除成功')
+    loadGroupPolicies()
+  } catch (error) {
+    console.error('删除策略失败:', error)
+    message.error('删除策略失败')
+  }
+}
+
+// 策略保存成功
+const handlePolicyModalSuccess = () => {
+  policyModalVisible.value = false
+  loadGroupPolicies()
+  // 同时刷新策略组列表以更新统计数据
+  loadPolicyGroups()
 }
 
 onMounted(() => {
@@ -384,6 +677,11 @@ onMounted(() => {
 
 .page-header h2 {
   margin: 0;
+}
+
+.breadcrumb-header {
+  display: flex;
+  align-items: center;
 }
 
 .groups-grid {
@@ -420,6 +718,12 @@ onMounted(() => {
   color: #fff;
   font-weight: bold;
   font-size: 16px;
+}
+
+.group-icon.small {
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
 }
 
 .group-name {
@@ -460,5 +764,9 @@ onMounted(() => {
 .empty-state {
   grid-column: 1 / -1;
   padding: 60px 0;
+}
+
+.group-info-card {
+  margin-bottom: 16px;
 }
 </style>
