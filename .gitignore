@@ -326,14 +326,16 @@ docs/.doctrees/
 !api/proto/*.proto
 !api/proto/README.md
 
-# 保留AI / IDE / local config规则文件
+# 忽略 AI / IDE 配置目录
 .cursor/
 .claude/
 .vscode/
 .idea/
-claude.md
 
 # Debian / RPM packages
 *.deb
 *.rpm
+
+# 上传的文件目录（包含组件包等）
+uploads/
 
