@@ -201,6 +201,7 @@ tmp/
 build/
 target/
 out/
+uploads/
 *.o
 *.a
 
@@ -327,11 +328,10 @@ docs/.doctrees/
 
 # 保留AI / IDE / local config规则文件
 .cursor/
-.cluade/
+.claude/
 .vscode/
 .idea/
-
-
+claude.md
 
 # Debian / RPM packages
 *.deb
