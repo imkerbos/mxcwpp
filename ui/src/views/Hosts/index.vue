@@ -47,17 +47,17 @@
         </a-card>
       </a-col>
 
-      <!-- 主机风险分布 -->
+      <!-- 主机基线风险分布 -->
       <a-col :span="12" class="distribution-col">
-        <a-card title="主机风险分布" :bordered="false" class="distribution-card">
+        <a-card title="主机基线风险分布" :bordered="false" class="distribution-card">
           <div class="risk-distribution-container">
             <div class="risk-card">
-              <div class="risk-icon" style="border-color: #ff4d4f">
-                <ExclamationCircleOutlined style="color: #ff4d4f" />
+              <div class="risk-icon" style="border-color: #cf1322">
+                <ExclamationCircleOutlined style="color: #cf1322" />
               </div>
               <div class="risk-content">
-                <div class="risk-label">存在主机和容器安全告警</div>
-                <div class="risk-value">{{ riskDistribution.host_container_alerts }}</div>
+                <div class="risk-label">严重</div>
+                <div class="risk-value" style="color: #cf1322">{{ riskDistribution.critical }}</div>
               </div>
             </div>
             <div class="risk-card">
@@ -65,35 +65,26 @@
                 <ExclamationCircleOutlined style="color: #ff4d4f" />
               </div>
               <div class="risk-content">
-                <div class="risk-label">存在应用运行时安全告警</div>
-                <div class="risk-value">{{ riskDistribution.app_runtime_alerts }}</div>
+                <div class="risk-label">高危</div>
+                <div class="risk-value" style="color: #ff4d4f">{{ riskDistribution.high }}</div>
               </div>
             </div>
             <div class="risk-card">
-              <div class="risk-icon" style="border-color: #ff4d4f">
-                <ExclamationCircleOutlined style="color: #ff4d4f" />
+              <div class="risk-icon" style="border-color: #faad14">
+                <ExclamationCircleOutlined style="color: #faad14" />
               </div>
               <div class="risk-content">
-                <div class="risk-label">存在高可利用漏洞</div>
-                <div class="risk-value">{{ riskDistribution.high_exploitable_vulns }}</div>
+                <div class="risk-label">中危</div>
+                <div class="risk-value" style="color: #faad14">{{ riskDistribution.medium }}</div>
               </div>
             </div>
             <div class="risk-card">
-              <div class="risk-icon" style="border-color: #ff4d4f">
-                <ExclamationCircleOutlined style="color: #ff4d4f" />
+              <div class="risk-icon" style="border-color: #1890ff">
+                <ExclamationCircleOutlined style="color: #1890ff" />
               </div>
               <div class="risk-content">
-                <div class="risk-label">存在病毒文件</div>
-                <div class="risk-value">{{ riskDistribution.virus_files }}</div>
-              </div>
-            </div>
-            <div class="risk-card">
-              <div class="risk-icon" style="border-color: #ff4d4f">
-                <ExclamationCircleOutlined style="color: #ff4d4f" />
-              </div>
-              <div class="risk-content">
-                <div class="risk-label">存在高危基线</div>
-                <div class="risk-value">{{ riskDistribution.high_risk_baselines }}</div>
+                <div class="risk-label">低危</div>
+                <div class="risk-value" style="color: #1890ff">{{ riskDistribution.low }}</div>
               </div>
             </div>
           </div>
@@ -342,11 +333,10 @@ const statusDistribution = ref<HostStatusDistribution>({
   uninstalled: 0,
 })
 const riskDistribution = ref<HostRiskDistribution>({
-  host_container_alerts: 0,
-  app_runtime_alerts: 0,
-  high_exploitable_vulns: 0,
-  virus_files: 0,
-  high_risk_baselines: 0,
+  critical: 0,
+  high: 0,
+  medium: 0,
+  low: 0,
 })
 
 const filters = reactive({

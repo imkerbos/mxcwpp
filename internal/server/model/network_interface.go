@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // NetInterface 网络接口资产模型
 type NetInterface struct {
 	ID            string      `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -15,7 +11,7 @@ type NetInterface struct {
 	IPv6Addresses StringArray `gorm:"column:ipv6_addresses;type:text" json:"ipv6_addresses"` // JSON 数组
 	MTU           int         `gorm:"column:mtu;type:int" json:"mtu"`
 	State         string      `gorm:"column:state;type:varchar(20)" json:"state"` // up、down
-	CollectedAt   time.Time   `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt   LocalTime   `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

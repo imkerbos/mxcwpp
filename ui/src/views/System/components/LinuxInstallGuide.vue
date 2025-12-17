@@ -6,21 +6,71 @@
       <div class="os-list">
         <div class="os-item">
           <span class="os-badge">CentOS</span>
-          <span>CentOS 6 及以上</span>
+          <span>CentOS 7/8/9</span>
         </div>
         <div class="os-item">
-          <span class="os-badge">Debian</span>
-          <span>Debian 9 及以上</span>
-        </div>
-        <div class="os-item">
-          <span class="os-badge">Ubuntu</span>
-          <span>Ubuntu 12 及以上</span>
+          <span class="os-badge">RHEL</span>
+          <span>Red Hat 7/8/9</span>
         </div>
         <div class="os-item">
           <span class="os-badge">Rocky</span>
-          <span>Rocky Linux 8 及以上</span>
+          <span>Rocky Linux 8/9</span>
+        </div>
+        <div class="os-item">
+          <span class="os-badge">Debian</span>
+          <span>Debian 10/11/12</span>
+        </div>
+        <div class="os-item">
+          <span class="os-badge">Ubuntu</span>
+          <span>Ubuntu 18.04/20.04/22.04</span>
         </div>
       </div>
+    </div>
+
+    <!-- 前置要求 -->
+    <div class="section">
+      <h3>前置要求</h3>
+      <a-alert type="info" show-icon class="prereq-alert">
+        <template #message>
+          <div>
+            <p><strong>1. 组件包上传</strong>：请先在 <router-link to="/system/components">系统管理 &gt; 组件列表</router-link> 中上传 Agent 安装包（RPM/DEB）。</p>
+            <p><strong>2. 服务器地址配置</strong>：请配置正确的服务器地址，确保目标主机可以访问。</p>
+          </div>
+        </template>
+      </a-alert>
+    </div>
+
+    <!-- 服务器地址配置 -->
+    <div class="section">
+      <h3>服务器地址配置</h3>
+      <a-card :bordered="false" class="config-card">
+        <a-form layout="inline">
+          <a-form-item label="HTTP 服务器地址">
+            <a-input
+              v-model:value="httpServerAddress"
+              placeholder="例如: 192.168.1.100:8080"
+              style="width: 250px"
+            />
+            <a-tooltip title="Manager HTTP API 地址，用于下载安装包和安装脚本">
+              <QuestionCircleOutlined style="margin-left: 8px; color: #999" />
+            </a-tooltip>
+          </a-form-item>
+          <a-form-item label="gRPC 服务器地址">
+            <a-input
+              v-model:value="grpcServerAddress"
+              placeholder="例如: 192.168.1.100:6751"
+              style="width: 250px"
+            />
+            <a-tooltip title="AgentCenter gRPC 地址，Agent 连接此地址上报数据">
+              <QuestionCircleOutlined style="margin-left: 8px; color: #999" />
+            </a-tooltip>
+          </a-form-item>
+        </a-form>
+        <div v-if="isLocalhost" class="warning-tip">
+          <WarningOutlined style="color: #faad14" />
+          <span>检测到您正在使用 localhost 访问，请输入服务器的实际 IP 地址。</span>
+        </div>
+      </a-card>
     </div>
 
     <!-- 安装步骤 -->
@@ -30,41 +80,68 @@
       <!-- 步骤1：复制客户端安装命令 -->
       <div class="step">
         <h4>步骤1：复制客户端安装命令</h4>
-        <div class="command-box">
-          <code class="command">{{ installCommand }}</code>
-          <a-button type="link" @click="copyCommand(installCommand)" class="copy-btn">
-            <template #icon><CopyOutlined /></template>
-            复制命令
-          </a-button>
-        </div>
-        <a-button type="link" @click="showCustomCommand = !showCustomCommand" class="custom-btn">
-          {{ showCustomCommand ? '隐藏' : '显示' }}自定义安装命令
-        </a-button>
-        <div v-if="showCustomCommand" class="custom-command-box">
-          <p>如果需要自定义 Server 地址或绑定业务线，可以使用以下命令：</p>
-          <div class="form-item">
-            <label>选择业务线（可选）：</label>
-            <a-select
-              v-model:value="selectedBusinessLine"
-              placeholder="请选择业务线（不选择则不绑定）"
-              allow-clear
-              show-search
-              :filter-option="filterBusinessLineOption"
-              style="width: 300px; margin-bottom: 12px;"
-            >
-              <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
-                {{ bl.name }} ({{ bl.code }})
-              </a-select-option>
-            </a-select>
-          </div>
-          <div class="command-box">
-            <code class="command">{{ customInstallCommand }}</code>
-            <a-button type="link" @click="copyCommand(customInstallCommand)" class="copy-btn">
-              <template #icon><CopyOutlined /></template>
-              复制命令
-            </a-button>
-          </div>
-        </div>
+
+        <a-tabs v-model:activeKey="installMethod" type="card">
+          <!-- 一键安装 -->
+          <a-tab-pane key="auto" tab="一键安装">
+            <p class="method-desc">使用一键安装脚本自动检测系统并安装对应版本：</p>
+            <div class="command-box">
+              <code class="command">{{ autoInstallCommand }}</code>
+              <a-button type="link" @click="copyCommand(autoInstallCommand)" class="copy-btn">
+                <template #icon><CopyOutlined /></template>
+                复制命令
+              </a-button>
+            </div>
+          </a-tab-pane>
+
+          <!-- 手动安装 -->
+          <a-tab-pane key="manual" tab="手动安装">
+            <p class="method-desc">根据操作系统选择对应的包管理器安装：</p>
+
+            <div class="manual-install-options">
+              <a-radio-group v-model:value="manualPkgType" button-style="solid">
+                <a-radio-button value="rpm">RPM (CentOS/RHEL/Rocky)</a-radio-button>
+                <a-radio-button value="deb">DEB (Debian/Ubuntu)</a-radio-button>
+              </a-radio-group>
+            </div>
+
+            <div class="command-box">
+              <code class="command">{{ manualInstallCommand }}</code>
+              <a-button type="link" @click="copyCommand(manualInstallCommand)" class="copy-btn">
+                <template #icon><CopyOutlined /></template>
+                复制命令
+              </a-button>
+            </div>
+          </a-tab-pane>
+        </a-tabs>
+
+        <!-- 高级选项 -->
+        <a-collapse :bordered="false" class="advanced-options">
+          <a-collapse-panel key="1" header="高级选项">
+            <div class="form-item">
+              <label>选择业务线（可选）：</label>
+              <a-select
+                v-model:value="selectedBusinessLine"
+                placeholder="请选择业务线（不选择则不绑定）"
+                allow-clear
+                show-search
+                :filter-option="filterBusinessLineOption"
+                style="width: 300px"
+              >
+                <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
+                  {{ bl.name }} ({{ bl.code }})
+                </a-select-option>
+              </a-select>
+            </div>
+            <div v-if="selectedBusinessLine" class="command-box" style="margin-top: 12px">
+              <code class="command">{{ advancedInstallCommand }}</code>
+              <a-button type="link" @click="copyCommand(advancedInstallCommand)" class="copy-btn">
+                <template #icon><CopyOutlined /></template>
+                复制命令
+              </a-button>
+            </div>
+          </a-collapse-panel>
+        </a-collapse>
       </div>
 
       <!-- 步骤2：在目标主机上以管理员权限执行安装命令 -->
@@ -107,15 +184,15 @@
             </a-button>
           </div>
           <p class="tip">
-            如果日志中显示 <code>get connection successfully</code> 或类似的连接成功信息，则视为网络畅通。
+            如果日志中显示 <code>connected to server</code> 或类似的连接成功信息，则视为网络畅通。
           </p>
         </div>
 
         <!-- 3.3 总结 -->
         <div class="sub-step">
           <h5>3.3 总结</h5>
-          <p class="tip">
-            如果"步骤一"和"步骤二"都显示预期结果，则表示 Agent 安装成功。
+          <p class="tip success">
+            如果"步骤一"和"步骤二"都显示预期结果，则表示 Agent 安装成功。约 1-2 分钟后，主机将出现在 <router-link to="/hosts">主机列表</router-link> 中。
           </p>
         </div>
       </div>
@@ -124,65 +201,167 @@
     <!-- 卸载方法 -->
     <div class="section">
       <h3>卸载方法</h3>
-      <p>如需卸载 Agent，请以管理员权限执行以下命令：</p>
-      <div class="command-box">
-        <code class="command">{{ uninstallCommand }}</code>
-        <a-button type="link" @click="copyCommand(uninstallCommand)" class="copy-btn">
-          <template #icon><CopyOutlined /></template>
-          复制命令
-        </a-button>
-      </div>
+
+      <a-tabs type="card">
+        <a-tab-pane key="auto" tab="一键卸载">
+          <div class="command-box">
+            <code class="command">{{ uninstallCommand }}</code>
+            <a-button type="link" @click="copyCommand(uninstallCommand)" class="copy-btn">
+              <template #icon><CopyOutlined /></template>
+              复制命令
+            </a-button>
+          </div>
+        </a-tab-pane>
+        <a-tab-pane key="manual" tab="手动卸载">
+          <div class="manual-install-options">
+            <a-radio-group v-model:value="uninstallPkgType" button-style="solid">
+              <a-radio-button value="rpm">RPM (CentOS/RHEL/Rocky)</a-radio-button>
+              <a-radio-button value="deb">DEB (Debian/Ubuntu)</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div class="command-box">
+            <code class="command">{{ manualUninstallCommand }}</code>
+            <a-button type="link" @click="copyCommand(manualUninstallCommand)" class="copy-btn">
+              <template #icon><CopyOutlined /></template>
+              复制命令
+            </a-button>
+          </div>
+        </a-tab-pane>
+      </a-tabs>
+    </div>
+
+    <!-- 常见问题 -->
+    <div class="section">
+      <h3>常见问题</h3>
+      <a-collapse :bordered="false">
+        <a-collapse-panel key="1" header="Agent 无法连接到服务器">
+          <ul>
+            <li>检查防火墙是否开放 gRPC 端口（默认 6751）</li>
+            <li>确认服务器地址配置正确（不能是 localhost 或 127.0.0.1）</li>
+            <li>检查 AgentCenter 服务是否正常运行</li>
+          </ul>
+        </a-collapse-panel>
+        <a-collapse-panel key="2" header="下载安装包失败">
+          <ul>
+            <li>确认已在组件列表中上传对应架构的安装包</li>
+            <li>检查 HTTP 服务器端口（默认 8080）是否可访问</li>
+            <li>检查目标主机的网络连通性</li>
+          </ul>
+        </a-collapse-panel>
+        <a-collapse-panel key="3" header="Agent 启动后无法上报数据">
+          <ul>
+            <li>检查 Agent 日志：<code>journalctl -u mxsec-agent -f</code></li>
+            <li>确认 mTLS 证书配置正确（如果启用）</li>
+            <li>检查 SELinux 或 AppArmor 是否阻止了通信</li>
+          </ul>
+        </a-collapse-panel>
+      </a-collapse>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { CopyOutlined, InfoCircleOutlined } from '@ant-design/icons-vue'
+import {
+  CopyOutlined,
+  InfoCircleOutlined,
+  QuestionCircleOutlined,
+  WarningOutlined,
+} from '@ant-design/icons-vue'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 
-// 获取当前页面的基础 URL（用于构建安装脚本 URL）
-const getBaseUrl = () => {
-  // 从 window.location 获取当前页面的协议和主机
-  const protocol = window.location.protocol
-  const host = window.location.host
-  return `${protocol}//${host}`
-}
+// 服务器地址配置
+const httpServerAddress = ref('')
+const grpcServerAddress = ref('')
 
-const baseUrl = getBaseUrl()
-const installCommand = computed(() => {
-  return `bash -c "if command -v curl > /dev/null; then curl -sS ${baseUrl}/agent/install.sh | bash; else wget -q -O - ${baseUrl}/agent/install.sh | bash; fi"`
+// 检测是否使用 localhost
+const isLocalhost = computed(() => {
+  const host = window.location.hostname
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1'
 })
 
+// 初始化服务器地址
+const initServerAddresses = () => {
+  const host = window.location.host
+  const hostname = window.location.hostname
+
+  // 如果是 localhost，提示用户输入实际地址
+  if (isLocalhost.value) {
+    httpServerAddress.value = ''
+    grpcServerAddress.value = ''
+  } else {
+    // 使用当前访问的地址
+    httpServerAddress.value = host
+    // gRPC 地址使用相同的 hostname，端口改为 6751
+    const port = window.location.port || '80'
+    if (port === '8080' || port === '80' || port === '3000') {
+      grpcServerAddress.value = `${hostname}:6751`
+    } else {
+      grpcServerAddress.value = `${hostname}:6751`
+    }
+  }
+}
+
+// 安装方式
+const installMethod = ref<'auto' | 'manual'>('auto')
+const manualPkgType = ref<'rpm' | 'deb'>('rpm')
+const uninstallPkgType = ref<'rpm' | 'deb'>('rpm')
+
+// 业务线
 const selectedBusinessLine = ref<string>('')
 const businessLines = ref<BusinessLine[]>([])
 
-const customInstallCommand = computed(() => {
-  const httpServer = baseUrl.replace(/^https?:\/\//, '')
-  let envVars = `BLS_SERVER_HOST=YOUR_SERVER_IP:6751 BLS_HTTP_SERVER=${httpServer}`
-  
-  // 如果选择了业务线，添加到环境变量
+// 安装命令
+const autoInstallCommand = computed(() => {
+  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
+  const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
+  return `BLS_HTTP_SERVER=${httpAddr} BLS_SERVER_HOST=${grpcAddr} bash -c "$(curl -fsSL http://${httpAddr}/agent/install.sh)"`
+})
+
+const manualInstallCommand = computed(() => {
+  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
+  const arch = 'amd64' // 可以根据需要扩展
+
+  if (manualPkgType.value === 'rpm') {
+    return `curl -fsSL -o mxsec-agent.rpm http://${httpAddr}/api/v1/agent/download/rpm/${arch} && yum install -y ./mxsec-agent.rpm && rm -f mxsec-agent.rpm`
+  } else {
+    return `curl -fsSL -o mxsec-agent.deb http://${httpAddr}/api/v1/agent/download/deb/${arch} && apt-get install -y ./mxsec-agent.deb && rm -f mxsec-agent.deb`
+  }
+})
+
+const advancedInstallCommand = computed(() => {
+  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
+  const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
+  let envVars = `BLS_HTTP_SERVER=${httpAddr} BLS_SERVER_HOST=${grpcAddr}`
+
   if (selectedBusinessLine.value) {
     envVars += ` BLS_BUSINESS_LINE=${selectedBusinessLine.value}`
   }
-  
-  return `bash -c "${envVars} if command -v curl > /dev/null; then curl -sS ${baseUrl}/agent/install.sh | bash; else wget -q -O - ${baseUrl}/agent/install.sh | bash; fi"`
+
+  return `${envVars} bash -c "$(curl -fsSL http://${httpAddr}/agent/install.sh)"`
 })
 
 const statusCommand = 'systemctl status mxsec-agent'
-const logCommand = 'tail -n 50 /var/log/mxsec-agent/agent.log | grep -i connection'
+const logCommand = 'journalctl -u mxsec-agent -n 50 --no-pager | grep -i connect'
+
 const uninstallCommand = computed(() => {
-  return `bash -c "if command -v curl > /dev/null; then curl -sS ${baseUrl}/agent/uninstall.sh | bash; else wget -q -O - ${baseUrl}/agent/uninstall.sh | bash; fi"`
+  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
+  return `bash -c "$(curl -fsSL http://${httpAddr}/agent/uninstall.sh)"`
 })
 
-const showCustomCommand = ref(false)
+const manualUninstallCommand = computed(() => {
+  if (uninstallPkgType.value === 'rpm') {
+    return 'systemctl stop mxsec-agent && yum remove -y mxsec-agent'
+  } else {
+    return 'systemctl stop mxsec-agent && apt-get remove -y mxsec-agent'
+  }
+})
 
 // 加载业务线列表
 const loadBusinessLines = async () => {
   try {
     const response = await businessLinesApi.list({ enabled: 'true', page_size: 1000 })
-    // API 客户端已经处理了响应，直接返回 PaginatedResponse
     businessLines.value = response.items || []
   } catch (error) {
     console.error('加载业务线列表失败:', error)
@@ -191,20 +370,16 @@ const loadBusinessLines = async () => {
 
 // 业务线筛选选项过滤
 const filterBusinessLineOption = (input: string, option: any) => {
-  const text = option.children[0].children || ''
+  const text = option.children?.[0]?.children || ''
   return text.toLowerCase().indexOf(input.toLowerCase()) >= 0
 }
 
-onMounted(() => {
-  loadBusinessLines()
-})
-
+// 复制命令
 const copyCommand = async (command: string) => {
   try {
     await navigator.clipboard.writeText(command)
     message.success('命令已复制到剪贴板')
   } catch (err) {
-    // 降级方案：使用传统方法
     const textArea = document.createElement('textarea')
     textArea.value = command
     textArea.style.position = 'fixed'
@@ -220,6 +395,11 @@ const copyCommand = async (command: string) => {
     document.body.removeChild(textArea)
   }
 }
+
+onMounted(() => {
+  initServerAddresses()
+  loadBusinessLines()
+})
 </script>
 
 <style scoped>
@@ -236,6 +416,31 @@ const copyCommand = async (command: string) => {
   font-weight: 600;
   margin-bottom: 16px;
   color: #262626;
+}
+
+.prereq-alert {
+  margin-bottom: 16px;
+}
+
+.prereq-alert p {
+  margin: 4px 0;
+}
+
+.config-card {
+  background: #fafafa;
+}
+
+.warning-tip {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #614700;
 }
 
 .step {
@@ -284,13 +489,22 @@ const copyCommand = async (command: string) => {
   font-size: 12px;
   font-weight: 600;
   color: #595959;
-  min-width: 60px;
+  min-width: 70px;
   text-align: center;
+}
+
+.method-desc {
+  margin-bottom: 12px;
+  color: #595959;
+}
+
+.manual-install-options {
+  margin-bottom: 12px;
 }
 
 .command-box {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 12px;
   background: #f5f5f5;
@@ -306,21 +520,16 @@ const copyCommand = async (command: string) => {
   color: #262626;
   word-break: break-all;
   white-space: pre-wrap;
+  line-height: 1.6;
 }
 
 .copy-btn {
   flex-shrink: 0;
 }
 
-.custom-btn {
-  margin-top: 8px;
-}
-
-.custom-command-box {
+.advanced-options {
   margin-top: 12px;
-  padding: 12px;
-  background: #fafafa;
-  border-radius: 4px;
+  background: transparent;
 }
 
 .form-item {
@@ -345,6 +554,11 @@ const copyCommand = async (command: string) => {
   font-size: 13px;
 }
 
+.tip.success {
+  background: #f6ffed;
+  border-left-color: #52c41a;
+}
+
 .tip code {
   background: #fff;
   padding: 2px 6px;
@@ -359,5 +573,31 @@ p {
   color: #595959;
   font-size: 13px;
   line-height: 1.6;
+}
+
+:deep(.ant-collapse-header) {
+  font-weight: 500;
+}
+
+:deep(.ant-collapse-content-box) {
+  padding-left: 24px;
+}
+
+:deep(.ant-collapse-content-box ul) {
+  margin: 0;
+  padding-left: 20px;
+}
+
+:deep(.ant-collapse-content-box li) {
+  margin-bottom: 8px;
+  color: #595959;
+}
+
+:deep(.ant-collapse-content-box code) {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-family: monospace;
+  font-size: 12px;
 }
 </style>

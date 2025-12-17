@@ -10,11 +10,10 @@ export interface HostStatusDistribution {
 }
 
 export interface HostRiskDistribution {
-  host_container_alerts: number
-  app_runtime_alerts: number
-  high_exploitable_vulns: number
-  virus_files: number
-  high_risk_baselines: number
+  critical: number   // 存在严重风险基线的主机数
+  high: number       // 存在高危风险基线的主机数
+  medium: number     // 存在中危风险基线的主机数
+  low: number        // 存在低危风险基线的主机数
 }
 
 export interface HostRiskStatistics {

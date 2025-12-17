@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // AssetUser 账户资产模型（注意：与 User 用户模型区分开）
 type AssetUser struct {
 	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -17,7 +13,7 @@ type AssetUser struct {
 	Shell       string    `gorm:"column:shell;type:varchar(255)" json:"shell"`
 	Comment     string    `gorm:"column:comment;type:varchar(255)" json:"comment"`
 	HasPassword bool      `gorm:"column:has_password;type:boolean;default:false" json:"has_password"`
-	CollectedAt time.Time `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // AlertStatus 告警状态
 type AlertStatus string
 
@@ -29,13 +25,13 @@ type Alert struct {
 	Expected      string      `gorm:"column:expected;type:text" json:"expected"`
 	FixSuggestion string      `gorm:"column:fix_suggestion;type:text" json:"fix_suggestion"`
 	Status        AlertStatus `gorm:"column:status;type:varchar(20);not null;default:'active';index" json:"status"`
-	FirstSeenAt   time.Time   `gorm:"column:first_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"first_seen_at"` // 首次发现时间
-	LastSeenAt    time.Time   `gorm:"column:last_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"last_seen_at"`   // 最后发现时间
-	ResolvedAt    *time.Time  `gorm:"column:resolved_at;type:timestamp" json:"resolved_at"`                                        // 解决时间
+	FirstSeenAt   LocalTime   `gorm:"column:first_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"first_seen_at"` // 首次发现时间
+	LastSeenAt    LocalTime   `gorm:"column:last_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"last_seen_at"`   // 最后发现时间
+	ResolvedAt    *LocalTime  `gorm:"column:resolved_at;type:timestamp" json:"resolved_at"`                                        // 解决时间
 	ResolvedBy    string      `gorm:"column:resolved_by;type:varchar(100)" json:"resolved_by"`                                     // 解决人
 	ResolveReason string      `gorm:"column:resolve_reason;type:text" json:"resolve_reason"`                                       // 解决原因
-	CreatedAt     time.Time   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt     time.Time   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt     LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt     LocalTime   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 
 	// 关联关系
 	Host Host `gorm:"foreignKey:HostID;references:HostID" json:"host,omitempty"`

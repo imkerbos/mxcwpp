@@ -1,0 +1,446 @@
+{
+  "id": "LINUX_SERVICE_STATUS",
+  "name": "系统服务状态基线",
+  "version": "2.0.0",
+  "description": "关键系统服务状态检查（参考 CIS Benchmark 和等保 2.0）",
+  "os_family": ["rocky", "centos", "oracle", "debian", "ubuntu", "almalinux"],
+  "os_version": ">=7",
+  "enabled": true,
+  "rules": [
+    {
+      "rule_id": "LINUX_SERVICE_001",
+      "category": "service",
+      "title": "SSH 服务应运行",
+      "description": "SSH 服务应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["sshd", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["ssh", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动 SSH 服务：systemctl start sshd && systemctl enable sshd",
+        "command": "systemctl start sshd && systemctl enable sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_002",
+      "category": "service",
+      "title": "时间同步服务应运行",
+      "description": "时间同步服务（chronyd 或 ntpd）应处于运行状态",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["chronyd", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["ntpd", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["systemd-timesyncd", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动时间同步服务：systemctl start chronyd && systemctl enable chronyd",
+        "command": "systemctl start chronyd && systemctl enable chronyd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_003",
+      "category": "service",
+      "title": "禁用 telnet 服务",
+      "description": "telnet 服务应被禁用，使用 SSH 替代",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["telnet.socket", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 telnet 服务：systemctl stop telnet.socket && systemctl disable telnet.socket",
+        "command": "systemctl stop telnet.socket 2>/dev/null; systemctl disable telnet.socket 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_004",
+      "category": "service",
+      "title": "禁用 rsh 服务",
+      "description": "rsh 服务应被禁用，存在安全风险",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rsh.socket", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 rsh 服务：systemctl stop rsh.socket && systemctl disable rsh.socket",
+        "command": "systemctl stop rsh.socket 2>/dev/null; systemctl disable rsh.socket 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_005",
+      "category": "service",
+      "title": "禁用 rlogin 服务",
+      "description": "rlogin 服务应被禁用，存在安全风险",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rlogin.socket", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 rlogin 服务：systemctl stop rlogin.socket && systemctl disable rlogin.socket",
+        "command": "systemctl stop rlogin.socket 2>/dev/null; systemctl disable rlogin.socket 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_006",
+      "category": "service",
+      "title": "禁用 rexec 服务",
+      "description": "rexec 服务应被禁用，存在安全风险",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rexec.socket", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 rexec 服务：systemctl stop rexec.socket && systemctl disable rexec.socket",
+        "command": "systemctl stop rexec.socket 2>/dev/null; systemctl disable rexec.socket 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_007",
+      "category": "service",
+      "title": "禁用 FTP 服务",
+      "description": "FTP 服务应被禁用（除非业务需要），使用 SFTP 替代",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["vsftpd", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 FTP 服务：systemctl stop vsftpd && systemctl disable vsftpd",
+        "command": "systemctl stop vsftpd 2>/dev/null; systemctl disable vsftpd 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_008",
+      "category": "service",
+      "title": "禁用 NFS 服务（客户端不需要时）",
+      "description": "NFS 服务应被禁用（除非作为 NFS 服务器）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["nfs-server", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 NFS 服务：systemctl stop nfs-server && systemctl disable nfs-server",
+        "command": "systemctl stop nfs-server 2>/dev/null; systemctl disable nfs-server 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_009",
+      "category": "service",
+      "title": "禁用 avahi-daemon 服务",
+      "description": "avahi-daemon（mDNS）应被禁用（除非需要 Bonjour 发现）",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["avahi-daemon", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 avahi-daemon：systemctl stop avahi-daemon && systemctl disable avahi-daemon",
+        "command": "systemctl stop avahi-daemon 2>/dev/null; systemctl disable avahi-daemon 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_010",
+      "category": "service",
+      "title": "禁用 cups 服务（非打印服务器）",
+      "description": "cups 打印服务应被禁用（除非需要打印功能）",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["cups", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 cups 服务：systemctl stop cups && systemctl disable cups",
+        "command": "systemctl stop cups 2>/dev/null; systemctl disable cups 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_011",
+      "category": "service",
+      "title": "禁用 dhcpd 服务（非 DHCP 服务器）",
+      "description": "DHCP 服务应被禁用（除非作为 DHCP 服务器）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["dhcpd", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 dhcpd 服务：systemctl stop dhcpd && systemctl disable dhcpd",
+        "command": "systemctl stop dhcpd 2>/dev/null; systemctl disable dhcpd 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_012",
+      "category": "service",
+      "title": "禁用 named 服务（非 DNS 服务器）",
+      "description": "DNS 服务应被禁用（除非作为 DNS 服务器）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["named", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 named 服务：systemctl stop named && systemctl disable named",
+        "command": "systemctl stop named 2>/dev/null; systemctl disable named 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_013",
+      "category": "service",
+      "title": "禁用 xrdp 服务",
+      "description": "xrdp 远程桌面服务应被禁用（除非需要远程桌面）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["xrdp", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 xrdp 服务：systemctl stop xrdp && systemctl disable xrdp",
+        "command": "systemctl stop xrdp 2>/dev/null; systemctl disable xrdp 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_014",
+      "category": "service",
+      "title": "禁用 snmpd 服务（非 SNMP 管理）",
+      "description": "SNMP 服务应被禁用（除非需要 SNMP 监控）",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["snmpd", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 snmpd 服务：systemctl stop snmpd && systemctl disable snmpd",
+        "command": "systemctl stop snmpd 2>/dev/null; systemctl disable snmpd 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_015",
+      "category": "service",
+      "title": "禁用 tftp 服务",
+      "description": "TFTP 服务应被禁用，存在安全风险",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["tftp.socket", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 TFTP 服务：systemctl stop tftp.socket && systemctl disable tftp.socket",
+        "command": "systemctl stop tftp.socket 2>/dev/null; systemctl disable tftp.socket 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_016",
+      "category": "service",
+      "title": "禁用 xinetd 服务",
+      "description": "xinetd 服务应被禁用（除非特别需要）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["xinetd", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 xinetd 服务：systemctl stop xinetd && systemctl disable xinetd",
+        "command": "systemctl stop xinetd 2>/dev/null; systemctl disable xinetd 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_017",
+      "category": "service",
+      "title": "防火墙服务应运行",
+      "description": "防火墙服务（firewalld 或 iptables）应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["firewalld", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["iptables", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["nftables", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["ufw", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动防火墙服务：systemctl start firewalld && systemctl enable firewalld",
+        "command": "systemctl start firewalld && systemctl enable firewalld"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_018",
+      "category": "service",
+      "title": "SELinux 或 AppArmor 应启用",
+      "description": "应启用 SELinux（CentOS/RHEL）或 AppArmor（Ubuntu）",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["getenforce 2>/dev/null || echo Disabled", "^(Enforcing|Permissive)$"]
+          },
+          {
+            "type": "service_status",
+            "param": ["apparmor", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启用 SELinux：setenforce 1 并修改 /etc/selinux/config"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_019",
+      "category": "service",
+      "title": "auditd 审计服务应运行",
+      "description": "auditd 审计服务应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["auditd", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动 auditd 服务：systemctl start auditd && systemctl enable auditd",
+        "command": "systemctl start auditd && systemctl enable auditd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_020",
+      "category": "service",
+      "title": "rsyslog 日志服务应运行",
+      "description": "rsyslog 日志服务应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rsyslog", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["syslog-ng", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["systemd-journald", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动 rsyslog 服务：systemctl start rsyslog && systemctl enable rsyslog",
+        "command": "systemctl start rsyslog && systemctl enable rsyslog"
+      }
+    }
+  ]
+}

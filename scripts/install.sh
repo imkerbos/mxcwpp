@@ -80,7 +80,7 @@ download_package() {
     DOWNLOAD_URL="http://${SERVER_HOST}/api/v1/agent/download/${PKG_TYPE}/${ARCH}"
     
     TEMP_DIR=$(mktemp -d)
-    PACKAGE_FILE="${TEMP_DIR}/mxcsec-agent.${PKG_TYPE}"
+    PACKAGE_FILE="${TEMP_DIR}/mxsec-agent.${PKG_TYPE}"
     
     if command -v curl &> /dev/null; then
         curl -f -L -o "$PACKAGE_FILE" "$DOWNLOAD_URL"
@@ -121,7 +121,7 @@ configure_business_line() {
         echo -e "${GREEN}Configuring business line: ${BUSINESS_LINE}${NC}"
         
         # 创建 systemd override 目录
-        OVERRIDE_DIR="/etc/systemd/system/mxcsec-agent.service.d"
+        OVERRIDE_DIR="/etc/systemd/system/mxsec-agent.service.d"
         mkdir -p "$OVERRIDE_DIR"
         
         # 创建 override 配置文件
@@ -143,18 +143,18 @@ start_service() {
     configure_business_line
     
     systemctl daemon-reload
-    systemctl enable mxcsec-agent
-    systemctl start mxcsec-agent
+    systemctl enable mxsec-agent
+    systemctl start mxsec-agent
     
     # 等待服务启动
     sleep 2
     
-    if systemctl is-active --quiet mxcsec-agent; then
+    if systemctl is-active --quiet mxsec-agent; then
         echo -e "${GREEN}Agent started successfully!${NC}"
-        echo -e "${GREEN}Status: $(systemctl status mxcsec-agent --no-pager -l | head -n 3)${NC}"
+        echo -e "${GREEN}Status: $(systemctl status mxsec-agent --no-pager -l | head -n 3)${NC}"
     else
         echo -e "${YELLOW}Warning: Agent service may not have started properly${NC}"
-        echo -e "${YELLOW}Check logs: journalctl -u mxcsec-agent${NC}"
+        echo -e "${YELLOW}Check logs: journalctl -u mxsec-agent${NC}"
     fi
 }
 

@@ -325,7 +325,15 @@ docs/.doctrees/
 !api/proto/*.proto
 !api/proto/README.md
 
-# 保留 Cursor 规则文件
-!.cursor/rules/
-!.cursor/rules/**/*
-CLAUDE.md
+# 保留AI / IDE / local config规则文件
+.cursor/
+.cluade/
+.vscode/
+.idea/
+
+
+
+# Debian / RPM packages
+*.deb
+*.rpm
+

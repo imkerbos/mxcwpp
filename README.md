@@ -1,6 +1,6 @@
 # README.md
 
-# Matrix Cloud Security Platform（矩阵云安全平台，项目简称：mxcsec-platform）
+# Matrix Cloud Security Platform（矩阵云安全平台，项目简称：mxsec-platform）
 
 > 面向 Linux 主机与中间件的基线检查平台。  
 > v1 聚焦 **操作系统基线**，参考 ByteDance 开源的 Elkeid（特别是 baseline 插件和 agent 设计），重新设计一套 **Server + UI + Agent + Baseline 引擎**，兼容新系统版本（如 Rocky Linux 9、Debian 12 等）。

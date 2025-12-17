@@ -18,6 +18,7 @@ BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ARCH="${GOARCH:-amd64}"
 OS="${GOOS:-linux}"
 DISTRO="${BLS_DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
+CERT_DIR="${BLS_CERT_DIR:-deploy/docker-compose/certs}"  # 证书目录
 
 # 输出目录
 DIST_DIR="dist/agent"
@@ -30,6 +31,7 @@ echo "Version: $VERSION"
 echo "Server: $SERVER_HOST"
 echo "OS/Arch: $OS/$ARCH"
 echo "Distribution: ${DISTRO:-通用}"
+echo "Cert Dir: $CERT_DIR"
 echo ""
 
 # 检查并安装 nFPM
@@ -78,7 +80,7 @@ go build -ldflags "\
     -X main.buildVersion=$VERSION \
     -X main.buildTime=$BUILD_TIME \
     -s -w" \
-    -o "$DIST_DIR/mxcsec-agent-$OS-$ARCH" \
+    -o "$DIST_DIR/mxsec-agent-$OS-$ARCH" \
     ./cmd/agent
 
 # 2. 创建临时目录结构
@@ -89,15 +91,54 @@ trap "rm -rf $TEMP_DIR" EXIT
 # 创建目录结构
 mkdir -p "$TEMP_DIR/usr/bin"
 mkdir -p "$TEMP_DIR/etc/systemd/system"
-mkdir -p "$TEMP_DIR/var/lib/mxcsec-agent"
-mkdir -p "$TEMP_DIR/var/log/mxcsec-agent"
+mkdir -p "$TEMP_DIR/var/lib/mxsec-agent"
+mkdir -p "$TEMP_DIR/var/lib/mxsec-agent/certs"
+mkdir -p "$TEMP_DIR/var/log/mxsec-agent"
+mkdir -p "$TEMP_DIR/scripts"
 
 # 复制二进制文件
-cp "$DIST_DIR/mxcsec-agent-$OS-$ARCH" "$TEMP_DIR/usr/bin/mxcsec-agent"
-chmod +x "$TEMP_DIR/usr/bin/mxcsec-agent"
+cp "$DIST_DIR/mxsec-agent-$OS-$ARCH" "$TEMP_DIR/usr/bin/mxsec-agent"
+chmod +x "$TEMP_DIR/usr/bin/mxsec-agent"
 
 # 复制 systemd service 文件
-cp deploy/systemd/mxcsec-agent.service "$TEMP_DIR/etc/systemd/system/mxcsec-agent.service"
+cp deploy/systemd/mxsec-agent.service "$TEMP_DIR/etc/systemd/system/mxsec-agent.service"
+
+# 复制证书文件（如果存在）
+CERTS_INCLUDED=false
+if [ -d "$CERT_DIR" ]; then
+    if [ -f "$CERT_DIR/ca.crt" ] && [ -f "$CERT_DIR/client.crt" ] && [ -f "$CERT_DIR/client.key" ]; then
+        echo -e "${GREEN}  → 包含证书文件${NC}"
+        cp "$CERT_DIR/ca.crt" "$TEMP_DIR/var/lib/mxsec-agent/certs/"
+        cp "$CERT_DIR/client.crt" "$TEMP_DIR/var/lib/mxsec-agent/certs/"
+        cp "$CERT_DIR/client.key" "$TEMP_DIR/var/lib/mxsec-agent/certs/"
+        chmod 644 "$TEMP_DIR/var/lib/mxsec-agent/certs/ca.crt"
+        chmod 644 "$TEMP_DIR/var/lib/mxsec-agent/certs/client.crt"
+        chmod 600 "$TEMP_DIR/var/lib/mxsec-agent/certs/client.key"
+        CERTS_INCLUDED=true
+    else
+        echo -e "${YELLOW}  → 证书文件不完整，跳过证书打包${NC}"
+        echo -e "${YELLOW}    需要: ca.crt, client.crt, client.key${NC}"
+        echo -e "${YELLOW}    运行: make certs 生成证书${NC}"
+    fi
+else
+    echo -e "${YELLOW}  → 证书目录不存在: $CERT_DIR${NC}"
+    echo -e "${YELLOW}    运行: make certs 生成证书${NC}"
+fi
+
+# 创建安装脚本
+cat > "$TEMP_DIR/scripts/postinstall.sh" <<'SCRIPT'
+#!/bin/bash
+systemctl daemon-reload
+systemctl enable mxsec-agent
+SCRIPT
+chmod +x "$TEMP_DIR/scripts/postinstall.sh"
+
+cat > "$TEMP_DIR/scripts/preremove.sh" <<'SCRIPT'
+#!/bin/bash
+systemctl stop mxsec-agent || true
+systemctl disable mxsec-agent || true
+SCRIPT
+chmod +x "$TEMP_DIR/scripts/preremove.sh"
 
 # 3. 创建 nFPM 配置文件
 echo -e "${GREEN}[3/4] Creating nFPM config...${NC}"
@@ -132,107 +173,163 @@ fi
 
 # RPM 配置
 cat > "$TEMP_DIR/nfpm-rpm.yaml" <<EOF
-name: mxcsec-agent
+name: mxsec-agent
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
 release: ${RPM_RELEASE}
 section: default
 priority: extra
-maintainer: Matrix Cloud Security Platform <dev@mxcsec-platform.local>
+maintainer: Matrix Cloud Security Platform <dev@mxsec-platform.local>
 description: |
   Matrix Cloud Security Platform Agent
   A lightweight agent for baseline security checks on Linux hosts.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxcsec-platform/mxcsec-platform
+homepage: https://github.com/mxsec-platform/mxsec-platform
 license: Apache-2.0
 contents:
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-agent
-    dst: /usr/bin/mxcsec-agent
+  - src: ${TEMP_DIR}/usr/bin/mxsec-agent
+    dst: /usr/bin/mxsec-agent
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-agent.service
-    dst: /etc/systemd/system/mxcsec-agent.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-agent.service
+    dst: /etc/systemd/system/mxsec-agent.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - dst: /var/lib/mxcsec-agent
+  - dst: /var/lib/mxsec-agent
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
-  - dst: /var/log/mxcsec-agent
+  - dst: /var/lib/mxsec-agent/certs
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+  - dst: /var/log/mxsec-agent
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
+EOF
+
+# 如果包含证书，添加证书配置到 RPM YAML
+if [ "$CERTS_INCLUDED" = true ]; then
+    cat >> "$TEMP_DIR/nfpm-rpm.yaml" <<EOF
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/ca.crt
+    dst: /var/lib/mxsec-agent/certs/ca.crt
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/client.crt
+    dst: /var/lib/mxsec-agent/certs/client.crt
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/client.key
+    dst: /var/lib/mxsec-agent/certs/client.key
+    file_info:
+      mode: 0600
+      owner: root
+      group: root
+EOF
+fi
+
+# 添加 RPM scripts
+cat >> "$TEMP_DIR/nfpm-rpm.yaml" <<EOF
 scripts:
-  postinstall: |
-    #!/bin/bash
-    systemctl daemon-reload
-    systemctl enable mxcsec-agent
-  postremove: |
-    #!/bin/bash
-    systemctl stop mxcsec-agent || true
-    systemctl disable mxcsec-agent || true
+  postinstall: ${TEMP_DIR}/scripts/postinstall.sh
+  preremove: ${TEMP_DIR}/scripts/preremove.sh
 EOF
 
 # DEB 配置
 cat > "$TEMP_DIR/nfpm-deb.yaml" <<EOF
-name: mxcsec-agent
+name: mxsec-agent
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
 section: default
 priority: extra
-maintainer: Matrix Cloud Security Platform <dev@mxcsec-platform.local>
+maintainer: Matrix Cloud Security Platform <dev@mxsec-platform.local>
 description: |
   Matrix Cloud Security Platform Agent
   A lightweight agent for baseline security checks on Linux hosts.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxcsec-platform/mxcsec-platform
+homepage: https://github.com/mxsec-platform/mxsec-platform
 license: Apache-2.0
 contents:
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-agent
-    dst: /usr/bin/mxcsec-agent
+  - src: ${TEMP_DIR}/usr/bin/mxsec-agent
+    dst: /usr/bin/mxsec-agent
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-agent.service
-    dst: /etc/systemd/system/mxcsec-agent.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-agent.service
+    dst: /etc/systemd/system/mxsec-agent.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - dst: /var/lib/mxcsec-agent
+  - dst: /var/lib/mxsec-agent
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
-  - dst: /var/log/mxcsec-agent
+  - dst: /var/lib/mxsec-agent/certs
+    type: dir
+    file_info:
+      mode: 0700
+      owner: root
+      group: root
+  - dst: /var/log/mxsec-agent
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
+EOF
+
+# 如果包含证书，添加证书配置到 DEB YAML
+if [ "$CERTS_INCLUDED" = true ]; then
+    cat >> "$TEMP_DIR/nfpm-deb.yaml" <<EOF
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/ca.crt
+    dst: /var/lib/mxsec-agent/certs/ca.crt
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/client.crt
+    dst: /var/lib/mxsec-agent/certs/client.crt
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: ${TEMP_DIR}/var/lib/mxsec-agent/certs/client.key
+    dst: /var/lib/mxsec-agent/certs/client.key
+    file_info:
+      mode: 0600
+      owner: root
+      group: root
+EOF
+fi
+
+# 添加 DEB scripts
+cat >> "$TEMP_DIR/nfpm-deb.yaml" <<EOF
 scripts:
-  postinstall: |
-    #!/bin/bash
-    systemctl daemon-reload
-    systemctl enable mxcsec-agent
-  postremove: |
-    #!/bin/bash
-    systemctl stop mxcsec-agent || true
-    systemctl disable mxcsec-agent || true
+  postinstall: ${TEMP_DIR}/scripts/postinstall.sh
+  preremove: ${TEMP_DIR}/scripts/preremove.sh
 EOF
 
 # 4. 打包
@@ -249,9 +346,9 @@ fi
 
 # RPM 包名（包含发行版信息）
 if [ -n "$RPM_DISTRO" ]; then
-    RPM_PKG_NAME="mxcsec-agent-${VERSION}-${RPM_RELEASE}.${RPM_ARCH}.rpm"
+    RPM_PKG_NAME="mxsec-agent-${VERSION}-${RPM_RELEASE}.${RPM_ARCH}.rpm"
 else
-    RPM_PKG_NAME="mxcsec-agent-${VERSION}-${RPM_ARCH}.rpm"
+    RPM_PKG_NAME="mxsec-agent-${VERSION}-${RPM_ARCH}.rpm"
 fi
 
 $NFPM_CMD pkg --packager rpm --config "$TEMP_DIR/nfpm-rpm.yaml" --target "$PACKAGE_DIR/$RPM_PKG_NAME"
@@ -299,9 +396,9 @@ if [ -n "$DISTRO" ]; then
 fi
 
 if [ -n "$DEB_DISTRO" ]; then
-    DEB_PKG_NAME="mxcsec-agent_${VERSION}-${DEB_RELEASE}_${DEB_ARCH}.deb"
+    DEB_PKG_NAME="mxsec-agent_${VERSION}-${DEB_RELEASE}_${DEB_ARCH}.deb"
 else
-    DEB_PKG_NAME="mxcsec-agent_${VERSION}_${DEB_ARCH}.deb"
+    DEB_PKG_NAME="mxsec-agent_${VERSION}_${DEB_ARCH}.deb"
 fi
 
 $NFPM_CMD pkg --packager deb --config "$TEMP_DIR/nfpm-deb.yaml" --target "$PACKAGE_DIR/$DEB_PKG_NAME"
@@ -311,4 +408,9 @@ echo ""
 echo -e "${GREEN}=== 打包完成 ===${NC}"
 echo "RPM: $PACKAGE_DIR/$RPM_PKG_NAME"
 echo "DEB: $PACKAGE_DIR/$DEB_PKG_NAME"
-ls -lh "$PACKAGE_DIR"/mxcsec-agent*.{rpm,deb} 2>/dev/null || true
+if [ "$CERTS_INCLUDED" = true ]; then
+    echo -e "${GREEN}✓ 证书已包含在包中${NC}"
+else
+    echo -e "${YELLOW}⚠ 证书未包含，Agent 启动时需要手动部署证书到 /var/lib/mxsec-agent/certs/${NC}"
+fi
+ls -lh "$PACKAGE_DIR"/mxsec-agent*.{rpm,deb} 2>/dev/null || true

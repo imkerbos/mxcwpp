@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
 	"github.com/mxcsec-platform/mxcsec-platform/plugins/baseline/engine"
 )
@@ -19,7 +20,7 @@ import (
 const DefaultPolicyGroupID = "system-baseline"
 
 // InitDefaultData 初始化默认数据（策略和规则）
-func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
+func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsCfg *config.PluginsConfig) error {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -32,7 +33,7 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string) error {
 	}
 
 	// 初始化默认插件配置（始终执行，确保插件配置存在）
-	if err := initDefaultPluginConfigs(db, logger); err != nil {
+	if err := initDefaultPluginConfigs(db, logger, pluginsCfg); err != nil {
 		return fmt.Errorf("初始化默认插件配置失败: %w", err)
 	}
 
@@ -289,33 +290,52 @@ func associateExistingPoliciesWithGroup(db *gorm.DB, logger *zap.Logger) error {
 }
 
 // initDefaultPluginConfigs 初始化默认插件配置
-func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger) error {
+func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *config.PluginsConfig) error {
+	// 构建插件下载 URL
+	// 如果配置了 base_url，使用 HTTP 下载
+	// 否则使用 file:// 协议（仅限开发环境）
+	var baselineURL, collectorURL string
+	if pluginsCfg != nil && pluginsCfg.BaseURL != "" {
+		// 生产环境：使用 HTTP URL
+		baselineURL = pluginsCfg.BaseURL + "/baseline"
+		collectorURL = pluginsCfg.BaseURL + "/collector"
+		logger.Info("使用 HTTP 插件下载 URL",
+			zap.String("base_url", pluginsCfg.BaseURL),
+		)
+	} else {
+		// 开发环境：使用 file:// 协议
+		pluginDir := "/workspace/dist/plugins"
+		if pluginsCfg != nil && pluginsCfg.Dir != "" {
+			pluginDir = pluginsCfg.Dir
+		}
+		baselineURL = "file://" + pluginDir + "/baseline"
+		collectorURL = "file://" + pluginDir + "/collector"
+		logger.Info("使用 file:// 插件下载 URL（开发环境）",
+			zap.String("plugin_dir", pluginDir),
+		)
+	}
+
 	// 定义默认插件配置
-	// 开发环境：插件构建到 /workspace/dist/plugins/
-	// 生产环境：需要改为实际的下载 URL
 	defaultPlugins := []model.PluginConfig{
 		{
-			Name:        "baseline",
-			Type:        model.PluginTypeBaseline,
-			Version:     "1.0.1", // 版本更新，触发 URL 更新
-			SHA256:      "",      // 暂时为空，后续可以添加校验
-			Signature:   "",
+			Name:    "baseline",
+			Type:    model.PluginTypeBaseline,
+			Version: "1.0.2", // 版本更新，触发 URL 更新
+			SHA256:  "",      // 暂时为空，后续可以添加校验
 			DownloadURLs: model.StringArray{
-				// 开发环境：使用 workspace 挂载路径
-				"file:///workspace/dist/plugins/baseline",
+				baselineURL,
 			},
 			Detail:      `{"check_interval": 3600}`,
 			Enabled:     true,
 			Description: "Linux 基线安全检查插件，执行操作系统安全配置检查",
 		},
 		{
-			Name:        "collector",
-			Type:        model.PluginTypeCollector,
-			Version:     "1.0.1",
-			SHA256:      "",
-			Signature:   "",
+			Name:    "collector",
+			Type:    model.PluginTypeCollector,
+			Version: "1.0.2",
+			SHA256:  "",
 			DownloadURLs: model.StringArray{
-				"file:///workspace/dist/plugins/collector",
+				collectorURL,
 			},
 			Detail:      `{"collect_interval": 300}`,
 			Enabled:     true,

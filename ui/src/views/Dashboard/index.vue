@@ -26,48 +26,7 @@
       </a-col>
     </a-row>
 
-    <!-- 第二行：实时事件流、漏洞风险 -->
-    <a-row :gutter="[16, 16]" class="dashboard-row">
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="实时事件流" :bordered="false" class="dashboard-card">
-          <div class="event-stream">
-            <div v-if="eventStream.length === 0" class="empty-state">
-              <a-empty description="暂无事件" :image="false" />
-            </div>
-            <div v-else class="event-list">
-              <div v-for="(event, index) in eventStream" :key="index" class="event-item">
-                <a-tag :color="getEventColor(event.type)">{{ event.type }}</a-tag>
-                <span class="event-message">{{ event.message }}</span>
-                <span class="event-time">{{ event.time }}</span>
-              </div>
-            </div>
-          </div>
-        </a-card>
-      </a-col>
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="漏洞风险 近7天" :bordered="false" class="dashboard-card">
-          <div class="vuln-risk-content">
-            <div class="vuln-main-stat">
-              <div class="vuln-number">{{ stats.pendingVulnerabilities }}</div>
-              <div class="vuln-label">待处理高可利用漏洞</div>
-            </div>
-            <a-divider style="margin: 16px 0" />
-            <a-space direction="vertical" style="width: 100%" size="small">
-              <div class="stat-row">
-                <span>已开启漏洞热补丁</span>
-                <span>{{ stats.hotPatchCount || 0 }}</span>
-              </div>
-              <div class="stat-row">
-                <span>漏洞库更新时间</span>
-                <span>{{ stats.vulnDbUpdateTime || '-' }}</span>
-              </div>
-            </a-space>
-          </div>
-        </a-card>
-      </a-col>
-    </a-row>
-
-    <!-- 第三行：基线风险、主机风险分布 -->
+    <!-- 第二行：基线风险、基线统计 -->
     <a-row :gutter="[16, 16]" class="dashboard-row">
       <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
         <a-card title="基线风险 Top 3" :bordered="false" class="dashboard-card">
@@ -92,43 +51,27 @@
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="主机风险分布" :bordered="false" class="dashboard-card">
-          <div class="risk-distribution">
+        <a-card title="基线安全统计" :bordered="false" class="dashboard-card">
+          <div class="baseline-stats-content">
+            <div class="baseline-main-stat">
+              <div class="baseline-number" :style="{ color: getPassRateColor(stats.baselineHardeningPercent) }">
+                {{ stats.baselineHardeningPercent || 0 }}%
+              </div>
+              <div class="baseline-label">整体基线合规率</div>
+            </div>
+            <a-divider style="margin: 16px 0" />
             <a-space direction="vertical" style="width: 100%" size="middle">
-              <div class="risk-item">
-                <div class="risk-label">
-                  <span class="risk-dot risk-dot-warning"></span>
-                  <span>存在主机和容器告警</span>
-                </div>
-                <span class="risk-percent">{{ stats.hostAlertPercent || 0 }}%</span>
+              <div class="stat-row">
+                <span>检查主机数</span>
+                <span>{{ stats.hosts || 0 }}</span>
               </div>
-              <div class="risk-item">
-                <div class="risk-label">
-                  <span class="risk-dot risk-dot-danger"></span>
-                  <span>存在高可利用性漏洞</span>
-                </div>
-                <span class="risk-percent">{{ stats.vulnHostPercent || 0 }}%</span>
+              <div class="stat-row">
+                <span>存在高危基线主机</span>
+                <span class="danger-text">{{ stats.baselineHostPercent || 0 }}%</span>
               </div>
-              <div class="risk-item">
-                <div class="risk-label">
-                  <span class="risk-dot risk-dot-danger"></span>
-                  <span>存在高危基线</span>
-                </div>
-                <span class="risk-percent">{{ stats.baselineHostPercent || 0 }}%</span>
-              </div>
-              <div class="risk-item">
-                <div class="risk-label">
-                  <span class="risk-dot risk-dot-warning"></span>
-                  <span>存在应用运行时安全告警</span>
-                </div>
-                <span class="risk-percent">{{ stats.runtimeAlertPercent || 0 }}%</span>
-              </div>
-              <div class="risk-item">
-                <div class="risk-label">
-                  <span class="risk-dot risk-dot-danger"></span>
-                  <span>存在病毒文件</span>
-                </div>
-                <span class="risk-percent">{{ stats.virusHostPercent || 0 }}%</span>
+              <div class="stat-row">
+                <span>待处理基线风险</span>
+                <span class="danger-text">{{ stats.baselineFailCount || 0 }}</span>
               </div>
             </a-space>
           </div>
@@ -221,16 +164,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { dashboardApi } from '@/api/dashboard'
-import { hostsApi } from '@/api/hosts'
 import type { DashboardStats } from '@/api/dashboard'
-
-interface EventItem {
-  type: string
-  message: string
-  time: string
-}
 
 interface BaselineRisk {
   name: string
@@ -264,24 +200,19 @@ const stats = ref<DashboardStats>({
   virusHostPercent: 0,
 })
 
-const eventStream = ref<EventItem[]>([])
 const baselineRisks = ref<BaselineRisk[]>([])
 
 const serviceStatus = ref({
   database: 'healthy',
   agentcenter: 'healthy',
   manager: 'healthy',
-  // 基线检查插件在 Agent 端运行，Server 端无法直接检查其状态
 })
 
-const getEventColor = (type: string) => {
-  const colorMap: Record<string, string> = {
-    alert: 'red',
-    warning: 'orange',
-    info: 'blue',
-    success: 'green',
-  }
-  return colorMap[type] || 'default'
+const getPassRateColor = (rate: number): string => {
+  if (rate >= 90) return '#52c41a'
+  if (rate >= 70) return '#faad14'
+  if (rate >= 50) return '#fa8c16'
+  return '#ff4d4f'
 }
 
 const formatMemory = (bytes: number): string => {
@@ -327,16 +258,13 @@ const getServiceStatusText = (status: string) => {
 
 const loadDashboardData = async () => {
   try {
-    // 并行加载 Dashboard 统计数据、主机状态分布和风险分布
-    const [dashboardStats, statusDistribution, riskDistribution] = await Promise.all([
-      dashboardApi.getStats(),
-      hostsApi.getStatusDistribution().catch(() => null),
-      hostsApi.getRiskDistribution().catch(() => null),
-    ])
+    // 加载 Dashboard 统计数据
+    const dashboardStats = await dashboardApi.getStats()
 
     stats.value = {
       ...dashboardStats,
-      baselineHardeningPercent: dashboardStats.baselineHardeningPercent || 0,
+      baselineHardeningPercent: Math.round(dashboardStats.baselineHardeningPercent || 0),
+      baselineHostPercent: Math.round(dashboardStats.baselineHostPercent || 0),
       onlineAgentsChange: dashboardStats.onlineAgentsChange || 0,
       offlineAgentsChange: dashboardStats.offlineAgentsChange || 0,
       hotPatchCount: dashboardStats.hotPatchCount || 0,
@@ -346,43 +274,8 @@ const loadDashboardData = async () => {
       avgMemoryUsageChange: dashboardStats.avgMemoryUsageChange || 0,
       hostAlertPercent: dashboardStats.hostAlertPercent || 0,
       vulnHostPercent: dashboardStats.vulnHostPercent || 0,
-      baselineHostPercent: dashboardStats.baselineHostPercent || 0,
       runtimeAlertPercent: dashboardStats.runtimeAlertPercent || 0,
       virusHostPercent: dashboardStats.virusHostPercent || 0,
-    }
-
-    // 更新主机状态分布（如果可用）
-    if (statusDistribution) {
-      // 可以在这里使用状态分布数据更新 UI
-      // 例如：更新在线/离线 Agent 数量
-      if (stats.value.onlineAgents === 0 && statusDistribution.running > 0) {
-        stats.value.onlineAgents = statusDistribution.running
-      }
-      if (stats.value.offlineAgents === 0 && statusDistribution.offline > 0) {
-        stats.value.offlineAgents = statusDistribution.offline
-      }
-    }
-
-    // 更新主机风险分布（如果可用）
-    if (riskDistribution) {
-      // 计算风险主机百分比
-      const totalHosts = stats.value.hosts || 1
-      if (riskDistribution.high_risk_baselines > 0) {
-        stats.value.baselineHostPercent = Math.round((riskDistribution.high_risk_baselines / totalHosts) * 100)
-      }
-      // 其他风险类型的百分比可以类似计算
-      if (riskDistribution.host_container_alerts > 0) {
-        stats.value.hostAlertPercent = Math.round((riskDistribution.host_container_alerts / totalHosts) * 100)
-      }
-      if (riskDistribution.high_exploitable_vulns > 0) {
-        stats.value.vulnHostPercent = Math.round((riskDistribution.high_exploitable_vulns / totalHosts) * 100)
-      }
-      if (riskDistribution.app_runtime_alerts > 0) {
-        stats.value.runtimeAlertPercent = Math.round((riskDistribution.app_runtime_alerts / totalHosts) * 100)
-      }
-      if (riskDistribution.virus_files > 0) {
-        stats.value.virusHostPercent = Math.round((riskDistribution.virus_files / totalHosts) * 100)
-      }
     }
 
     // 加载基线风险 Top 3
@@ -390,16 +283,12 @@ const loadDashboardData = async () => {
       baselineRisks.value = dashboardStats.baselineRisks.slice(0, 3)
     }
 
-    // 加载实时事件流（模拟数据，后续从 WebSocket 或轮询获取）
-    // eventStream.value = dashboardStats.eventStream || []
-
     // 加载服务状态
     if (dashboardStats.serviceStatus) {
       serviceStatus.value = {
         database: dashboardStats.serviceStatus.database || 'healthy',
         agentcenter: dashboardStats.serviceStatus.agentcenter || 'healthy',
         manager: dashboardStats.serviceStatus.manager || 'healthy',
-        // 基线检查插件在 Agent 端运行，Server 端无法直接检查其状态
       }
     }
   } catch (error) {
@@ -466,74 +355,11 @@ onUnmounted(() => {
   padding: 16px 20px;
 }
 
-/* 实时事件流 */
-.event-stream {
-  min-height: 200px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
 .empty-state {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 200px;
-}
-
-.event-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.event-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px;
-  border-radius: 4px;
-  background: #fafafa;
-  transition: background 0.3s;
-}
-
-.event-item:hover {
-  background: #f0f0f0;
-}
-
-.event-message {
-  flex: 1;
-  font-size: 14px;
-  color: #333;
-}
-
-.event-time {
-  font-size: 12px;
-  color: #8c8c8c;
-}
-
-/* 漏洞风险 */
-.vuln-risk-content {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.vuln-main-stat {
-  text-align: center;
-  padding: 16px 0;
-}
-
-.vuln-number {
-  font-size: 36px;
-  font-weight: bold;
-  color: #ff4d4f;
-  line-height: 1;
-}
-
-.vuln-label {
-  color: #8c8c8c;
-  margin-top: 8px;
-  font-size: 14px;
 }
 
 .stat-row {
@@ -585,45 +411,33 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
-/* 主机风险分布 */
-.risk-distribution {
-  min-height: 200px;
-}
-
-.risk-item {
+/* 基线安全统计 */
+.baseline-stats-content {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
+  flex-direction: column;
+  height: 100%;
 }
 
-.risk-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.baseline-main-stat {
+  text-align: center;
+  padding: 16px 0;
+}
+
+.baseline-number {
+  font-size: 36px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.baseline-label {
+  color: #8c8c8c;
+  margin-top: 8px;
   font-size: 14px;
-  color: #333;
 }
 
-.risk-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.risk-dot-warning {
-  background-color: #ff9800;
-}
-
-.risk-dot-danger {
-  background-color: #ff4d4f;
-}
-
-.risk-percent {
-  font-size: 14px;
+.danger-text {
+  color: #ff4d4f;
   font-weight: 500;
-  color: #333;
 }
 
 /* Agent 概述 */
@@ -694,8 +508,8 @@ onUnmounted(() => {
   .dashboard-card {
     min-height: auto;
   }
-  
-  .vuln-number {
+
+  .baseline-number {
     font-size: 28px;
   }
 }

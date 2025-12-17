@@ -6,6 +6,7 @@ SERVER_HOST ?= localhost:6751
 GOARCH ?= amd64
 GOOS ?= linux
 DISTRO ?=  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
+CERT_DIR ?= deploy/docker-compose/certs  # 证书目录
 
 # 生成 Protobuf Go 代码
 proto: generate
@@ -67,10 +68,41 @@ build-server:
 	@go build -ldflags "-s -w" -o dist/server/manager ./cmd/server/manager
 	@echo "Server binaries built: dist/server/"
 
-# 打包 Agent（RPM/DEB）
+# 打包 Agent（RPM/DEB）- 单架构
 package-agent:
-	@echo "Packaging agent..."
-	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) GOARCH=$(GOARCH) GOOS=$(GOOS) ./scripts/package-agent.sh
+	@echo "Packaging agent ($(GOARCH))..."
+	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=$(GOARCH) GOOS=$(GOOS) ./scripts/package-agent.sh
+
+# 打包 Agent（RPM/DEB）- 所有架构（amd64 + arm64）
+package-agent-all:
+	@echo "Packaging agent for all architectures..."
+	@echo "=== Building amd64 packages ==="
+	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=amd64 GOOS=linux ./scripts/package-agent.sh
+	@echo "=== Building arm64 packages ==="
+	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=arm64 GOOS=linux ./scripts/package-agent.sh
+	@echo "All agent packages built successfully in dist/packages/"
+
+# 构建插件（baseline + collector）
+build-plugins:
+	@echo "Building plugins..."
+	@mkdir -p dist/plugins
+	@echo "Building baseline plugin ($(GOARCH))..."
+	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-s -w" -o dist/plugins/baseline ./plugins/baseline
+	@echo "Building collector plugin ($(GOARCH))..."
+	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-s -w" -o dist/plugins/collector ./plugins/collector
+	@echo "Plugins built: dist/plugins/"
+
+# 构建插件 - 所有架构（amd64 + arm64）
+build-plugins-all:
+	@echo "Building plugins for all architectures..."
+	@mkdir -p dist/plugins/amd64 dist/plugins/arm64
+	@echo "=== Building amd64 plugins ==="
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/plugins/amd64/baseline ./plugins/baseline
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/plugins/amd64/collector ./plugins/collector
+	@echo "=== Building arm64 plugins ==="
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o dist/plugins/arm64/baseline ./plugins/baseline
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o dist/plugins/arm64/collector ./plugins/collector
+	@echo "All plugins built in dist/plugins/{amd64,arm64}/"
 
 # 打包 Server（RPM/DEB）
 package-server:
@@ -210,11 +242,14 @@ help:
 	@echo "  make generate       - Alias for proto"
 	@echo ""
 	@echo "构建:"
-	@echo "  make build-agent    - Build agent binary (SERVER_HOST=host:port VERSION=1.0.0)"
-	@echo "  make build-server   - Build server binaries (agentcenter, manager)"
-	@echo "  make package-agent  - Package agent as RPM/DEB (SERVER_HOST=host:port VERSION=1.0.0)"
-	@echo "  make package-server - Package server as RPM/DEB (VERSION=1.0.0)"
-	@echo "  make package-all    - Package both agent and server"
+	@echo "  make build-agent      - Build agent binary (SERVER_HOST=host:port VERSION=1.0.0)"
+	@echo "  make build-server     - Build server binaries (agentcenter, manager)"
+	@echo "  make build-plugins    - Build plugins (baseline, collector) for current arch"
+	@echo "  make build-plugins-all- Build plugins for all architectures (amd64 + arm64)"
+	@echo "  make package-agent    - Package agent as RPM/DEB for current arch"
+	@echo "  make package-agent-all- Package agent as RPM/DEB for all architectures"
+	@echo "  make package-server   - Package server as RPM/DEB (VERSION=1.0.0)"
+	@echo "  make package-all      - Package both agent and server"
 	@echo ""
 	@echo "安装:"
 	@echo "  make install-agent  - Install agent from package (VERSION=1.0.0)"
@@ -247,11 +282,26 @@ help:
 	@echo "示例:"
 	@echo "  make build-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0"
 	@echo "  make package-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0 DISTRO=rocky9"
+	@echo "  make package-agent-all SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0"
+	@echo "  make package-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0 CERT_DIR=./certs"
 	@echo "  make package-server VERSION=1.0.0 DISTRO=debian12"
+	@echo "  make build-plugins GOARCH=arm64"
+	@echo "  make build-plugins-all"
 	@echo "  make dev-up         # Start development environment"
 	@echo ""
 	@echo "支持的发行版 (DISTRO):"
 	@echo "  RPM: centos7, centos8, centos9, rocky8, rocky9, el7, el8, el9"
 	@echo "  DEB: debian10, debian11, debian12, ubuntu20, ubuntu22"
 	@echo ""
+	@echo "证书打包说明:"
+	@echo "  默认从 deploy/docker-compose/certs/ 读取证书"
+	@echo "  需要: ca.crt, client.crt, client.key"
+	@echo "  生成证书: make certs"
+	@echo ""
 	@echo "注意: Rocky Linux 9 和 CentOS Stream 9 可以共用 el9 包"
+	@echo ""
+	@echo "插件管理说明:"
+	@echo "  1. 编译插件: make build-plugins-all"
+	@echo "  2. 将插件上传到 Manager: 系统管理 > 组件列表"
+	@echo "  3. Agent 会自动通过 gRPC 获取插件配置并下载更新"
+	@echo "  4. 更新策略: 基于版本号比较，新版本自动替换旧版本"

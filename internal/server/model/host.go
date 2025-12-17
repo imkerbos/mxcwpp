@@ -4,7 +4,6 @@ package model
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"time"
 )
 
 // HostStatus 主机状态
@@ -49,7 +48,7 @@ type Host struct {
 	PublicIPv4    StringArray `gorm:"column:public_ipv4;type:json" json:"public_ipv4"` // 公网IPv4地址
 	PublicIPv6    StringArray `gorm:"column:public_ipv6;type:json" json:"public_ipv6"` // 公网IPv6地址
 	Status        HostStatus  `gorm:"column:status;type:varchar(20);default:'offline'" json:"status"`
-	LastHeartbeat *time.Time  `gorm:"column:last_heartbeat;type:timestamp" json:"last_heartbeat"`
+	LastHeartbeat *LocalTime  `gorm:"column:last_heartbeat;type:timestamp" json:"last_heartbeat"`
 	// 硬件信息
 	DeviceModel  string `gorm:"column:device_model;type:varchar(255)" json:"device_model"`
 	Manufacturer string `gorm:"column:manufacturer;type:varchar(255)" json:"manufacturer"`
@@ -69,16 +68,16 @@ type Host struct {
 	// 业务信息
 	BusinessLine string `gorm:"column:business_line;type:varchar(100)" json:"business_line"` // 业务线
 	// 时间信息
-	SystemBootTime *time.Time `gorm:"column:system_boot_time;type:timestamp" json:"system_boot_time"` // 系统启动时间
-	AgentStartTime *time.Time `gorm:"column:agent_start_time;type:timestamp" json:"agent_start_time"` // 客户端启动时间
-	LastActiveTime *time.Time `gorm:"column:last_active_time;type:timestamp" json:"last_active_time"` // 最近活跃时间
+	SystemBootTime *LocalTime `gorm:"column:system_boot_time;type:timestamp" json:"system_boot_time"` // 系统启动时间
+	AgentStartTime *LocalTime `gorm:"column:agent_start_time;type:timestamp" json:"agent_start_time"` // 客户端启动时间
+	LastActiveTime *LocalTime `gorm:"column:last_active_time;type:timestamp" json:"last_active_time"` // 最近活跃时间
 	// 容器标识
 	IsContainer bool   `gorm:"column:is_container;type:tinyint(1);default:0" json:"is_container"` // 是否为容器环境
 	ContainerID string `gorm:"column:container_id;type:varchar(64)" json:"container_id"`          // 容器ID（如果是在容器中运行）
 	// 标签
 	Tags      StringArray `gorm:"column:tags;type:json" json:"tags"`
-	CreatedAt time.Time   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt time.Time   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt LocalTime   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 }
 
 // TableName 指定表名

@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // Volume 磁盘资产模型
 type Volume struct {
 	ID            string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -16,7 +12,7 @@ type Volume struct {
 	UsedSize      int64     `gorm:"column:used_size;type:bigint" json:"used_size"`           // 已用大小（字节）
 	AvailableSize int64     `gorm:"column:available_size;type:bigint" json:"available_size"` // 可用大小（字节）
 	UsagePercent  float64   `gorm:"column:usage_percent;type:double" json:"usage_percent"`   // 使用率（百分比）
-	CollectedAt   time.Time `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt   LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

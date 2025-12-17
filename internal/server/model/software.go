@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // Software 软件包资产模型
 type Software struct {
 	ID           string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -15,7 +11,7 @@ type Software struct {
 	PackageType  string    `gorm:"column:package_type;type:varchar(50);not null" json:"package_type"` // rpm、deb、pip、npm、jar 等
 	Vendor       string    `gorm:"column:vendor;type:varchar(255)" json:"vendor"`
 	InstallTime  string    `gorm:"column:install_time;type:varchar(50)" json:"install_time"`
-	CollectedAt  time.Time `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt  LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

@@ -1,0 +1,364 @@
+{
+  "id": "LINUX_AUDIT_LOGGING",
+  "name": "审计日志配置基线",
+  "version": "1.0.0",
+  "description": "系统审计日志配置检查（参考 CIS Benchmark 和等保 2.0）",
+  "os_family": ["rocky", "centos", "oracle", "debian", "ubuntu", "almalinux"],
+  "os_version": ">=7",
+  "enabled": true,
+  "rules": [
+    {
+      "rule_id": "LINUX_AUDIT_001",
+      "category": "audit",
+      "title": "auditd 服务运行",
+      "description": "auditd 审计服务应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["auditd", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动 auditd 服务：systemctl start auditd && systemctl enable auditd",
+        "command": "systemctl start auditd && systemctl enable auditd"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_002",
+      "category": "audit",
+      "title": "rsyslog 服务运行",
+      "description": "rsyslog 日志服务应处于运行状态",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rsyslog", "active"]
+          },
+          {
+            "type": "service_status",
+            "param": ["syslog-ng", "active"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启动 rsyslog 服务：systemctl start rsyslog && systemctl enable rsyslog",
+        "command": "systemctl start rsyslog && systemctl enable rsyslog"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_003",
+      "category": "audit",
+      "title": "审计日志文件权限",
+      "description": "/var/log/audit 目录权限应为 700",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/var/log/audit"]
+          },
+          {
+            "type": "file_permission",
+            "param": ["/var/log/audit", "700"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "执行 chmod 700 /var/log/audit",
+        "command": "chmod 700 /var/log/audit"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_004",
+      "category": "audit",
+      "title": "审计日志最大文件大小",
+      "description": "审计日志文件大小应有限制（max_log_file）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/auditd.conf", "^\\s*max_log_file\\s*=\\s*[1-9][0-9]*", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/audit/auditd.conf 中设置 max_log_file = 8",
+        "command": "sed -i 's/^max_log_file.*/max_log_file = 8/' /etc/audit/auditd.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_005",
+      "category": "audit",
+      "title": "审计日志满时动作",
+      "description": "审计日志满时应保留日志（max_log_file_action）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/auditd.conf", "^\\s*max_log_file_action\\s*=\\s*keep_logs", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/audit/auditd.conf 中设置 max_log_file_action = keep_logs",
+        "command": "sed -i 's/^max_log_file_action.*/max_log_file_action = keep_logs/' /etc/audit/auditd.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_006",
+      "category": "audit",
+      "title": "磁盘空间满时动作",
+      "description": "磁盘空间不足时应停止系统（space_left_action）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/auditd.conf", "^\\s*space_left_action\\s*=\\s*(email|exec|syslog|halt)", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/audit/auditd.conf 中设置 space_left_action = email",
+        "command": "sed -i 's/^space_left_action.*/space_left_action = email/' /etc/audit/auditd.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_007",
+      "category": "audit",
+      "title": "管理员空间满动作",
+      "description": "管理员空间满时应暂停审计（admin_space_left_action）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/auditd.conf", "^\\s*admin_space_left_action\\s*=\\s*(single|halt|suspend)", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/audit/auditd.conf 中设置 admin_space_left_action = halt",
+        "command": "sed -i 's/^admin_space_left_action.*/admin_space_left_action = halt/' /etc/audit/auditd.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_008",
+      "category": "audit",
+      "title": "审计用户登录登出",
+      "description": "应审计用户登录和登出事件",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "-w /var/log/lastlog", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/audit.rules", "-w /var/log/lastlog", "match"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["auditctl -l | grep -c lastlog", "^[1-9]"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "添加审计规则：-w /var/log/lastlog -p wa -k logins",
+        "command": "echo '-w /var/log/lastlog -p wa -k logins' >> /etc/audit/rules.d/audit.rules && auditctl -w /var/log/lastlog -p wa -k logins"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_009",
+      "category": "audit",
+      "title": "审计时间修改",
+      "description": "应审计系统时间修改事件",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "-a always,exit -F arch=b64.*-S.*adjtimex", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/audit.rules", "-a always,exit -F arch=b64.*-S.*adjtimex", "match"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["auditctl -l | grep -c adjtimex", "^[1-9]"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "添加审计规则监控时间修改"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_010",
+      "category": "audit",
+      "title": "审计用户/组修改",
+      "description": "应审计用户和组的修改",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "-w /etc/passwd", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/audit.rules", "-w /etc/passwd", "match"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["auditctl -l | grep -c '/etc/passwd'", "^[1-9]"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "添加审计规则：-w /etc/passwd -p wa -k identity",
+        "command": "echo '-w /etc/passwd -p wa -k identity' >> /etc/audit/rules.d/audit.rules"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_011",
+      "category": "audit",
+      "title": "审计网络配置修改",
+      "description": "应审计网络配置的修改",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "-w /etc/hosts", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/audit.rules", "-w /etc/hosts", "match"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["auditctl -l | grep -c '/etc/hosts'", "^[1-9]"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "添加审计规则：-w /etc/hosts -p wa -k system-locale",
+        "command": "echo '-w /etc/hosts -p wa -k system-locale' >> /etc/audit/rules.d/audit.rules"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_012",
+      "category": "audit",
+      "title": "审计 sudoers 修改",
+      "description": "应审计 sudoers 文件的修改",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "-w /etc/sudoers", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/audit/audit.rules", "-w /etc/sudoers", "match"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["auditctl -l | grep -c '/etc/sudoers'", "^[1-9]"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "添加审计规则：-w /etc/sudoers -p wa -k scope",
+        "command": "echo '-w /etc/sudoers -p wa -k scope' >> /etc/audit/rules.d/audit.rules"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_013",
+      "category": "audit",
+      "title": "日志轮转配置",
+      "description": "应配置日志轮转（logrotate）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/logrotate.conf"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "配置 /etc/logrotate.conf 进行日志轮转"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_014",
+      "category": "audit",
+      "title": "系统日志保留",
+      "description": "系统日志应保留至少 90 天",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/logrotate.conf", "rotate\\s+([4-9]|[1-9][0-9]+)", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/logrotate.d/syslog", "rotate\\s+([4-9]|[1-9][0-9]+)", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 logrotate 配置中设置 rotate 4 或更大（按周轮转时）"
+      }
+    },
+    {
+      "rule_id": "LINUX_AUDIT_015",
+      "category": "audit",
+      "title": "安全日志权限",
+      "description": "/var/log/secure 或 /var/log/auth.log 权限应不超过 600",
+      "severity": "high",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_permission",
+            "param": ["/var/log/secure", "600"]
+          },
+          {
+            "type": "file_permission",
+            "param": ["/var/log/auth.log", "600"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "执行 chmod 600 /var/log/secure",
+        "command": "chmod 600 /var/log/secure 2>/dev/null || chmod 600 /var/log/auth.log"
+      }
+    }
+  ]
+}

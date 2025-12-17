@@ -118,7 +118,14 @@ const formatBytes = (bytes: number): string => {
 }
 
 const formatTime = (timeStr: string): string => {
-  return new Date(timeStr).toLocaleString('zh-CN')
+  if (!timeStr) return '-'
+  // 如果是 YYYY-MM-DD HH:mm:ss 格式，先转换为 ISO 格式
+  let date = new Date(timeStr)
+  if (isNaN(date.getTime()) && timeStr.includes(' ')) {
+    date = new Date(timeStr.replace(' ', 'T'))
+  }
+  if (isNaN(date.getTime())) return timeStr
+  return date.toLocaleString('zh-CN')
 }
 
 onMounted(() => {

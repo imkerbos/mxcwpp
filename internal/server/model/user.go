@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // UserRole 用户角色
 type UserRole string
 
@@ -29,9 +25,9 @@ type User struct {
 	Email     string     `gorm:"column:email;type:varchar(255)" json:"email"`
 	Role      UserRole   `gorm:"column:role;type:varchar(20);default:'user'" json:"role"`
 	Status    UserStatus `gorm:"column:status;type:varchar(20);default:'active'" json:"status"`
-	LastLogin *time.Time `gorm:"column:last_login;type:timestamp" json:"last_login"`
-	CreatedAt time.Time  `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt time.Time  `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	LastLogin *LocalTime `gorm:"column:last_login;type:timestamp" json:"last_login"`
+	CreatedAt LocalTime  `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt LocalTime  `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 }
 
 // TableName 指定表名

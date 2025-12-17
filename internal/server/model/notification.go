@@ -4,7 +4,6 @@ package model
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"time"
 )
 
 // NotificationType 通知类型
@@ -73,8 +72,8 @@ type Notification struct {
 	ScopeValue  string             `gorm:"column:scope_value;type:text" json:"scope_value"`                      // 主机范围值（JSON，根据 scope 类型存储不同数据）
 	FrontendURL string             `gorm:"column:frontend_url;type:varchar(500)" json:"frontend_url"`            // 前端地址（告警带上告警uri）
 	Config      NotificationConfig `gorm:"column:config;type:json" json:"config"`                                // 通知配置（Webhook URL、Secret 等）
-	CreatedAt   time.Time          `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt   time.Time          `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt   LocalTime          `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt   LocalTime          `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 }
 
 // TableName 指定表名

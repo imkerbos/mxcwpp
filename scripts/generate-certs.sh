@@ -26,6 +26,9 @@ AGENT_CSR="${CERT_DIR}/agent.csr"
 # 证书有效期（天）
 VALIDITY_DAYS="${VALIDITY_DAYS:-3650}"  # 默认 10 年
 
+# 额外的 IP 地址（用于外部访问，如 192.168.8.140）
+EXTRA_IPS="${EXTRA_IPS:-}"  # 逗号分隔的 IP 列表，如 "192.168.8.140,10.0.0.1"
+
 # 创建证书目录
 mkdir -p "${CERT_DIR}"
 
@@ -64,6 +67,23 @@ openssl req -new \
 
 # 5. 使用 CA 签名 Server 证书
 echo -e "${GREEN}[5/6] 使用 CA 签名 Server 证书...${NC}"
+
+# 构建额外 IP 配置
+EXTRA_IP_CONFIG=""
+if [ -n "$EXTRA_IPS" ]; then
+    IP_INDEX=3
+    IFS=',' read -ra IPS <<< "$EXTRA_IPS"
+    for ip in "${IPS[@]}"; do
+        ip=$(echo "$ip" | xargs)  # 去除空格
+        if [ -n "$ip" ]; then
+            EXTRA_IP_CONFIG="${EXTRA_IP_CONFIG}
+IP.${IP_INDEX} = ${ip}"
+            IP_INDEX=$((IP_INDEX + 1))
+            echo -e "${GREEN}  → 添加 IP: ${ip}${NC}"
+        fi
+    done
+fi
+
 openssl x509 -req -days "${VALIDITY_DAYS}" \
     -in "${SERVER_CSR}" \
     -CA "${CA_CERT}" \
@@ -84,7 +104,7 @@ DNS.2 = *.local
 DNS.3 = agentcenter
 DNS.4 = agentcenter.mxsec-network
 IP.1 = 127.0.0.1
-IP.2 = ::1
+IP.2 = ::1${EXTRA_IP_CONFIG}
 EOF
     )
 
@@ -94,7 +114,7 @@ openssl genrsa -out "${AGENT_KEY}" 4096
 openssl req -new \
     -key "${AGENT_KEY}" \
     -out "${AGENT_CSR}" \
-    -subj "/C=CN/ST=Beijing/L=Beijing/O=Matrix Cloud Security Platform/OU=Agent/CN=mxcsec-agent"
+    -subj "/C=CN/ST=Beijing/L=Beijing/O=Matrix Cloud Security Platform/OU=Agent/CN=mxsec-agent"
 
 openssl x509 -req -days "${VALIDITY_DAYS}" \
     -in "${AGENT_CSR}" \

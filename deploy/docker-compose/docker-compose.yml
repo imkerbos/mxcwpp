@@ -29,7 +29,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker-compose/Dockerfile.agentcenter
-    container_name: mxcsec-agentcenter
+    container_name: mxsec-agentcenter
     restart: unless-stopped
     depends_on:
       mysql:
@@ -37,12 +37,12 @@ services:
     ports:
       - "6751:6751"
     volumes:
-      - ./configs/server.yaml:/etc/mxcsec-platform/server.yaml:ro
-      - ./certs:/etc/mxcsec-platform/certs:ro
-      - agentcenter_logs:/var/log/mxcsec-platform
+      - ./configs/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - agentcenter_logs:/var/log/mxsec-platform
     environment:
       - TZ=Asia/Shanghai
-    command: ["-config", "/etc/mxcsec-platform/server.yaml"]
+    command: ["-config", "/etc/mxsec-platform/server.yaml"]
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
       interval: 30s
@@ -64,7 +64,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker-compose/Dockerfile.manager
-    container_name: mxcsec-manager
+    container_name: mxsec-manager
     restart: unless-stopped
     depends_on:
       mysql:
@@ -74,11 +74,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./configs/server.yaml:/etc/mxcsec-platform/server.yaml:ro
-      - manager_logs:/var/log/mxcsec-platform
+      - ./configs/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - manager_logs:/var/log/mxsec-platform
     environment:
       - TZ=Asia/Shanghai
-    command: ["-config", "/etc/mxcsec-platform/server.yaml"]
+    command: ["-config", "/etc/mxsec-platform/server.yaml"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -100,7 +100,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker-compose/Dockerfile.ui
-    container_name: mxcsec-ui
+    container_name: mxsec-ui
     restart: unless-stopped
     depends_on:
       manager:
@@ -136,15 +136,15 @@ services:
         SERVER_HOST: agentcenter:6751
         VERSION: dev-test
         BUILD_TIME: ${BUILD_TIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
-    container_name: mxcsec-agent-test
+    container_name: mxsec-agent-dev
     restart: unless-stopped
     depends_on:
       agentcenter:
         condition: service_healthy
     volumes:
-      - agent_data:/var/lib/mxcsec-agent
-      - agent_logs:/var/log/mxcsec-agent
-      - ./certs:/var/lib/mxcsec-agent/certs:ro
+      - agent_data:/var/lib/mxsec-agent
+      - agent_logs:/var/log/mxsec-agent
+      - ./certs:/var/lib/mxsec-agent/certs:ro
     environment:
       - TZ=Asia/Shanghai
     networks:

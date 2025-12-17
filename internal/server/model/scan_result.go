@@ -1,9 +1,5 @@
 package model
 
-import (
-	"time"
-)
-
 // ResultStatus 检测结果状态
 type ResultStatus string
 
@@ -28,8 +24,8 @@ type ScanResult struct {
 	Actual        string       `gorm:"column:actual;type:text" json:"actual"`
 	Expected      string       `gorm:"column:expected;type:text" json:"expected"`
 	FixSuggestion string       `gorm:"column:fix_suggestion;type:text" json:"fix_suggestion"`
-	CheckedAt     time.Time    `gorm:"column:checked_at;type:timestamp;not null" json:"checked_at"`
-	CreatedAt     time.Time    `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	CheckedAt     LocalTime    `gorm:"column:checked_at;type:timestamp;not null" json:"checked_at"`
+	CreatedAt     LocalTime    `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 
 	// 关联关系
 	Host Host `gorm:"foreignKey:HostID;references:HostID" json:"host,omitempty"`

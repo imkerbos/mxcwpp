@@ -20,6 +20,17 @@ type Config struct {
 	Log      LogConfig      `mapstructure:"log"`
 	Agent    AgentConfig    `mapstructure:"agent"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Plugins  PluginsConfig  `mapstructure:"plugins"`
+}
+
+// PluginsConfig 是插件配置
+type PluginsConfig struct {
+	// 插件存放目录（本地文件路径）
+	Dir string `mapstructure:"dir"`
+	// 插件下载基础 URL（Agent 用于下载插件的 URL 前缀）
+	// 例如: http://192.168.8.140:8080/api/v1/plugins/download
+	// 如果为空，则使用 file:// 协议（仅限开发环境）
+	BaseURL string `mapstructure:"base_url"`
 }
 
 // ServerConfig 是服务器配置
@@ -297,6 +308,12 @@ func setDefaults(cfg *Config, logFileSet bool) {
 			cfg.Metrics.Prometheus.Timeout = 10 * time.Second
 		}
 	}
+
+	// Plugins 默认配置
+	if cfg.Plugins.Dir == "" {
+		cfg.Plugins.Dir = "/workspace/dist/plugins" // Docker 开发环境默认路径
+	}
+	// BaseURL 为空时，表示使用 file:// 协议（开发环境）
 }
 
 // Validate 验证配置

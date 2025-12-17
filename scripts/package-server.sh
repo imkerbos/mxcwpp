@@ -86,22 +86,22 @@ trap "rm -rf $TEMP_DIR" EXIT
 # 创建目录结构
 mkdir -p "$TEMP_DIR/usr/bin"
 mkdir -p "$TEMP_DIR/etc/systemd/system"
-mkdir -p "$TEMP_DIR/etc/mxcsec-platform"
-mkdir -p "$TEMP_DIR/opt/mxcsec-platform"
-mkdir -p "$TEMP_DIR/var/log/mxcsec-platform"
+mkdir -p "$TEMP_DIR/etc/mxsec-platform"
+mkdir -p "$TEMP_DIR/opt/mxsec-platform"
+mkdir -p "$TEMP_DIR/var/log/mxsec-platform"
 
 # 复制二进制文件
-cp "$DIST_DIR/agentcenter" "$TEMP_DIR/usr/bin/mxcsec-agentcenter"
-cp "$DIST_DIR/manager" "$TEMP_DIR/usr/bin/mxcsec-manager"
-chmod +x "$TEMP_DIR/usr/bin/mxcsec-agentcenter"
-chmod +x "$TEMP_DIR/usr/bin/mxcsec-manager"
+cp "$DIST_DIR/agentcenter" "$TEMP_DIR/usr/bin/mxsec-agentcenter"
+cp "$DIST_DIR/manager" "$TEMP_DIR/usr/bin/mxsec-manager"
+chmod +x "$TEMP_DIR/usr/bin/mxsec-agentcenter"
+chmod +x "$TEMP_DIR/usr/bin/mxsec-manager"
 
 # 复制 systemd service 文件
-cp deploy/systemd/mxcsec-agentcenter.service "$TEMP_DIR/etc/systemd/system/mxcsec-agentcenter.service"
-cp deploy/systemd/mxcsec-manager.service "$TEMP_DIR/etc/systemd/system/mxcsec-manager.service"
+cp deploy/systemd/mxsec-agentcenter.service "$TEMP_DIR/etc/systemd/system/mxsec-agentcenter.service"
+cp deploy/systemd/mxsec-manager.service "$TEMP_DIR/etc/systemd/system/mxsec-manager.service"
 
 # 复制配置文件示例
-cp configs/server.yaml.example "$TEMP_DIR/etc/mxcsec-platform/server.yaml.example"
+cp configs/server.yaml.example "$TEMP_DIR/etc/mxsec-platform/server.yaml.example"
 
 # 3. 创建安装脚本
 echo -e "${GREEN}[3/6] Creating install scripts...${NC}"
@@ -110,24 +110,24 @@ mkdir -p "$TEMP_DIR/scripts"
 cat > "$TEMP_DIR/scripts/postinstall.sh" <<'SCRIPT_EOF'
 #!/bin/bash
 systemctl daemon-reload
-systemctl enable mxcsec-agentcenter || true
-systemctl enable mxcsec-manager || true
+systemctl enable mxsec-agentcenter || true
+systemctl enable mxsec-manager || true
 echo ""
 echo "Matrix Cloud Security Platform Server installed successfully!"
 echo ""
 echo "Next steps:"
-echo "1. Copy /etc/mxcsec-platform/server.yaml.example to /etc/mxcsec-platform/server.yaml"
-echo "2. Edit /etc/mxcsec-platform/server.yaml and configure database and certificates"
+echo "1. Copy /etc/mxsec-platform/server.yaml.example to /etc/mxsec-platform/server.yaml"
+echo "2. Edit /etc/mxsec-platform/server.yaml and configure database and certificates"
 echo "3. Generate certificates: ./scripts/generate-certs.sh"
-echo "4. Start services: systemctl start mxcsec-agentcenter mxcsec-manager"
+echo "4. Start services: systemctl start mxsec-agentcenter mxsec-manager"
 SCRIPT_EOF
 
 cat > "$TEMP_DIR/scripts/postremove.sh" <<'SCRIPT_EOF'
 #!/bin/bash
-systemctl stop mxcsec-agentcenter || true
-systemctl stop mxcsec-manager || true
-systemctl disable mxcsec-agentcenter || true
-systemctl disable mxcsec-manager || true
+systemctl stop mxsec-agentcenter || true
+systemctl stop mxsec-manager || true
+systemctl disable mxsec-agentcenter || true
+systemctl disable mxsec-manager || true
 SCRIPT_EOF
 
 chmod +x "$TEMP_DIR/scripts/postinstall.sh"
@@ -173,54 +173,54 @@ version: ${VERSION}
 release: ${RPM_RELEASE}
 section: default
 priority: extra
-maintainer: Matrix Cloud Security Platform <dev@mxcsec-platform.local>
+maintainer: Matrix Cloud Security Platform <dev@mxsec-platform.local>
 description: |
   Matrix Cloud Security Platform Server
   Includes AgentCenter (gRPC) and Manager (HTTP API) services.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxcsec-platform/mxcsec-platform
+homepage: https://github.com/mxsec-platform/mxsec-platform
 license: Apache-2.0
 contents:
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-agentcenter
-    dst: /usr/bin/mxcsec-agentcenter
+  - src: ${TEMP_DIR}/usr/bin/mxsec-agentcenter
+    dst: /usr/bin/mxsec-agentcenter
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-manager
-    dst: /usr/bin/mxcsec-manager
+  - src: ${TEMP_DIR}/usr/bin/mxsec-manager
+    dst: /usr/bin/mxsec-manager
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-agentcenter.service
-    dst: /etc/systemd/system/mxcsec-agentcenter.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-agentcenter.service
+    dst: /etc/systemd/system/mxsec-agentcenter.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-manager.service
-    dst: /etc/systemd/system/mxcsec-manager.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-manager.service
+    dst: /etc/systemd/system/mxsec-manager.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/mxcsec-platform/server.yaml.example
-    dst: /etc/mxcsec-platform/server.yaml.example
+  - src: ${TEMP_DIR}/etc/mxsec-platform/server.yaml.example
+    dst: /etc/mxsec-platform/server.yaml.example
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - dst: /opt/mxcsec-platform
+  - dst: /opt/mxsec-platform
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
-  - dst: /var/log/mxcsec-platform
+  - dst: /var/log/mxsec-platform
     type: dir
     file_info:
       mode: 0755
@@ -239,54 +239,54 @@ platform: linux
 version: ${VERSION}
 section: default
 priority: extra
-maintainer: Matrix Cloud Security Platform <dev@mxcsec-platform.local>
+maintainer: Matrix Cloud Security Platform <dev@mxsec-platform.local>
 description: |
   Matrix Cloud Security Platform Server
   Includes AgentCenter (gRPC) and Manager (HTTP API) services.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxcsec-platform/mxcsec-platform
+homepage: https://github.com/mxsec-platform/mxsec-platform
 license: Apache-2.0
 contents:
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-agentcenter
-    dst: /usr/bin/mxcsec-agentcenter
+  - src: ${TEMP_DIR}/usr/bin/mxsec-agentcenter
+    dst: /usr/bin/mxsec-agentcenter
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/usr/bin/mxcsec-manager
-    dst: /usr/bin/mxcsec-manager
+  - src: ${TEMP_DIR}/usr/bin/mxsec-manager
+    dst: /usr/bin/mxsec-manager
     file_info:
       mode: 0755
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-agentcenter.service
-    dst: /etc/systemd/system/mxcsec-agentcenter.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-agentcenter.service
+    dst: /etc/systemd/system/mxsec-agentcenter.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/systemd/system/mxcsec-manager.service
-    dst: /etc/systemd/system/mxcsec-manager.service
+  - src: ${TEMP_DIR}/etc/systemd/system/mxsec-manager.service
+    dst: /etc/systemd/system/mxsec-manager.service
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - src: ${TEMP_DIR}/etc/mxcsec-platform/server.yaml.example
-    dst: /etc/mxcsec-platform/server.yaml.example
+  - src: ${TEMP_DIR}/etc/mxsec-platform/server.yaml.example
+    dst: /etc/mxsec-platform/server.yaml.example
     type: config
     file_info:
       mode: 0644
       owner: root
       group: root
-  - dst: /opt/mxcsec-platform
+  - dst: /opt/mxsec-platform
     type: dir
     file_info:
       mode: 0755
       owner: root
       group: root
-  - dst: /var/log/mxcsec-platform
+  - dst: /var/log/mxsec-platform
     type: dir
     file_info:
       mode: 0755

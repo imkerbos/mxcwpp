@@ -17,10 +17,13 @@ services:
       # 挂载源代码，支持热重载（需要重新编译）
       - ../../:/workspace:rw
       # 挂载配置文件
-      - ./configs/server.dev.yaml:/etc/mxcsec-platform/server.yaml:ro
+      - ./configs/server.dev.yaml:/etc/mxsec-platform/server.yaml:ro
       # 挂载证书
-      - ./certs:/etc/mxcsec-platform/certs:ro
-      - agentcenter_logs:/var/log/mxcsec-platform
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - agentcenter_logs:/var/log/mxsec-platform
+      # Go 模块缓存
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
     working_dir: /workspace
     environment:
       - TZ=Asia/Shanghai
@@ -41,7 +44,7 @@ services:
           air -c .air.agentcenter.toml
         else
           echo '使用 go run 模式（修改代码后需要手动重启容器）...';
-          go run ./cmd/server/agentcenter -config /etc/mxcsec-platform/server.yaml
+          go run ./cmd/server/agentcenter -config /etc/mxsec-platform/server.yaml
         fi
       "
     networks:
@@ -50,8 +53,8 @@ services:
       test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 120s
 
   manager:
     build:
@@ -67,9 +70,12 @@ services:
       # 挂载源代码，支持热重载（需要重新编译）
       - ../../:/workspace:rw
       # 挂载配置文件
-      - ./configs/server.dev.yaml:/etc/mxcsec-platform/server.yaml:ro
+      - ./configs/server.dev.yaml:/etc/mxsec-platform/server.yaml:ro
       # 挂载证书
-      - ./certs:/etc/mxcsec-platform/certs:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      # Go 模块缓存
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
     working_dir: /workspace
     environment:
       - TZ=Asia/Shanghai
@@ -77,7 +83,7 @@ services:
     # 开发模式：优先使用 go run（简单可靠），如果 Air 可用则使用 Air
     command: >
       sh -c "
-        cd /workspace && 
+        cd /workspace &&
         # 确保 tmp 目录存在
         mkdir -p tmp &&
         # 先运行 go mod tidy 确保依赖正确
@@ -87,7 +93,7 @@ services:
           air -c .air.toml
         else
           echo '使用 go run 模式（修改代码后需要手动重启容器）...';
-          go run ./cmd/server/manager -config /etc/mxcsec-platform/server.yaml
+          go run ./cmd/server/manager -config /etc/mxsec-platform/server.yaml
         fi
       "
     networks:
@@ -138,7 +144,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker-compose/Dockerfile.agent.dev
-    container_name: mxcsec-agent-test
+    container_name: mxsec-agent-dev
     restart: unless-stopped
     depends_on:
       agentcenter:
@@ -149,6 +155,9 @@ services:
       - agent_data:/var/lib/mxsec-agent
       - agent_logs:/var/log/mxsec-agent
       - ./certs:/var/lib/mxsec-agent/certs:ro
+      # Go 模块缓存
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
     working_dir: /workspace
     environment:
       - TZ=Asia/Shanghai
@@ -191,6 +200,10 @@ volumes:
   agent_data:
     driver: local
   agent_logs:
+    driver: local
+  go_mod_cache:
+    driver: local
+  go_build_cache:
     driver: local
 
 networks:

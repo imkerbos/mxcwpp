@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // App 应用资产模型
 type App struct {
 	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -16,7 +12,7 @@ type App struct {
 	ProcessID   string    `gorm:"column:process_id;type:varchar(20)" json:"process_id"`
 	ConfigPath  string    `gorm:"column:config_path;type:varchar(512)" json:"config_path"`
 	DataPath    string    `gorm:"column:data_path;type:varchar(512)" json:"data_path"`
-	CollectedAt time.Time `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

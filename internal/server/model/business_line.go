@@ -1,8 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import "time"
-
 // BusinessLine 业务线模型
 type BusinessLine struct {
 	ID          uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
@@ -13,8 +11,8 @@ type BusinessLine struct {
 	Contact     string    `gorm:"column:contact;type:varchar(200)" json:"contact"`                // 联系方式
 	Enabled     bool      `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`        // 是否启用
 	HostCount   int       `gorm:"-" json:"host_count"`                                            // 关联主机数量（不存储，查询时计算）
-	CreatedAt   time.Time `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt   LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt   LocalTime `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 }
 
 // TableName 指定表名

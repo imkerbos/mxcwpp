@@ -1,10 +1,6 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"time"
-)
-
 // Container 容器资产模型
 type Container struct {
 	ID            string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
@@ -16,7 +12,7 @@ type Container struct {
 	Runtime       string    `gorm:"column:runtime;type:varchar(50)" json:"runtime"` // docker、containerd
 	Status        string    `gorm:"column:status;type:varchar(50)" json:"status"`   // running、stopped 等
 	CreatedAt     string    `gorm:"column:created_at;type:varchar(50)" json:"created_at"`
-	CollectedAt   time.Time `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
+	CollectedAt   LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 
 // TableName 指定表名

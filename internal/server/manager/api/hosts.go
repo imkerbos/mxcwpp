@@ -140,13 +140,12 @@ type HostStatusDistribution struct {
 	Uninstalled  int64 `json:"uninstalled"`   // 已卸载
 }
 
-// HostRiskDistribution 主机风险分布统计
+// HostRiskDistribution 主机基线风险分布统计（按严重程度）
 type HostRiskDistribution struct {
-	HostContainerAlerts  int64 `json:"host_container_alerts"`  // 存在主机和容器安全告警
-	AppRuntimeAlerts     int64 `json:"app_runtime_alerts"`     // 存在应用运行时安全告警
-	HighExploitableVulns int64 `json:"high_exploitable_vulns"` // 存在高可利用漏洞
-	VirusFiles           int64 `json:"virus_files"`            // 存在病毒文件
-	HighRiskBaselines    int64 `json:"high_risk_baselines"`    // 存在高危基线
+	Critical int64 `json:"critical"` // 存在严重风险基线的主机数
+	High     int64 `json:"high"`     // 存在高危风险基线的主机数
+	Medium   int64 `json:"medium"`   // 存在中危风险基线的主机数
+	Low      int64 `json:"low"`      // 存在低危风险基线的主机数
 }
 
 // GetHostStatusDistribution 获取主机状态分布
@@ -172,24 +171,42 @@ func (h *HostsHandler) GetHostStatusDistribution(c *gin.Context) {
 	})
 }
 
-// GetHostRiskDistribution 获取主机风险分布
+// GetHostRiskDistribution 获取主机基线风险分布（按严重程度）
 // GET /api/v1/hosts/risk-distribution
 func (h *HostsHandler) GetHostRiskDistribution(c *gin.Context) {
 	var distribution HostRiskDistribution
 
-	// 存在高危基线的主机数
-	var hostsWithHighRiskBaseline []string
+	// 统计存在严重(critical)风险基线的主机数
+	var hostsWithCritical []string
 	h.db.Model(&model.ScanResult{}).
 		Select("DISTINCT host_id").
-		Where("status = ? AND severity IN (?)", "fail", []string{"high", "critical"}).
-		Pluck("host_id", &hostsWithHighRiskBaseline)
-	distribution.HighRiskBaselines = int64(len(hostsWithHighRiskBaseline))
+		Where("status = ? AND severity = ?", "fail", "critical").
+		Pluck("host_id", &hostsWithCritical)
+	distribution.Critical = int64(len(hostsWithCritical))
 
-	// 其他风险类型暂时返回0，后续扩展
-	// TODO: 实现主机和容器安全告警统计
-	// TODO: 实现应用运行时安全告警统计
-	// TODO: 实现高可利用漏洞统计
-	// TODO: 实现病毒文件统计
+	// 统计存在高危(high)风险基线的主机数
+	var hostsWithHigh []string
+	h.db.Model(&model.ScanResult{}).
+		Select("DISTINCT host_id").
+		Where("status = ? AND severity = ?", "fail", "high").
+		Pluck("host_id", &hostsWithHigh)
+	distribution.High = int64(len(hostsWithHigh))
+
+	// 统计存在中危(medium)风险基线的主机数
+	var hostsWithMedium []string
+	h.db.Model(&model.ScanResult{}).
+		Select("DISTINCT host_id").
+		Where("status = ? AND severity = ?", "fail", "medium").
+		Pluck("host_id", &hostsWithMedium)
+	distribution.Medium = int64(len(hostsWithMedium))
+
+	// 统计存在低危(low)风险基线的主机数
+	var hostsWithLow []string
+	h.db.Model(&model.ScanResult{}).
+		Select("DISTINCT host_id").
+		Where("status = ? AND severity = ?", "fail", "low").
+		Pluck("host_id", &hostsWithLow)
+	distribution.Low = int64(len(hostsWithLow))
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,

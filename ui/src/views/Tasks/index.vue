@@ -5,6 +5,17 @@
       <a-space>
         <a-button
           v-if="selectedRowKeys.length > 0"
+          type="primary"
+          @click="handleBatchRun"
+          :loading="batchRunning"
+        >
+          <template #icon>
+            <PlayCircleOutlined />
+          </template>
+          批量执行 ({{ selectedRowKeys.length }})
+        </a-button>
+        <a-button
+          v-if="selectedRowKeys.length > 0"
           danger
           @click="handleBatchCancel"
           :loading="batchCanceling"
@@ -115,7 +126,7 @@
           <a-tag>{{ getTargetTypeText(record.target_type) }}</a-tag>
         </template>
         <template v-else-if="column.key === 'action'">
-          <a-space>
+          <a-space size="small">
             <!-- 只有待执行状态才能执行 -->
             <a-popconfirm
               v-if="record.status === 'pending'"
@@ -126,11 +137,9 @@
             >
               <a-button
                 type="link"
+                size="small"
                 :loading="runningTasks[record.task_id]"
               >
-                <template #icon>
-                  <PlayCircleOutlined />
-                </template>
                 执行
               </a-button>
             </a-popconfirm>
@@ -144,19 +153,14 @@
             >
               <a-button
                 type="link"
+                size="small"
                 danger
                 :loading="cancelingTasks[record.task_id]"
               >
-                <template #icon>
-                  <StopOutlined />
-                </template>
                 取消
               </a-button>
             </a-popconfirm>
-            <a-button type="link" @click="handleViewDetail(record)">
-              <template #icon>
-                <EyeOutlined />
-              </template>
+            <a-button type="link" size="small" @click="handleViewDetail(record)">
               查看
             </a-button>
           </a-space>
@@ -239,15 +243,26 @@
           {{ selectedTask.policy_id || '-' }}
         </a-descriptions-item>
         <a-descriptions-item label="目标主机" :span="2">
-          <template v-if="selectedTask.target_hosts && selectedTask.target_hosts.length > 0">
+          <template v-if="selectedTask.target_type === 'all'">
+            <span>全部主机</span>
+            <a-tag v-if="selectedTask.matched_host_count !== undefined" color="blue" style="margin-left: 8px;">
+              在线: {{ selectedTask.matched_host_count }} / 总计: {{ selectedTask.total_host_count }}
+            </a-tag>
+          </template>
+          <template v-else-if="selectedTask.target_hosts && selectedTask.target_hosts.length > 0">
             <a-tag v-for="host in selectedTask.target_hosts.slice(0, 5)" :key="host">
               {{ host }}
             </a-tag>
             <span v-if="selectedTask.target_hosts.length > 5">
               等 {{ selectedTask.target_hosts.length }} 台主机
             </span>
+            <a-tag v-if="selectedTask.matched_host_count !== undefined" color="blue" style="margin-left: 8px;">
+              在线: {{ selectedTask.matched_host_count }} / 总计: {{ selectedTask.total_host_count }}
+            </a-tag>
           </template>
-          <span v-else>全部主机</span>
+          <template v-else>
+            <span>-</span>
+          </template>
         </a-descriptions-item>
         <a-descriptions-item label="创建时间">
           {{ formatTime(selectedTask.created_at) }}
@@ -330,6 +345,51 @@
             </a-statistic>
           </a-col>
         </a-row>
+
+        <!-- 详细结果表格 -->
+        <div class="detailed-results" style="margin-top: 16px;">
+          <div class="result-filter" style="margin-bottom: 12px;">
+            <span style="margin-right: 8px;">筛选:</span>
+            <a-radio-group v-model:value="resultFilter" size="small">
+              <a-radio-button value="all">全部 ({{ taskResultStats.total }})</a-radio-button>
+              <a-radio-button value="fail">失败 ({{ taskResultStats.fail + taskResultStats.error }})</a-radio-button>
+              <a-radio-button value="pass">通过 ({{ taskResultStats.pass }})</a-radio-button>
+            </a-radio-group>
+          </div>
+          <a-table
+            :columns="detailedResultColumns"
+            :data-source="filteredDetailedResults"
+            :loading="detailResultsLoading"
+            :pagination="{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+            row-key="rule_id"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'status'">
+                <a-tag :color="record.status === 'pass' ? 'green' : record.status === 'fail' ? 'red' : 'orange'">
+                  {{ record.status === 'pass' ? '通过' : record.status === 'fail' ? '失败' : '错误' }}
+                </a-tag>
+              </template>
+              <template v-else-if="column.key === 'failure_reason'">
+                <template v-if="record.status === 'fail' || record.status === 'error'">
+                  <a-tooltip v-if="record.actual || record.expected" placement="topLeft">
+                    <template #title>
+                      <div>
+                        <div v-if="record.expected"><strong>期望值:</strong> {{ record.expected }}</div>
+                        <div v-if="record.actual"><strong>实际值:</strong> {{ record.actual }}</div>
+                      </div>
+                    </template>
+                    <span class="failure-reason">
+                      {{ record.actual ? `实际: ${record.actual.slice(0, 50)}${record.actual.length > 50 ? '...' : ''}` : '检查失败' }}
+                    </span>
+                  </a-tooltip>
+                  <span v-else class="failure-reason">检查失败</span>
+                </template>
+                <span v-else style="color: #999;">-</span>
+              </template>
+            </template>
+          </a-table>
+        </div>
       </div>
 
       <!-- 执行日志 -->
@@ -377,7 +437,8 @@ import {
 } from '@ant-design/icons-vue'
 import { tasksApi } from '@/api/tasks'
 import { resultsApi } from '@/api/results'
-import type { ScanTask } from '@/api/types'
+import { hostsApi } from '@/api/hosts'
+import type { ScanTask, ScanResult } from '@/api/types'
 import TaskModal from './components/TaskModal.vue'
 
 interface TaskLog {
@@ -410,10 +471,25 @@ const logsLoading = ref(false)
 const logsContainer = ref<HTMLElement | null>(null)
 const detailRefreshing = ref(false)
 
+// 任务详细结果
+interface DetailedResult {
+  host_id: string
+  hostname: string
+  rule_id: string
+  title: string
+  status: string
+  actual?: string
+  expected?: string
+}
+const detailedResults = ref<DetailedResult[]>([])
+const detailResultsLoading = ref(false)
+const resultFilter = ref<'all' | 'fail' | 'pass'>('all')
+
 // 批量操作相关
 const selectedRowKeys = ref<string[]>([])
 const batchCanceling = ref(false)
 const batchDeleting = ref(false)
+const batchRunning = ref(false)
 
 // 行选择配置
 const rowSelection = computed(() => ({
@@ -421,7 +497,7 @@ const rowSelection = computed(() => ({
   onChange: (keys: string[]) => {
     selectedRowKeys.value = keys
   },
-  getCheckboxProps: (record: ScanTask) => ({
+  getCheckboxProps: (_record: ScanTask) => ({
     disabled: false,
   }),
 }))
@@ -485,10 +561,57 @@ const columns = [
   {
     title: '操作',
     key: 'action',
-    width: 150,
+    width: 120,
     fixed: 'right' as const,
   },
 ]
+
+// 详细结果表格列定义
+const detailedResultColumns = [
+  {
+    title: '主机名',
+    dataIndex: 'hostname',
+    key: 'hostname',
+    width: 180,
+    ellipsis: true,
+  },
+  {
+    title: '主机ID',
+    dataIndex: 'host_id',
+    key: 'host_id',
+    width: 120,
+    ellipsis: true,
+    customRender: ({ text }: { text: string }) => text ? `${text.slice(0, 8)}...` : '-',
+  },
+  {
+    title: '检查项',
+    dataIndex: 'title',
+    key: 'title',
+    ellipsis: true,
+  },
+  {
+    title: '结果',
+    key: 'status',
+    width: 80,
+  },
+  {
+    title: '失败原因',
+    key: 'failure_reason',
+    width: 250,
+    ellipsis: true,
+  },
+]
+
+// 过滤后的详细结果
+const filteredDetailedResults = computed(() => {
+  if (resultFilter.value === 'all') {
+    return detailedResults.value
+  } else if (resultFilter.value === 'fail') {
+    return detailedResults.value.filter(r => r.status === 'fail' || r.status === 'error')
+  } else {
+    return detailedResults.value.filter(r => r.status === 'pass')
+  }
+})
 
 const loadTasks = async () => {
   loading.value = true
@@ -525,6 +648,53 @@ const handleReset = () => {
 const handleRefresh = () => {
   loadTasks()
   message.success('已刷新')
+}
+
+// 批量执行任务
+const handleBatchRun = () => {
+  const runnableTasks = tasks.value.filter(
+    t => selectedRowKeys.value.includes(t.task_id) && t.status === 'pending'
+  )
+
+  if (runnableTasks.length === 0) {
+    message.warning('没有可执行的任务（只有待执行状态的任务可以执行）')
+    return
+  }
+
+  Modal.confirm({
+    title: '批量执行任务',
+    content: `确定要执行 ${runnableTasks.length} 个任务吗？`,
+    okText: '确认执行',
+    cancelText: '取消',
+    async onOk() {
+      batchRunning.value = true
+      let successCount = 0
+      let failCount = 0
+
+      for (const task of runnableTasks) {
+        try {
+          await tasksApi.run(task.task_id)
+          successCount++
+        } catch (error) {
+          console.error(`执行任务 ${task.task_id} 失败:`, error)
+          failCount++
+        }
+      }
+
+      batchRunning.value = false
+      selectedRowKeys.value = []
+
+      if (failCount === 0) {
+        message.success(`成功执行 ${successCount} 个任务`)
+      } else {
+        message.warning(`成功执行 ${successCount} 个任务，${failCount} 个任务执行失败`)
+      }
+
+      loadTasks()
+      // 开始自动刷新
+      startAutoRefresh()
+    },
+  })
 }
 
 // 批量取消任务
@@ -706,6 +876,7 @@ const refreshTaskDetail = async (taskId: string) => {
 }
 
 const loadTaskResultStats = async (taskId: string) => {
+  detailResultsLoading.value = true
   try {
     const response = await resultsApi.list({
       task_id: taskId,
@@ -716,6 +887,32 @@ const loadTaskResultStats = async (taskId: string) => {
     taskResultStats.pass = results.filter((r: any) => r.status === 'pass').length
     taskResultStats.fail = results.filter((r: any) => r.status === 'fail').length
     taskResultStats.error = results.filter((r: any) => r.status === 'error').length
+
+    // 获取主机名映射
+    const hostIds = [...new Set(results.map((r: any) => r.host_id))]
+    let hostsMap = new Map<string, string>()
+    if (hostIds.length > 0) {
+      try {
+        const hostsResponse = await hostsApi.list({ page_size: 1000 }) as any
+        const hosts = hostsResponse.items || []
+        hosts.forEach((h: any) => {
+          hostsMap.set(h.host_id, h.hostname)
+        })
+      } catch (e) {
+        console.error('获取主机列表失败:', e)
+      }
+    }
+
+    // 构建详细结果列表
+    detailedResults.value = results.map((r: any) => ({
+      host_id: r.host_id,
+      hostname: hostsMap.get(r.host_id) || r.host_id,
+      rule_id: r.rule_id,
+      title: r.title || r.rule_id,
+      status: r.status,
+      actual: r.actual,
+      expected: r.expected,
+    }))
 
     // 计算进度百分比（基于预期检查项数量，如果没有则使用已完成数量）
     if (selectedTask.value?.status === 'running') {
@@ -728,6 +925,8 @@ const loadTaskResultStats = async (taskId: string) => {
     }
   } catch (error) {
     console.error('加载任务结果统计失败:', error)
+  } finally {
+    detailResultsLoading.value = false
   }
 }
 
@@ -750,10 +949,17 @@ const generateTaskLogs = (task: ScanTask) => {
       level: 'info',
       message: '任务开始执行',
     })
+    // 使用新的字段显示主机数量
+    let targetHostMessage = ''
+    if (task.target_type === 'all') {
+      targetHostMessage = `全部主机 (在线: ${task.matched_host_count ?? 0} / 总计: ${task.total_host_count ?? 0})`
+    } else {
+      targetHostMessage = `${task.total_host_count ?? task.target_hosts?.length ?? 0} 台主机 (在线: ${task.matched_host_count ?? 0})`
+    }
     logs.push({
       time: formatLogTime(task.executed_at),
       level: 'info',
-      message: `目标主机: ${task.target_type === 'all' ? '全部主机' : (task.target_hosts?.length || 0) + ' 台主机'}`,
+      message: `目标主机: ${targetHostMessage}`,
     })
     logs.push({
       time: formatLogTime(task.executed_at),
@@ -820,7 +1026,11 @@ const generateTaskLogs = (task: ScanTask) => {
 }
 
 const formatLogTime = (time: string) => {
-  const date = new Date(time)
+  // 如果是 YYYY-MM-DD HH:mm:ss 格式，先转换为 ISO 格式
+  let date = new Date(time)
+  if (isNaN(date.getTime()) && time.includes(' ')) {
+    date = new Date(time.replace(' ', 'T'))
+  }
   if (isNaN(date.getTime())) return time
   return date.toLocaleString('zh-CN', {
     month: '2-digit',
@@ -902,7 +1112,11 @@ const getTargetTypeText = (type: string) => {
 
 const formatTime = (time: string | undefined) => {
   if (!time) return ''
-  const date = new Date(time)
+  // 如果是 YYYY-MM-DD HH:mm:ss 格式，先转换为 ISO 格式
+  let date = new Date(time)
+  if (isNaN(date.getTime()) && time.includes(' ')) {
+    date = new Date(time.replace(' ', 'T'))
+  }
   if (isNaN(date.getTime())) return time
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -1078,5 +1292,24 @@ onUnmounted(() => {
 
 .log-error .log-message {
   color: #ff4d4f;
+}
+
+/* 失败原因样式 */
+.failure-reason {
+  color: #ff4d4f;
+  font-size: 12px;
+  cursor: help;
+}
+
+.modal-title-with-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-right: 40px;
+}
+
+.refresh-detail-btn {
+  margin-left: auto;
 }
 </style>
