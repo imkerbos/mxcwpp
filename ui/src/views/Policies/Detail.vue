@@ -618,7 +618,12 @@ const getRowClassName = (record: Rule) => {
 }
 
 const handleBack = () => {
-  router.push('/policies')
+  // 检查是否有历史记录，如果有则返回上一页，否则跳转到策略列表
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/policies')
+  }
 }
 
 // 批量检查 - 检查所有规则

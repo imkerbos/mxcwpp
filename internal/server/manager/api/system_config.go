@@ -747,3 +747,111 @@ func (h *SystemConfigHandler) GetLogo(c *gin.Context) {
 	// 返回文件内容
 	io.Copy(c.Writer, file)
 }
+
+// GetAlertConfig 获取告警配置
+// GET /api/v1/system-config/alert
+func (h *SystemConfigHandler) GetAlertConfig(c *gin.Context) {
+	defaultConfig := model.DefaultAlertConfig()
+
+	var config model.SystemConfig
+	result := h.db.Where("`key` = ? AND category = ?", "alert_config", "alert").First(&config)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			h.logger.Debug("告警配置不存在，使用默认配置")
+		} else {
+			h.logger.Warn("查询告警配置失败，使用默认配置", zap.Error(result.Error))
+		}
+		Success(c, defaultConfig)
+		return
+	}
+
+	if config.Value == "" {
+		Success(c, defaultConfig)
+		return
+	}
+
+	var alertConfig model.AlertConfig
+	if err := json.Unmarshal([]byte(config.Value), &alertConfig); err != nil {
+		h.logger.Warn("解析告警配置失败，使用默认配置", zap.Error(err))
+		Success(c, defaultConfig)
+		return
+	}
+
+	// 验证配置有效性
+	if alertConfig.RepeatAlertInterval <= 0 {
+		alertConfig.RepeatAlertInterval = defaultConfig.RepeatAlertInterval
+	}
+
+	Success(c, alertConfig)
+}
+
+// UpdateAlertConfigRequest 更新告警配置请求
+type UpdateAlertConfigRequest struct {
+	RepeatAlertInterval   int  `json:"repeat_alert_interval" binding:"required,min=1"`
+	EnablePeriodicSummary bool `json:"enable_periodic_summary"`
+}
+
+// UpdateAlertConfig 更新告警配置
+// PUT /api/v1/system-config/alert
+func (h *SystemConfigHandler) UpdateAlertConfig(c *gin.Context) {
+	var req UpdateAlertConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	alertConfig := model.AlertConfig{
+		RepeatAlertInterval:   req.RepeatAlertInterval,
+		EnablePeriodicSummary: req.EnablePeriodicSummary,
+	}
+
+	valueJSON, err := json.Marshal(alertConfig)
+	if err != nil {
+		h.logger.Error("序列化告警配置失败", zap.Error(err))
+		InternalError(c, "序列化配置失败")
+		return
+	}
+
+	var existingConfig model.SystemConfig
+	result := h.db.Where("`key` = ? AND category = ?", "alert_config", "alert").First(&existingConfig)
+
+	if result.Error == nil {
+		// 更新现有配置
+		if err := h.db.Model(&existingConfig).Updates(map[string]interface{}{
+			"value":       string(valueJSON),
+			"description": "告警配置（重复告警间隔、定期汇总开关）",
+		}).Error; err != nil {
+			h.logger.Error("更新告警配置失败", zap.Error(err))
+			InternalError(c, "更新配置失败")
+			return
+		}
+		h.logger.Info("告警配置更新成功",
+			zap.Int("repeat_alert_interval", req.RepeatAlertInterval),
+			zap.Bool("enable_periodic_summary", req.EnablePeriodicSummary),
+		)
+	} else if result.Error == gorm.ErrRecordNotFound {
+		// 创建新配置
+		config := model.SystemConfig{
+			Key:         "alert_config",
+			Category:    "alert",
+			Value:       string(valueJSON),
+			Description: "告警配置（重复告警间隔、定期汇总开关）",
+		}
+		if err := h.db.Create(&config).Error; err != nil {
+			h.logger.Error("创建告警配置失败", zap.Error(err))
+			InternalError(c, "创建配置失败")
+			return
+		}
+		h.logger.Info("告警配置创建成功",
+			zap.Int("repeat_alert_interval", req.RepeatAlertInterval),
+			zap.Bool("enable_periodic_summary", req.EnablePeriodicSummary),
+		)
+	} else {
+		h.logger.Error("查询告警配置失败", zap.Error(result.Error))
+		InternalError(c, "查询配置失败")
+		return
+	}
+
+	SuccessWithMessage(c, "配置更新成功", alertConfig)
+}

@@ -3,6 +3,7 @@ package transfer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -166,6 +167,9 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	s.registerConnection(agentID, conn)
 	defer s.unregisterConnection(agentID)
 
+	// 检查并发送 Agent 上线恢复通知（如果之前离线）
+	go s.checkAndSendAgentOnlineNotification(agentID, conn)
+
 	// 检查并下发证书（首次连接时）
 	if err := s.sendCertificateBundleIfNeeded(ctx, conn); err != nil {
 		s.logger.Error("下发证书包失败", zap.Error(err), zap.String("agent_id", agentID))
@@ -265,9 +269,13 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	var isContainer bool
 	var containerID string
 	var businessLine string
+	var runtimeType model.RuntimeType = model.RuntimeTypeVM // 默认为 VM
+	var podName, podNamespace, podUID string
+	var hasHeartbeatData bool // 是否包含心跳数据
 	if len(data.Records) > 0 {
 		for _, record := range data.Records {
 			if record.DataType == 1000 { // 心跳数据类型
+				hasHeartbeatData = true
 				// 解析 bridge.Record 获取OS、硬件和网络信息
 				var bridgeRecord bridge.Record
 				if err := proto.Unmarshal(record.Data, &bridgeRecord); err == nil {
@@ -328,12 +336,42 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 								agentStartTime = &startTime
 							}
 						}
+						// 解析运行时类型
+						if rtStr, ok := fields["runtime_type"]; ok && rtStr != "" {
+							switch rtStr {
+							case "vm":
+								runtimeType = model.RuntimeTypeVM
+							case "docker":
+								runtimeType = model.RuntimeTypeDocker
+							case "k8s":
+								runtimeType = model.RuntimeTypeK8s
+							default:
+								runtimeType = model.RuntimeTypeVM
+							}
+						}
 						// 解析容器环境标识
 						if isContainerStr, ok := fields["is_container"]; ok && isContainerStr == "true" {
 							isContainer = true
 							if cid, ok := fields["container_id"]; ok && cid != "" {
 								containerID = cid
 							}
+							// 如果是容器但 runtime_type 仍为默认值 VM，则修正为 Docker
+							if runtimeType == model.RuntimeTypeVM {
+								runtimeType = model.RuntimeTypeDocker
+								s.logger.Debug("修正容器运行时类型",
+									zap.String("agent_id", conn.AgentID),
+									zap.String("runtime_type", string(runtimeType)))
+							}
+						}
+						// 解析 K8s 相关字段
+						if pn, ok := fields["pod_name"]; ok && pn != "" {
+							podName = pn
+						}
+						if pns, ok := fields["pod_namespace"]; ok && pns != "" {
+							podNamespace = pns
+						}
+						if puid, ok := fields["pod_uid"]; ok && puid != "" {
+							podUID = puid
 						}
 						// 解析业务线（如果 Agent 提供了）
 						if bl, ok := fields["business_line"]; ok && bl != "" {
@@ -341,6 +379,14 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 							s.logger.Debug("收到业务线信息",
 								zap.String("agent_id", conn.AgentID),
 								zap.String("business_line", businessLine))
+						}
+						// 解析并存储插件状态
+						if pluginStatsStr, ok := fields["plugin_stats"]; ok && pluginStatsStr != "" {
+							if err := s.storeHostPlugins(ctx, conn.AgentID, pluginStatsStr); err != nil {
+								s.logger.Warn("存储插件状态失败",
+									zap.String("agent_id", conn.AgentID),
+									zap.Error(err))
+							}
 						}
 					}
 				}
@@ -373,6 +419,7 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		IPv6:          model.StringArray(append(data.IntranetIpv6, data.ExtranetIpv6...)),
 		Status:        model.HostStatusOnline,
 		LastHeartbeat: &nowLocal,
+		AgentVersion:  data.Version, // Agent 版本号
 		// OS信息
 		OSFamily:      osInfo["os_family"],
 		OSVersion:     osInfo["os_version"],
@@ -392,9 +439,14 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		// 磁盘和网卡信息
 		DiskInfo:          networkInfo["disk_info"],
 		NetworkInterfaces: networkInfo["network_interfaces"],
-		// 容器标识
+		// 运行时环境
+		RuntimeType: runtimeType,
 		IsContainer: isContainer,
 		ContainerID: containerID,
+		// K8s 相关字段
+		PodName:      podName,
+		PodNamespace: podNamespace,
+		PodUID:       podUID,
 		// 时间信息
 		SystemBootTime: model.ToLocalTimePtr(systemBootTime),
 		AgentStartTime: model.ToLocalTimePtr(agentStartTime),
@@ -411,39 +463,54 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	// 如果主机已存在，更新字段
 	if result.RowsAffected == 0 {
 		updates := map[string]interface{}{
-			"hostname":           data.Hostname,
-			"ipv4":               model.StringArray(append(data.IntranetIpv4, data.ExtranetIpv4...)),
-			"ipv6":               model.StringArray(append(data.IntranetIpv6, data.ExtranetIpv6...)),
-			"status":             model.HostStatusOnline,
-			"last_heartbeat":     time.Now(),
-			"os_family":          osInfo["os_family"],
-			"os_version":         osInfo["os_version"],
-			"kernel_version":     osInfo["kernel_version"],
-			"arch":               osInfo["arch"],
-			"device_model":       hardwareInfo["device_model"],
-			"manufacturer":       hardwareInfo["manufacturer"],
-			"device_serial":      hardwareInfo["device_serial"],
-			"cpu_info":           hardwareInfo["cpu_info"],
-			"memory_size":        hardwareInfo["memory_size"],
-			"system_load":        hardwareInfo["system_load"],
-			"default_gateway":    networkInfo["default_gateway"],
-			"dns_servers":        dnsServers,
-			"network_mode":       networkInfo["network_mode"],
-			"disk_info":          networkInfo["disk_info"],
-			"network_interfaces": networkInfo["network_interfaces"],
-			"is_container":       isContainer,
-			"container_id":       containerID,
-			"system_boot_time":   systemBootTime,
-			"agent_start_time":   agentStartTime,
+			"hostname":       data.Hostname,
+			"ipv4":           model.StringArray(append(data.IntranetIpv4, data.ExtranetIpv4...)),
+			"ipv6":           model.StringArray(append(data.IntranetIpv6, data.ExtranetIpv6...)),
+			"status":         model.HostStatusOnline,
+			"last_heartbeat": time.Now(),
+			"agent_version":  data.Version, // Agent 版本号
+		}
+		// 只有当数据包中包含心跳数据时才更新这些字段
+		if hasHeartbeatData {
+			updates["os_family"] = osInfo["os_family"]
+			updates["os_version"] = osInfo["os_version"]
+			updates["kernel_version"] = osInfo["kernel_version"]
+			updates["arch"] = osInfo["arch"]
+			updates["device_model"] = hardwareInfo["device_model"]
+			updates["manufacturer"] = hardwareInfo["manufacturer"]
+			updates["device_serial"] = hardwareInfo["device_serial"]
+			updates["cpu_info"] = hardwareInfo["cpu_info"]
+			updates["memory_size"] = hardwareInfo["memory_size"]
+			updates["system_load"] = hardwareInfo["system_load"]
+			updates["default_gateway"] = networkInfo["default_gateway"]
+			updates["dns_servers"] = dnsServers
+			updates["network_mode"] = networkInfo["network_mode"]
+			updates["disk_info"] = networkInfo["disk_info"]
+			updates["network_interfaces"] = networkInfo["network_interfaces"]
+			updates["runtime_type"] = runtimeType
+			updates["is_container"] = isContainer
+			updates["container_id"] = containerID
+			updates["pod_name"] = podName
+			updates["pod_namespace"] = podNamespace
+			updates["pod_uid"] = podUID
+			updates["system_boot_time"] = systemBootTime
+			updates["agent_start_time"] = agentStartTime
 		}
 		// 如果 Agent 提供了业务线，则更新（仅在首次设置或 Agent 明确提供时更新）
 		if businessLine != "" {
 			updates["business_line"] = businessLine
 		}
-		// 只更新非空字段
+		// 只更新非空字段（但 agent_version 只有在非空时才更新）
 		cleanUpdates := make(map[string]interface{})
 		for k, v := range updates {
 			if v == nil {
+				continue
+			}
+			// agent_version 字段只有在非空时才更新（避免覆盖已有版本为空）
+			if k == "agent_version" {
+				if str, ok := v.(string); ok && str != "" {
+					cleanUpdates[k] = v
+				}
 				continue
 			}
 			// 对于字符串，检查是否为空
@@ -477,6 +544,97 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		zap.Bool("has_disk_info", networkInfo["disk_info"] != ""),
 		zap.Bool("has_network_interfaces", networkInfo["network_interfaces"] != ""),
 	)
+
+	return nil
+}
+
+// storeHostPlugins 存储主机插件状态
+func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginStatsJSON string) error {
+	// 解析插件状态 JSON
+	// 格式: {"baseline": {"status": "running", "version": "1.0.3", "start_time": 1234567890}, ...}
+	var pluginStats map[string]struct {
+		Status    string `json:"status"`
+		Version   string `json:"version"`
+		StartTime int64  `json:"start_time"`
+	}
+
+	if err := json.Unmarshal([]byte(pluginStatsJSON), &pluginStats); err != nil {
+		return fmt.Errorf("解析插件状态 JSON 失败: %w", err)
+	}
+
+	if len(pluginStats) == 0 {
+		return nil
+	}
+
+	s.logger.Debug("收到插件状态",
+		zap.String("host_id", hostID),
+		zap.Int("plugin_count", len(pluginStats)))
+
+	// 更新或创建每个插件的状态
+	for name, stats := range pluginStats {
+		// 转换状态
+		var status model.HostPluginStatus
+		switch stats.Status {
+		case "running":
+			status = model.HostPluginStatusRunning
+		case "stopped":
+			status = model.HostPluginStatusStopped
+		case "error":
+			status = model.HostPluginStatusError
+		default:
+			status = model.HostPluginStatusRunning
+		}
+
+		// 转换启动时间
+		var startTime *model.LocalTime
+		if stats.StartTime > 0 {
+			t := model.ToLocalTime(time.Unix(stats.StartTime, 0))
+			startTime = &t
+		}
+
+		// 使用 UPSERT 更新或创建插件记录
+		hostPlugin := model.HostPlugin{
+			HostID:    hostID,
+			Name:      name,
+			Version:   stats.Version,
+			Status:    status,
+			StartTime: startTime,
+		}
+
+		// 查找现有记录
+		var existing model.HostPlugin
+		result := s.db.Where("host_id = ? AND name = ?", hostID, name).First(&existing)
+		if result.Error == nil {
+			// 记录存在，更新
+			updates := map[string]interface{}{
+				"version":    stats.Version,
+				"status":     status,
+				"start_time": startTime,
+			}
+			if err := s.db.Model(&existing).Updates(updates).Error; err != nil {
+				s.logger.Error("更新插件状态失败",
+					zap.String("host_id", hostID),
+					zap.String("plugin_name", name),
+					zap.Error(err))
+				continue
+			}
+		} else {
+			// 记录不存在，创建
+			if err := s.db.Create(&hostPlugin).Error; err != nil {
+				s.logger.Error("创建插件状态失败",
+					zap.String("host_id", hostID),
+					zap.String("plugin_name", name),
+					zap.Error(err))
+				continue
+			}
+		}
+
+		s.logger.Debug("更新插件状态成功",
+			zap.String("host_id", hostID),
+			zap.String("plugin_name", name),
+			zap.String("version", stats.Version),
+			zap.String("status", string(status)))
+	}
 
 	return nil
 }
@@ -757,6 +915,14 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 			)
 			// 不中断流程，告警创建失败不影响检测结果保存
 		}
+	} else if resultStatus == model.ResultStatusPass {
+		// 如果检测结果为 pass，检查是否有活跃告警需要恢复
+		if err := s.resolveAlertIfExists(scanResult, conn); err != nil {
+			s.logger.Warn("解决告警失败",
+				zap.String("result_id", resultID),
+				zap.Error(err),
+			)
+		}
 	}
 
 	return nil
@@ -826,6 +992,88 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 	return nil
 }
 
+// resolveAlertIfExists 如果存在活跃告警则解决并发送恢复通知
+func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Connection) error {
+	// 查询是否存在活跃告警
+	var existingAlert model.Alert
+	err := s.db.Where("result_id = ? AND status = ?", scanResult.ResultID, model.AlertStatusActive).First(&existingAlert).Error
+
+	if err == gorm.ErrRecordNotFound {
+		// 没有活跃告警，无需处理
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("查询告警失败: %w", err)
+	}
+
+	// 解决告警
+	now := model.Now()
+	existingAlert.Status = model.AlertStatusResolved
+	existingAlert.ResolvedAt = &now
+	existingAlert.ResolvedBy = "system" // 系统自动解决
+	existingAlert.ResolveReason = "检测通过，问题已修复"
+
+	if err := s.db.Save(&existingAlert).Error; err != nil {
+		return fmt.Errorf("更新告警状态失败: %w", err)
+	}
+
+	s.logger.Info("告警已自动解决",
+		zap.Uint("alert_id", existingAlert.ID),
+		zap.String("result_id", scanResult.ResultID),
+	)
+
+	// 发送告警恢复通知（异步，不阻塞）
+	go func() {
+		// 查询主机信息
+		var host model.Host
+		if err := s.db.First(&host, "host_id = ?", existingAlert.HostID).Error; err != nil {
+			s.logger.Warn("查询主机信息失败", zap.String("host_id", existingAlert.HostID), zap.Error(err))
+			return
+		}
+
+		// 查询规则信息
+		var rule model.Rule
+		if err := s.db.First(&rule, "rule_id = ?", existingAlert.RuleID).Error; err != nil {
+			s.logger.Warn("查询规则信息失败", zap.String("rule_id", existingAlert.RuleID), zap.Error(err))
+		}
+
+		// 获取主机 IP
+		hostIP := ""
+		if len(host.IPv4) > 0 {
+			hostIP = strings.Join(host.IPv4, ",")
+		} else if len(conn.IPv4) > 0 {
+			hostIP = strings.Join(conn.IPv4, ",")
+		}
+
+		// 构建恢复数据
+		resolvedData := &biz.AlertResolvedData{
+			HostID:      existingAlert.HostID,
+			Hostname:    host.Hostname,
+			IP:          hostIP,
+			OSFamily:    host.OSFamily,
+			OSVersion:   host.OSVersion,
+			RuleID:      existingAlert.RuleID,
+			RuleName:    rule.Title,
+			Category:    existingAlert.Category,
+			Severity:    existingAlert.Severity,
+			Title:       existingAlert.Title,
+			FirstSeenAt: existingAlert.FirstSeenAt.Time(),
+			ResolvedAt:  time.Now(),
+			ResultID:    existingAlert.ResultID,
+		}
+
+		notificationService := biz.NewNotificationService(s.db, s.logger)
+		if err := notificationService.SendAlertResolvedNotification(resolvedData); err != nil {
+			s.logger.Warn("发送告警恢复通知失败",
+				zap.Uint("alert_id", existingAlert.ID),
+				zap.Error(err),
+			)
+		}
+	}()
+
+	return nil
+}
+
 // handleTaskCompletion 处理任务完成信号
 func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
 	// 解析 EncodedRecord.data 为 bridge.Record
@@ -876,36 +1124,55 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 	}
 
 	// 如果任务已经完成或失败，不再处理
-	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed {
-		s.logger.Debug("任务已完成，忽略完成信号",
+	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
+		s.logger.Debug("任务已完成/失败/取消，忽略完成信号",
 			zap.String("task_id", taskID),
 			zap.String("status", string(task.Status)),
 		)
 		return nil
 	}
 
-	// 更新任务状态为 completed
-	// 注意：这里简化实现，直接标记为完成
-	// 更严格的实现应该跟踪每个主机的完成状态
-	now := time.Now()
-	updates := map[string]interface{}{
-		"status":     model.TaskStatusCompleted,
-		"updated_at": now,
+	// 增加已完成主机数
+	if err := s.db.Model(&task).Update("completed_host_count", gorm.Expr("completed_host_count + 1")).Error; err != nil {
+		s.logger.Error("更新任务完成主机数失败", zap.String("task_id", taskID), zap.Error(err))
 	}
 
-	if err := s.db.Model(&task).Updates(updates).Error; err != nil {
-		return fmt.Errorf("更新任务状态失败: %w", err)
+	// 重新查询任务以获取最新的完成主机数
+	if err := s.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
+		return fmt.Errorf("查询任务失败: %w", err)
 	}
 
-	s.logger.Info("任务状态已更新为 completed",
+	s.logger.Info("收到主机任务完成信号",
 		zap.String("task_id", taskID),
 		zap.String("host_id", conn.AgentID),
+		zap.Int("completed_host_count", task.CompletedHostCount),
+		zap.Int("dispatched_host_count", task.DispatchedHostCount),
 	)
+
+	// 检查是否所有主机都已完成
+	if task.DispatchedHostCount > 0 && task.CompletedHostCount >= task.DispatchedHostCount {
+		// 所有主机都已返回结果，标记任务为 completed
+		now := model.Now()
+		updates := map[string]interface{}{
+			"status":       model.TaskStatusCompleted,
+			"completed_at": &now,
+		}
+
+		if err := s.db.Model(&task).Updates(updates).Error; err != nil {
+			return fmt.Errorf("更新任务状态失败: %w", err)
+		}
+
+		s.logger.Info("任务所有主机都已完成，状态更新为 completed",
+			zap.String("task_id", taskID),
+			zap.Int("completed_host_count", task.CompletedHostCount),
+			zap.Int("dispatched_host_count", task.DispatchedHostCount),
+		)
+	}
 
 	return nil
 }
 
-// sendAlertNotification 发送告警通知
+// sendAlertNotification 发送告警通知（只发送立即通知模式）
 func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 	// 查询主机信息
 	var host model.Host
@@ -921,13 +1188,22 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 		// 规则信息不是必须的，继续发送通知
 	}
 
+	// 获取主机 IP（优先使用数据库中的 IP，如果没有则使用连接中的 IP）
+	hostIP := ""
+	if len(host.IPv4) > 0 {
+		hostIP = strings.Join(host.IPv4, ",")
+	} else if len(conn.IPv4) > 0 {
+		hostIP = strings.Join(conn.IPv4, ",")
+	}
+
 	// 构建告警数据
 	alertData := &biz.AlertData{
 		HostID:        alert.HostID,
 		Hostname:      host.Hostname,
-		IP:            strings.Join(conn.IPv4, ","),
+		IP:            hostIP,
 		OSFamily:      host.OSFamily,
 		OSVersion:     host.OSVersion,
+		BusinessLine:  host.BusinessLine, // 添加业务线
 		RuleID:        alert.RuleID,
 		RuleName:      rule.Title,
 		Category:      alert.Category,
@@ -946,10 +1222,28 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 	// 发送通知（异步，不阻塞）
 	go func() {
 		notificationService := biz.NewNotificationService(s.db, s.logger)
-		if err := notificationService.SendAlertNotification(alertData); err != nil {
+		sent, err := notificationService.SendAlertNotification(alertData)
+		if err != nil {
 			s.logger.Warn("发送告警通知失败",
 				zap.Uint("alert_id", alert.ID),
 				zap.Error(err),
+			)
+		} else if sent {
+			// 只有实际发送了通知才更新通知时间和通知次数
+			now := model.Now()
+			s.db.Model(&model.Alert{}).Where("id = ?", alert.ID).Updates(map[string]interface{}{
+				"last_notified_at": &now,
+				"notify_count":     gorm.Expr("notify_count + 1"),
+			})
+			s.logger.Info("告警通知已发送",
+				zap.Uint("alert_id", alert.ID),
+				zap.String("host_id", alert.HostID),
+				zap.String("rule_id", alert.RuleID),
+			)
+		} else {
+			s.logger.Debug("告警无匹配的通知配置",
+				zap.Uint("alert_id", alert.ID),
+				zap.String("severity", alert.Severity),
 			)
 		}
 	}()
@@ -1002,11 +1296,104 @@ func (s *Service) registerConnection(agentID string, conn *Connection) {
 	s.connections[agentID] = conn
 }
 
+// checkAndSendAgentOnlineNotification 检查并发送 Agent 上线恢复通知
+func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Connection) {
+	// 查询主机信息
+	var host model.Host
+	if err := s.db.First(&host, "host_id = ?", agentID).Error; err != nil {
+		// 主机不存在（首次注册），不发送恢复通知
+		return
+	}
+
+	// 检查主机上次心跳时间，如果超过 3 分钟，说明之前离线
+	offlineThreshold := 3 * time.Minute
+	if host.LastHeartbeat == nil {
+		// 首次注册，没有心跳记录，不发送恢复通知
+		return
+	}
+	lastHeartbeat := host.LastHeartbeat.Time()
+	if time.Since(lastHeartbeat) < offlineThreshold {
+		// 主机最近有心跳，不算离线
+		return
+	}
+
+	s.logger.Info("检测到 Agent 从离线状态恢复上线",
+		zap.String("agent_id", agentID),
+		zap.String("hostname", host.Hostname),
+		zap.Time("last_heartbeat", lastHeartbeat),
+		zap.Duration("offline_duration", time.Since(lastHeartbeat)),
+	)
+
+	// 获取主机 IP
+	hostIP := ""
+	if len(conn.IPv4) > 0 {
+		hostIP = strings.Join(conn.IPv4, ",")
+	} else if len(host.IPv4) > 0 {
+		hostIP = strings.Join(host.IPv4, ",")
+	}
+
+	// 构建上线数据
+	onlineData := &biz.AgentOnlineData{
+		HostID:       agentID,
+		Hostname:     host.Hostname,
+		IP:           hostIP,
+		OSFamily:     host.OSFamily,
+		OSVersion:    host.OSVersion,
+		OnlineAt:     time.Now(),
+		OfflineSince: lastHeartbeat,
+	}
+
+	// 发送上线恢复通知
+	notificationService := biz.NewNotificationService(s.db, s.logger)
+	if err := notificationService.SendAgentOnlineNotification(onlineData); err != nil {
+		s.logger.Warn("发送 Agent 上线恢复通知失败",
+			zap.String("agent_id", agentID),
+			zap.Error(err),
+		)
+	}
+}
+
 // unregisterConnection 注销连接
 func (s *Service) unregisterConnection(agentID string) {
 	s.connMu.Lock()
-	defer s.connMu.Unlock()
+	conn, exists := s.connections[agentID]
 	delete(s.connections, agentID)
+	s.connMu.Unlock()
+
+	// 查询主机信息用于发送离线通知
+	var host model.Host
+	if err := s.db.First(&host, "host_id = ?", agentID).Error; err != nil {
+		s.logger.Warn("查询主机信息失败，跳过离线通知", zap.String("agent_id", agentID), zap.Error(err))
+	} else {
+		// 发送 Agent 离线通知（异步，不阻塞）
+		go func() {
+			// 获取主机 IP（优先使用数据库中的 IP，如果没有则使用连接中的 IP）
+			hostIP := ""
+			if len(host.IPv4) > 0 {
+				hostIP = strings.Join(host.IPv4, ",")
+			} else if exists && conn != nil && len(conn.IPv4) > 0 {
+				hostIP = strings.Join(conn.IPv4, ",")
+			}
+
+			offlineData := &biz.AgentOfflineData{
+				HostID:       host.HostID,
+				Hostname:     host.Hostname,
+				IP:           hostIP,
+				OSFamily:     host.OSFamily,
+				OSVersion:    host.OSVersion,
+				LastOnlineAt: host.LastHeartbeat.Time(),
+				OfflineAt:    time.Now(),
+			}
+
+			notificationService := biz.NewNotificationService(s.db, s.logger)
+			if err := notificationService.SendAgentOfflineNotification(offlineData); err != nil {
+				s.logger.Warn("发送 Agent 离线通知失败",
+					zap.String("agent_id", agentID),
+					zap.Error(err),
+				)
+			}
+		}()
+	}
 
 	// 更新主机状态为离线
 	s.db.Model(&model.Host{}).Where("host_id = ?", agentID).Update("status", model.HostStatusOffline)
@@ -1162,4 +1549,102 @@ func (s *Service) SendCommand(agentID string, cmd *grpcProto.Command) error {
 	default:
 		return fmt.Errorf("发送队列已满: %s", agentID)
 	}
+}
+
+// BroadcastPluginConfigs 向所有在线 Agent 广播插件配置（用于推送更新）
+// 返回成功发送的 Agent 数量和失败的 Agent 列表
+func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, error) {
+	// 从数据库查询启用的插件配置
+	var pluginConfigs []model.PluginConfig
+	if err := s.db.Where("enabled = ?", true).Find(&pluginConfigs).Error; err != nil {
+		return 0, nil, fmt.Errorf("查询插件配置失败: %w", err)
+	}
+
+	if len(pluginConfigs) == 0 {
+		s.logger.Info("没有启用的插件配置，跳过广播")
+		return 0, nil, nil
+	}
+
+	// 转换为 gRPC Config 格式
+	var configs []*grpcProto.Config
+	for _, pc := range pluginConfigs {
+		config := &grpcProto.Config{
+			Name:         pc.Name,
+			Type:         string(pc.Type),
+			Version:      pc.Version,
+			Sha256:       pc.SHA256,
+			Signature:    pc.Signature,
+			DownloadUrls: []string(pc.DownloadURLs),
+			Detail:       pc.Detail,
+		}
+		configs = append(configs, config)
+	}
+
+	// 构建命令
+	cmd := &grpcProto.Command{
+		Configs: configs,
+	}
+
+	// 获取所有在线连接
+	s.connMu.RLock()
+	connections := make([]*Connection, 0, len(s.connections))
+	for _, conn := range s.connections {
+		connections = append(connections, conn)
+	}
+	s.connMu.RUnlock()
+
+	if len(connections) == 0 {
+		s.logger.Info("没有在线的 Agent，跳过广播")
+		return 0, nil, nil
+	}
+
+	s.logger.Info("开始广播插件配置到所有在线 Agent",
+		zap.Int("agent_count", len(connections)),
+		zap.Int("plugin_count", len(configs)))
+
+	// 向每个连接发送配置
+	successCount := 0
+	var failedAgents []string
+
+	for _, conn := range connections {
+		select {
+		case conn.sendCh <- cmd:
+			successCount++
+			s.logger.Debug("插件配置已发送到 Agent",
+				zap.String("agent_id", conn.AgentID))
+		case <-conn.ctx.Done():
+			failedAgents = append(failedAgents, conn.AgentID)
+			s.logger.Warn("发送插件配置失败：连接已关闭",
+				zap.String("agent_id", conn.AgentID))
+		default:
+			failedAgents = append(failedAgents, conn.AgentID)
+			s.logger.Warn("发送插件配置失败：队列已满",
+				zap.String("agent_id", conn.AgentID))
+		}
+	}
+
+	s.logger.Info("插件配置广播完成",
+		zap.Int("success_count", successCount),
+		zap.Int("failed_count", len(failedAgents)))
+
+	return successCount, failedAgents, nil
+}
+
+// GetOnlineAgentCount 获取在线 Agent 数量
+func (s *Service) GetOnlineAgentCount() int {
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+	return len(s.connections)
+}
+
+// GetOnlineAgentIDs 获取所有在线 Agent ID 列表
+func (s *Service) GetOnlineAgentIDs() []string {
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+
+	ids := make([]string, 0, len(s.connections))
+	for agentID := range s.connections {
+		ids = append(ids, agentID)
+	}
+	return ids
 }

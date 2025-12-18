@@ -22,15 +22,27 @@
 
     <!-- 策略信息 -->
     <div class="policy-info-card" v-if="policy">
-      <a-descriptions :column="4" size="small">
-        <a-descriptions-item label="策略ID">{{ policy.id }}</a-descriptions-item>
-        <a-descriptions-item label="版本">{{ policy.version || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="适用系统">
-          <a-tag v-for="os in policy.os_family" :key="os" style="margin-right: 4px;">{{ os }}</a-tag>
-          <span v-if="!policy.os_family || policy.os_family.length === 0">-</span>
-        </a-descriptions-item>
-        <a-descriptions-item label="检查项数量">{{ rules.length }}</a-descriptions-item>
-      </a-descriptions>
+      <div class="policy-info-grid">
+        <div class="info-item">
+          <span class="info-label">策略ID：</span>
+          <span class="info-value">{{ policy.id }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">版本：</span>
+          <span class="info-value">{{ policy.version || '-' }}</span>
+        </div>
+        <div class="info-item os-family-item">
+          <span class="info-label">适用系统：</span>
+          <span class="info-value os-tags">
+            <a-tag v-for="os in policy.os_family" :key="os">{{ getOSLabel(os) }}</a-tag>
+            <span v-if="!policy.os_family || policy.os_family.length === 0">-</span>
+          </span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">检查项数量：</span>
+          <span class="info-value highlight">{{ rules.length }}</span>
+        </div>
+      </div>
       <p v-if="policy.description" class="policy-description">{{ policy.description }}</p>
     </div>
 
@@ -190,7 +202,12 @@ const loadPolicyDetail = async () => {
 }
 
 const handleBack = () => {
-  router.push('/policy-groups')
+  // 检查是否有历史记录，如果有则返回上一页，否则跳转到策略组列表
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/policy-groups')
+  }
 }
 
 const handleCreateRule = () => {
@@ -254,6 +271,20 @@ const getCategoryText = (category: string) => {
   return texts[category] || category || '-'
 }
 
+const getOSLabel = (os: string) => {
+  const osMap: Record<string, string> = {
+    rocky: 'Rocky',
+    centos: 'CentOS',
+    oracle: 'Oracle',
+    debian: 'Debian',
+    ubuntu: 'Ubuntu',
+    openeuler: 'openEuler',
+    alibaba: 'Alibaba',
+    alma: 'AlmaLinux',
+  }
+  return osMap[os] || os
+}
+
 onMounted(() => {
   loadPolicyDetail()
 })
@@ -294,15 +325,63 @@ onMounted(() => {
 .policy-info-card {
   background: #fff;
   border-radius: 8px;
-  padding: 16px 20px;
+  padding: 20px 24px;
   margin-bottom: 20px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border: 1px solid #f0f0f0;
+}
+
+.policy-info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 48px;
+  align-items: flex-start;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.os-family-item {
+  flex-wrap: wrap;
+}
+
+.info-label {
+  color: #8c8c8c;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.info-value {
+  color: #262626;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.info-value.highlight {
+  color: #1890ff;
+  font-weight: 600;
+}
+
+.info-value.os-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.info-value.os-tags :deep(.ant-tag) {
+  margin: 0;
 }
 
 .policy-description {
-  margin: 12px 0 0 0;
+  margin: 16px 0 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #f5f5f5;
   color: #666;
   font-size: 14px;
+  line-height: 1.6;
 }
 
 .ellipsis-text {

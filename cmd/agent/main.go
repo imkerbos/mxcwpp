@@ -51,6 +51,10 @@ func main() {
 	// 2. 加载默认配置（完全依赖构建时嵌入，不需要配置文件）
 	cfg := config.LoadDefaults()
 	cfg.Local.Server.AgentCenter.PrivateHost = serverHost
+	// 设置构建时嵌入的版本
+	if buildVersion != "" {
+		cfg.BuildVersion = buildVersion
+	}
 
 	// 3. 初始化日志（默认配置：按天轮转，保留30天）
 	log, err := logger.Init(logger.LogConfig{

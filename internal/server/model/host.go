@@ -14,6 +14,25 @@ const (
 	HostStatusOffline HostStatus = "offline"
 )
 
+// RuntimeType 运行时类型
+type RuntimeType string
+
+const (
+	RuntimeTypeVM     RuntimeType = "vm"     // 虚拟机或物理机
+	RuntimeTypeDocker RuntimeType = "docker" // Docker 容器
+	RuntimeTypeK8s    RuntimeType = "k8s"    // Kubernetes Pod
+)
+
+// IsValidRuntimeType 检查运行时类型是否有效
+func IsValidRuntimeType(rt string) bool {
+	switch RuntimeType(rt) {
+	case RuntimeTypeVM, RuntimeTypeDocker, RuntimeTypeK8s:
+		return true
+	default:
+		return false
+	}
+}
+
 // StringArray 字符串数组类型，用于 JSON 字段
 type StringArray []string
 
@@ -71,9 +90,16 @@ type Host struct {
 	SystemBootTime *LocalTime `gorm:"column:system_boot_time;type:timestamp" json:"system_boot_time"` // 系统启动时间
 	AgentStartTime *LocalTime `gorm:"column:agent_start_time;type:timestamp" json:"agent_start_time"` // 客户端启动时间
 	LastActiveTime *LocalTime `gorm:"column:last_active_time;type:timestamp" json:"last_active_time"` // 最近活跃时间
-	// 容器标识
-	IsContainer bool   `gorm:"column:is_container;type:tinyint(1);default:0" json:"is_container"` // 是否为容器环境
-	ContainerID string `gorm:"column:container_id;type:varchar(64)" json:"container_id"`          // 容器ID（如果是在容器中运行）
+	// 运行时环境
+	RuntimeType RuntimeType `gorm:"column:runtime_type;type:varchar(20);default:'vm'" json:"runtime_type"` // 运行时类型：vm/docker/k8s
+	IsContainer bool        `gorm:"column:is_container;type:tinyint(1);default:0" json:"is_container"`     // 是否为容器环境
+	ContainerID string      `gorm:"column:container_id;type:varchar(64)" json:"container_id"`              // 容器ID（如果是在容器中运行）
+	// K8s 相关字段
+	PodName      string `gorm:"column:pod_name;type:varchar(255)" json:"pod_name"`           // Pod 名称（K8s 环境）
+	PodNamespace string `gorm:"column:pod_namespace;type:varchar(255)" json:"pod_namespace"` // 命名空间（K8s 环境）
+	PodUID       string `gorm:"column:pod_uid;type:varchar(64)" json:"pod_uid"`              // Pod UID（K8s 环境）
+	// Agent 版本信息
+	AgentVersion string `gorm:"column:agent_version;type:varchar(32)" json:"agent_version"` // Agent 当前版本号
 	// 标签
 	Tags      StringArray `gorm:"column:tags;type:json" json:"tags"`
 	CreatedAt LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`

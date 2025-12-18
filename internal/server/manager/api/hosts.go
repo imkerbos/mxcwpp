@@ -49,7 +49,8 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 	status := c.Query("status")
 	businessLine := c.Query("business_line")  // 业务线筛选
 	search := c.Query("search")               // 搜索关键词
-	isContainerStr := c.Query("is_container") // 容器/主机类型筛选
+	isContainerStr := c.Query("is_container") // 容器/主机类型筛选（废弃，使用 runtime_type）
+	runtimeType := c.Query("runtime_type")    // 运行环境类型筛选：vm/docker/k8s
 
 	// 构建查询
 	query := h.db.Model(&model.Host{})
@@ -64,8 +65,11 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 	if businessLine != "" {
 		query = query.Where("business_line = ?", businessLine)
 	}
-	// 容器/主机类型筛选
-	if isContainerStr != "" {
+	// 运行环境类型筛选（优先使用新参数）
+	if runtimeType != "" && model.IsValidRuntimeType(runtimeType) {
+		query = query.Where("runtime_type = ?", runtimeType)
+	} else if isContainerStr != "" {
+		// 向后兼容：容器/主机类型筛选
 		isContainer := isContainerStr == "true"
 		query = query.Where("is_container = ?", isContainer)
 	}
@@ -236,11 +240,10 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		return
 	}
 
-	// 查询基线结果
+	// 查询基线结果（移除数量限制，返回所有结果）
 	var results []model.ScanResult
 	h.db.Where("host_id = ?", hostID).
 		Order("checked_at DESC").
-		Limit(100).
 		Find(&results)
 
 	// 查询最新监控数据
@@ -615,4 +618,198 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 		"message": "更新成功",
 		"data":    host,
 	})
+}
+
+// HostPluginResponse 主机插件响应
+type HostPluginResponse struct {
+	ID            uint   `json:"id"`
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	Status        string `json:"status"`
+	StartTime     string `json:"start_time,omitempty"`
+	UpdatedAt     string `json:"updated_at"`
+	LatestVersion string `json:"latest_version"`
+	NeedUpdate    bool   `json:"need_update"`
+}
+
+// GetHostPlugins 获取主机插件列表
+// GET /api/v1/hosts/:host_id/plugins
+func (h *HostsHandler) GetHostPlugins(c *gin.Context) {
+	hostID := c.Param("host_id")
+	if hostID == "" {
+		BadRequest(c, "host_id 不能为空")
+		return
+	}
+
+	// 检查主机是否存在
+	var host model.Host
+	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "主机不存在")
+			return
+		}
+		h.logger.Error("查询主机失败", zap.String("host_id", hostID), zap.Error(err))
+		InternalError(c, "查询主机失败")
+		return
+	}
+
+	// 查询主机插件
+	var hostPlugins []model.HostPlugin
+	if err := h.db.Where("host_id = ?", hostID).Find(&hostPlugins).Error; err != nil {
+		h.logger.Error("查询主机插件失败", zap.String("host_id", hostID), zap.Error(err))
+		InternalError(c, "查询主机插件失败")
+		return
+	}
+
+	// 查询最新插件版本（从 plugin_configs 表）
+	var pluginConfigs []model.PluginConfig
+	if err := h.db.Where("enabled = ?", true).Find(&pluginConfigs).Error; err != nil {
+		h.logger.Warn("查询插件配置失败", zap.Error(err))
+	}
+
+	// 构建插件名称到最新版本的映射
+	latestVersions := make(map[string]string)
+	for _, pc := range pluginConfigs {
+		latestVersions[pc.Name] = pc.Version
+	}
+
+	// 构建响应
+	var response []HostPluginResponse
+	for _, hp := range hostPlugins {
+		latestVersion := latestVersions[hp.Name]
+		needUpdate := latestVersion != "" && hp.Version != latestVersion
+
+		item := HostPluginResponse{
+			ID:            hp.ID,
+			Name:          hp.Name,
+			Version:       hp.Version,
+			Status:        string(hp.Status),
+			UpdatedAt:     hp.UpdatedAt.Time().Format("2006-01-02 15:04:05"),
+			LatestVersion: latestVersion,
+			NeedUpdate:    needUpdate,
+		}
+		if hp.StartTime != nil {
+			item.StartTime = hp.StartTime.Time().Format("2006-01-02 15:04:05")
+		}
+		response = append(response, item)
+	}
+
+	// 如果主机没有插件记录，但有可用的插件配置，显示为未安装
+	for name, latestVersion := range latestVersions {
+		found := false
+		for _, hp := range hostPlugins {
+			if hp.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			response = append(response, HostPluginResponse{
+				Name:          name,
+				Version:       "-",
+				Status:        "not_installed",
+				LatestVersion: latestVersion,
+				NeedUpdate:    true,
+			})
+		}
+	}
+
+	Success(c, response)
+}
+
+// DeleteHost 删除主机
+// DELETE /api/v1/hosts/:host_id
+func (h *HostsHandler) DeleteHost(c *gin.Context) {
+	hostID := c.Param("host_id")
+
+	// 查询主机是否存在
+	var host model.Host
+	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "主机不存在")
+			return
+		}
+		h.logger.Error("查询主机失败", zap.String("host_id", hostID), zap.Error(err))
+		InternalError(c, "查询主机失败")
+		return
+	}
+
+	// 使用事务删除主机及其所有关联数据
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		// 1. 删除扫描结果
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.ScanResult{}).Error; err != nil {
+			return err
+		}
+
+		// 2. 删除告警
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Alert{}).Error; err != nil {
+			return err
+		}
+
+		// 3. 删除主机监控数据
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostMetric{}).Error; err != nil {
+			return err
+		}
+
+		// 4. 删除主机插件信息
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostPlugin{}).Error; err != nil {
+			return err
+		}
+
+		// 5. 删除资产数据（进程、端口、软件、容器等）
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Process{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Port{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Software{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Container{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.AssetUser{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Cron{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Service{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.NetInterface{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Volume{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Kmod{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.App{}).Error; err != nil {
+			return err
+		}
+
+		// 6. 清除基线得分缓存
+		if h.scoreCache != nil {
+			h.scoreCache.InvalidateHostScore(hostID)
+		}
+
+		// 7. 最后删除主机记录
+		if err := tx.Delete(&host).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		h.logger.Error("删除主机失败", zap.String("host_id", hostID), zap.Error(err))
+		InternalError(c, "删除主机失败")
+		return
+	}
+
+	h.logger.Info("主机已删除", zap.String("host_id", hostID), zap.String("hostname", host.Hostname))
+	SuccessMessage(c, "主机删除成功")
 }

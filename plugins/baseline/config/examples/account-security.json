@@ -96,20 +96,20 @@
     {
       "rule_id": "LINUX_ACCOUNT_005",
       "category": "account",
-      "title": "所有账户都有密码",
-      "description": "所有可登录账户都应设置密码",
+      "title": "无空密码可交互登录账户",
+      "description": "可交互登录的账户不应设置空密码（使用SSH Key登录或锁定的账户除外）",
       "severity": "high",
       "check": {
         "condition": "all",
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($2 == \"\" || $2 == \"!\") { print $1 }' /etc/shadow 2>/dev/null | wc -l", "^0$"]
+            "param": ["awk -F: '($2 == \"\") { print $1 }' /etc/shadow 2>/dev/null | while read user; do shell=$(getent passwd $user | cut -d: -f7); if [[ \"$shell\" != */nologin && \"$shell\" != */false && \"$shell\" != \"\" ]]; then echo $user; fi; done | wc -l", "^0$"]
           }
         ]
       },
       "fix": {
-        "suggestion": "为空密码账户设置密码或锁定账户"
+        "suggestion": "为空密码账户设置密码、锁定账户或设置为不可登录shell"
       }
     },
     {
@@ -182,20 +182,20 @@
     {
       "rule_id": "LINUX_ACCOUNT_009",
       "category": "account",
-      "title": "用户主目录存在",
-      "description": "所有用户的主目录应存在",
+      "title": "可登录用户主目录存在",
+      "description": "可交互登录用户的主目录应存在",
       "severity": "low",
       "check": {
         "condition": "all",
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($3 >= 1000 && $6 != \"\" && $6 != \"/dev/null\") { system(\"test -d \" $6 \" || echo \" $1) }' /etc/passwd | wc -l", "^0$"]
+            "param": ["awk -F: '($3 >= 1000 && $6 != \"\" && $6 != \"/dev/null\" && $7 !~ /nologin|false/) { system(\"test -d \" $6 \" || echo \" $1) }' /etc/passwd | wc -l", "^0$"]
           }
         ]
       },
       "fix": {
-        "suggestion": "为用户创建缺失的主目录"
+        "suggestion": "为可登录用户创建缺失的主目录：mkhomedir_helper <username>"
       }
     },
     {
@@ -315,6 +315,126 @@
       },
       "fix": {
         "suggestion": "配置 wheel 组的 sudo 权限"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_016",
+      "category": "account",
+      "title": "不存在用户 .rhosts 文件",
+      "description": ".rhosts 文件允许远程主机无密码访问，存在严重安全风险",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["find /home /root -name '.rhosts' 2>/dev/null | wc -l", "^0$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "删除所有用户的 .rhosts 文件",
+        "command": "find /home /root -name '.rhosts' -delete 2>/dev/null"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_017",
+      "category": "account",
+      "title": "不存在用户 .netrc 文件",
+      "description": ".netrc 文件存储 FTP 密码，存在安全风险",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["find /home /root -name '.netrc' 2>/dev/null | wc -l", "^0$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "删除所有用户的 .netrc 文件",
+        "command": "find /home /root -name '.netrc' -delete 2>/dev/null"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_018",
+      "category": "account",
+      "title": "不存在用户 .forward 文件",
+      "description": ".forward 文件可被用于邮件转发攻击",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["find /home /root -name '.forward' 2>/dev/null | wc -l", "^0$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "删除所有用户的 .forward 文件",
+        "command": "find /home /root -name '.forward' -delete 2>/dev/null"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_019",
+      "category": "account",
+      "title": "root PATH 不含当前目录",
+      "description": "root 用户的 PATH 环境变量不应包含当前目录(.)，防止特洛伊木马攻击",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["echo $PATH | grep -E '(^|:)\\.(:|\\/|$)' && echo FOUND || echo OK", "^OK$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "从 root 用户的 PATH 中移除当前目录(.)",
+        "command": "sed -i 's/:.:/:/' /root/.bashrc /root/.bash_profile /etc/profile 2>/dev/null"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_020",
+      "category": "account",
+      "title": "root PATH 不含组可写目录",
+      "description": "root 用户的 PATH 中的目录不应为组或其他用户可写",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["for dir in $(echo $PATH | tr ':' ' '); do [ -d \"$dir\" ] && stat -c '%a' \"$dir\" 2>/dev/null | grep -qE '^[0-7][2367][0-7]$' && echo $dir; done | wc -l", "^0$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 PATH 中组可写目录的权限",
+        "command": "for dir in $(echo $PATH | tr ':' ' '); do chmod g-w,o-w \"$dir\" 2>/dev/null; done"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_021",
+      "category": "account",
+      "title": "su 命令限制为 wheel 组",
+      "description": "su 命令应限制为 wheel 组成员使用，通过 pam_wheel.so 实现",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/pam.d/su", "pam_wheel.so", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "配置 /etc/pam.d/su，启用 pam_wheel.so",
+        "command": "sed -i 's/^#auth.*pam_wheel.so/auth required pam_wheel.so/' /etc/pam.d/su"
       }
     }
   ]

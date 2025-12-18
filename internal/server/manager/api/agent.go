@@ -48,12 +48,11 @@ func (h *AgentHandler) InstallScript(c *gin.Context) {
 	if httpHost == "" {
 		// 如果还是为空，使用配置的地址
 		httpHost = h.httpAddress
-		// 如果配置的地址是 localhost，尝试从请求中获取实际地址
-		if strings.Contains(httpHost, "localhost") || strings.Contains(httpHost, "127.0.0.1") {
-			// 从请求的 RemoteAddr 或 X-Forwarded-For 获取客户端 IP
-			// 但这里我们需要的是服务器地址，不是客户端地址
-			// 所以如果配置是 localhost，我们保持使用 Host 头（如果存在）
-			// 否则使用配置的地址（可能是开发环境）
+		// 如果配置的地址是 0.0.0.0 或 localhost，尝试从请求中获取实际地址
+		if strings.Contains(httpHost, "0.0.0.0") || strings.Contains(httpHost, "localhost") || strings.Contains(httpHost, "127.0.0.1") {
+			// 尝试从 X-Forwarded-For 或 RemoteAddr 获取客户端 IP（作为服务器地址的参考）
+			// 但更可靠的方式是使用 Host 头（如果存在）
+			// 如果都没有，保持使用配置的地址（可能是开发环境）
 		}
 	}
 	// 确保有协议前缀
@@ -73,10 +72,33 @@ func (h *AgentHandler) InstallScript(c *gin.Context) {
 		httpHostOnly = strings.TrimPrefix(httpHostOnly, "https://")
 	}
 
+	// 获取 Agent Server 地址（gRPC 地址）
+	// 如果配置的地址是 0.0.0.0，使用 HTTP Host 的 host 部分 + gRPC 端口
+	agentServerHost := h.serverHost
+	if strings.Contains(agentServerHost, "0.0.0.0") {
+		// 从 httpHostOnly 中提取 host 部分（去掉端口）
+		hostPart := httpHostOnly
+		if idx := strings.LastIndex(httpHostOnly, ":"); idx > 0 {
+			hostPart = httpHostOnly[:idx]
+		}
+		// 从 serverHost 中提取端口部分
+		portPart := "6751"
+		if idx := strings.LastIndex(h.serverHost, ":"); idx > 0 {
+			portPart = h.serverHost[idx+1:]
+		}
+		agentServerHost = hostPart + ":" + portPart
+	}
+
 	// 替换脚本中的占位符
-	// 将 SERVER_HOST 替换为实际的 gRPC Server 地址（用于 Agent 连接）
-	scriptContent = strings.ReplaceAll(scriptContent, "${BLS_SERVER_HOST:-localhost:6751}", h.serverHost)
-	// 将下载 URL 中的 SERVER_HOST 替换为实际的 HTTP 地址（用于下载安装包）
+	// 1. 替换 Agent Server 地址占位符（用于 Agent 连接）
+	scriptContent = strings.ReplaceAll(scriptContent, "AGENT_SERVER_PLACEHOLDER", agentServerHost)
+	scriptContent = strings.ReplaceAll(scriptContent, "${BLS_SERVER_HOST:-localhost:6751}", agentServerHost)
+	scriptContent = strings.ReplaceAll(scriptContent, "${MXSEC_AGENT_SERVER:-AGENT_SERVER_PLACEHOLDER}", agentServerHost)
+
+	// 2. 替换 HTTP Server 地址占位符（用于下载安装包）
+	scriptContent = strings.ReplaceAll(scriptContent, "http://SERVER_HOST_PLACEHOLDER", httpHost)
+	scriptContent = strings.ReplaceAll(scriptContent, "SERVER_HOST_PLACEHOLDER", httpHostOnly)
+	// 兼容旧的占位符格式
 	scriptContent = strings.ReplaceAll(scriptContent, "http://${SERVER_HOST}/api/v1/agent/download", fmt.Sprintf("%s/api/v1/agent/download", httpHost))
 
 	// 设置响应头

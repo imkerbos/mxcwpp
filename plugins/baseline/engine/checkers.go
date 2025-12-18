@@ -225,16 +225,63 @@ func (c *CommandExecChecker) Check(ctx context.Context, rule *CheckRule) (*Check
 
 	// 执行命令
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
+	actual := strings.TrimSpace(string(output))
+
 	if err != nil {
+		// 检查是否是命令执行本身的错误
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode := exitError.ExitCode()
+
+			// exit code 127 表示命令不存在，直接返回失败
+			if exitCode == 127 {
+				return &CheckResult{
+					Pass:     false,
+					Actual:   fmt.Sprintf("命令不存在: %s", actual),
+					Expected: expected,
+				}, nil
+			}
+
+			// exit code 126 表示命令无法执行（权限问题等）
+			if exitCode == 126 {
+				return &CheckResult{
+					Pass:     false,
+					Actual:   fmt.Sprintf("命令无法执行: %s", actual),
+					Expected: expected,
+				}, nil
+			}
+
+			// 其他非零退出码，尝试匹配输出内容
+			// 某些命令用退出码表示状态但仍有有效输出（如 grep 未找到返回 1）
+			if actual != "" {
+				// 尝试匹配输出
+				matched, matchErr := regexp.MatchString(expected, actual)
+				if matchErr != nil {
+					matched = strings.EqualFold(actual, expected)
+				}
+				if matched {
+					return &CheckResult{
+						Pass:     true,
+						Actual:   actual,
+						Expected: expected,
+					}, nil
+				}
+			}
+
+			// 输出不匹配，返回失败
+			return &CheckResult{
+				Pass:     false,
+				Actual:   fmt.Sprintf("命令退出码 %d，输出: %s", exitCode, actual),
+				Expected: expected,
+			}, nil
+		}
+		// 命令执行失败（如命令不存在）
 		return &CheckResult{
 			Pass:     false,
 			Actual:   fmt.Sprintf("命令执行失败: %v", err),
 			Expected: expected,
 		}, nil
 	}
-
-	actual := strings.TrimSpace(string(output))
 
 	// 匹配输出（支持正则）
 	matched, err := regexp.MatchString(expected, actual)
@@ -424,6 +471,14 @@ func NewServiceStatusChecker(logger *zap.Logger) *ServiceStatusChecker {
 	return &ServiceStatusChecker{logger: logger}
 }
 
+// serviceCheckResult 服务检查的内部结果
+type serviceCheckResult struct {
+	status      string // active, inactive, not_installed 等
+	enabled     string // enabled, disabled, not_found 等
+	installed   bool   // 服务单元是否存在
+	description string // 额外描述信息
+}
+
 // Check 执行检查
 func (c *ServiceStatusChecker) Check(ctx context.Context, rule *CheckRule) (*CheckResult, error) {
 	if len(rule.Param) < 2 {
@@ -434,53 +489,331 @@ func (c *ServiceStatusChecker) Check(ctx context.Context, rule *CheckRule) (*Che
 	expectedStatus := strings.ToLower(rule.Param[1]) // active, inactive, enabled, disabled 等
 
 	// 尝试使用 systemctl（systemd）
-	actualStatus, err := c.checkSystemdService(ctx, serviceName)
+	result, err := c.checkSystemdServiceDetailed(ctx, serviceName)
 	if err != nil {
-		// 如果 systemctl 失败，尝试使用 service 命令（SysV）
-		actualStatus, err = c.checkSysVService(ctx, serviceName)
-		if err != nil {
+		// 如果 systemctl 完全不可用，尝试使用 service 命令（SysV）
+		actualStatus, sysVErr := c.checkSysVService(ctx, serviceName)
+		if sysVErr != nil {
+			// 如果期望状态是 inactive 或 disabled，服务检查失败意味着服务不存在
+			// 服务未安装 = 不存在安全风险，无需禁用
+			if expectedStatus == "inactive" || expectedStatus == "disabled" {
+				return &CheckResult{
+					Pass:     true,
+					Actual:   fmt.Sprintf("服务 %s 未安装，无需禁用", serviceName),
+					Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, expectedStatus),
+				}, nil
+			}
 			return &CheckResult{
 				Pass:     false,
-				Actual:   fmt.Sprintf("无法检查服务状态: %v", err),
+				Actual:   fmt.Sprintf("服务 %s 未安装或无法检查: %v", serviceName, err),
 				Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, expectedStatus),
 			}, nil
 		}
+		// SysV 成功，构建结果
+		result = &serviceCheckResult{
+			status:    actualStatus,
+			installed: true,
+		}
 	}
 
-	// 规范化状态值
-	normalizedActual := c.normalizeStatus(actualStatus)
-	normalizedExpected := c.normalizeStatus(expectedStatus)
+	// 处理服务未安装的情况
+	if !result.installed {
+		// 如果期望状态是 inactive 或 disabled，服务未安装应该视为通过
+		// 服务未安装 = 不存在安全风险，无需禁用
+		if expectedStatus == "inactive" || expectedStatus == "disabled" {
+			return &CheckResult{
+				Pass:     true,
+				Actual:   fmt.Sprintf("服务 %s 未安装，无需禁用", serviceName),
+				Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, expectedStatus),
+			}, nil
+		}
+		// 如果期望状态是 active 或 enabled，服务未安装是不通过的
+		return &CheckResult{
+			Pass:     false,
+			Actual:   fmt.Sprintf("服务 %s 未安装", serviceName),
+			Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, expectedStatus),
+		}, nil
+	}
 
-	pass := strings.EqualFold(normalizedActual, normalizedExpected)
+	// 服务已安装，进行状态匹配
+	pass := c.matchStatus(result, expectedStatus)
+	actualDisplay := c.formatActualStatus(serviceName, result, expectedStatus)
 
 	return &CheckResult{
 		Pass:     pass,
-		Actual:   fmt.Sprintf("服务 %s 状态: %s", serviceName, normalizedActual),
-		Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, normalizedExpected),
+		Actual:   actualDisplay,
+		Expected: fmt.Sprintf("服务 %s 状态应为: %s", serviceName, expectedStatus),
 	}, nil
 }
 
-// checkSystemdService 检查 systemd 服务状态
-func (c *ServiceStatusChecker) checkSystemdService(ctx context.Context, serviceName string) (string, error) {
+// matchStatus 智能匹配服务状态
+func (c *ServiceStatusChecker) matchStatus(result *serviceCheckResult, expected string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	actualActive := strings.ToLower(result.status)
+	actualEnabled := strings.ToLower(result.enabled)
+
+	// 处理组合期望值（如 "active+enabled"）
+	if strings.Contains(expected, "+") {
+		parts := strings.Split(expected, "+")
+		if len(parts) == 2 {
+			expectedActive := parts[0]
+			expectedEnabled := parts[1]
+			return c.matchActiveStatus(actualActive, expectedActive) &&
+				c.matchEnabledStatus(actualEnabled, expectedEnabled)
+		}
+	}
+
+	// 单个状态值检查
+	switch expected {
+	case "active", "running", "started":
+		return c.matchActiveStatus(actualActive, "active")
+	case "inactive", "stopped", "dead":
+		return c.matchActiveStatus(actualActive, "inactive")
+	case "enabled":
+		return c.matchEnabledStatus(actualEnabled, "enabled")
+	case "disabled":
+		return c.matchEnabledStatus(actualEnabled, "disabled")
+	default:
+		// 精确匹配
+		return actualActive == expected || actualEnabled == expected
+	}
+}
+
+// matchActiveStatus 匹配活跃状态
+func (c *ServiceStatusChecker) matchActiveStatus(actual, expected string) bool {
+	// 规范化状态值
+	switch actual {
+	case "active", "running", "started", "activating":
+		return expected == "active"
+	case "inactive", "stopped", "dead", "deactivating", "failed":
+		return expected == "inactive"
+	}
+	return actual == expected
+}
+
+// matchEnabledStatus 匹配启用状态
+func (c *ServiceStatusChecker) matchEnabledStatus(actual, expected string) bool {
+	// 规范化期望值
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	actual = strings.ToLower(strings.TrimSpace(actual))
+
+	// "enabled" 状态匹配
+	if expected == "enabled" {
+		switch actual {
+		case "enabled", "enabled-runtime", "alias":
+			return true
+		case "static", "indirect", "generated":
+			// static: 服务没有 [Install] 部分，但会被其他服务依赖时自动启动
+			// indirect: 服务通过其他服务间接启用
+			// generated: 服务由 generator 动态生成
+			// 这些都视为"已启用"
+			return true
+		}
+		return false
+	}
+
+	// "disabled" 状态匹配
+	if expected == "disabled" {
+		switch actual {
+		case "disabled", "masked", "not_found", "not-found":
+			return true
+		}
+		return false
+	}
+
+	// 精确匹配
+	return actual == expected
+}
+
+// formatActualStatus 格式化实际状态显示
+// 根据期望状态智能显示实际状态，使比较更加清晰
+func (c *ServiceStatusChecker) formatActualStatus(serviceName string, result *serviceCheckResult, expectedStatus string) string {
+	expectedStatus = strings.ToLower(strings.TrimSpace(expectedStatus))
+
+	// 获取中文描述
+		activeDesc := c.getActiveStatusDesc(result.status)
+		enabledDesc := c.getEnabledStatusDesc(result.enabled)
+
+	// 如果期望的是运行状态（active/inactive）
+	if expectedStatus == "active" || expectedStatus == "running" || expectedStatus == "started" ||
+		expectedStatus == "inactive" || expectedStatus == "stopped" || expectedStatus == "dead" {
+		// 显示运行状态和中文描述
+		if result.enabled != "" && result.enabled != "not_found" {
+			return fmt.Sprintf("服务 %s 状态: %s（%s，%s）", serviceName, result.status, activeDesc, enabledDesc)
+	}
+		return fmt.Sprintf("服务 %s 状态: %s（%s）", serviceName, result.status, activeDesc)
+	}
+
+	// 如果期望的是启用状态（enabled/disabled）
+	if expectedStatus == "enabled" || expectedStatus == "disabled" {
+		// 显示启用状态和中文描述
+		return fmt.Sprintf("服务 %s 状态: %s（%s，%s）", serviceName, result.enabled, activeDesc, enabledDesc)
+	}
+
+	// 如果期望的是组合状态（如 active+enabled）
+	if strings.Contains(expectedStatus, "+") {
+		return fmt.Sprintf("服务 %s 状态: %s+%s（%s，%s）", serviceName, result.status, result.enabled, activeDesc, enabledDesc)
+	}
+
+	// 默认显示完整状态
+	if result.enabled != "" && result.enabled != "not_found" {
+		return fmt.Sprintf("服务 %s: %s, %s（%s+%s）", serviceName, activeDesc, enabledDesc, result.status, result.enabled)
+	}
+	return fmt.Sprintf("服务 %s: %s（%s）", serviceName, activeDesc, result.status)
+}
+
+// getActiveStatusDesc 获取运行状态的描述
+func (c *ServiceStatusChecker) getActiveStatusDesc(status string) string {
+	switch strings.ToLower(status) {
+	case "active", "running", "started":
+		return "运行中"
+	case "inactive", "stopped", "dead":
+		return "已停止"
+	case "activating":
+		return "启动中"
+	case "deactivating":
+		return "停止中"
+	case "failed":
+		return "失败"
+	default:
+		return status
+	}
+}
+
+// getEnabledStatusDesc 获取开机启动状态的描述
+func (c *ServiceStatusChecker) getEnabledStatusDesc(enabled string) string {
+	switch strings.ToLower(enabled) {
+	case "enabled", "enabled-runtime":
+		return "开机自启"
+	case "disabled":
+		return "开机不启动"
+	case "static":
+		return "静态服务(依赖时启动)"
+	case "masked":
+		return "已屏蔽"
+	case "indirect":
+		return "间接启用"
+	case "generated":
+		return "动态生成"
+	default:
+		return enabled
+	}
+}
+
+// checkSystemdServiceDetailed 检查 systemd 服务状态（详细版本）
+func (c *ServiceStatusChecker) checkSystemdServiceDetailed(ctx context.Context, serviceName string) (*serviceCheckResult, error) {
+	result := &serviceCheckResult{
+		installed: true,
+	}
+
 	// 检查服务是否活跃（is-active）
 	cmd := exec.CommandContext(ctx, "systemctl", "is-active", serviceName)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
+	output, err := cmd.CombinedOutput()
 	activeStatus := strings.TrimSpace(string(output))
+
+	if err != nil {
+		// 检查退出码
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode := exitError.ExitCode()
+			// exit code 4 表示服务单元不存在（Unit not found）
+			// 也检查输出内容，有些系统可能返回不同的文本
+			if exitCode == 4 || activeStatus == "unknown" ||
+				strings.Contains(activeStatus, "not be found") ||
+				strings.Contains(activeStatus, "not found") ||
+				strings.Contains(activeStatus, "No such file") {
+				result.installed = false
+				result.status = "not_installed"
+				result.enabled = "not_found"
+				return result, nil
+			}
+			// exit code 3 表示服务未运行（inactive）
+			if exitCode == 3 {
+				result.status = "inactive"
+			} else if exitCode == 1 {
+				// exit code 1 也可能表示 inactive 或 failed
+				if activeStatus == "inactive" || activeStatus == "failed" || activeStatus == "dead" {
+					result.status = activeStatus
+				} else {
+					result.status = "inactive"
+				}
+			} else {
+				// 其他错误，使用输出内容作为状态
+				result.status = activeStatus
+				if result.status == "" {
+					result.status = "unknown"
+				}
+			}
+		} else {
+			// 非退出码错误（如 systemctl 命令不存在）
+			return nil, fmt.Errorf("systemctl 命令执行失败: %w", err)
+		}
+	} else {
+		result.status = activeStatus
+	}
 
 	// 检查服务是否启用（is-enabled）
 	cmd = exec.CommandContext(ctx, "systemctl", "is-enabled", serviceName)
-	output, err = cmd.Output()
-	if err != nil {
-		// 如果 is-enabled 失败，只返回 active 状态
-		return activeStatus, nil
-	}
+	output, err = cmd.CombinedOutput()
 	enabledStatus := strings.TrimSpace(string(output))
 
-	// 组合状态：active+enabled, active+disabled, inactive+enabled, inactive+disabled
-	return fmt.Sprintf("%s+%s", activeStatus, enabledStatus), nil
+	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode := exitError.ExitCode()
+
+			// exit code 4 也表示服务单元不存在
+			if exitCode == 4 ||
+				strings.Contains(enabledStatus, "not be found") ||
+				strings.Contains(enabledStatus, "not found") ||
+				strings.Contains(enabledStatus, "No such file") {
+				// 如果之前 is-active 没有检测到未安装，这里补充设置
+				if result.installed {
+					result.installed = false
+					result.status = "not_installed"
+				}
+				result.enabled = "not_found"
+				return result, nil
+			}
+
+			// exit code 1 可能表示 disabled、masked 或其他
+			if exitCode == 1 {
+				// 检查输出内容
+				switch enabledStatus {
+				case "disabled", "masked", "indirect", "static", "generated", "bad":
+					result.enabled = enabledStatus
+				default:
+					// 有些系统返回空或其他值，默认设为 disabled
+					if enabledStatus == "" {
+					result.enabled = "disabled"
+					} else {
+						result.enabled = enabledStatus
+					}
+				}
+			} else {
+				result.enabled = "not_found"
+			}
+		} else {
+			result.enabled = "not_found"
+		}
+	} else {
+		result.enabled = enabledStatus
+	}
+
+	return result, nil
+}
+
+// checkSystemdService 检查 systemd 服务状态（兼容旧接口）
+func (c *ServiceStatusChecker) checkSystemdService(ctx context.Context, serviceName string) (string, error) {
+	result, err := c.checkSystemdServiceDetailed(ctx, serviceName)
+	if err != nil {
+		return "", err
+	}
+	if !result.installed {
+		return "not_installed", nil
+	}
+	if result.enabled != "" && result.enabled != "not_found" {
+		return fmt.Sprintf("%s+%s", result.status, result.enabled), nil
+	}
+	return result.status, nil
 }
 
 // checkSysVService 检查 SysV 服务状态
@@ -497,46 +830,6 @@ func (c *ServiceStatusChecker) checkSysVService(ctx context.Context, serviceName
 		return "active", nil
 	}
 	return "inactive", nil
-}
-
-// normalizeStatus 规范化状态值
-func (c *ServiceStatusChecker) normalizeStatus(status string) string {
-	status = strings.ToLower(strings.TrimSpace(status))
-
-	// 处理组合状态（如 "active+enabled"）
-	if strings.Contains(status, "+") {
-		parts := strings.Split(status, "+")
-		if len(parts) == 2 {
-			active := parts[0]
-			enabled := parts[1]
-			if active == "active" && enabled == "enabled" {
-				return "active+enabled"
-			}
-			if active == "active" && enabled == "disabled" {
-				return "active+disabled"
-			}
-			if active == "inactive" && enabled == "enabled" {
-				return "inactive+enabled"
-			}
-			if active == "inactive" && enabled == "disabled" {
-				return "inactive+disabled"
-			}
-		}
-	}
-
-	// 处理单个状态值
-	switch status {
-	case "active", "running", "started":
-		return "active"
-	case "inactive", "stopped", "dead":
-		return "inactive"
-	case "enabled":
-		return "enabled"
-	case "disabled":
-		return "disabled"
-	default:
-		return status
-	}
 }
 
 // FileOwnerChecker 检查文件属主

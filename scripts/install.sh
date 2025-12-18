@@ -1,7 +1,14 @@
 #!/bin/bash
 
 # Matrix Cloud Security Platform Agent 一键安装脚本
-# 使用方法: curl -sS http://SERVER_IP:8080/agent/install.sh | bash
+# 使用方法（推荐）:
+#   curl -sS http://SERVER_IP:8080/agent/install.sh | bash
+# 
+# 或者通过环境变量自定义服务器地址:
+#   MXSEC_HTTP_SERVER=http://192.168.8.140:8080 MXSEC_AGENT_SERVER=192.168.8.140:6751 \
+#   bash -c "$(curl -fsSL http://192.168.8.140:8080/agent/install.sh)"
+#
+# 注意：如果使用前端代理（如 3000 端口），请确保代理已配置 /agent 路径
 
 set -e
 
@@ -13,14 +20,50 @@ NC='\033[0m' # No Color
 
 # 默认配置（可通过环境变量覆盖）
 # SERVER_HOST 用于下载安装包，应该指向 Manager HTTP 服务器（例如：10.0.0.1:8080）
-# BLS_SERVER_HOST 用于 Agent 连接，应该指向 AgentCenter gRPC 服务器（例如：10.0.0.1:6751）
-# BLS_BUSINESS_LINE 业务线标识（可选，如果设置，Agent 安装后会自动绑定到该业务线）
-# 如果未设置，将从脚本中自动替换（由 Manager API 动态替换）
-SERVER_HOST="${BLS_HTTP_SERVER:-localhost:8080}"
-AGENT_SERVER_HOST="${BLS_SERVER_HOST:-localhost:6751}"
-BUSINESS_LINE="${BLS_BUSINESS_LINE:-}"
-ARCH="${BLS_ARCH:-$(uname -m)}"
-OS_TYPE="${BLS_OS_TYPE:-}"
+# AGENT_SERVER_HOST 用于 Agent 连接，应该指向 AgentCenter gRPC 服务器（例如：10.0.0.1:6751）
+# BUSINESS_LINE 业务线标识（可选，如果设置，Agent 安装后会自动绑定到该业务线）
+# 注意：优先使用环境变量，如果环境变量未设置，脚本中的占位符会被 Manager API 自动替换
+
+# 优先使用环境变量（即使占位符已被后端替换）
+if [ -n "$MXSEC_HTTP_SERVER" ]; then
+    SERVER_HOST="$MXSEC_HTTP_SERVER"
+elif [ -n "$BLS_HTTP_SERVER" ]; then
+    SERVER_HOST="$BLS_HTTP_SERVER"
+else
+    # 如果环境变量未设置，使用占位符（会被后端替换）
+    SERVER_HOST="http://SERVER_HOST_PLACEHOLDER"
+fi
+
+if [ -n "$MXSEC_AGENT_SERVER" ]; then
+    AGENT_SERVER_HOST="$MXSEC_AGENT_SERVER"
+elif [ -n "$BLS_SERVER_HOST" ]; then
+    AGENT_SERVER_HOST="$BLS_SERVER_HOST"
+else
+    # 如果环境变量未设置，使用占位符（会被后端替换）
+    AGENT_SERVER_HOST="AGENT_SERVER_PLACEHOLDER"
+fi
+
+# 如果 SERVER_HOST 包含占位符或 0.0.0.0，说明环境变量未设置且后端替换失败，报错
+if [[ "$SERVER_HOST" == *"SERVER_HOST_PLACEHOLDER"* ]] || [[ "$SERVER_HOST" == *"0.0.0.0"* ]]; then
+    echo -e "${RED}Error: SERVER_HOST is not set correctly. Please set MXSEC_HTTP_SERVER environment variable.${NC}"
+    echo -e "${RED}Example: MXSEC_HTTP_SERVER=192.168.8.140:8080${NC}"
+    exit 1
+fi
+
+# 如果 AGENT_SERVER_HOST 包含占位符或 0.0.0.0，说明环境变量未设置且后端替换失败，报错
+if [[ "$AGENT_SERVER_HOST" == *"AGENT_SERVER_PLACEHOLDER"* ]] || [[ "$AGENT_SERVER_HOST" == *"0.0.0.0"* ]]; then
+    echo -e "${RED}Error: AGENT_SERVER_HOST is not set correctly. Please set MXSEC_AGENT_SERVER environment variable.${NC}"
+    echo -e "${RED}Example: MXSEC_AGENT_SERVER=192.168.8.140:6751${NC}"
+    exit 1
+fi
+
+# 确保 SERVER_HOST 有协议前缀（如果没有）
+if [[ "$SERVER_HOST" != http://* ]] && [[ "$SERVER_HOST" != https://* ]]; then
+    SERVER_HOST="http://${SERVER_HOST}"
+fi
+BUSINESS_LINE="${MXSEC_BUSINESS_LINE:-${BLS_BUSINESS_LINE:-}}"
+ARCH="${MXSEC_ARCH:-${BLS_ARCH:-$(uname -m)}}"
+OS_TYPE="${MXSEC_OS_TYPE:-${BLS_OS_TYPE:-}}"
 
 # 检测操作系统类型
 detect_os() {
@@ -73,24 +116,74 @@ determine_package_manager() {
 
 # 下载安装包
 download_package() {
-    echo -e "${GREEN}Downloading agent package...${NC}"
+    # 所有输出都重定向到 stderr，避免影响返回值
+    echo -e "${GREEN}Downloading agent package...${NC}" >&2
     
     # 构建下载 URL
     # SERVER_HOST 在脚本中会被替换为实际的 HTTP 服务器地址
-    DOWNLOAD_URL="http://${SERVER_HOST}/api/v1/agent/download/${PKG_TYPE}/${ARCH}"
+    # 如果 SERVER_HOST 包含协议前缀，直接使用；否则添加 http://
+    if [[ "$SERVER_HOST" == http://* ]] || [[ "$SERVER_HOST" == https://* ]]; then
+        DOWNLOAD_URL="${SERVER_HOST}/api/v1/agent/download/${PKG_TYPE}/${ARCH}"
+    else
+        DOWNLOAD_URL="http://${SERVER_HOST}/api/v1/agent/download/${PKG_TYPE}/${ARCH}"
+    fi
+    
+    echo -e "${GREEN}Download URL: ${DOWNLOAD_URL}${NC}" >&2
     
     TEMP_DIR=$(mktemp -d)
     PACKAGE_FILE="${TEMP_DIR}/mxsec-agent.${PKG_TYPE}"
     
+    # 下载文件
     if command -v curl &> /dev/null; then
-        curl -f -L -o "$PACKAGE_FILE" "$DOWNLOAD_URL"
+        if ! curl -f -L -o "$PACKAGE_FILE" "$DOWNLOAD_URL"; then
+            echo -e "${RED}Error: Failed to download agent package from ${DOWNLOAD_URL}${NC}" >&2
+            echo -e "${RED}Please check the server address and network connection.${NC}" >&2
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
     elif command -v wget &> /dev/null; then
-        wget -O "$PACKAGE_FILE" "$DOWNLOAD_URL"
+        if ! wget -O "$PACKAGE_FILE" "$DOWNLOAD_URL"; then
+            echo -e "${RED}Error: Failed to download agent package from ${DOWNLOAD_URL}${NC}" >&2
+            echo -e "${RED}Please check the server address and network connection.${NC}" >&2
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
     else
-        echo -e "${RED}Error: curl or wget is required${NC}"
+        echo -e "${RED}Error: curl or wget is required${NC}" >&2
         exit 1
     fi
     
+    # 检查文件是否存在且不为空
+    if [ ! -f "$PACKAGE_FILE" ] || [ ! -s "$PACKAGE_FILE" ]; then
+        echo -e "${RED}Error: Downloaded file is empty or does not exist${NC}" >&2
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    # 检查文件类型（防止下载到 HTML 错误页面）
+    file_type=$(file -b "$PACKAGE_FILE" 2>/dev/null || echo "")
+    if [[ "$PKG_TYPE" == "rpm" ]] && [[ "$file_type" != *"RPM"* ]] && [[ "$file_type" != *"rpm"* ]]; then
+        # 检查是否是 HTML 错误页面
+        if head -n 1 "$PACKAGE_FILE" | grep -q "<!DOCTYPE\|<html"; then
+            echo -e "${RED}Error: Server returned HTML instead of RPM package${NC}" >&2
+            echo -e "${RED}Response: $(head -n 5 "$PACKAGE_FILE")${NC}" >&2
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
+        echo -e "${YELLOW}Warning: File type check failed, but continuing...${NC}" >&2
+    elif [[ "$PKG_TYPE" == "deb" ]] && [[ "$file_type" != *"Debian"* ]] && [[ "$file_type" != *"debian"* ]]; then
+        # 检查是否是 HTML 错误页面
+        if head -n 1 "$PACKAGE_FILE" | grep -q "<!DOCTYPE\|<html"; then
+            echo -e "${RED}Error: Server returned HTML instead of DEB package${NC}" >&2
+            echo -e "${RED}Response: $(head -n 5 "$PACKAGE_FILE")${NC}" >&2
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
+        echo -e "${YELLOW}Warning: File type check failed, but continuing...${NC}" >&2
+    fi
+    
+    echo -e "${GREEN}Package downloaded successfully: ${PACKAGE_FILE}${NC}" >&2
+    # 只输出文件路径到 stdout（用于返回值）
     echo "$PACKAGE_FILE"
 }
 
@@ -98,21 +191,47 @@ download_package() {
 install_package() {
     PACKAGE_FILE="$1"
     
-    echo -e "${GREEN}Installing agent...${NC}"
+    if [ ! -f "$PACKAGE_FILE" ]; then
+        echo -e "${RED}Error: Package file not found: ${PACKAGE_FILE}${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}Installing agent from ${PACKAGE_FILE}...${NC}"
     
     if [ "$PKG_TYPE" = "rpm" ]; then
         if [ "$PKG_MANAGER" = "yum" ]; then
-            yum install -y "$PACKAGE_FILE"
+            if ! yum install -y "$PACKAGE_FILE"; then
+                echo -e "${RED}Error: Failed to install RPM package${NC}"
+                echo -e "${RED}Please check the package file: ${PACKAGE_FILE}${NC}"
+                rm -f "$PACKAGE_FILE"
+                rmdir "$(dirname "$PACKAGE_FILE")" 2>/dev/null
+                exit 1
+            fi
         else
-            dnf install -y "$PACKAGE_FILE"
+            if ! dnf install -y "$PACKAGE_FILE"; then
+                echo -e "${RED}Error: Failed to install RPM package${NC}"
+                echo -e "${RED}Please check the package file: ${PACKAGE_FILE}${NC}"
+                rm -f "$PACKAGE_FILE"
+                rmdir "$(dirname "$PACKAGE_FILE")" 2>/dev/null
+                exit 1
+            fi
         fi
     else
-        apt-get update
-        apt-get install -y "$PACKAGE_FILE"
+        if ! apt-get update; then
+            echo -e "${YELLOW}Warning: apt-get update failed, but continuing...${NC}"
+        fi
+        if ! apt-get install -y "$PACKAGE_FILE"; then
+            echo -e "${RED}Error: Failed to install DEB package${NC}"
+            echo -e "${RED}Please check the package file: ${PACKAGE_FILE}${NC}"
+            rm -f "$PACKAGE_FILE"
+            rmdir "$(dirname "$PACKAGE_FILE")" 2>/dev/null
+            exit 1
+        fi
     fi
     
+    echo -e "${GREEN}Package installed successfully${NC}"
     rm -f "$PACKAGE_FILE"
-    rmdir "$(dirname "$PACKAGE_FILE")"
+    rmdir "$(dirname "$PACKAGE_FILE")" 2>/dev/null
 }
 
 # 配置业务线环境变量（如果提供了）

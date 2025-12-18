@@ -77,22 +77,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '平台授权' },
       },
       {
-        path: 'system/tasks',
-        name: 'SystemTasks',
-        component: () => import('@/views/System/Tasks.vue'),
-        meta: { title: '任务列表' },
-      },
-      {
         path: 'system/components',
         name: 'SystemComponents',
         component: () => import('@/views/System/Components.vue'),
         meta: { title: '组件列表' },
-      },
-      {
-        path: 'system/policy',
-        name: 'SystemPolicy',
-        component: () => import('@/views/System/Policy.vue'),
-        meta: { title: '组件策略' },
       },
       {
         path: 'system/install',
@@ -122,7 +110,13 @@ const routes: RouteRecordRaw[] = [
         path: 'system/reports',
         name: 'SystemReports',
         component: () => import('@/views/System/Reports.vue'),
-        meta: { title: '报告管理' },
+        meta: { title: '统计报表' },
+      },
+      {
+        path: 'system/task-report',
+        name: 'SystemTaskReport',
+        component: () => import('@/views/System/TaskReport.vue'),
+        meta: { title: '任务报告' },
       },
       {
         path: 'alerts',
@@ -137,6 +131,25 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '告警详情' },
       },
     ],
+  },
+  // 404 错误页面
+  {
+    path: '/404',
+    name: 'NotFound',
+    component: () => import('@/views/Error/404.vue'),
+    meta: { title: '页面不存在', public: true },
+  },
+  // 500 错误页面
+  {
+    path: '/500',
+    name: 'ServerError',
+    component: () => import('@/views/Error/500.vue'),
+    meta: { title: '服务器错误', public: true },
+  },
+  // 捕获所有未匹配的路由
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/404',
   },
 ]
 
@@ -181,10 +194,26 @@ router.beforeEach(async (to, from, next) => {
       return
     }
     // 初始化认证信息
-    await authStore.initAuth()
+    try {
+      await authStore.initAuth()
+    } catch (error) {
+      console.error('认证初始化失败:', error)
+      // 认证失败，跳转到登录页
+      next('/login')
+      return
+    }
   }
 
   next()
+})
+
+// 路由错误处理
+router.onError((error) => {
+  console.error('路由错误:', error)
+  // 如果是组件加载失败，跳转到 500 页面
+  if (error.message && error.message.includes('Failed to fetch dynamically imported module')) {
+    router.push('/500')
+  }
 })
 
 export default router

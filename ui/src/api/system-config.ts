@@ -12,6 +12,11 @@ export interface SiteConfig {
   site_domain: string
 }
 
+export interface AlertConfig {
+  repeat_alert_interval: number // 重复告警通知间隔（分钟）
+  enable_periodic_summary: boolean // 是否启用定期汇总
+}
+
 export const systemConfigApi = {
   // 获取 Kubernetes 镜像配置
   getKubernetesImageConfig: async (): Promise<KubernetesImageConfig> => {
@@ -50,5 +55,15 @@ export const systemConfigApi = {
         'Content-Type': 'multipart/form-data',
       },
     })
+  },
+
+  // 获取告警配置
+  getAlertConfig: async (): Promise<AlertConfig> => {
+    return apiClient.get<AlertConfig>('/system-config/alert')
+  },
+
+  // 更新告警配置
+  updateAlertConfig: async (data: AlertConfig): Promise<AlertConfig> => {
+    return apiClient.put<AlertConfig>('/system-config/alert', data)
   },
 }

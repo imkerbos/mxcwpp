@@ -174,13 +174,14 @@
           <a-select-option value="offline">离线</a-select-option>
         </a-select>
         <a-select
-          v-model:value="filters.is_container"
-          placeholder="类型"
+          v-model:value="filters.runtime_type"
+          placeholder="运行环境"
           style="width: 120px"
           allow-clear
         >
-          <a-select-option :value="false">主机</a-select-option>
-          <a-select-option :value="true">容器</a-select-option>
+          <a-select-option value="vm">虚拟机/物理机</a-select-option>
+          <a-select-option value="docker">Docker 容器</a-select-option>
+          <a-select-option value="k8s">K8s Pod</a-select-option>
         </a-select>
         <a-input
           v-model:value="filters.search"
@@ -217,8 +218,11 @@
             <a-button type="link" @click="handleViewDetail(record)">
               {{ record.hostname }}
             </a-button>
-            <a-tag v-if="record.is_container" color="blue" style="margin: 0;">
-              容器
+            <a-tag v-if="record.runtime_type === 'docker'" color="blue" style="margin: 0;">
+              Docker
+            </a-tag>
+            <a-tag v-else-if="record.runtime_type === 'k8s'" color="purple" style="margin: 0;">
+              K8s
             </a-tag>
           </div>
         </template>
@@ -243,7 +247,18 @@
           </div>
         </template>
         <template v-else-if="column.key === 'action'">
-          <a-button type="link" @click="handleViewDetail(record)">查看详情</a-button>
+          <a-space>
+            <a-button type="link" @click="handleViewDetail(record)">查看详情</a-button>
+            <a-popconfirm
+              title="确定要删除这台主机吗？"
+              description="删除后将同时删除该主机的所有扫描结果、告警和相关数据，此操作不可恢复。"
+              ok-text="确定"
+              cancel-text="取消"
+              @confirm="handleDeleteHost(record)"
+            >
+              <a-button type="link" danger>删除</a-button>
+            </a-popconfirm>
+          </a-space>
         </template>
       </template>
       <template #emptyText>
@@ -345,7 +360,7 @@ const filters = reactive({
   business_line: undefined as string | undefined,
   os_family: undefined as string | undefined,
   status: undefined as string | undefined,
-  is_container: undefined as boolean | undefined, // 容器/主机类型筛选
+  runtime_type: undefined as string | undefined, // 运行环境类型筛选：vm/docker/k8s
 })
 
 const statusTotal = computed(() => {
@@ -538,8 +553,8 @@ const loadHosts = async () => {
     if (filters.search && filters.search.trim()) {
       params.search = filters.search.trim()
     }
-    if (filters.is_container !== undefined) {
-      params.is_container = filters.is_container
+    if (filters.runtime_type) {
+      params.runtime_type = filters.runtime_type
     }
     const response = await hostsApi.list(params)
     hosts.value = response.items
@@ -601,7 +616,7 @@ const handleReset = () => {
   filters.business_line = undefined
   filters.os_family = undefined
   filters.status = undefined
-  filters.is_container = undefined
+  filters.runtime_type = undefined
   pagination.current = 1
   loadHosts()
 }
@@ -614,6 +629,22 @@ const handleTableChange = (pag: any) => {
 
 const handleViewDetail = (record: Host) => {
   router.push(`/hosts/${record.host_id}`)
+}
+
+// 删除主机
+const handleDeleteHost = async (record: Host) => {
+  try {
+    await hostsApi.delete(record.host_id)
+    message.success(`主机 ${record.hostname} 删除成功`)
+    
+    // 刷新主机列表和统计
+    loadHosts()
+    loadStatusDistribution()
+    loadRiskDistribution()
+  } catch (error: any) {
+    console.error('删除主机失败:', error)
+    message.error(error?.message || '删除主机失败，请重试')
+  }
 }
 
 // 批量绑定业务线

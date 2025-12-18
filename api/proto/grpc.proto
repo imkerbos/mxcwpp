@@ -42,6 +42,17 @@ message Command {
   repeated Config configs = 3;            // 配置列表（插件配置等）
   AgentConfig agent_config = 4;          // Agent 配置（Server 下发）
   CertificateBundle certificate_bundle = 5;  // 证书包（首次连接时下发）
+  AgentUpdate agent_update = 6;          // Agent 更新命令（新版本推送）
+}
+
+// AgentUpdate 是 Agent 更新命令
+message AgentUpdate {
+  string version = 1;                     // 新版本号
+  string download_url = 2;                // 下载地址
+  string sha256 = 3;                      // SHA256 校验和
+  string pkg_type = 4;                    // 包类型 (rpm/deb/binary)
+  string arch = 5;                        // 架构 (amd64/arm64)
+  bool force = 6;                         // 是否强制更新（即使版本相同也更新）
 }
 
 // AgentConfig 是 Agent 配置（由 Server 下发）

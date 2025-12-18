@@ -167,7 +167,8 @@
           :loading="policiesLoading"
           row-key="id"
           :scroll="{ x: 900 }"
-          :pagination="{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+          :pagination="policyPagination"
+          @change="handlePolicyTableChange"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'name'">
@@ -292,8 +293,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import {
   PlusOutlined,
@@ -314,6 +315,7 @@ import type { FormInstance } from 'ant-design-vue'
 import PolicyModal from '@/views/Policies/components/PolicyModal.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const policyGroups = ref<PolicyGroup[]>([])
@@ -329,6 +331,16 @@ const groupPolicies = ref<Policy[]>([])
 const policySearchKeyword = ref('')
 const policyModalVisible = ref(false)
 const editingPolicy = ref<Policy | null>(null)
+
+// 分页配置
+const policyPagination = reactive({
+  current: 1,
+  pageSize: 10,
+  total: 0,
+  showSizeChanger: true,
+  showTotal: (total: number) => `共 ${total} 条`,
+  pageSizeOptions: ['10', '20', '50', '100'],
+})
 
 const groupFormState = reactive({
   id: '',
@@ -384,14 +396,23 @@ const policyColumns = [
 ]
 
 const filteredPolicies = computed(() => {
-  if (!policySearchKeyword.value) {
-    return groupPolicies.value
+  let result = groupPolicies.value
+  if (policySearchKeyword.value) {
+    result = result.filter(p =>
+      p.name.toLowerCase().includes(policySearchKeyword.value.toLowerCase()) ||
+      p.id.toLowerCase().includes(policySearchKeyword.value.toLowerCase())
+    )
   }
-  return groupPolicies.value.filter(p =>
-    p.name.toLowerCase().includes(policySearchKeyword.value.toLowerCase()) ||
-    p.id.toLowerCase().includes(policySearchKeyword.value.toLowerCase())
-  )
+  // 更新分页总数
+  policyPagination.total = result.length
+  return result
 })
+
+// 表格分页变化处理
+const handlePolicyTableChange = (pag: any) => {
+  policyPagination.current = pag.current
+  policyPagination.pageSize = pag.pageSize
+}
 
 // 获取 OS 标签
 const getOSLabel = (os: string) => {
@@ -447,6 +468,8 @@ const getPassRateColor = (rate: number) => {
 // 进入策略组管理
 const handleEnterGroup = (group: PolicyGroup) => {
   currentGroup.value = group
+  // 更新 URL 参数
+  router.replace({ query: { group_id: group.id } })
   loadGroupPolicies()
 }
 
@@ -455,12 +478,15 @@ const handleBackToGroups = () => {
   currentGroup.value = null
   policySearchKeyword.value = ''
   groupPolicies.value = []
+  // 清除 URL 参数
+  router.replace({ query: {} })
   loadPolicyGroups()
 }
 
 // 搜索策略
 const handleSearchPolicies = () => {
-  // 通过 computed 自动过滤
+  // 搜索时重置页码
+  policyPagination.current = 1
 }
 
 // 创建策略组
@@ -658,9 +684,47 @@ const handlePolicyModalSuccess = () => {
   loadPolicyGroups()
 }
 
-onMounted(() => {
-  loadPolicyGroups()
+// 从 URL 参数恢复状态
+const restoreStateFromUrl = async () => {
+  const groupId = route.query.group_id as string
+  if (groupId && policyGroups.value.length > 0) {
+    const group = policyGroups.value.find(g => g.id === groupId)
+    if (group) {
+      currentGroup.value = group
+      await loadGroupPolicies()
+    }
+  }
+}
+
+onMounted(async () => {
+  await loadPolicyGroups()
+  // 加载完策略组后，检查 URL 参数恢复状态
+  await restoreStateFromUrl()
 })
+
+// 监听路由参数变化
+watch(
+  () => route.query.group_id,
+  async (newGroupId) => {
+    if (newGroupId) {
+      // 有 group_id 参数，尝试进入该策略组
+      if (policyGroups.value.length > 0) {
+        const group = policyGroups.value.find(g => g.id === newGroupId)
+        if (group && currentGroup.value?.id !== group.id) {
+          currentGroup.value = group
+          await loadGroupPolicies()
+        }
+      }
+    } else {
+      // 没有 group_id 参数，返回列表
+      if (currentGroup.value) {
+        currentGroup.value = null
+        policySearchKeyword.value = ''
+        groupPolicies.value = []
+      }
+    }
+  }
+)
 </script>
 
 <style scoped>

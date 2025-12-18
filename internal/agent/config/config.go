@@ -14,8 +14,9 @@ import (
 // 本地配置：Agent 启动时从文件读取，用于连接 Server
 // 远程配置：由 Server 下发，支持热更新
 type Config struct {
-	Local  LocalConfig  `mapstructure:"local"`
-	Remote RemoteConfig // 由 Server 下发，初始为空
+	Local        LocalConfig  `mapstructure:"local"`
+	Remote       RemoteConfig // 由 Server 下发，初始为空
+	BuildVersion string       // 构建时嵌入的版本（优先级最高）
 }
 
 // LocalConfig 是本地配置（最小配置）
@@ -131,7 +132,7 @@ func LoadDefaults() *Config {
 				Level:  "info",
 				Format: "json",
 				File:   "/var/log/mxsec-agent/agent.log", // 标准 Linux 日志目录，按天轮转
-				MaxAge: 30,                             // 保留30天
+				MaxAge: 30,                               // 保留30天
 			},
 		},
 		Remote: RemoteConfig{
@@ -185,12 +186,17 @@ func (c *Config) GetProduct() string {
 	return "mxsec-agent"
 }
 
-// GetVersion 获取版本（优先使用远程配置）
+// GetVersion 获取版本（优先级：构建时嵌入 > 远程配置 > 默认值）
 func (c *Config) GetVersion() string {
+	// 1. 优先使用构建时嵌入的版本
+	if c.BuildVersion != "" {
+		return c.BuildVersion
+	}
+	// 2. 使用远程配置的版本
 	if c.Remote.Loaded && c.Remote.Version != "" {
 		return c.Remote.Version
 	}
-	// 默认值（从构建时注入）
+	// 3. 默认值
 	return "1.0.0"
 }
 

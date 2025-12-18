@@ -11,6 +11,9 @@ export interface PaginatedResponse<T> {
   items: T[]
 }
 
+// 运行时类型
+export type RuntimeType = 'vm' | 'docker' | 'k8s'
+
 // 主机相关类型
 export interface Host {
   host_id: string
@@ -27,9 +30,16 @@ export interface Host {
   baseline_score?: number
   baseline_pass_rate?: number
   tags?: string[]
+  // 运行时环境
+  runtime_type?: RuntimeType // 运行时类型：vm/docker/k8s
   is_container?: boolean // 是否为容器环境
   container_id?: string // 容器ID
+  // K8s 相关字段
+  pod_name?: string // Pod 名称（K8s 环境）
+  pod_namespace?: string // 命名空间（K8s 环境）
+  pod_uid?: string // Pod UID（K8s 环境）
   business_line?: string // 业务线
+  agent_version?: string // Agent 当前版本号
 }
 
 // 磁盘信息类型（用于 Host 的 disk_info 字段）
@@ -125,7 +135,8 @@ export interface Policy {
   os_family: string[]
   os_version: string
   os_requirements?: OSRequirement[] // 详细 OS 版本要求
-  target_type?: 'host' | 'container' | 'all' // 适用目标：主机/容器/全部
+  target_type?: 'host' | 'container' | 'all' // 废弃，保留向后兼容
+  runtime_types?: RuntimeType[] // 适用的运行时类型：["vm", "docker", "k8s"]，空表示全部
   enabled: boolean
   group_id?: string // 所属策略组ID
   rule_count?: number
@@ -142,7 +153,8 @@ export interface Rule {
   description: string
   severity: 'critical' | 'high' | 'medium' | 'low'
   enabled: boolean
-  target_type?: 'host' | 'container' | 'all' // 适用目标：主机/容器/全部
+  target_type?: 'host' | 'container' | 'all' // 废弃，保留向后兼容
+  runtime_types?: RuntimeType[] // 适用的运行时类型：["vm", "docker", "k8s"]，空表示全部
   check_config: CheckConfig
   fix_config: FixConfig
   created_at: string
@@ -181,9 +193,12 @@ export interface ScanTask {
   target_hosts?: string[] // 目标主机 ID 列表
   matched_host_count?: number // 匹配的主机数量（在线）
   total_host_count?: number // 总目标主机数量（包括离线）
-  policy_id: string
+  total_rule_count?: number // 关联策略的规则总数
+  expected_check_count?: number // 预期检查项总数（在线主机数 × 规则数）
+  policy_id: string // 兼容旧数据：单策略
+  policy_ids?: string[] // 新字段：多策略
   rule_ids?: string[]
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'created' | 'pending' | 'running' | 'completed' | 'failed'
   created_at: string
   executed_at?: string
   completed_at?: string

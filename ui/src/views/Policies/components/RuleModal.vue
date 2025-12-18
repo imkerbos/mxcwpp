@@ -66,17 +66,6 @@
         </a-select>
       </a-form-item>
 
-      <a-form-item label="适用目标" name="target_type">
-        <a-radio-group v-model:value="formData.target_type">
-          <a-radio value="all">全部</a-radio>
-          <a-radio value="host">仅主机</a-radio>
-          <a-radio value="container">仅容器</a-radio>
-        </a-radio-group>
-        <template #extra>
-          <span class="form-tip">选择此规则适用于主机、容器还是全部（容器可能没有某些服务如 SSH）</span>
-        </template>
-      </a-form-item>
-
       <a-form-item label="规则描述" name="description">
         <a-textarea
           v-model:value="formData.description"
@@ -290,7 +279,6 @@ const formData = reactive({
   title: '',
   category: 'other',
   severity: 'medium' as 'critical' | 'high' | 'medium' | 'low',
-  target_type: 'all' as 'host' | 'container' | 'all',
   description: '',
   check_config: {
     condition: 'all' as 'all' | 'any',
@@ -325,7 +313,6 @@ watch(
         formData.title = props.rule.title
         formData.category = props.rule.category || 'other'
         formData.severity = props.rule.severity || 'medium'
-        formData.target_type = props.rule.target_type || 'all'
         formData.description = props.rule.description || ''
 
         // 处理 check_config
@@ -361,7 +348,6 @@ const resetForm = () => {
   formData.title = ''
   formData.category = 'other'
   formData.severity = 'medium'
-  formData.target_type = 'all'
   formData.description = ''
   formData.check_config = {
     condition: 'all',
@@ -426,7 +412,6 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
-        target_type: formData.target_type,
         check_config: checkConfig,
         fix_config: fixConfig,
       })
@@ -439,7 +424,6 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
-        target_type: formData.target_type,
         check_config: checkConfig,
         fix_config: fixConfig,
       })

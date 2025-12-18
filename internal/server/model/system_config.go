@@ -30,3 +30,20 @@ type SiteConfig struct {
 	SiteLogo   string `json:"site_logo"`   // Logo URL（相对路径或完整URL）
 	SiteDomain string `json:"site_domain"` // 域名设置
 }
+
+// AlertConfig 告警配置
+type AlertConfig struct {
+	// 重复告警通知间隔（分钟）
+	// 同一主机同一问题在此间隔内只会通知一次
+	RepeatAlertInterval int `json:"repeat_alert_interval"`
+	// 是否启用定期汇总（false = 只发首次告警，true = 按间隔定期发送）
+	EnablePeriodicSummary bool `json:"enable_periodic_summary"`
+}
+
+// DefaultAlertConfig 默认告警配置
+func DefaultAlertConfig() AlertConfig {
+	return AlertConfig{
+		RepeatAlertInterval:   30, // 默认 30 分钟
+		EnablePeriodicSummary: true,
+	}
+}

@@ -60,6 +60,207 @@ export interface CheckResultTrend {
   warning: number[]
 }
 
+// 任务报告概要
+export interface TaskReportSummary {
+  task_id: string
+  task_name: string
+  policy_id: string
+  policy_ids?: string[]
+  policy_name: string
+  policy_names?: string[]
+  executed_at: string | null
+  completed_at: string | null
+  host_count: number
+  rule_count: number
+  status: string
+}
+
+// 类别统计（用于报告摘要）
+export interface CategoryStats {
+  category: string
+  category_name: string
+  total_checks: number
+  passed_checks: number
+  failed_checks: number
+  pass_rate: number
+}
+
+// 任务报告统计
+export interface TaskReportStatistics {
+  total_checks: number
+  passed_checks: number
+  failed_checks: number
+  warning_checks: number
+  na_checks: number
+  pass_rate: number
+  by_severity: Record<string, number>
+  by_category: Record<string, number>
+}
+
+// 主机检查明细
+export interface HostCheckDetail {
+  host_id: string
+  hostname: string
+  ip: string
+  os_family: string
+  passed_count: number
+  failed_count: number
+  warning_count: number
+  na_count: number
+  score: number
+  status: string
+  critical_fails: number
+  high_fails: number
+}
+
+// 失败规则汇总
+export interface FailedRuleSummary {
+  rule_id: string
+  title: string
+  severity: string
+  category: string
+  affected_hosts: string[]
+  affected_count: number
+  fix_suggestion: string
+  expected: string
+}
+
+// 任务报告
+export interface TaskReport {
+  summary: TaskReportSummary
+  statistics: TaskReportStatistics
+  host_details: HostCheckDetail[]
+  failed_rules: FailedRuleSummary[]
+}
+
+// 主机任务详情
+export interface HostTaskDetail {
+  host: {
+    host_id: string
+    hostname: string
+    ip: string
+    os_family: string
+    os_version: string
+  }
+  statistics: {
+    total: number
+    passed: number
+    failed: number
+    warning: number
+    na: number
+  }
+  results: ScanResult[]
+}
+
+// 检查结果
+export interface ScanResult {
+  result_id: string
+  host_id: string
+  policy_id: string
+  rule_id: string
+  task_id: string
+  status: string
+  severity: string
+  category: string
+  title: string
+  actual: string
+  expected: string
+  fix_suggestion: string
+  checked_at: string
+}
+
+// Top 失败检查项
+export interface TopFailedRule {
+  rule_id: string
+  title: string
+  severity: string
+  category: string
+  affected_hosts: number
+}
+
+// Top 风险主机
+export interface TopRiskHost {
+  host_id: string
+  hostname: string
+  ip: string
+  os_family: string
+  score: number
+  fail_count: number
+  critical_count: number
+  high_count: number
+}
+
+// 管理层报告元数据
+export interface ExecutiveReportMeta {
+  report_id: string
+  report_title: string
+  generated_at: string
+  company_name: string
+  baseline_type: string
+  check_target: string
+}
+
+// 执行摘要
+export interface ExecutiveSummary {
+  overall_conclusion: string
+  check_scope: string
+  compliance_rate: number
+  has_critical_risk: boolean
+  has_high_risk: boolean
+  conclusion_statement: string
+  coverage_note: string
+}
+
+// 安全评分
+export interface SecurityScore {
+  score: number
+  grade: string
+  grade_color: string
+  score_explanation: string
+  security_note: string
+}
+
+// 风险项
+export interface RiskItem {
+  category: string
+  description: string
+  impact: string
+  severity: string
+  severity_label: string
+  recommendation: string
+  affected_count: number
+}
+
+// 合规与基线覆盖说明
+export interface ComplianceCoverage {
+  baseline_source: string
+  covered_areas: string[]
+  uncovered_areas: string[]
+  improvement_note: string
+}
+
+// 管理建议
+export interface ManagementRecommendation {
+  overall_assessment: string
+  action_suggestions: string[]
+  disclaimer: string
+}
+
+// 管理层任务报告（完整版）
+export interface ExecutiveTaskReport {
+  meta: ExecutiveReportMeta
+  summary: ExecutiveSummary
+  task_info: TaskReportSummary
+  statistics: TaskReportStatistics
+  category_stats: CategoryStats[]  // 按类别统计（含通过率）
+  security_score: SecurityScore
+  host_details: HostCheckDetail[]
+  risk_items: RiskItem[]
+  failed_rules: FailedRuleSummary[]
+  coverage: ComplianceCoverage
+  recommendation: ManagementRecommendation
+}
+
 export const reportsApi = {
   // 获取报表统计数据
   getStats: async (params?: {
@@ -99,5 +300,30 @@ export const reportsApi = {
   // 获取主机风险分布（用于图表）
   getHostRiskDistribution: async () => {
     return apiClient.get('/hosts/risk-distribution')
+  },
+
+  // 获取任务报告
+  getTaskReport: async (taskId: string): Promise<TaskReport> => {
+    return apiClient.get(`/reports/task/${taskId}`)
+  },
+
+  // 获取管理层任务报告
+  getExecutiveTaskReport: async (taskId: string): Promise<ExecutiveTaskReport> => {
+    return apiClient.get(`/reports/task/${taskId}/executive`)
+  },
+
+  // 获取主机在任务中的详细检查结果
+  getTaskHostDetail: async (taskId: string, hostId: string): Promise<HostTaskDetail> => {
+    return apiClient.get(`/reports/task/${taskId}/host/${hostId}`)
+  },
+
+  // 获取 Top 失败检查项
+  getTopFailedRules: async (limit?: number): Promise<TopFailedRule[]> => {
+    return apiClient.get('/reports/top-failed-rules', { params: { limit } })
+  },
+
+  // 获取 Top 风险主机
+  getTopRiskHosts: async (limit?: number): Promise<TopRiskHost[]> => {
+    return apiClient.get('/reports/top-risk-hosts', { params: { limit } })
   },
 }

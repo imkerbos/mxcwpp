@@ -785,8 +785,49 @@
             </a-card>
           </div>
           <div class="content-section">
-            <a-card title="插件列表" :bordered="false">
-              <a-empty description="插件列表功能待实现" />
+            <a-card title="组件列表" :bordered="false">
+              <a-spin :spinning="componentsLoading">
+                <a-table
+                  v-if="components.length > 0"
+                  :columns="componentColumns"
+                  :data-source="components"
+                  :pagination="false"
+                  row-key="name"
+                  size="small"
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'name'">
+                      <a-tag :color="record.name === 'agent' ? 'blue' : 'green'" style="margin-right: 8px;">
+                        {{ record.name === 'agent' ? 'Agent' : 'Plugin' }}
+                      </a-tag>
+                      <span style="font-weight: 500;">{{ record.name }}</span>
+                    </template>
+                    <template v-else-if="column.key === 'version'">
+                      <span :style="{ color: record.need_update ? '#faad14' : 'inherit' }">
+                        {{ record.version || '-' }}
+                        <a-tag v-if="record.need_update" color="orange" style="margin-left: 8px; font-size: 11px;">
+                          可更新
+                        </a-tag>
+                      </span>
+                    </template>
+                    <template v-else-if="column.key === 'latest_version'">
+                      {{ record.latest_version || '-' }}
+                    </template>
+                    <template v-else-if="column.key === 'status'">
+                      <a-tag :color="componentStatusMap[record.status]?.color || 'default'">
+                        {{ componentStatusMap[record.status]?.text || record.status }}
+                      </a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'start_time'">
+                      {{ record.start_time || '-' }}
+                    </template>
+                    <template v-else-if="column.key === 'updated_at'">
+                      {{ record.updated_at || '-' }}
+                    </template>
+                  </template>
+                </a-table>
+                <a-empty v-else description="暂无组件信息" />
+              </a-spin>
             </a-card>
           </div>
       </div>
@@ -847,8 +888,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import { message } from 'ant-design-vue'
-import { hostsApi, type HostRiskStatistics } from '@/api/hosts'
+import { hostsApi, type HostRiskStatistics, type HostPlugin } from '@/api/hosts'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
+import { componentsApi } from '@/api/components'
 import type { HostDetail, BaselineScore, DiskInfo, NetworkInterfaceInfo } from '@/api/types'
 import { formatDateTime } from '@/utils/date'
 
@@ -916,6 +958,99 @@ const fingerprintItems = ref([
   { key: 'packages', label: '系统软件', value: 0 },
   { key: 'integrity', label: '系统完整性校验', value: 0 },
 ])
+
+// 组件列表（包含 Agent 和插件）
+interface ComponentInfo {
+  name: string
+  version: string
+  latest_version: string
+  status: string
+  start_time?: string
+  updated_at?: string
+  need_update: boolean
+}
+
+const components = ref<ComponentInfo[]>([])
+const componentsLoading = ref(false)
+
+// 组件状态标签映射
+const componentStatusMap: Record<string, { text: string; color: string }> = {
+  running: { text: '运行中', color: 'green' },
+  stopped: { text: '已停止', color: 'default' },
+  error: { text: '错误', color: 'red' },
+  not_installed: { text: '未安装', color: 'orange' },
+  updating: { text: '更新中', color: 'blue' },
+}
+
+// 组件表格列定义
+const componentColumns = [
+  { title: '组件名称', dataIndex: 'name', key: 'name' },
+  { title: '当前版本', dataIndex: 'version', key: 'version' },
+  { title: '最新版本', dataIndex: 'latest_version', key: 'latest_version' },
+  { title: '状态', dataIndex: 'status', key: 'status' },
+  { title: '启动时间', dataIndex: 'start_time', key: 'start_time' },
+  { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at' },
+]
+
+// 加载组件列表（包含 Agent 和插件）
+const loadComponents = async () => {
+  if (!props.host) return
+  
+  componentsLoading.value = true
+  try {
+    // 1. 加载插件列表
+    const pluginsResponse = await hostsApi.getPlugins(props.host.host_id)
+    
+    // 2. 加载所有组件的最新版本
+    const allComponents = await componentsApi.list()
+    const latestVersions = new Map<string, string>()
+    allComponents.forEach(c => {
+      if (c.latest_version) {
+        latestVersions.set(c.name, c.latest_version)
+      }
+    })
+    
+    // 3. 构建组件列表（先添加 Agent）
+    const componentList: ComponentInfo[] = []
+    
+    // 添加 Agent
+    const agentLatestVersion = latestVersions.get('agent') || ''
+    const agentCurrentVersion = props.host.agent_version || ''
+    componentList.push({
+      name: 'agent',
+      version: agentCurrentVersion || '-',
+      latest_version: agentLatestVersion,
+      status: agentCurrentVersion ? 'running' : 'not_installed',
+      need_update: agentLatestVersion && agentCurrentVersion && agentCurrentVersion !== agentLatestVersion,
+    })
+    
+    // 添加插件
+    pluginsResponse.forEach(plugin => {
+      componentList.push({
+        name: plugin.name,
+        version: plugin.version,
+        latest_version: plugin.latest_version,
+        status: plugin.status,
+        start_time: plugin.start_time,
+        updated_at: plugin.updated_at,
+        need_update: plugin.need_update,
+      })
+    })
+    
+    components.value = componentList
+  } catch (error) {
+    console.error('加载组件列表失败:', error)
+  } finally {
+    componentsLoading.value = false
+  }
+}
+
+// 监听 host 变化，重新加载组件列表
+watch(() => props.host?.host_id, (newHostId) => {
+  if (newHostId) {
+    loadComponents()
+  }
+})
 
 const showTagModal = ref(false)
 const editingTags = ref<string[]>([])
@@ -1326,6 +1461,7 @@ const networkColumns = [
 
 onMounted(() => {
   loadOverviewData()
+  loadComponents()
 })
 </script>
 

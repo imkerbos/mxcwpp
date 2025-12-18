@@ -168,5 +168,7 @@ var (
 		&Component{},
 		&ComponentVersion{},
 		&ComponentPackage{},
+		&HostPlugin{},
+		&ComponentPushRecord{},
 	}
 )

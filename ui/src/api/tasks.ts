@@ -25,8 +25,10 @@ export const tasksApi = {
       type: 'all' | 'host_ids' | 'os_family'
       host_ids?: string[]
       os_family?: string[]
+      runtime_type?: 'vm' | 'docker' | 'k8s' // 运行时类型
     }
-    policy_id: string
+    policy_id?: string    // 兼容旧版本：单策略
+    policy_ids?: string[] // 新版本：多策略
     rule_ids?: string[]
     schedule?: any
   }) => {

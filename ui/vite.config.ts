@@ -24,6 +24,11 @@ export default defineConfig({
         target: process.env.VITE_API_TARGET || 'http://manager:8080',
         changeOrigin: true,
       },
+      '/agent': {
+        // 代理 Agent 安装/卸载脚本（不需要认证）
+        target: process.env.VITE_API_TARGET || 'http://manager:8080',
+        changeOrigin: true,
+      },
     },
   },
 })

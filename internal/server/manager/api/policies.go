@@ -132,15 +132,17 @@ func (h *PoliciesHandler) GetPolicy(c *gin.Context) {
 
 // CreatePolicyRequest 创建策略请求
 type CreatePolicyRequest struct {
-	ID          string      `json:"id" binding:"required"`
-	Name        string      `json:"name" binding:"required"`
-	Version     string      `json:"version"`
-	Description string      `json:"description"`
-	OSFamily    []string    `json:"os_family"`
-	OSVersion   string      `json:"os_version"`
-	Enabled     bool        `json:"enabled"`
-	GroupID     string      `json:"group_id"`
-	Rules       []*RuleData `json:"rules"`
+	ID             string                `json:"id" binding:"required"`
+	Name           string                `json:"name" binding:"required"`
+	Version        string                `json:"version"`
+	Description    string                `json:"description"`
+	OSFamily       []string              `json:"os_family"`
+	OSVersion      string                `json:"os_version"`
+	OSRequirements []model.OSRequirement `json:"os_requirements"` // 详细 OS 版本要求
+	RuntimeTypes   []string              `json:"runtime_types"`   // 适用的运行时类型：["vm", "docker", "k8s"]
+	Enabled        bool                  `json:"enabled"`
+	GroupID        string                `json:"group_id"`
+	Rules          []*RuleData           `json:"rules"`
 }
 
 // RuleData 规则数据
@@ -198,14 +200,16 @@ func (h *PoliciesHandler) CreatePolicy(c *gin.Context) {
 
 	// 创建策略
 	policy := &model.Policy{
-		ID:          req.ID,
-		Name:        req.Name,
-		Version:     req.Version,
-		Description: req.Description,
-		OSFamily:    model.StringArray(req.OSFamily),
-		OSVersion:   req.OSVersion,
-		Enabled:     req.Enabled,
-		GroupID:     req.GroupID,
+		ID:             req.ID,
+		Name:           req.Name,
+		Version:        req.Version,
+		Description:    req.Description,
+		OSFamily:       model.StringArray(req.OSFamily),
+		OSVersion:      req.OSVersion,
+		OSRequirements: model.OSRequirements(req.OSRequirements),
+		RuntimeTypes:   model.StringArray(req.RuntimeTypes),
+		Enabled:        req.Enabled,
+		GroupID:        req.GroupID,
 	}
 
 	// 创建策略
@@ -253,14 +257,16 @@ func (h *PoliciesHandler) CreatePolicy(c *gin.Context) {
 
 // UpdatePolicyRequest 更新策略请求
 type UpdatePolicyRequest struct {
-	Name        string      `json:"name"`
-	Version     string      `json:"version"`
-	Description string      `json:"description"`
-	OSFamily    []string    `json:"os_family"`
-	OSVersion   string      `json:"os_version"`
-	Enabled     *bool       `json:"enabled"`
-	GroupID     *string     `json:"group_id"`
-	Rules       []*RuleData `json:"rules"`
+	Name           string                `json:"name"`
+	Version        string                `json:"version"`
+	Description    string                `json:"description"`
+	OSFamily       []string              `json:"os_family"`
+	OSVersion      string                `json:"os_version"`
+	OSRequirements []model.OSRequirement `json:"os_requirements"` // 详细 OS 版本要求
+	RuntimeTypes   []string              `json:"runtime_types"`   // 适用的运行时类型
+	Enabled        *bool                 `json:"enabled"`
+	GroupID        *string               `json:"group_id"`
+	Rules          []*RuleData           `json:"rules"`
 }
 
 // UpdatePolicy 更新策略
@@ -311,6 +317,12 @@ func (h *PoliciesHandler) UpdatePolicy(c *gin.Context) {
 	}
 	if req.OSVersion != "" {
 		policy.OSVersion = req.OSVersion
+	}
+	if req.OSRequirements != nil {
+		policy.OSRequirements = model.OSRequirements(req.OSRequirements)
+	}
+	if req.RuntimeTypes != nil {
+		policy.RuntimeTypes = model.StringArray(req.RuntimeTypes)
 	}
 	if req.Enabled != nil {
 		policy.Enabled = *req.Enabled

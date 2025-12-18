@@ -1,6 +1,12 @@
 <template>
   <div class="alerts-page">
-    <h2 class="page-title">告警管理</h2>
+    <div class="page-header">
+      <h2 class="page-title">告警管理</h2>
+      <a-button type="primary" @click="showConfigModal = true">
+        <template #icon><SettingOutlined /></template>
+        告警配置
+      </a-button>
+    </div>
     
     <!-- 统计 -->
     <div class="stats">
@@ -19,6 +25,10 @@
       <div class="stat-card">
         <div class="stat-value medium">{{ statistics.medium || 0 }}</div>
         <div class="stat-label">中危</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value low">{{ statistics.low || 0 }}</div>
+        <div class="stat-label">低危</div>
       </div>
     </div>
 
@@ -61,13 +71,46 @@
       @change="handleTableChange"
       @refresh="loadAlerts"
     />
+
+    <!-- 告警配置弹窗 -->
+    <a-modal
+      v-model:open="showConfigModal"
+      title="告警配置"
+      @ok="handleSaveConfig"
+      :confirm-loading="savingConfig"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="重复告警通知间隔">
+          <a-select v-model:value="alertConfig.repeat_alert_interval" style="width: 100%">
+            <a-select-option :value="15">15 分钟</a-select-option>
+            <a-select-option :value="30">30 分钟</a-select-option>
+            <a-select-option :value="60">1 小时</a-select-option>
+            <a-select-option :value="120">2 小时</a-select-option>
+            <a-select-option :value="360">6 小时</a-select-option>
+            <a-select-option :value="720">12 小时</a-select-option>
+            <a-select-option :value="1440">24 小时</a-select-option>
+          </a-select>
+          <div class="config-tip">
+            同一主机同一问题在此间隔内只会通知一次，避免重复告警轰炸
+          </div>
+        </a-form-item>
+        <a-form-item label="定期汇总">
+          <a-switch v-model:checked="alertConfig.enable_periodic_summary" />
+          <span style="margin-left: 8px; color: #8c8c8c;">
+            {{ alertConfig.enable_periodic_summary ? '已启用：已存在的告警按间隔定期发送' : '已关闭：只在首次发现时发送通知' }}
+          </span>
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
+import { SettingOutlined } from '@ant-design/icons-vue'
 import { alertsApi, type Alert, type AlertStatistics } from '@/api/alerts'
+import { systemConfigApi, type AlertConfig } from '@/api/system-config'
 import AlertTable from './components/AlertTable.vue'
 
 const activeTab = ref<'active' | 'history'>('active')
@@ -84,6 +127,14 @@ const statistics = ref<AlertStatistics>({
   low: 0,
 })
 
+// 告警配置
+const showConfigModal = ref(false)
+const savingConfig = ref(false)
+const alertConfig = reactive<AlertConfig>({
+  repeat_alert_interval: 30,
+  enable_periodic_summary: true,
+})
+
 const pagination = ref({
   current: 1,
   pageSize: 20,
@@ -96,6 +147,7 @@ const filters = ref({
   severity: undefined as 'critical' | 'high' | 'medium' | 'low' | undefined,
   host_id: undefined as string | undefined,
   category: undefined as string | undefined,
+  alert_type: undefined as 'baseline' | 'agent_offline' | undefined,
   keyword: undefined as string | undefined,
 })
 
@@ -139,6 +191,9 @@ const loadAlerts = async () => {
     if (filters.value.category) {
       params.category = filters.value.category
     }
+    if (filters.value.alert_type) {
+      params.alert_type = filters.value.alert_type
+    }
     if (filters.value.keyword) {
       params.keyword = filters.value.keyword
     }
@@ -159,8 +214,20 @@ const handleTabChange = () => {
 }
 
 const handleTableChange = (newFilters: any) => {
-  filters.value = { ...filters.value, ...newFilters }
-  pagination.value.current = 1
+  // 如果传入了 page 参数，使用传入的值（翻页操作）
+  if (newFilters.page) {
+    pagination.value.current = newFilters.page
+  } else {
+    // 否则重置为第 1 页（筛选条件变化）
+    pagination.value.current = 1
+  }
+  // 如果传入了 pageSize 参数，更新每页条数
+  if (newFilters.pageSize) {
+    pagination.value.pageSize = newFilters.pageSize
+  }
+  // 更新其他过滤条件（排除 page 和 pageSize）
+  const { page, pageSize, ...otherFilters } = newFilters
+  filters.value = { ...filters.value, ...otherFilters }
   loadAlerts()
 }
 
@@ -186,9 +253,35 @@ const handleIgnore = async (alert: Alert) => {
   }
 }
 
+// 加载告警配置
+const loadAlertConfig = async () => {
+  try {
+    const config = await systemConfigApi.getAlertConfig()
+    alertConfig.repeat_alert_interval = config.repeat_alert_interval
+    alertConfig.enable_periodic_summary = config.enable_periodic_summary
+  } catch (error: any) {
+    console.error('加载告警配置失败:', error)
+  }
+}
+
+// 保存告警配置
+const handleSaveConfig = async () => {
+  savingConfig.value = true
+  try {
+    await systemConfigApi.updateAlertConfig(alertConfig)
+    message.success('告警配置保存成功')
+    showConfigModal.value = false
+  } catch (error: any) {
+    message.error(error?.message || '保存告警配置失败')
+  } finally {
+    savingConfig.value = false
+  }
+}
+
 onMounted(() => {
   loadStatistics()
   loadAlerts()
+  loadAlertConfig()
 })
 </script>
 
@@ -197,11 +290,24 @@ onMounted(() => {
   padding: 24px;
 }
 
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
 .page-title {
   font-size: 20px;
   font-weight: 500;
-  margin: 0 0 24px 0;
+  margin: 0;
   color: #262626;
+}
+
+.config-tip {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #8c8c8c;
 }
 
 .stats {
@@ -242,6 +348,10 @@ onMounted(() => {
 
   &.medium {
     color: #faad14;
+  }
+
+  &.low {
+    color: #1890ff;
   }
 }
 

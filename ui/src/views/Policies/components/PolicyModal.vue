@@ -45,13 +45,13 @@
           placeholder="请输入策略描述"
         />
       </a-form-item>
-      <a-form-item label="适用目标" name="target_type">
-        <a-radio-group v-model:value="formData.target_type">
-          <a-radio value="all">全部</a-radio>
-          <a-radio value="host">仅主机</a-radio>
-          <a-radio value="container">仅容器</a-radio>
-        </a-radio-group>
-        <div class="form-tip">选择此策略适用于主机、容器还是全部</div>
+      <a-form-item label="适用环境" name="runtime_types">
+        <a-checkbox-group v-model:value="formData.runtime_types">
+          <a-checkbox value="vm">主机/虚拟机</a-checkbox>
+          <a-checkbox value="docker">Docker 容器</a-checkbox>
+          <a-checkbox value="k8s" disabled>Kubernetes（即将支持）</a-checkbox>
+        </a-checkbox-group>
+        <div class="form-tip">选择此策略适用的运行环境，不选表示全部适用。规则会自动继承策略的设置。</div>
       </a-form-item>
       <a-form-item label="适用OS" name="os_family">
         <a-select
@@ -138,7 +138,7 @@ const formData = reactive({
   group_id: '' as string | undefined,
   version: '',
   description: '',
-  target_type: 'all' as 'host' | 'container' | 'all',
+  runtime_types: ['vm'] as string[], // 默认仅主机
   os_family: [] as string[],
   os_version: '',
   os_requirements: [] as OSRequirement[],
@@ -223,7 +223,16 @@ watch(
         formData.group_id = props.policy.group_id || undefined
         formData.version = props.policy.version || ''
         formData.description = props.policy.description || ''
-        formData.target_type = props.policy.target_type || 'all'
+        // 兼容旧的 target_type 字段
+        if (props.policy.runtime_types && props.policy.runtime_types.length > 0) {
+          formData.runtime_types = [...props.policy.runtime_types]
+        } else if (props.policy.target_type === 'host') {
+          formData.runtime_types = ['vm']
+        } else if (props.policy.target_type === 'container') {
+          formData.runtime_types = ['docker']
+        } else {
+          formData.runtime_types = ['vm'] // 默认主机
+        }
         formData.os_family = [...props.policy.os_family]
         formData.os_version = props.policy.os_version || ''
         formData.os_requirements = props.policy.os_requirements
@@ -237,7 +246,7 @@ watch(
         formData.group_id = props.defaultGroupId || undefined
         formData.version = ''
         formData.description = ''
-        formData.target_type = 'all'
+        formData.runtime_types = ['vm'] // 默认仅主机
         formData.os_family = []
         formData.os_version = ''
         formData.os_requirements = []
@@ -273,7 +282,7 @@ const handleSubmit = async () => {
         group_id: formData.group_id || undefined,
         version: formData.version,
         description: formData.description,
-        target_type: formData.target_type,
+        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
         os_family: formData.os_family,
         os_version: formData.os_version,
         os_requirements: cleanedRequirements.length > 0 ? cleanedRequirements : undefined,
@@ -287,7 +296,7 @@ const handleSubmit = async () => {
         group_id: formData.group_id || undefined,
         version: formData.version,
         description: formData.description,
-        target_type: formData.target_type,
+        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
         os_family: formData.os_family,
         os_version: formData.os_version,
         os_requirements: cleanedRequirements.length > 0 ? cleanedRequirements : undefined,

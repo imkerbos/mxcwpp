@@ -22,16 +22,18 @@ import (
 
 // AgentCenterServices 包含 AgentCenter 服务所需的所有组件
 type AgentCenterServices struct {
-	Config            *config.Config
-	Logger            *zap.Logger
-	DB                *gorm.DB
-	GRPCServer        *grpc.Server
-	TransferService   *transfer.Service
-	TaskService       *service.TaskService
-	TaskStatusUpdater *service.TaskStatusUpdater
-	StatusCtx         context.Context
-	StatusCancel      context.CancelFunc
-	Listener          net.Listener
+	Config                *config.Config
+	Logger                *zap.Logger
+	DB                    *gorm.DB
+	GRPCServer            *grpc.Server
+	TransferService       *transfer.Service
+	TaskService           *service.TaskService
+	TaskStatusUpdater     *service.TaskStatusUpdater
+	PluginUpdateScheduler *scheduler.PluginUpdateScheduler
+	AgentUpdateScheduler  *scheduler.AgentUpdateScheduler
+	StatusCtx             context.Context
+	StatusCancel          context.CancelFunc
+	Listener              net.Listener
 }
 
 // Initialize 初始化 AgentCenter 服务的所有组件
@@ -81,7 +83,13 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	taskStatusUpdater := service.NewTaskStatusUpdater(db, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 9. 创建网络监听器
+	// 9. 创建插件更新调度器
+	pluginUpdateScheduler := scheduler.NewPluginUpdateScheduler(db, transferService, logger)
+
+	// 10. 创建 Agent 更新调度器
+	agentUpdateScheduler := scheduler.NewAgentUpdateScheduler(db, transferService, logger)
+
+	// 11. 创建网络监听器
 	listener, err := net.Listen("tcp", cfg.Server.GRPC.Address())
 	if err != nil {
 		cancel() // 确保在错误时取消 context
@@ -90,16 +98,18 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	}
 
 	return &AgentCenterServices{
-		Config:            cfg,
-		Logger:            logger,
-		DB:                db,
-		GRPCServer:        grpcServer,
-		TransferService:   transferService,
-		TaskService:       taskService,
-		TaskStatusUpdater: taskStatusUpdater,
-		StatusCtx:         ctx,
-		StatusCancel:      cancel,
-		Listener:          listener,
+		Config:                cfg,
+		Logger:                logger,
+		DB:                    db,
+		GRPCServer:            grpcServer,
+		TransferService:       transferService,
+		TaskService:           taskService,
+		TaskStatusUpdater:     taskStatusUpdater,
+		PluginUpdateScheduler: pluginUpdateScheduler,
+		AgentUpdateScheduler:  agentUpdateScheduler,
+		StatusCtx:             ctx,
+		StatusCancel:          cancel,
+		Listener:              listener,
 	}, nil
 }
 
@@ -108,8 +118,20 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 	// 启动任务调度器（定期分发待执行任务）
 	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.Logger)
 
+	// 启动任务超时调度器（检查超时任务）
+	go scheduler.StartTaskTimeoutScheduler(s.DB, s.Logger)
+
 	// 启动任务状态更新器（定期更新任务完成状态）
 	go s.TaskStatusUpdater.Start(s.StatusCtx)
+
+	// 启动定期告警调度器（按配置间隔发送告警通知）
+	go scheduler.StartAlertScheduler(s.DB, s.Logger)
+
+	// 启动插件更新调度器（检查插件配置更新并广播）
+	go s.PluginUpdateScheduler.Start(s.StatusCtx)
+
+	// 启动 Agent 更新调度器（检查 Agent 版本更新并推送）
+	go s.AgentUpdateScheduler.Start(s.StatusCtx)
 }
 
 // Cleanup 清理资源

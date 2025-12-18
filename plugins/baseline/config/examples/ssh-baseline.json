@@ -366,6 +366,214 @@
         "suggestion": "修改 /etc/ssh/sshd_config，设置 AllowTcpForwarding no",
         "command": "sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/' /etc/ssh/sshd_config && systemctl restart sshd"
       }
+    },
+    {
+      "rule_id": "LINUX_SSH_016",
+      "category": "ssh",
+      "title": "SSH LogLevel 设置",
+      "description": "LogLevel 应设置为 INFO 或 VERBOSE，便于审计",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_kv",
+            "param": ["/etc/ssh/sshd_config", "LogLevel", "^(INFO|VERBOSE)$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，设置 LogLevel INFO",
+        "command": "sed -i 's/^#*LogLevel.*/LogLevel INFO/' /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_017",
+      "category": "ssh",
+      "title": "SSH 使用强加密算法",
+      "description": "SSH 应仅使用强加密算法，禁用 3des-cbc、arcfour 等弱算法",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/ssh/sshd_config", "Ciphers.*(3des|arcfour|blowfish)", "not_match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，配置强加密算法",
+        "command": "echo 'Ciphers aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr' >> /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_018",
+      "category": "ssh",
+      "title": "SSH 使用强 MAC 算法",
+      "description": "SSH 应仅使用强 MAC 算法，禁用 MD5、96 位等弱算法",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/ssh/sshd_config", "MACs.*(hmac-md5|hmac-sha1-96|umac-64)", "not_match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，配置强 MAC 算法",
+        "command": "echo 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256' >> /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_019",
+      "category": "ssh",
+      "title": "SSH 使用强密钥交换算法",
+      "description": "SSH 应仅使用强密钥交换算法，禁用 diffie-hellman-group1-sha1 等弱算法",
+      "severity": "critical",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/ssh/sshd_config", "KexAlgorithms.*(diffie-hellman-group1|diffie-hellman-group14-sha1|diffie-hellman-group-exchange-sha1)", "not_match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，配置强密钥交换算法",
+        "command": "echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512' >> /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_020",
+      "category": "ssh",
+      "title": "禁用 PermitUserEnvironment",
+      "description": "PermitUserEnvironment 应设置为 no，防止用户修改环境变量绕过安全限制",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_kv",
+            "param": ["/etc/ssh/sshd_config", "PermitUserEnvironment", "no"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，设置 PermitUserEnvironment no",
+        "command": "sed -i 's/^#*PermitUserEnvironment.*/PermitUserEnvironment no/' /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_021",
+      "category": "ssh",
+      "title": "禁用 GSSAPIAuthentication",
+      "description": "GSSAPIAuthentication 应设置为 no（除非使用 Kerberos）",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_kv",
+            "param": ["/etc/ssh/sshd_config", "GSSAPIAuthentication", "no"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，设置 GSSAPIAuthentication no",
+        "command": "sed -i 's/^#*GSSAPIAuthentication.*/GSSAPIAuthentication no/' /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_022",
+      "category": "ssh",
+      "title": "禁用 UseDNS",
+      "description": "UseDNS 应设置为 no，避免 DNS 反向解析导致的连接延迟和潜在的安全问题",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": ["/etc/ssh/sshd_config"]
+          },
+          {
+            "type": "file_kv",
+            "param": ["/etc/ssh/sshd_config", "UseDNS", "no"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "修改 /etc/ssh/sshd_config，设置 UseDNS no",
+        "command": "sed -i 's/^#*UseDNS.*/UseDNS no/' /etc/ssh/sshd_config && systemctl restart sshd"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_023",
+      "category": "ssh",
+      "title": "SSH 私钥文件权限",
+      "description": "SSH 私钥文件权限应为 600，仅属主可读写",
+      "severity": "high",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_permission",
+            "param": ["/etc/ssh/ssh_host_rsa_key", "0600"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 SSH 私钥文件权限为 600",
+        "command": "chmod 600 /etc/ssh/ssh_host_*_key"
+      }
+    },
+    {
+      "rule_id": "LINUX_SSH_024",
+      "category": "ssh",
+      "title": "SSH 公钥文件权限",
+      "description": "SSH 公钥文件权限应为 644",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_permission",
+            "param": ["/etc/ssh/ssh_host_rsa_key.pub", "0644"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 SSH 公钥文件权限为 644",
+        "command": "chmod 644 /etc/ssh/ssh_host_*_key.pub"
+      }
     }
   ]
 }

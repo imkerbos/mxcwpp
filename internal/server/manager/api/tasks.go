@@ -36,20 +36,23 @@ func NewTasksHandler(db *gorm.DB, logger *zap.Logger) *TasksHandler {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	Name     string                 `json:"name" binding:"required"`
-	Type     string                 `json:"type" binding:"required"`
-	Targets  map[string]interface{} `json:"targets" binding:"required"`
-	PolicyID string                 `json:"policy_id" binding:"required"`
-	RuleIDs  []string               `json:"rule_ids"`
-	Schedule map[string]interface{} `json:"schedule"`
+	Name      string                 `json:"name" binding:"required"`
+	Type      string                 `json:"type" binding:"required"`
+	Targets   map[string]interface{} `json:"targets" binding:"required"`
+	PolicyID  string                 `json:"policy_id"`  // 兼容旧版本：单策略
+	PolicyIDs []string               `json:"policy_ids"` // 新版本：多策略
+	RuleIDs   []string               `json:"rule_ids"`
+	Schedule  map[string]interface{} `json:"schedule"`
 }
 
 // TaskResponse 任务响应（包含计算字段）
 type TaskResponse struct {
 	model.ScanTask
-	TargetHosts      []string `json:"target_hosts"`       // 目标主机 ID 列表
-	MatchedHostCount int      `json:"matched_host_count"` // 匹配的主机数量（在线）
-	TotalHostCount   int      `json:"total_host_count"`   // 总目标主机数量（包括离线）
+	TargetHosts        []string `json:"target_hosts"`         // 目标主机 ID 列表
+	MatchedHostCount   int      `json:"matched_host_count"`   // 匹配的主机数量（在线）
+	TotalHostCount     int      `json:"total_host_count"`     // 总目标主机数量（包括离线）
+	TotalRuleCount     int      `json:"total_rule_count"`     // 关联策略的规则总数
+	ExpectedCheckCount int      `json:"expected_check_count"` // 预期检查项总数（在线主机数 × 规则数）
 }
 
 // enrichTaskWithTargetHosts 为任务添加目标主机信息
@@ -62,11 +65,28 @@ func (h *TasksHandler) enrichTaskWithTargetHosts(task *model.ScanTask) *TaskResp
 	var hosts []model.Host
 	var totalHosts []model.Host
 
+	// 构建运行时类型筛选条件
+	runtimeType := task.TargetConfig.RuntimeType
+	baseQuery := h.db.Model(&model.Host{})
+	onlineQuery := h.db.Model(&model.Host{}).Where("status = ?", model.HostStatusOnline)
+
+	// 如果指定了运行时类型，添加筛选条件
+	if runtimeType != "" {
+		if runtimeType == model.RuntimeTypeVM {
+			// 虚拟机：runtime_type = 'vm' 或为空（兼容旧数据）
+			baseQuery = baseQuery.Where("(runtime_type = ? OR runtime_type = '' OR runtime_type IS NULL)", model.RuntimeTypeVM)
+			onlineQuery = onlineQuery.Where("(runtime_type = ? OR runtime_type = '' OR runtime_type IS NULL)", model.RuntimeTypeVM)
+		} else {
+			baseQuery = baseQuery.Where("runtime_type = ?", runtimeType)
+			onlineQuery = onlineQuery.Where("runtime_type = ?", runtimeType)
+		}
+	}
+
 	switch task.TargetType {
 	case model.TargetTypeAll:
 		// 查询所有主机
-		h.db.Find(&totalHosts)
-		h.db.Where("status = ?", model.HostStatusOnline).Find(&hosts)
+		baseQuery.Find(&totalHosts)
+		onlineQuery.Find(&hosts)
 		for _, host := range totalHosts {
 			response.TargetHosts = append(response.TargetHosts, host.HostID)
 		}
@@ -75,15 +95,15 @@ func (h *TasksHandler) enrichTaskWithTargetHosts(task *model.ScanTask) *TaskResp
 		// 使用指定的主机 ID
 		if len(task.TargetConfig.HostIDs) > 0 {
 			response.TargetHosts = task.TargetConfig.HostIDs
-			h.db.Where("host_id IN ?", task.TargetConfig.HostIDs).Find(&totalHosts)
-			h.db.Where("host_id IN ? AND status = ?", task.TargetConfig.HostIDs, model.HostStatusOnline).Find(&hosts)
+			baseQuery.Where("host_id IN ?", task.TargetConfig.HostIDs).Find(&totalHosts)
+			onlineQuery.Where("host_id IN ?", task.TargetConfig.HostIDs).Find(&hosts)
 		}
 
 	case model.TargetTypeOSFamily:
 		// 查询指定 OS 系列的主机
 		if len(task.TargetConfig.OSFamily) > 0 {
-			h.db.Where("os_family IN ?", task.TargetConfig.OSFamily).Find(&totalHosts)
-			h.db.Where("os_family IN ? AND status = ?", task.TargetConfig.OSFamily, model.HostStatusOnline).Find(&hosts)
+			baseQuery.Where("os_family IN ?", task.TargetConfig.OSFamily).Find(&totalHosts)
+			onlineQuery.Where("os_family IN ?", task.TargetConfig.OSFamily).Find(&hosts)
 			for _, host := range totalHosts {
 				response.TargetHosts = append(response.TargetHosts, host.HostID)
 			}
@@ -92,6 +112,16 @@ func (h *TasksHandler) enrichTaskWithTargetHosts(task *model.ScanTask) *TaskResp
 
 	response.MatchedHostCount = len(hosts)
 	response.TotalHostCount = len(totalHosts)
+
+	// 计算关联策略的规则总数
+	policyIDs := task.GetPolicyIDs()
+	if len(policyIDs) > 0 {
+		var ruleCount int64
+		h.db.Model(&model.Rule{}).Where("policy_id IN ? AND enabled = ?", policyIDs, true).Count(&ruleCount)
+		response.TotalRuleCount = int(ruleCount)
+		// 预期检查项总数 = 在线主机数 × 规则数
+		response.ExpectedCheckCount = response.MatchedHostCount * response.TotalRuleCount
+	}
 
 	return response
 }
@@ -108,22 +138,37 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	// 验证策略是否存在
-	_, err := h.policyService.GetPolicy(req.PolicyID)
-	if err != nil {
-		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
+	// 获取策略ID列表（兼容新旧版本）
+	policyIDs := req.PolicyIDs
+	if len(policyIDs) == 0 && req.PolicyID != "" {
+		policyIDs = []string{req.PolicyID}
+	}
+	if len(policyIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "请至少指定一个策略 (policy_id 或 policy_ids)",
+		})
+		return
+	}
+
+	// 验证所有策略是否存在
+	for _, policyID := range policyIDs {
+		_, err := h.policyService.GetPolicy(policyID)
+		if err != nil {
+			if strings.Contains(err.Error(), "不存在") {
+				c.JSON(http.StatusNotFound, gin.H{
+					"code":    404,
+					"message": "策略不存在: " + policyID,
+				})
+				return
+			}
+			h.logger.Error("查询策略失败", zap.String("policy_id", policyID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "查询策略失败",
 			})
 			return
 		}
-		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
-		return
 	}
 
 	// 解析目标配置
@@ -137,6 +182,12 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 	}
 
 	var targetConfig model.TargetConfig
+
+	// 解析运行时类型（可选）
+	if runtimeType, ok := req.Targets["runtime_type"].(string); ok && runtimeType != "" {
+		targetConfig.RuntimeType = model.RuntimeType(runtimeType)
+	}
+
 	switch targetType {
 	case "all":
 		// 不需要额外配置
@@ -180,16 +231,17 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	// 创建任务
+	// 创建任务（状态为 created，等待用户确认执行）
 	task := &model.ScanTask{
 		TaskID:       uuid.New().String(),
 		Name:         req.Name,
 		Type:         model.TaskType(req.Type),
 		TargetType:   model.TargetType(targetType),
 		TargetConfig: targetConfig,
-		PolicyID:     req.PolicyID,
+		PolicyID:     policyIDs[0],                 // 兼容旧版本
+		PolicyIDs:    model.StringArray(policyIDs), // 新版本多策略
 		RuleIDs:      model.StringArray(req.RuleIDs),
-		Status:       model.TaskStatusPending,
+		Status:       model.TaskStatusCreated,
 	}
 
 	if err := h.db.Create(task).Error; err != nil {
@@ -326,12 +378,18 @@ func (h *TasksHandler) RunTask(c *gin.Context) {
 		return
 	}
 
+	// created 或其他状态的任务都可以执行
 	// 重置任务状态为 pending，等待调度器处理
+	// 设置 executed_at 为执行请求时间（用于计算超时）
 	now := time.Now()
+	localNow := model.LocalTime(now)
 	if err := h.db.Model(&task).Updates(map[string]interface{}{
-		"status":      model.TaskStatusPending,
-		"executed_at": nil,
-		"updated_at":  now,
+		"status":                model.TaskStatusPending,
+		"executed_at":           &localNow,
+		"dispatched_host_count": 0,
+		"completed_host_count":  0,
+		"failed_reason":         "",
+		"updated_at":            now,
 	}).Error; err != nil {
 		h.logger.Error("更新任务状态失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -375,8 +433,8 @@ func (h *TasksHandler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	// 检查任务状态，只有 pending 或 running 状态的任务可以取消
-	if task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
+	// 检查任务状态，只有 created、pending 或 running 状态的任务可以取消
+	if task.Status != model.TaskStatusCreated && task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
 		c.JSON(http.StatusConflict, gin.H{
 			"code":    409,
 			"message": "任务状态为 " + string(task.Status) + "，无法取消",
@@ -384,10 +442,10 @@ func (h *TasksHandler) CancelTask(c *gin.Context) {
 		return
 	}
 
-	// 更新任务状态为 failed（取消视为失败）
+	// 更新任务状态为 cancelled
 	now := time.Now()
 	if err := h.db.Model(&task).Updates(map[string]interface{}{
-		"status":       model.TaskStatusFailed,
+		"status":       model.TaskStatusCancelled,
 		"completed_at": now,
 		"updated_at":   now,
 	}).Error; err != nil {

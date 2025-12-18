@@ -66,10 +66,12 @@
             style="width: 150px"
             allow-clear
           >
+            <a-select-option value="created">已创建</a-select-option>
             <a-select-option value="pending">待执行</a-select-option>
             <a-select-option value="running">执行中</a-select-option>
             <a-select-option value="completed">已完成</a-select-option>
             <a-select-option value="failed">失败</a-select-option>
+            <a-select-option value="cancelled">已取消</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="任务名称">
@@ -125,11 +127,28 @@
         <template v-else-if="column.key === 'target_type'">
           <a-tag>{{ getTargetTypeText(record.target_type) }}</a-tag>
         </template>
+        <template v-else-if="column.key === 'policy_ids'">
+          <template v-if="getTaskPolicyIds(record).length > 0">
+            <a-tooltip v-if="getTaskPolicyIds(record).length > 1">
+              <template #title>
+                <div v-for="policyId in getTaskPolicyIds(record)" :key="policyId">
+                  {{ policyId }}
+                </div>
+              </template>
+              <span>
+                <a-tag>{{ getTaskPolicyIds(record)[0] }}</a-tag>
+                <span style="color: #1890ff; cursor: pointer;">+{{ getTaskPolicyIds(record).length - 1 }}</span>
+              </span>
+            </a-tooltip>
+            <a-tag v-else>{{ getTaskPolicyIds(record)[0] }}</a-tag>
+          </template>
+          <span v-else>-</span>
+        </template>
         <template v-else-if="column.key === 'action'">
           <a-space size="small">
-            <!-- 只有待执行状态才能执行 -->
+            <!-- 已创建或待执行状态才能执行 -->
             <a-popconfirm
-              v-if="record.status === 'pending'"
+              v-if="record.status === 'created' || record.status === 'pending'"
               title="确定要执行此任务吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -143,9 +162,9 @@
                 执行
               </a-button>
             </a-popconfirm>
-            <!-- 执行中显示取消按钮 -->
+            <!-- 已创建、待执行或执行中状态都可以取消 -->
             <a-popconfirm
-              v-if="record.status === 'running'"
+              v-if="record.status === 'created' || record.status === 'pending' || record.status === 'running'"
               title="确定要取消此任务吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -198,7 +217,7 @@
           </a-button>
         </div>
       </template>
-      <a-descriptions v-if="selectedTask" :column="2" bordered size="small">
+      <a-descriptions v-if="selectedTask" :column="2" bordered size="small" class="task-detail-descriptions">
         <a-descriptions-item label="任务ID" :span="2">
           <span style="font-family: monospace;">{{ selectedTask.task_id }}</span>
         </a-descriptions-item>
@@ -240,7 +259,17 @@
           <a-tag>{{ getTargetTypeText(selectedTask.target_type) }}</a-tag>
         </a-descriptions-item>
         <a-descriptions-item label="关联策略" :span="2">
-          {{ selectedTask.policy_id || '-' }}
+          <div class="policy-tags-wrapper">
+            <template v-if="getTaskPolicyIds(selectedTask).length > 0">
+              <a-tag v-for="policyId in getTaskPolicyIds(selectedTask)" :key="policyId">
+                {{ policyId }}
+              </a-tag>
+              <span class="policy-count">
+                (共 {{ getTaskPolicyIds(selectedTask).length }} 个策略<template v-if="selectedTask.total_rule_count">，{{ selectedTask.total_rule_count }} 条规则</template>)
+              </span>
+            </template>
+            <span v-else>-</span>
+          </div>
         </a-descriptions-item>
         <a-descriptions-item label="目标主机" :span="2">
           <template v-if="selectedTask.target_type === 'all'">
@@ -288,7 +317,7 @@
           }"
         />
         <div class="progress-info">
-          <span>已完成: {{ taskResultStats.total }} 项检查</span>
+          <span>已完成: {{ taskResultStats.total }} / {{ selectedTask?.expected_check_count || 0 }} 项</span>
           <span>通过: {{ taskResultStats.pass }}</span>
           <span>失败: {{ taskResultStats.fail }}</span>
         </div>
@@ -352,7 +381,8 @@
             <span style="margin-right: 8px;">筛选:</span>
             <a-radio-group v-model:value="resultFilter" size="small">
               <a-radio-button value="all">全部 ({{ taskResultStats.total }})</a-radio-button>
-              <a-radio-button value="fail">失败 ({{ taskResultStats.fail + taskResultStats.error }})</a-radio-button>
+              <a-radio-button value="fail">失败 ({{ taskResultStats.fail }})</a-radio-button>
+              <a-radio-button value="error">错误 ({{ taskResultStats.error }})</a-radio-button>
               <a-radio-button value="pass">通过 ({{ taskResultStats.pass }})</a-radio-button>
             </a-radio-group>
           </div>
@@ -360,7 +390,7 @@
             :columns="detailedResultColumns"
             :data-source="filteredDetailedResults"
             :loading="detailResultsLoading"
-            :pagination="{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+            :pagination="{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total: number) => `共 ${total} 条` }"
             row-key="rule_id"
             size="small"
           >
@@ -483,7 +513,7 @@ interface DetailedResult {
 }
 const detailedResults = ref<DetailedResult[]>([])
 const detailResultsLoading = ref(false)
-const resultFilter = ref<'all' | 'fail' | 'pass'>('all')
+const resultFilter = ref<'all' | 'fail' | 'error' | 'pass'>('all')
 
 // 批量操作相关
 const selectedRowKeys = ref<string[]>([])
@@ -534,10 +564,8 @@ const columns = [
   },
   {
     title: '关联策略',
-    dataIndex: 'policy_id',
-    key: 'policy_id',
-    width: 200,
-    ellipsis: true,
+    key: 'policy_ids',
+    width: 250,
   },
   {
     title: '状态',
@@ -607,7 +635,9 @@ const filteredDetailedResults = computed(() => {
   if (resultFilter.value === 'all') {
     return detailedResults.value
   } else if (resultFilter.value === 'fail') {
-    return detailedResults.value.filter(r => r.status === 'fail' || r.status === 'error')
+    return detailedResults.value.filter(r => r.status === 'fail')
+  } else if (resultFilter.value === 'error') {
+    return detailedResults.value.filter(r => r.status === 'error')
   } else {
     return detailedResults.value.filter(r => r.status === 'pass')
   }
@@ -653,11 +683,11 @@ const handleRefresh = () => {
 // 批量执行任务
 const handleBatchRun = () => {
   const runnableTasks = tasks.value.filter(
-    t => selectedRowKeys.value.includes(t.task_id) && t.status === 'pending'
+    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'created' || t.status === 'pending')
   )
 
   if (runnableTasks.length === 0) {
-    message.warning('没有可执行的任务（只有待执行状态的任务可以执行）')
+    message.warning('没有可执行的任务（只有已创建或待执行状态的任务可以执行）')
     return
   }
 
@@ -700,11 +730,11 @@ const handleBatchRun = () => {
 // 批量取消任务
 const handleBatchCancel = () => {
   const cancelableTasks = tasks.value.filter(
-    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'pending' || t.status === 'running')
+    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'created' || t.status === 'pending' || t.status === 'running')
   )
 
   if (cancelableTasks.length === 0) {
-    message.warning('没有可取消的任务（只有待执行或执行中的任务可以取消）')
+    message.warning('没有可取消的任务（只有已创建、待执行或执行中的任务可以取消）')
     return
   }
 
@@ -746,7 +776,7 @@ const handleBatchCancel = () => {
 // 批量删除任务
 const handleBatchDelete = () => {
   const deletableTasks = tasks.value.filter(
-    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'pending' || t.status === 'completed' || t.status === 'failed')
+    t => selectedRowKeys.value.includes(t.task_id) && (t.status === 'created' || t.status === 'pending' || t.status === 'completed' || t.status === 'failed')
   )
 
   if (deletableTasks.length === 0) {
@@ -914,12 +944,18 @@ const loadTaskResultStats = async (taskId: string) => {
       expected: r.expected,
     }))
 
-    // 计算进度百分比（基于预期检查项数量，如果没有则使用已完成数量）
+    // 计算进度百分比（基于预期检查项数量）
     if (selectedTask.value?.status === 'running') {
-      // 假设每个任务大约有 20 个检查项，根据实际完成数量计算进度
-      const expectedTotal = 20 // 可以从任务配置中获取
-      const completedPercent = Math.min(Math.round((taskResultStats.total / expectedTotal) * 100), 99)
-      taskProgress.value = completedPercent
+      // 使用后端返回的预期检查项总数：在线主机数 × 规则总数
+      const expectedTotal = selectedTask.value.expected_check_count || 0
+      if (expectedTotal > 0) {
+        // 正常计算进度，执行中时最大显示 99%
+        const completedPercent = Math.min(Math.round((taskResultStats.total / expectedTotal) * 100), 99)
+        taskProgress.value = completedPercent
+      } else {
+        // 如果没有预期值，显示为 0%
+        taskProgress.value = 0
+      }
     } else {
       taskProgress.value = 100
     }
@@ -961,10 +997,11 @@ const generateTaskLogs = (task: ScanTask) => {
       level: 'info',
       message: `目标主机: ${targetHostMessage}`,
     })
+    const policyIds = getTaskPolicyIds(task)
     logs.push({
       time: formatLogTime(task.executed_at),
       level: 'info',
-      message: `关联策略: ${task.policy_id || '无'}`,
+      message: `关联策略: ${policyIds.length > 0 ? policyIds.join(', ') : '无'}${policyIds.length > 1 ? ` (共 ${policyIds.length} 个)` : ''}`,
     })
   }
 
@@ -1065,20 +1102,24 @@ const handleTableChange = (pag: any) => {
 
 const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
-    pending: 'default',
+    created: 'default',
+    pending: 'processing',
     running: 'processing',
     completed: 'success',
     failed: 'error',
+    cancelled: 'warning',
   }
   return colors[status] || 'default'
 }
 
 const getStatusText = (status: string) => {
   const texts: Record<string, string> = {
+    created: '已创建',
     pending: '待执行',
     running: '执行中',
     completed: '已完成',
     failed: '失败',
+    cancelled: '已取消',
   }
   return texts[status] || status
 }
@@ -1108,6 +1149,17 @@ const getTargetTypeText = (type: string) => {
     os_family: '按OS筛选',
   }
   return texts[type] || type
+}
+
+// 获取任务的策略ID列表（兼容新旧数据）
+const getTaskPolicyIds = (task: ScanTask): string[] => {
+  if (task.policy_ids && task.policy_ids.length > 0) {
+    return task.policy_ids
+  }
+  if (task.policy_id) {
+    return [task.policy_id]
+  }
+  return []
 }
 
 const formatTime = (time: string | undefined) => {
@@ -1311,5 +1363,34 @@ onUnmounted(() => {
 
 .refresh-detail-btn {
   margin-left: auto;
+}
+
+/* 任务详情表格紧凑样式 */
+.task-detail-descriptions :deep(.ant-descriptions-item-label),
+.task-detail-descriptions :deep(.ant-descriptions-item-content) {
+  padding: 8px 12px !important;
+}
+
+.task-detail-descriptions :deep(.ant-descriptions-item-label) {
+  width: 80px;
+  min-width: 80px;
+}
+
+/* 策略标签容器 */
+.policy-tags-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.policy-tags-wrapper .ant-tag {
+  margin: 0;
+}
+
+.policy-count {
+  color: #666;
+  font-size: 12px;
+  margin-left: 4px;
 }
 </style>

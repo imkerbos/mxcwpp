@@ -32,7 +32,157 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Info("模型迁移成功", zap.String("model", fmt.Sprintf("%T", m)))
 	}
 
+	// 执行数据迁移：为现有数据设置默认的运行时类型
+	if err := migrateRuntimeTypes(db, logger); err != nil {
+		logger.Warn("运行时类型迁移处理", zap.Error(err))
+	}
+
+	// 执行数据迁移：更新策略组名称为主机系统基线组
+	if err := migratePolicyGroupName(db, logger); err != nil {
+		logger.Warn("策略组名称迁移处理", zap.Error(err))
+	}
+
+	// 执行数据迁移：为通知配置设置 notify_category
+	if err := migrateNotificationCategory(db, logger); err != nil {
+		logger.Warn("通知类别迁移处理", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
+	return nil
+}
+
+// migrateNotificationCategory 为现有通知配置设置 notify_category
+func migrateNotificationCategory(db *gorm.DB, logger *zap.Logger) error {
+	// 1. 将名称包含 "离线" 的通知设置为 agent_offline
+	result := db.Model(&model.Notification{}).
+		Where("(notify_category IS NULL OR notify_category = '')").
+		Where("name LIKE ?", "%离线%").
+		Update("notify_category", model.NotifyCategoryAgentOffline)
+	if result.Error != nil {
+		logger.Warn("更新 Agent 离线通知类别失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新 Agent 离线通知类别",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// 2. 将其他通知设置为 baseline_alert（默认）
+	result = db.Model(&model.Notification{}).
+		Where("notify_category IS NULL OR notify_category = ''").
+		Update("notify_category", model.NotifyCategoryBaselineAlert)
+	if result.Error != nil {
+		logger.Warn("更新基线告警通知类别失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新基线告警通知类别",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// 3. 清空 Agent 离线通知的 severities（不需要等级配置）
+	result = db.Model(&model.Notification{}).
+		Where("notify_category = ?", model.NotifyCategoryAgentOffline).
+		Update("severities", model.StringArray{})
+	if result.Error != nil {
+		logger.Warn("清空 Agent 离线通知的 severities 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已清空 Agent 离线通知的 severities",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	return nil
+}
+
+// migrateRuntimeTypes 为现有数据设置默认的运行时类型
+func migrateRuntimeTypes(db *gorm.DB, logger *zap.Logger) error {
+	// 1. 更新现有主机的 runtime_type
+	// 如果 is_container = true，设置为 docker；否则设置为 vm
+	result := db.Model(&model.Host{}).
+		Where("runtime_type IS NULL OR runtime_type = ''").
+		Where("is_container = ?", true).
+		Update("runtime_type", model.RuntimeTypeDocker)
+	if result.Error != nil {
+		logger.Warn("更新容器主机的 runtime_type 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新容器主机的 runtime_type",
+			zap.Int64("count", result.RowsAffected),
+			zap.String("runtime_type", string(model.RuntimeTypeDocker)))
+	}
+
+	result = db.Model(&model.Host{}).
+		Where("runtime_type IS NULL OR runtime_type = ''").
+		Where("is_container = ? OR is_container IS NULL", false).
+		Update("runtime_type", model.RuntimeTypeVM)
+	if result.Error != nil {
+		logger.Warn("更新虚拟机主机的 runtime_type 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新虚拟机主机的 runtime_type",
+			zap.Int64("count", result.RowsAffected),
+			zap.String("runtime_type", string(model.RuntimeTypeVM)))
+	}
+
+	// 2. 更新所有策略的 runtime_types 为 ["vm"]
+	// 这里强制更新所有策略，确保所有策略都有默认的运行时类型
+	result = db.Model(&model.Policy{}).
+		Where("runtime_types IS NULL OR runtime_types = '[]' OR runtime_types = '' OR runtime_types = 'null'").
+		Update("runtime_types", model.StringArray{"vm"})
+	if result.Error != nil {
+		logger.Warn("更新策略的 runtime_types 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新策略的 runtime_types",
+			zap.Int64("count", result.RowsAffected),
+			zap.Strings("runtime_types", []string{"vm"}))
+	}
+
+	// 2.1 额外检查：强制更新那些 runtime_types 可能包含无效值的记录
+	// 使用 JSON 包含检查，如果不包含有效值则更新
+	result = db.Exec(`
+		UPDATE policies 
+		SET runtime_types = '["vm"]' 
+		WHERE runtime_types NOT LIKE '%"vm"%' 
+		  AND runtime_types NOT LIKE '%"docker"%' 
+		  AND runtime_types NOT LIKE '%"k8s"%'
+	`)
+	if result.Error != nil {
+		logger.Warn("强制更新策略的 runtime_types 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("强制更新了无效的策略 runtime_types",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// 3. 清空现有规则的 runtime_types，让它们继承策略的设置
+	// 规则默认继承策略的 RuntimeTypes，不需要单独设置
+	result = db.Model(&model.Rule{}).
+		Where("runtime_types IS NOT NULL AND runtime_types != '[]' AND runtime_types != ''").
+		Update("runtime_types", model.StringArray{})
+	if result.Error != nil {
+		logger.Warn("清空规则的 runtime_types 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已清空规则的 runtime_types（规则将继承策略的设置）",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	return nil
+}
+
+// migratePolicyGroupName 更新策略组名称为"主机系统基线组"
+func migratePolicyGroupName(db *gorm.DB, logger *zap.Logger) error {
+	// 更新默认策略组的名称（从"系统基线组"改为"主机系统基线组"）
+	result := db.Model(&model.PolicyGroup{}).
+		Where("id = ?", "system-baseline").
+		Where("name = ?", "系统基线组").
+		Updates(map[string]interface{}{
+			"name":        "主机系统基线组",
+			"description": "系统内置的基线检查策略组，包含 Linux 主机操作系统安全基线检查策略（仅适用于主机/虚拟机，不适用于容器）",
+			"icon":        "🖥",
+		})
+	if result.Error != nil {
+		logger.Warn("更新策略组名称失败", zap.Error(result.Error))
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		logger.Info("已更新策略组名称",
+			zap.String("old_name", "系统基线组"),
+			zap.String("new_name", "主机系统基线组"))
+	}
+
 	return nil
 }
 

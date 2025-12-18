@@ -249,12 +249,12 @@ const daemonsetYaml = computed(() => {
   const serverHost = httpServer.split(':')[0] + ':6751' // 假设 gRPC 端口是 6751
   
   let envVars = `
-        - name: BLS_SERVER_HOST
+        - name: MXSEC_AGENT_SERVER
           value: "${serverHost}"`
   
   if (selectedBusinessLine.value) {
     envVars += `
-        - name: BLS_BUSINESS_LINE
+        - name: MXSEC_BUSINESS_LINE
           value: "${selectedBusinessLine.value}"`
   }
   

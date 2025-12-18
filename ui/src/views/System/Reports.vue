@@ -169,20 +169,120 @@
         </a-card>
       </a-col>
     </a-row>
+
+    <!-- 第六行：Top 列表 -->
+    <a-row :gutter="[16, 16]" class="charts-row">
+      <a-col :xs="24" :sm="24" :md="12" :lg="12">
+        <a-card title="Top 10 失败检查项" :bordered="false" class="list-card">
+          <template #extra>
+            <a-button type="link" size="small" @click="goToTaskReport">
+              查看详情
+            </a-button>
+          </template>
+          <a-spin :spinning="loadingTopLists">
+            <a-table
+              v-if="topFailedRules.length > 0"
+              :columns="failedRulesColumns"
+              :data-source="topFailedRules"
+              :pagination="false"
+              row-key="rule_id"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'severity'">
+                  <a-tag :color="getSeverityColor(record.severity)">
+                    {{ getSeverityLabel(record.severity) }}
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'affected_hosts'">
+                  <span style="color: #ff4d4f; font-weight: 500">
+                    {{ record.affected_hosts }} 台
+                  </span>
+                </template>
+              </template>
+            </a-table>
+            <a-empty v-else description="暂无失败检查项" />
+          </a-spin>
+        </a-card>
+      </a-col>
+      <a-col :xs="24" :sm="24" :md="12" :lg="12">
+        <a-card title="Top 10 风险主机" :bordered="false" class="list-card">
+          <template #extra>
+            <a-button type="link" size="small" @click="goToHosts">
+              查看详情
+            </a-button>
+          </template>
+          <a-spin :spinning="loadingTopLists">
+            <a-table
+              v-if="topRiskHosts.length > 0"
+              :columns="riskHostsColumns"
+              :data-source="topRiskHosts"
+              :pagination="false"
+              row-key="host_id"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'hostname'">
+                  <span>{{ record.hostname || record.host_id.slice(0, 8) }}</span>
+                  <span v-if="record.ip" style="color: #8c8c8c; margin-left: 4px; font-size: 12px">
+                    ({{ record.ip }})
+                  </span>
+                </template>
+                <template v-else-if="column.key === 'score'">
+                  <a-progress
+                    :percent="Math.round(record.score)"
+                    :status="getScoreStatus(record.score)"
+                    :stroke-color="getScoreColor(record.score)"
+                    size="small"
+                    style="width: 100px"
+                  />
+                </template>
+                <template v-else-if="column.key === 'fails'">
+                  <a-space :size="4">
+                    <a-tag v-if="record.critical_count > 0" color="red">
+                      严重 {{ record.critical_count }}
+                    </a-tag>
+                    <a-tag v-if="record.high_count > 0" color="orange">
+                      高危 {{ record.high_count }}
+                    </a-tag>
+                  </a-space>
+                </template>
+                <template v-else-if="column.key === 'action'">
+                  <a-button type="link" size="small" @click="goToHostDetail(record.host_id)">
+                    详情
+                  </a-button>
+                </template>
+              </template>
+            </a-table>
+            <a-empty v-else description="暂无风险主机" />
+          </a-spin>
+        </a-card>
+      </a-col>
+    </a-row>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
-import { reportsApi, type ReportStats, type BaselineScoreTrend, type CheckResultTrend } from '@/api/reports'
+import {
+  reportsApi,
+  type ReportStats,
+  type BaselineScoreTrend,
+  type CheckResultTrend,
+  type TopFailedRule,
+  type TopRiskHost,
+} from '@/api/reports'
 import { hostsApi } from '@/api/hosts'
 import { dashboardApi } from '@/api/dashboard'
 import type { HostStatusDistribution, HostRiskDistribution } from '@/api/hosts'
 import type { EChartsOption } from 'echarts'
 
+const router = useRouter()
 const loading = ref(false)
+const loadingTopLists = ref(false)
 const dateRange = ref<[Dayjs, Dayjs]>([
   dayjs().subtract(7, 'day'),
   dayjs()
@@ -256,6 +356,26 @@ const checkResultTrend = ref<CheckResultTrend>({
   failed: [],
   warning: [],
 })
+
+// Top 列表数据
+const topFailedRules = ref<TopFailedRule[]>([])
+const topRiskHosts = ref<TopRiskHost[]>([])
+
+// Top 失败检查项表格列定义
+const failedRulesColumns = [
+  { title: '检查项', key: 'title', dataIndex: 'title', ellipsis: true },
+  { title: '级别', key: 'severity', width: 80 },
+  { title: '类别', key: 'category', dataIndex: 'category', width: 100 },
+  { title: '影响主机', key: 'affected_hosts', width: 100 },
+]
+
+// Top 风险主机表格列定义
+const riskHostsColumns = [
+  { title: '主机', key: 'hostname', ellipsis: true },
+  { title: '得分', key: 'score', width: 130 },
+  { title: '风险项', key: 'fails', width: 150 },
+  { title: '操作', key: 'action', width: 70 },
+]
 
 // 主机状态分布图表配置
 const hostStatusChartOption = computed<EChartsOption>(() => ({
@@ -625,6 +745,69 @@ const handleDateRangeChange = () => {
   refreshData()
 }
 
+// 辅助函数
+const getSeverityColor = (severity: string): string => {
+  const colors: Record<string, string> = {
+    critical: 'red',
+    high: 'orange',
+    medium: 'gold',
+    low: 'blue',
+  }
+  return colors[severity] || 'default'
+}
+
+const getSeverityLabel = (severity: string): string => {
+  const labels: Record<string, string> = {
+    critical: '严重',
+    high: '高危',
+    medium: '中危',
+    low: '低危',
+  }
+  return labels[severity] || severity
+}
+
+const getScoreStatus = (score: number): 'success' | 'exception' | 'normal' => {
+  if (score >= 80) return 'success'
+  if (score < 60) return 'exception'
+  return 'normal'
+}
+
+const getScoreColor = (score: number): string => {
+  if (score >= 80) return '#52c41a'
+  if (score >= 60) return '#faad14'
+  return '#ff4d4f'
+}
+
+// 导航函数
+const goToTaskReport = () => {
+  router.push('/system/task-report')
+}
+
+const goToHosts = () => {
+  router.push('/hosts')
+}
+
+const goToHostDetail = (hostId: string) => {
+  router.push(`/hosts/${hostId}`)
+}
+
+// 加载 Top 列表数据
+const loadTopLists = async () => {
+  loadingTopLists.value = true
+  try {
+    const [failedRules, riskHosts] = await Promise.all([
+      reportsApi.getTopFailedRules(10).catch(() => []),
+      reportsApi.getTopRiskHosts(10).catch(() => []),
+    ])
+    topFailedRules.value = failedRules
+    topRiskHosts.value = riskHosts
+  } catch (error) {
+    console.error('加载 Top 列表失败:', error)
+  } finally {
+    loadingTopLists.value = false
+  }
+}
+
 const refreshData = async () => {
   loading.value = true
   try {
@@ -697,9 +880,11 @@ let refreshInterval: number | null = null
 
 onMounted(() => {
   refreshData()
+  loadTopLists()
   // 每5分钟自动刷新一次
   refreshInterval = window.setInterval(() => {
     refreshData()
+    loadTopLists()
   }, 5 * 60 * 1000)
 })
 
@@ -753,6 +938,18 @@ onUnmounted(() => {
 
 .chart-card :deep(.ant-card-body) {
   padding: 20px;
+}
+
+.list-card {
+  height: 100%;
+}
+
+.list-card :deep(.ant-card-body) {
+  padding: 12px;
+}
+
+.list-card :deep(.ant-table-wrapper) {
+  margin: 0;
 }
 
 /* 响应式调整 */

@@ -1,13 +1,17 @@
 import apiClient from './client'
 import type { PaginatedResponse } from './types'
 
+// 通知类别
+export type NotifyCategory = 'baseline_alert' | 'agent_offline'
+
 export interface Notification {
   id: number
   name: string
   description?: string
+  notify_category: NotifyCategory // 通知类别
   enabled: boolean
   type: 'lark' | 'webhook'
-  severities: string[] // critical, high, medium, low
+  severities: string[] // critical, high, medium, low（仅基线告警需要）
   scope: 'global' | 'host_tags' | 'business_line' | 'specified'
   scope_value?: string // JSON 字符串
   frontend_url?: string
@@ -29,9 +33,10 @@ export interface ScopeValueData {
 export interface CreateNotificationRequest {
   name: string
   description?: string
+  notify_category: NotifyCategory // 通知类别
   enabled?: boolean
   type: 'lark' | 'webhook'
-  severities: string[]
+  severities?: string[] // 仅基线告警需要
   scope: 'global' | 'host_tags' | 'business_line' | 'specified'
   scope_value?: ScopeValueData
   frontend_url?: string
@@ -45,6 +50,7 @@ export interface CreateNotificationRequest {
 export interface UpdateNotificationRequest {
   name?: string
   description?: string
+  notify_category?: NotifyCategory
   enabled?: boolean
   type?: 'lark' | 'webhook'
   severities?: string[]

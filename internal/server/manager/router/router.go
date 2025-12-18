@@ -109,8 +109,10 @@ func setupHostsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, sco
 	router.GET("/hosts/:host_id", handler.GetHost)
 	router.GET("/hosts/:host_id/metrics", handler.GetHostMetrics)
 	router.GET("/hosts/:host_id/risk-statistics", handler.GetHostRiskStatistics)
+	router.GET("/hosts/:host_id/plugins", handler.GetHostPlugins)
 	router.PUT("/hosts/:host_id/tags", handler.UpdateHostTags)
 	router.PUT("/hosts/:host_id/business-line", handler.UpdateHostBusinessLine)
+	router.DELETE("/hosts/:host_id", handler.DeleteHost)
 	router.GET("/hosts/status-distribution", handler.GetHostStatusDistribution)
 	router.GET("/hosts/risk-distribution", handler.GetHostRiskDistribution)
 }
@@ -205,6 +207,13 @@ func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/reports/stats", handler.GetStats)
 	router.GET("/reports/baseline-score-trend", handler.GetBaselineScoreTrend)
 	router.GET("/reports/check-result-trend", handler.GetCheckResultTrend)
+	// 任务报告
+	router.GET("/reports/task/:task_id", handler.GetTaskReport)
+	router.GET("/reports/task/:task_id/host/:host_id", handler.GetTaskHostDetail)
+	router.GET("/reports/task/:task_id/executive", handler.GetExecutiveTaskReport)
+	// Top 统计
+	router.GET("/reports/top-failed-rules", handler.GetTopFailedRules)
+	router.GET("/reports/top-risk-hosts", handler.GetTopRiskHosts)
 }
 
 // setupBusinessLinesAPI 设置业务线 API 路由
@@ -230,6 +239,10 @@ func setupSystemConfigAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logg
 
 	// Logo 上传
 	router.POST("/system-config/upload-logo", handler.UploadLogo)
+
+	// 告警配置
+	router.GET("/system-config/alert", handler.GetAlertConfig)
+	router.PUT("/system-config/alert", handler.UpdateAlertConfig)
 }
 
 // setupNotificationsAPI 设置通知管理 API 路由
@@ -251,6 +264,10 @@ func setupAlertsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/alerts/:id", handler.GetAlert)
 	router.POST("/alerts/:id/resolve", handler.ResolveAlert)
 	router.POST("/alerts/:id/ignore", handler.IgnoreAlert)
+	// 批量操作
+	router.POST("/alerts/batch/resolve", handler.BatchResolveAlerts)
+	router.POST("/alerts/batch/ignore", handler.BatchIgnoreAlerts)
+	router.POST("/alerts/batch/delete", handler.BatchDeleteAlerts)
 }
 
 // setupComponentsAPI 设置组件管理 API 路由
@@ -274,4 +291,11 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 	// 包上传
 	router.POST("/components/:id/versions/:version_id/packages", handler.UploadPackage)
 	router.DELETE("/packages/:id", handler.DeletePackage)
+
+	// Agent 更新推送
+	router.POST("/components/agent/push-update", handler.PushAgentUpdate)
+
+	// 推送记录查询
+	router.GET("/components/push-records", handler.ListPushRecords)
+	router.GET("/components/push-records/:id", handler.GetPushRecord)
 }

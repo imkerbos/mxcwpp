@@ -45,11 +45,17 @@
       :data-source="notifications"
       :loading="loading"
       :pagination="pagination"
+      :scroll="{ x: 910 }"
       row-key="id"
       @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'enabled'">
+        <template v-if="column.key === 'notify_category'">
+          <a-tag :color="record.notify_category === 'baseline_alert' ? 'green' : 'orange'">
+            {{ NOTIFY_CATEGORY_TEXT_MAP[record.notify_category] || record.notify_category }}
+          </a-tag>
+        </template>
+        <template v-else-if="column.key === 'enabled'">
           <a-switch
             v-model:checked="record.enabled"
             size="small"
@@ -57,32 +63,37 @@
           />
         </template>
         <template v-else-if="column.key === 'severities'">
-          <a-space size="small">
-            <a-tag v-if="record.severities.includes('critical')" color="red" size="small">
-              严重
-            </a-tag>
-            <a-tag v-if="record.severities.includes('high')" color="orange" size="small">
-              高危
-            </a-tag>
-            <a-tag v-if="record.severities.includes('medium')" color="blue" size="small">
-              中危
-            </a-tag>
-            <a-tag v-if="record.severities.includes('low')" color="default" size="small">
-              低危
-            </a-tag>
-          </a-space>
+          <template v-if="record.notify_category === 'baseline_alert'">
+            <a-space size="small">
+              <a-tag v-if="record.severities?.includes('critical')" color="red" size="small">
+                严重
+              </a-tag>
+              <a-tag v-if="record.severities?.includes('high')" color="orange" size="small">
+                高危
+              </a-tag>
+              <a-tag v-if="record.severities?.includes('medium')" color="blue" size="small">
+                中危
+              </a-tag>
+              <a-tag v-if="record.severities?.includes('low')" color="default" size="small">
+                低危
+              </a-tag>
+            </a-space>
+          </template>
+          <template v-else>
+            <span style="color: #999;">-</span>
+          </template>
         </template>
         <template v-else-if="column.key === 'scope'">
           {{ getScopeText(record.scope) }}
         </template>
         <template v-else-if="column.key === 'config'">
-          <div>
-            <div>{{ getTypeText(record.type) }}</div>
-            <div class="config-url">{{ record.config.webhook_url }}</div>
-          </div>
+          <a-tag :color="record.type === 'lark' ? 'blue' : 'cyan'">
+            {{ getTypeText(record.type) }}
+          </a-tag>
         </template>
         <template v-else-if="column.key === 'actions'">
           <a-space>
+            <a-button type="link" size="small" @click="handleViewDetail(record)">详情</a-button>
             <a-button type="link" size="small" @click="handleEdit(record)">编辑</a-button>
             <a-popconfirm
               title="确定要删除这个通知吗？"
@@ -113,26 +124,27 @@
         :label-col="{ span: 5 }"
         :wrapper-col="{ span: 19 }"
       >
-        <a-form-item label="通知类型" name="name" required>
-          <a-select
-            v-model:value="formData.name"
-            placeholder="请选择通知类型"
-            allow-clear
-            show-search
-            :filter-option="filterNotificationTypeOption"
-            style="width: 100%"
-          >
-            <a-select-option
-              v-for="type in notificationTypes"
-              :key="type"
-              :value="type"
-            >
-              {{ type }}
-            </a-select-option>
-          </a-select>
+        <a-form-item label="通知类别" name="notify_category" required>
+          <a-radio-group v-model:value="formData.notify_category" @change="handleNotifyCategoryChange">
+            <a-radio v-for="opt in notifyCategoryOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </a-radio>
+          </a-radio-group>
+          <div class="form-tip">
+            {{ notifyCategoryOptions.find(o => o.value === formData.notify_category)?.description }}
+          </div>
         </a-form-item>
 
-        <a-form-item label="通知等级" name="severities" required>
+        <a-form-item label="通知名称" name="name" required>
+          <a-input
+            v-model:value="formData.name"
+            placeholder="请输入通知名称，如：生产环境基线告警"
+            allow-clear
+          />
+        </a-form-item>
+
+        <!-- 基线告警才显示通知等级 -->
+        <a-form-item v-if="formData.notify_category === 'baseline_alert'" label="通知等级" name="severities" required>
           <div class="severity-section">
             <a-checkbox-group v-model:value="formData.severities" class="severity-checkbox-group">
               <a-checkbox value="critical">严重</a-checkbox>
@@ -140,15 +152,20 @@
               <a-checkbox value="medium">中危</a-checkbox>
               <a-checkbox value="low">低危</a-checkbox>
             </a-checkbox-group>
-            <div class="custom-alert-section">
-              <a-button type="link" size="small" @click="showCustomAlertModal = true">
-                选择通知告警 (已选{{ customAlerts.length }}条)
-              </a-button>
-            </div>
             <div class="form-tip">
-              添加的告警不受通知等级约束，与通知等级取"并集"进行通知
+              选择需要通知的告警等级
             </div>
           </div>
+        </a-form-item>
+
+        <!-- Agent 离线通知的说明 -->
+        <a-form-item v-if="formData.notify_category === 'agent_offline'" label="通知说明">
+          <a-alert
+            type="info"
+            show-icon
+            message="Agent 离线通知"
+            description="当 Agent 断开连接时，将自动发送离线通知到配置的通知渠道。"
+          />
         </a-form-item>
 
         <a-form-item label="主机范围" name="scope" required>
@@ -164,7 +181,7 @@
           </a-radio-group>
           <div v-if="formData.scope === 'host_tags'" class="scope-input-wrapper">
             <a-select
-              v-model:value="formData.scopeValue.tags"
+              v-model:value="formData.scope_value.tags"
               mode="tags"
               placeholder="请输入或选择主机标签，按回车或逗号分隔"
               style="width: 100%"
@@ -174,7 +191,7 @@
           </div>
           <div v-else-if="formData.scope === 'business_line'" class="scope-input-wrapper">
             <a-select
-              v-model:value="formData.scopeValue.business_lines"
+              v-model:value="formData.scope_value.business_lines"
               mode="multiple"
               placeholder="请选择业务线"
               style="width: 100%"
@@ -189,7 +206,7 @@
           </div>
           <div v-else-if="formData.scope === 'specified'" class="scope-input-wrapper">
             <a-select
-              v-model:value="formData.scopeValue.host_ids"
+              v-model:value="formData.scope_value.host_ids"
               mode="multiple"
               placeholder="请选择主机"
               style="width: 100%"
@@ -288,6 +305,52 @@
         <p>自定义告警功能暂未实现</p>
       </div>
     </a-modal>
+
+    <!-- 通知详情弹窗 -->
+    <a-modal
+      v-model:open="detailModalVisible"
+      title="通知详情"
+      :width="600"
+      :footer="null"
+    >
+      <a-descriptions :column="1" bordered v-if="viewingNotification">
+        <a-descriptions-item label="通知类型">
+          {{ viewingNotification.name }}
+        </a-descriptions-item>
+        <a-descriptions-item label="通知状态">
+          <a-tag :color="viewingNotification.enabled ? 'success' : 'default'">
+            {{ viewingNotification.enabled ? '启用' : '禁用' }}
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="关注等级">
+          <a-space size="small">
+            <a-tag v-if="viewingNotification.severities?.includes('critical')" color="red">严重</a-tag>
+            <a-tag v-if="viewingNotification.severities?.includes('high')" color="orange">高危</a-tag>
+            <a-tag v-if="viewingNotification.severities?.includes('medium')" color="blue">中危</a-tag>
+            <a-tag v-if="viewingNotification.severities?.includes('low')" color="default">低危</a-tag>
+          </a-space>
+        </a-descriptions-item>
+        <a-descriptions-item label="主机范围">
+          {{ getScopeText(viewingNotification.scope) }}
+        </a-descriptions-item>
+        <a-descriptions-item label="通知方式">
+          <a-tag :color="viewingNotification.type === 'lark' ? 'blue' : 'cyan'">
+            {{ getTypeText(viewingNotification.type) }}
+          </a-tag>
+        </a-descriptions-item>
+        <a-descriptions-item label="Webhook URL">
+          <div class="detail-url">
+            {{ viewingNotification.config?.webhook_url || '-' }}
+          </div>
+        </a-descriptions-item>
+        <a-descriptions-item label="用户备注">
+          {{ viewingNotification.config?.user_notes || '-' }}
+        </a-descriptions-item>
+        <a-descriptions-item label="前端地址">
+          {{ viewingNotification.frontend_url || '-' }}
+        </a-descriptions-item>
+      </a-descriptions>
+    </a-modal>
   </div>
 </template>
 
@@ -301,19 +364,22 @@ import {
   type CreateNotificationRequest,
   type UpdateNotificationRequest,
   type ScopeValueData,
+  type NotifyCategory,
 } from '@/api/notifications'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 import { hostsApi, type Host } from '@/api/hosts'
 
-// 预设通知类型
-const notificationTypes = [
-  '主机和容器安全告警',
-  '授权即将到期/将到期',
-  '应用运行时安全告警',
-  '容器集群安全告警',
-  '病毒扫描安全告警',
-  'Agent 离线通知',
+// 通知类别选项
+const notifyCategoryOptions = [
+  { value: 'baseline_alert', label: '基线安全告警', description: '基线检测发现安全问题时发送通知' },
+  { value: 'agent_offline', label: 'Agent 离线通知', description: 'Agent 断开连接时发送通知' },
 ]
+
+// 通知类别文本映射
+const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
+  baseline_alert: '基线安全告警',
+  agent_offline: 'Agent 离线通知',
+}
 
 const SCOPE_TEXT_MAP: Record<string, string> = {
   global: '全局',
@@ -334,6 +400,8 @@ const notifications = ref<Notification[]>([])
 const businessLines = ref<BusinessLine[]>([])
 const hosts = ref<Host[]>([])
 const modalVisible = ref(false)
+const detailModalVisible = ref(false)
+const viewingNotification = ref<Notification | null>(null)
 const isEdit = ref(false)
 const editingId = ref<number | null>(null)
 const formRef = ref()
@@ -356,6 +424,7 @@ const pagination = reactive({
 const formData = reactive<CreateNotificationRequest>({
   name: '',
   description: '',
+  notify_category: 'baseline_alert', // 默认基线告警
   enabled: true,
   type: 'lark',
   severities: [],
@@ -374,46 +443,63 @@ const formData = reactive<CreateNotificationRequest>({
 })
 
 const formRules = {
-  name: [{ required: true, message: '请选择通知类型', trigger: 'change' }],
-  severities: [{ required: true, message: '请选择至少一个通知等级', trigger: 'change' }],
+  name: [{ required: true, message: '请输入通知名称', trigger: 'blur' }],
+  notify_category: [{ required: true, message: '请选择通知类别', trigger: 'change' }],
+  severities: [{
+    validator: (_rule: any, value: string[]) => {
+      // 只有基线告警才需要验证 severities
+      if (formData.notify_category === 'baseline_alert' && (!value || value.length === 0)) {
+        return Promise.reject('请选择至少一个通知等级')
+      }
+      return Promise.resolve()
+    },
+    trigger: 'change',
+  }],
   scope: [{ required: true, message: '请选择主机范围', trigger: 'change' }],
-  type: [{ required: true, message: '请选择通知类型', trigger: 'change' }],
+  type: [{ required: true, message: '请选择通知方式', trigger: 'change' }],
   frontend_url: [{ required: true, message: '请输入前端地址', trigger: 'blur' }],
 }
 
 const columns = [
   {
-    title: '通知类型',
+    title: '通知名称',
     dataIndex: 'name',
     key: 'name',
+    width: 150,
     ellipsis: true,
+  },
+  {
+    title: '通知类别',
+    key: 'notify_category',
+    width: 130,
   },
   {
     title: '通知状态',
     key: 'enabled',
     width: 100,
-    align: 'center',
+    align: 'center' as const,
   },
   {
-    title: '我关注的等级',
+    title: '关注等级',
     key: 'severities',
-    width: 180,
+    width: 200,
   },
   {
     title: '主机范围',
     key: 'scope',
-    width: 120,
+    width: 100,
   },
   {
-    title: '通知配置',
+    title: '通知方式',
     key: 'config',
-    ellipsis: true,
+    width: 80,
   },
   {
     title: '操作',
     key: 'actions',
-    width: 120,
-    align: 'center',
+    width: 180,
+    align: 'center' as const,
+    fixed: 'right' as const,
   },
 ]
 
@@ -502,6 +588,16 @@ const handleToggleEnabled = async (record: Notification) => {
   }
 }
 
+const handleViewDetail = async (record: Notification) => {
+  try {
+    const detail = await notificationsApi.get(record.id)
+    viewingNotification.value = detail
+    detailModalVisible.value = true
+  } catch (error: any) {
+    message.error(error?.message || '加载通知详情失败')
+  }
+}
+
 const handleCreate = () => {
   isEdit.value = false
   editingId.value = null
@@ -519,6 +615,7 @@ const handleEdit = async (record: Notification) => {
     Object.assign(formData, {
       name: detail.name,
       description: detail.description || '',
+      notify_category: detail.notify_category || 'baseline_alert',
       enabled: detail.enabled,
       type: detail.type,
       severities: detail.severities || [],
@@ -655,6 +752,17 @@ const handleScopeChange = () => {
   formData.scope_value = { tags: [], business_lines: [], host_ids: [] }
 }
 
+const handleNotifyCategoryChange = () => {
+  // 切换通知类别时，清空 severities
+  formData.severities = []
+  // 根据类别设置默认名称
+  if (formData.notify_category === 'baseline_alert') {
+    formData.name = formData.name || '基线安全告警'
+  } else if (formData.notify_category === 'agent_offline') {
+    formData.name = formData.name || 'Agent 离线通知'
+  }
+}
+
 const handleCustomAlertOk = () => {
   showCustomAlertModal.value = false
 }
@@ -663,6 +771,7 @@ const resetForm = () => {
   Object.assign(formData, {
     name: '',
     description: '',
+    notify_category: 'baseline_alert' as NotifyCategory,
     enabled: true,
     type: 'lark',
     severities: [],
@@ -721,6 +830,15 @@ onMounted(() => {
   font-size: 12px;
   color: #8c8c8c;
   word-break: break-all;
+}
+
+.detail-url {
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 13px;
+  background: #f5f5f5;
+  padding: 8px;
+  border-radius: 4px;
 }
 
 .severity-section {

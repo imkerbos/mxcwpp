@@ -96,14 +96,13 @@
                 </template>
                 <template #title>系统管理</template>
                 <a-menu-item key="system-collection">平台授权</a-menu-item>
-                <a-menu-item key="system-tasks">任务列表</a-menu-item>
                 <a-menu-item key="system-components">组件列表</a-menu-item>
-                <a-menu-item key="system-policy">组件策略</a-menu-item>
                 <a-menu-item key="system-install">安装配置</a-menu-item>
                 <a-menu-item key="users">用户管理</a-menu-item>
                 <a-menu-item key="system-settings">基本设置</a-menu-item>
                 <a-menu-item key="system-notification">通知管理</a-menu-item>
                 <a-menu-item key="system-reports">报告管理</a-menu-item>
+                <a-menu-item key="system-task-report">任务报告</a-menu-item>
               </a-sub-menu>
             </a-menu>
           </div>
@@ -238,8 +237,6 @@ watch(
     } else if (name === 'SystemCollection') {
       selectedKeys.value = ['system-collection']
       openKeys.value = ['system-menu']
-    } else if (name === 'SystemTasks') {
-      selectedKeys.value = ['system-tasks']
       openKeys.value = ['system-menu']
     } else if (name === 'SystemSettings') {
       selectedKeys.value = ['system-settings']
@@ -250,14 +247,14 @@ watch(
     } else if (name === 'SystemComponents') {
       selectedKeys.value = ['system-components']
       openKeys.value = ['system-menu']
-    } else if (name === 'SystemPolicy') {
-      selectedKeys.value = ['system-policy']
-      openKeys.value = ['system-menu']
     } else if (name === 'SystemInstall') {
       selectedKeys.value = ['system-install']
       openKeys.value = ['system-menu']
     } else if (name === 'SystemReports') {
       selectedKeys.value = ['system-reports']
+      openKeys.value = ['system-menu']
+    } else if (name === 'SystemTaskReport') {
+      selectedKeys.value = ['system-task-report']
       openKeys.value = ['system-menu']
     } else if (name === 'Alerts') {
       selectedKeys.value = ['alerts']
@@ -284,20 +281,18 @@ const handleMenuClick = ({ key }: { key: string }) => {
     router.push('/users')
   } else if (key === 'system-collection') {
     router.push('/system/collection')
-  } else if (key === 'system-tasks') {
-    router.push('/system/tasks')
   } else if (key === 'system-settings') {
     router.push('/system/settings')
   } else if (key === 'system-notification') {
     router.push('/system/notification')
   } else if (key === 'system-components') {
     router.push('/system/components')
-  } else if (key === 'system-policy') {
-    router.push('/system/policy')
   } else if (key === 'system-install') {
     router.push('/system/install')
   } else if (key === 'system-reports') {
     router.push('/system/reports')
+  } else if (key === 'system-task-report') {
+    router.push('/system/task-report')
   } else if (key === 'alerts') {
     router.push('/alerts')
   }

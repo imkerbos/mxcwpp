@@ -289,6 +289,196 @@
 
 ---
 
+## Phase 2.5: CIS 基线规则完善（Linux VM）
+
+> **目标**：按照 CIS Rocky Linux 9 Benchmark 完善系统安全基线规则，并实现架构区分（虚拟机 vs Docker 容器）。
+> **适用范围**：仅适用于 Linux 虚拟机，不适用于 Docker 容器。
+> **添加时间**：2025-12-18
+
+### 2.5.0 架构区分功能（优先级：P0）⏳
+
+> **背景**：当前基线检查会应用到所有主机（包括 Docker 容器），导致容器误报（如容器没有 SSH 导致 SSH 规则全部告警）。需要先实现架构区分功能。
+
+- [ ] **主机架构识别**
+  - [ ] Agent 端识别运行环境（VM/Docker/K8s Pod）
+    - [ ] 检测 `/.dockerenv` 文件是否存在
+    - [ ] 检测 `/proc/1/cgroup` 是否包含 docker/containerd
+    - [ ] 检测 `KUBERNETES_SERVICE_HOST` 环境变量
+  - [ ] 心跳数据增加 `runtime_type` 字段（vm/docker/k8s）
+  - [ ] Host 模型增加 `runtime_type` 字段
+  - [ ] AgentCenter 处理心跳时更新 `runtime_type`
+
+- [ ] **策略/规则架构适配**
+  - [ ] Policy/Rule 模型增加 `runtime_types` 字段（支持多选：["vm", "docker", "k8s"]）
+  - [ ] 现有规则默认设置为 `["vm"]`（仅虚拟机适用）
+  - [ ] AgentCenter 下发任务时根据主机 `runtime_type` 过滤规则
+  - [ ] Baseline Plugin 执行时二次过滤确认
+
+- [ ] **UI 适配**
+  - [ ] 主机列表显示运行环境类型
+  - [ ] 策略/规则编辑支持选择适用的运行环境
+  - [ ] 告警列表可按运行环境过滤
+
+---
+
+### 2.5.1 P0 严重/高危安全基线（优先级：P0）⏳
+
+> **说明**：以下为严重（Critical）和高危（High）级别的安全基线，必须优先完善。
+
+#### 2.5.1.1 访问与认证（Access & Authentication）
+
+- [ ] **SELinux/MAC 强制访问控制** - 新增 `mac-security.json`
+  - [ ] MAC_001: SELinux 已安装（libselinux 包存在）
+  - [ ] MAC_002: SELinux 未在 bootloader 中禁用（grub 无 selinux=0）
+  - [ ] MAC_003: SELinux 策略已配置（SELINUXTYPE=targeted）
+  - [ ] MAC_004: SELinux 模式为 enforcing（**Critical**）
+  - [ ] MAC_005: 无 unconfined 服务
+
+- [ ] **安全启动（Secure Boot）** - 新增 `secure-boot.json`
+  - [ ] BOOT_001: GRUB 引导密码已设置
+  - [ ] BOOT_002: 单用户模式需要认证（**Critical**）
+  - [ ] BOOT_003: 禁止 Ctrl-Alt-Del 重启
+  - [ ] BOOT_004: GRUB 配置文件权限正确（600）
+
+- [ ] **用户环境安全** - 补充到 `account-security.json`
+  - [ ] USER_001: 不存在 .rhosts 文件（**Critical**）
+  - [ ] USER_002: 不存在 .netrc 文件
+  - [ ] USER_003: 不存在 .forward 文件
+  - [ ] USER_004: root PATH 不含当前目录 (.)（**Critical**）
+  - [ ] USER_005: root PATH 不含组可写目录
+
+#### 2.5.1.2 审计与取证（Audit & Forensics）
+
+- [ ] **审计规则增强** - 补充到 `audit-logging.json`
+  - [ ] AUDIT_016: 审计文件权限修改 (chmod)
+  - [ ] AUDIT_017: 审计文件属主修改 (chown)
+  - [ ] AUDIT_018: 审计文件属性修改 (setxattr)
+  - [ ] AUDIT_019: 审计失败的文件访问 (EACCES/EPERM)
+  - [ ] AUDIT_020: 审计特权命令执行（**Critical**，所有 SUID/SGID）
+  - [ ] AUDIT_021: 审计内核模块操作（**Critical**，insmod/rmmod）
+  - [ ] AUDIT_022: 审计 MAC 策略修改
+  - [ ] AUDIT_023: 审计规则不可变 (-e 2)
+  - [ ] AUDIT_024: 审计会话初始化 (utmp/wtmp/btmp)
+  - [ ] AUDIT_025: 审计成功的挂载操作
+
+#### 2.5.1.3 系统完整性（System Integrity）
+
+- [ ] **文件完整性检查** - 新增 `file-integrity.json`
+  - [ ] AIDE_001: AIDE 已安装
+  - [ ] AIDE_002: AIDE 数据库已初始化
+  - [ ] AIDE_003: AIDE 完整性检查定期运行（cron）
+  - [ ] AIDE_004: AIDE 配置文件权限正确
+
+#### 2.5.1.4 SSH 和远程访问（SSH & Remote Access）
+
+- [ ] **SSH 安全增强** - 补充到 `ssh-baseline.json`
+  - [ ] SSH_016: SSH LogLevel 设置为 INFO 或 VERBOSE
+  - [ ] SSH_017: SSH 使用强加密算法 Ciphers（**Critical**）
+  - [ ] SSH_018: SSH 使用强 MAC 算法（**Critical**）
+  - [ ] SSH_019: SSH 使用强密钥交换算法 KexAlgorithms（**Critical**）
+  - [ ] SSH_020: SSH PermitUserEnvironment 禁用
+  - [ ] SSH_021: SSH GSSAPIAuthentication 禁用
+  - [ ] SSH_022: SSH AllowUsers/AllowGroups 已配置
+  - [ ] SSH_023: SSH UseDNS 禁用
+
+#### 2.5.1.5 内核和 sysctl 安全
+
+- [ ] **内核参数增强** - 补充到 `sysctl-security.json`
+  - [ ] SYSCTL_026: 限制用户命名空间 (user.max_user_namespaces=0)
+  - [ ] SYSCTL_027: 限制性能监控 (kernel.perf_event_paranoid)
+  - [ ] SYSCTL_028: IPv6 默认禁止源路由
+  - [ ] SYSCTL_029: IPv6 默认禁止路由广告
+
+- [ ] **禁用不安全网络协议** - 新增 `network-protocols.json`
+  - [ ] NET_001: 禁用 DCCP 协议模块
+  - [ ] NET_002: 禁用 SCTP 协议模块
+  - [ ] NET_003: 禁用 RDS 协议模块
+  - [ ] NET_004: 禁用 TIPC 协议模块
+  - [ ] NET_005: 禁用无线接口
+
+#### 2.5.1.6 服务暴露面（Service Exposure）
+
+- [ ] **服务状态增强** - 补充到 `service-status.json`
+  - [ ] SERVICE_021: 禁用 rpcbind 服务（除非 NFS 需要）
+  - [ ] SERVICE_022: 禁用 postfix 仅本地监听
+  - [ ] SERVICE_023: 禁用 ldap 客户端（除非需要）
+  - [ ] SERVICE_024: X Window System 未安装（服务器）
+
+---
+
+### 2.5.2 P1 中危安全基线（优先级：P1）⏳
+
+> **说明**：以下为中危（Medium）级别的安全基线，在 P0 完成后实现。
+
+#### 2.5.2.1 账号和密码策略
+
+- [ ] **PAM 认证增强** - 补充到 `password-policy.json`
+  - [ ] PAM_001: su 命令限制为 wheel 组 (pam_wheel.so)
+  - [ ] PAM_002: 账户非活动锁定时间 (INACTIVE=30)
+  - [ ] PAM_003: pam_pwhistory 配置正确
+  - [ ] PAM_004: 新用户默认密码过期时间
+
+#### 2.5.2.2 文件权限与卫生
+
+- [ ] **Cron 定时任务安全** - 新增 `cron-security.json`
+  - [ ] CRON_001: /etc/cron.hourly 权限 700
+  - [ ] CRON_002: /etc/cron.daily 权限 700
+  - [ ] CRON_003: /etc/cron.weekly 权限 700
+  - [ ] CRON_004: /etc/cron.monthly 权限 700
+  - [ ] CRON_005: /etc/cron.d 权限 700
+  - [ ] CRON_006: cron.allow 已配置
+  - [ ] CRON_007: at.allow 已配置
+
+- [ ] **文件权限补充** - 补充到 `file-permissions.json`
+  - [ ] FILE_021: /etc/motd 权限正确
+  - [ ] FILE_022: /etc/issue 权限正确
+  - [ ] FILE_023: /etc/issue.net 权限正确
+
+#### 2.5.2.3 日志系统
+
+- [ ] **日志配置增强** - 补充到 `audit-logging.json`
+  - [ ] LOG_001: journald 配置 Storage=persistent
+  - [ ] LOG_002: journald 配置 Compress=yes
+  - [ ] LOG_003: rsyslog 默认文件权限 0640
+  - [ ] LOG_004: 日志文件不属于其他用户可读
+
+#### 2.5.2.4 时间与基础服务
+
+- [ ] **时间同步增强** - 补充到 `service-status.json`
+  - [ ] TIME_001: chrony 或 ntp 服务运行
+  - [ ] TIME_002: 时间同步源已配置
+  - [ ] TIME_003: 时间同步服务开机自启
+
+- [ ] **警告横幅** - 新增 `login-banner.json`
+  - [ ] BANNER_001: /etc/motd 配置正确
+  - [ ] BANNER_002: /etc/issue 配置正确
+  - [ ] BANNER_003: /etc/issue.net 配置正确
+
+---
+
+### 2.5.3 规则文件汇总
+
+完成后，预计规则文件结构：
+
+```
+plugins/baseline/config/examples/
+├── account-security.json      # 账户安全（现有 + 补充）
+├── audit-logging.json         # 审计日志（现有 + 补充）
+├── cron-security.json         # Cron 安全（新增）
+├── file-integrity.json        # 文件完整性（新增）
+├── file-permissions.json      # 文件权限（现有 + 补充）
+├── login-banner.json          # 登录横幅（新增）
+├── mac-security.json          # MAC/SELinux（新增）
+├── network-protocols.json     # 网络协议（新增）
+├── password-policy.json       # 密码策略（现有 + 补充）
+├── secure-boot.json           # 安全启动（新增）
+├── service-status.json        # 服务状态（现有 + 补充）
+├── ssh-baseline.json          # SSH 安全（现有 + 补充）
+└── sysctl-security.json       # 内核参数（现有 + 补充）
+```
+
+---
+
 ## Phase 3: 扩展功能
 
 ### 3.1 中间件基线
@@ -317,7 +507,41 @@
 
 ## 当前任务
 
-**当前阶段**：Phase 1 MVP 基本完成 ✅，进入 Phase 2 功能完善阶段
+**当前阶段**：Phase 2.5 CIS 基线规则完善
+
+### 🔄 进行中：CIS 基线规则完善（2025-12-18）
+
+**优先级排序**：
+1. **P0-0 架构区分功能**（必须先做）
+   - [ ] Agent 端识别运行环境（VM/Docker/K8s）
+   - [ ] 心跳数据和 Host 模型增加 `runtime_type` 字段
+   - [ ] 策略/规则增加 `runtime_types` 适用范围
+   - [ ] 任务下发时按运行环境过滤规则
+
+2. **P0 严重/高危基线**（架构区分完成后）
+   - [ ] MAC/SELinux 安全
+   - [ ] 安全启动
+   - [ ] 审计规则增强
+   - [ ] 系统完整性（AIDE）
+   - [ ] SSH 加密算法强化
+   - [ ] 内核/网络协议禁用
+   - [ ] 服务暴露面
+
+3. **P1 中危基线**
+   - [ ] PAM 认证增强
+   - [ ] Cron 安全
+   - [ ] 日志配置
+   - [ ] 时间同步
+   - [ ] 登录横幅
+
+**背景**：
+- 当前基线规则 ~125 条，但都是示例级别
+- 需要按 CIS Rocky Linux 9 Benchmark 完善
+- Docker 容器不应检测 SSH 等 VM 专属规则，需先实现架构区分
+
+---
+
+**历史阶段**：Phase 1 MVP 基本完成 ✅，Phase 2 功能完善基本完成 ✅
 
 **已完成**：
 1. ✅ Phase 0：Elkeid 研究、架构设计、API 设计、数据库设计
@@ -657,6 +881,37 @@
 - 立即检查功能（策略详情页的"立即检查"按钮）
 - 批量重新检查功能
 - 白名单功能
+
+---
+
+### 任务 9：主机管理和组件版本显示修复（优先级：P1）✅
+
+**目标**：修复主机删除功能和组件列表版本显示问题。
+
+**步骤**：
+1. ✅ 实现主机删除功能
+   - ✅ 后端 API：`DELETE /api/v1/hosts/:host_id`（级联删除所有关联数据）
+   - ✅ 前端 UI：添加删除按钮和确认对话框
+   - ✅ 删除范围：扫描结果、告警、监控数据、插件信息、资产数据等
+2. ✅ 修复组件列表版本显示问题
+   - ✅ 后端 API：`ListComponents` 添加当前版本和状态统计
+   - ✅ Agent 版本：从 `hosts` 表统计已安装版本
+   - ✅ Plugin 版本：从 `host_plugins` 表统计已安装版本
+   - ✅ 前端 UI：添加"当前版本"、"状态"、"启动时间"、"更新时间"列
+3. ✅ 修复 AgentCenter 空版本更新问题
+   - ✅ 修改 `handleHeartbeat`，只有当 `data.Version` 非空时才更新 `agent_version`
+   - ✅ 避免空版本覆盖已有版本数据
+4. ✅ 添加调试日志
+   - ✅ Manager API 添加组件统计查询的调试日志
+   - ✅ 便于排查版本显示问题
+
+**完成时间**：2025-12-19
+
+**说明**：
+- 主机删除功能已完整实现，支持级联删除所有关联数据
+- 组件列表现在可以正确显示当前版本和安装状态
+- 修复了 AgentCenter 将空版本写入数据库的问题
+- 添加了诊断文档（`docs/COMPONENT_STATUS_DIAGNOSIS.md`）
 
 ---
 

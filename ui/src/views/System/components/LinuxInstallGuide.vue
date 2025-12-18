@@ -51,7 +51,7 @@
               placeholder="例如: 192.168.1.100:8080"
               style="width: 250px"
             />
-            <a-tooltip title="Manager HTTP API 地址，用于下载安装包和安装脚本">
+            <a-tooltip title="后端 Manager HTTP API 地址（端口 8080），用于下载安装包。curl 命令会自动使用前端地址（3000）下载安装脚本。">
               <QuestionCircleOutlined style="margin-left: 8px; color: #999" />
             </a-tooltip>
           </a-form-item>
@@ -61,7 +61,7 @@
               placeholder="例如: 192.168.1.100:6751"
               style="width: 250px"
             />
-            <a-tooltip title="AgentCenter gRPC 地址，Agent 连接此地址上报数据">
+            <a-tooltip title="AgentCenter gRPC 地址（端口 6751），Agent 连接此地址上报数据">
               <QuestionCircleOutlined style="margin-left: 8px; color: #999" />
             </a-tooltip>
           </a-form-item>
@@ -283,23 +283,18 @@ const isLocalhost = computed(() => {
 
 // 初始化服务器地址
 const initServerAddresses = () => {
-  const host = window.location.host
   const hostname = window.location.hostname
+  const port = window.location.port || '80'
 
   // 如果是 localhost，提示用户输入实际地址
   if (isLocalhost.value) {
     httpServerAddress.value = ''
     grpcServerAddress.value = ''
   } else {
-    // 使用当前访问的地址
-    httpServerAddress.value = host
-    // gRPC 地址使用相同的 hostname，端口改为 6751
-    const port = window.location.port || '80'
-    if (port === '8080' || port === '80' || port === '3000') {
-      grpcServerAddress.value = `${hostname}:6751`
-    } else {
-      grpcServerAddress.value = `${hostname}:6751`
-    }
+    // HTTP 服务器地址：后端 Manager API 端口 8080（用于下载安装包）
+    httpServerAddress.value = `${hostname}:8080`
+    // gRPC 地址：AgentCenter 端口 6751
+    grpcServerAddress.value = `${hostname}:6751`
   }
 }
 
@@ -316,7 +311,11 @@ const businessLines = ref<BusinessLine[]>([])
 const autoInstallCommand = computed(() => {
   const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
   const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
-  return `BLS_HTTP_SERVER=${httpAddr} BLS_SERVER_HOST=${grpcAddr} bash -c "$(curl -fsSL http://${httpAddr}/agent/install.sh)"`
+  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
+  // MXSEC_HTTP_SERVER 使用后端地址（8080），因为脚本内部需要下载安装包
+  const hostname = window.location.hostname
+  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : httpAddr
+  return `MXSEC_HTTP_SERVER=${httpAddr} MXSEC_AGENT_SERVER=${grpcAddr} bash -c "$(curl -fsSL http://${curlAddr}/agent/install.sh)"`
 })
 
 const manualInstallCommand = computed(() => {
@@ -333,21 +332,27 @@ const manualInstallCommand = computed(() => {
 const advancedInstallCommand = computed(() => {
   const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
   const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
-  let envVars = `BLS_HTTP_SERVER=${httpAddr} BLS_SERVER_HOST=${grpcAddr}`
+  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
+  // MXSEC_HTTP_SERVER 使用后端地址（8080），因为脚本内部需要下载安装包
+  const hostname = window.location.hostname
+  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : httpAddr
+  let envVars = `MXSEC_HTTP_SERVER=${httpAddr} MXSEC_AGENT_SERVER=${grpcAddr}`
 
   if (selectedBusinessLine.value) {
-    envVars += ` BLS_BUSINESS_LINE=${selectedBusinessLine.value}`
+    envVars += ` MXSEC_BUSINESS_LINE=${selectedBusinessLine.value}`
   }
 
-  return `${envVars} bash -c "$(curl -fsSL http://${httpAddr}/agent/install.sh)"`
+  return `${envVars} bash -c "$(curl -fsSL http://${curlAddr}/agent/install.sh)"`
 })
 
 const statusCommand = 'systemctl status mxsec-agent'
 const logCommand = 'journalctl -u mxsec-agent -n 50 --no-pager | grep -i connect'
 
 const uninstallCommand = computed(() => {
-  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
-  return `bash -c "$(curl -fsSL http://${httpAddr}/agent/uninstall.sh)"`
+  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
+  const hostname = window.location.hostname
+  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : (httpServerAddress.value || 'YOUR_HTTP_SERVER:8080')
+  return `bash -c "$(curl -fsSL http://${curlAddr}/agent/uninstall.sh)"`
 })
 
 const manualUninstallCommand = computed(() => {

@@ -176,54 +176,6 @@
       }
     },
     {
-      "rule_id": "LINUX_FILE_008",
-      "category": "file_permission",
-      "title": "/etc/hosts.allow 文件权限",
-      "description": "/etc/hosts.allow 文件权限应不超过 644",
-      "severity": "medium",
-      "check": {
-        "condition": "all",
-        "rules": [
-          {
-            "type": "file_exists",
-            "param": ["/etc/hosts.allow"]
-          },
-          {
-            "type": "file_permission",
-            "param": ["/etc/hosts.allow", "644"]
-          }
-        ]
-      },
-      "fix": {
-        "suggestion": "执行 chmod 644 /etc/hosts.allow",
-        "command": "chmod 644 /etc/hosts.allow"
-      }
-    },
-    {
-      "rule_id": "LINUX_FILE_009",
-      "category": "file_permission",
-      "title": "/etc/hosts.deny 文件权限",
-      "description": "/etc/hosts.deny 文件权限应不超过 644",
-      "severity": "medium",
-      "check": {
-        "condition": "all",
-        "rules": [
-          {
-            "type": "file_exists",
-            "param": ["/etc/hosts.deny"]
-          },
-          {
-            "type": "file_permission",
-            "param": ["/etc/hosts.deny", "644"]
-          }
-        ]
-      },
-      "fix": {
-        "suggestion": "执行 chmod 644 /etc/hosts.deny",
-        "command": "chmod 644 /etc/hosts.deny"
-      }
-    },
-    {
       "rule_id": "LINUX_FILE_010",
       "category": "file_permission",
       "title": "/etc/crontab 文件权限",

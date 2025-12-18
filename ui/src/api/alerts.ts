@@ -81,4 +81,19 @@ export const alertsApi = {
   ignore: (id: number) => {
     return apiClient.post(`/alerts/${id}/ignore`)
   },
+
+  // 批量解决告警
+  batchResolve: (ids: number[], reason?: string) => {
+    return apiClient.post('/alerts/batch/resolve', { ids, reason })
+  },
+
+  // 批量忽略告警
+  batchIgnore: (ids: number[]) => {
+    return apiClient.post('/alerts/batch/ignore', { ids })
+  },
+
+  // 批量删除告警
+  batchDelete: (ids: number[]) => {
+    return apiClient.post('/alerts/batch/delete', { ids })
+  },
 }

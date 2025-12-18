@@ -139,6 +139,11 @@ func (s *PolicyService) DeleteRule(ruleID string) error {
 
 // GetPoliciesForHost 根据主机信息获取适用的策略
 func (s *PolicyService) GetPoliciesForHost(osFamily, osVersion string) ([]model.Policy, error) {
+	return s.GetPoliciesForHostWithRuntime(osFamily, osVersion, "")
+}
+
+// GetPoliciesForHostWithRuntime 根据主机信息和运行时类型获取适用的策略
+func (s *PolicyService) GetPoliciesForHostWithRuntime(osFamily, osVersion string, runtimeType model.RuntimeType) ([]model.Policy, error) {
 	var policies []model.Policy
 
 	// 查询启用的策略
@@ -158,18 +163,51 @@ func (s *PolicyService) GetPoliciesForHost(osFamily, osVersion string) ([]model.
 	}
 
 	// 过滤版本约束匹配的策略
-	if osVersion != "" {
-		var matchedPolicies []model.Policy
-		for _, policy := range policies {
-			// 如果策略没有版本约束，或者版本匹配，则包含该策略
-			if policy.OSVersion == "" || matchVersion(osVersion, policy.OSVersion) {
-				matchedPolicies = append(matchedPolicies, policy)
-			}
+	var matchedPolicies []model.Policy
+	for _, policy := range policies {
+		// 检查版本约束
+		if osVersion != "" && policy.OSVersion != "" && !matchVersion(osVersion, policy.OSVersion) {
+			continue
 		}
-		policies = matchedPolicies
+
+		// 检查运行时类型匹配
+		if runtimeType != "" && !policy.MatchesRuntimeType(runtimeType) {
+			s.logger.Debug("策略不适用于当前运行时类型",
+				zap.String("policy_id", policy.ID),
+				zap.String("runtime_type", string(runtimeType)),
+				zap.Strings("policy_runtime_types", policy.RuntimeTypes))
+			continue
+		}
+
+		// 过滤规则中不适用的规则
+		if runtimeType != "" {
+			var filteredRules []model.Rule
+			for _, rule := range policy.Rules {
+				if rule.MatchesRuntimeType(runtimeType) && rule.Enabled {
+					filteredRules = append(filteredRules, rule)
+				} else {
+					s.logger.Debug("规则不适用于当前运行时类型",
+						zap.String("rule_id", rule.RuleID),
+						zap.String("runtime_type", string(runtimeType)),
+						zap.Strings("rule_runtime_types", rule.RuntimeTypes))
+				}
+			}
+			policy.Rules = filteredRules
+		}
+
+		// 只有当策略有适用的规则时才添加
+		if len(policy.Rules) > 0 {
+			matchedPolicies = append(matchedPolicies, policy)
+		}
 	}
 
-	return policies, nil
+	s.logger.Debug("获取主机适用策略完成",
+		zap.String("os_family", osFamily),
+		zap.String("os_version", osVersion),
+		zap.String("runtime_type", string(runtimeType)),
+		zap.Int("matched_policies", len(matchedPolicies)))
+
+	return matchedPolicies, nil
 }
 
 // matchVersion 匹配版本约束（参考 plugins/baseline/engine/models.go）

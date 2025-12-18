@@ -22,45 +22,79 @@
           <a-radio value="scheduled">定时</a-radio>
         </a-radio-group>
       </a-form-item>
-      <a-form-item label="策略" name="policy_id">
+
+      <!-- 运行时类型选择（主机/容器） -->
+      <a-form-item label="检查类型" name="runtime_type">
+        <a-radio-group v-model:value="formData.runtime_type" @change="handleRuntimeTypeChange">
+          <a-radio value="vm">
+            <DesktopOutlined /> 主机/虚拟机
+          </a-radio>
+          <a-radio value="docker">
+            <ContainerOutlined /> Docker 容器
+          </a-radio>
+          <a-radio value="k8s" disabled>
+            <CloudServerOutlined /> Kubernetes（即将支持）
+          </a-radio>
+        </a-radio-group>
+        <div class="form-tip">
+          选择要扫描的运行时类型，策略将根据类型自动筛选
+        </div>
+      </a-form-item>
+
+      <!-- 策略选择（多选） -->
+      <a-form-item label="检查策略" name="policy_ids">
         <a-select
-          v-model:value="formData.policy_id"
-          placeholder="选择策略"
+          v-model:value="formData.policy_ids"
+          mode="multiple"
+          placeholder="选择要执行的策略（可多选）"
           :loading="policiesLoading"
+          :disabled="!formData.runtime_type"
+          allow-clear
         >
           <a-select-option
-            v-for="policy in policies"
+            v-for="policy in filteredPolicies"
             :key="policy.id"
             :value="policy.id"
           >
-            {{ policy.name }} ({{ policy.id }})
+            {{ policy.name }}
+            <a-tag v-if="policy.runtime_types && policy.runtime_types.length > 0" size="small" style="margin-left: 8px;">
+              {{ getRuntimeTypesLabel(policy.runtime_types) }}
+            </a-tag>
           </a-select-option>
         </a-select>
+        <div class="form-tip" v-if="formData.runtime_type && filteredPolicies.length === 0">
+          <WarningOutlined style="color: #faad14;" /> 没有找到适用于当前运行时类型的策略
+        </div>
       </a-form-item>
+
       <a-form-item label="目标类型" name="target_type">
         <a-radio-group v-model:value="formData.target_type" @change="handleTargetTypeChange">
-          <a-radio value="all">全部主机</a-radio>
-          <a-radio value="host_ids">指定主机</a-radio>
+          <a-radio value="all">全部{{ getRuntimeTypeLabel(formData.runtime_type) }}</a-radio>
+          <a-radio value="host_ids">指定{{ getRuntimeTypeLabel(formData.runtime_type) }}</a-radio>
           <a-radio value="os_family">按OS筛选</a-radio>
         </a-radio-group>
       </a-form-item>
+
       <a-form-item
         v-if="formData.target_type === 'host_ids'"
-        label="主机ID列表"
+        :label="getRuntimeTypeLabel(formData.runtime_type) + '列表'"
         name="host_ids"
       >
         <a-select
           v-model:value="formData.host_ids"
-          mode="tags"
-          placeholder="输入主机ID，按回车添加"
+          mode="multiple"
+          :placeholder="'选择' + getRuntimeTypeLabel(formData.runtime_type)"
           :loading="hostsLoading"
         >
           <a-select-option
-            v-for="host in hosts"
+            v-for="host in filteredHosts"
             :key="host.host_id"
             :value="host.host_id"
           >
-            {{ host.hostname }} ({{ host.host_id }})
+            {{ host.hostname }} ({{ host.host_id.slice(0, 8) }}...)
+            <a-tag v-if="host.runtime_type" size="small" style="margin-left: 8px;">
+              {{ getRuntimeTypeLabel(host.runtime_type) }}
+            </a-tag>
           </a-select-option>
         </a-select>
       </a-form-item>
@@ -78,6 +112,7 @@
           <a-select-option value="centos">CentOS</a-select-option>
           <a-select-option value="oracle">Oracle Linux</a-select-option>
           <a-select-option value="debian">Debian</a-select-option>
+          <a-select-option value="ubuntu">Ubuntu</a-select-option>
         </a-select>
       </a-form-item>
     </a-form>
@@ -86,6 +121,13 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted, computed } from 'vue'
+import { message } from 'ant-design-vue'
+import {
+  DesktopOutlined,
+  ContainerOutlined,
+  CloudServerOutlined,
+  WarningOutlined,
+} from '@ant-design/icons-vue'
 import { tasksApi } from '@/api/tasks'
 import { policiesApi } from '@/api/policies'
 import { hostsApi } from '@/api/hosts'
@@ -110,7 +152,8 @@ const hostsLoading = ref(false)
 const formData = reactive({
   name: '',
   type: 'manual' as 'manual' | 'scheduled',
-  policy_id: '',
+  runtime_type: 'vm' as 'vm' | 'docker' | 'k8s',
+  policy_ids: [] as string[],
   target_type: 'all' as 'all' | 'host_ids' | 'os_family',
   host_ids: [] as string[],
   os_family: [] as string[],
@@ -118,12 +161,23 @@ const formData = reactive({
 
 const rules = {
   name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
-  policy_id: [{ required: true, message: '请选择策略', trigger: 'change' }],
+  runtime_type: [{ required: true, message: '请选择检查类型', trigger: 'change' }],
+  policy_ids: [
+    {
+      validator: (_rule: any, value: string[]) => {
+        if (!value || value.length === 0) {
+          return Promise.reject('请至少选择一个策略')
+        }
+        return Promise.resolve()
+      },
+      trigger: 'change',
+    },
+  ],
   host_ids: [
     {
       validator: (_rule: any, value: string[]) => {
         if (formData.target_type === 'host_ids' && (!value || value.length === 0)) {
-          return Promise.reject('请至少选择一个主机')
+          return Promise.reject('请至少选择一个目标')
         }
         return Promise.resolve()
       },
@@ -148,6 +202,49 @@ const visible = computed({
   set: (value) => emit('update:visible', value),
 })
 
+// 根据运行时类型筛选策略
+const filteredPolicies = computed(() => {
+  if (!formData.runtime_type) return []
+  return policies.value.filter(policy => {
+    // 如果策略没有设置 runtime_types，默认只适用于主机（vm）
+    if (!policy.runtime_types || policy.runtime_types.length === 0) {
+      return formData.runtime_type === 'vm'
+    }
+    return policy.runtime_types.includes(formData.runtime_type)
+  })
+})
+
+// 根据运行时类型筛选主机
+const filteredHosts = computed(() => {
+  if (!formData.runtime_type) return hosts.value
+  return hosts.value.filter(host => {
+    // 根据运行时类型筛选
+    if (formData.runtime_type === 'vm') {
+      return host.runtime_type === 'vm' || !host.runtime_type
+    }
+    if (formData.runtime_type === 'docker') {
+      return host.runtime_type === 'docker' || host.is_container
+    }
+    return true
+  })
+})
+
+// 获取运行时类型标签
+const getRuntimeTypeLabel = (runtimeType: string) => {
+  const labels: Record<string, string> = {
+    vm: '主机',
+    docker: '容器',
+    k8s: 'Pod',
+  }
+  return labels[runtimeType] || runtimeType
+}
+
+// 获取运行时类型列表标签
+const getRuntimeTypesLabel = (runtimeTypes: string[]) => {
+  if (!runtimeTypes || runtimeTypes.length === 0) return '通用'
+  return runtimeTypes.map(rt => getRuntimeTypeLabel(rt)).join('/')
+}
+
 const loadPolicies = async () => {
   policiesLoading.value = true
   try {
@@ -163,13 +260,20 @@ const loadPolicies = async () => {
 const loadHosts = async () => {
   hostsLoading.value = true
   try {
-    const response = await hostsApi.list({ page_size: 100 })
+    const response = await hostsApi.list({ page_size: 500 })
     hosts.value = response.items
   } catch (error) {
     console.error('加载主机列表失败:', error)
   } finally {
     hostsLoading.value = false
   }
+}
+
+const handleRuntimeTypeChange = () => {
+  // 清空策略选择
+  formData.policy_ids = []
+  // 清空主机选择
+  formData.host_ids = []
 }
 
 const handleTargetTypeChange = () => {
@@ -188,12 +292,16 @@ const handleSubmit = async () => {
     } else if (formData.target_type === 'os_family') {
       targets.os_family = formData.os_family
     }
+    // 添加运行时类型筛选
+    targets.runtime_type = formData.runtime_type
+    
     await tasksApi.create({
       name: formData.name,
       type: formData.type,
       targets,
-      policy_id: formData.policy_id,
+      policy_ids: formData.policy_ids,
     })
+    message.success('任务创建成功')
     emit('success')
   } catch (error) {
     console.error('创建任务失败:', error)
@@ -205,7 +313,8 @@ const handleCancel = () => {
   // 重置表单
   formData.name = ''
   formData.type = 'manual'
-  formData.policy_id = ''
+  formData.runtime_type = 'vm'
+  formData.policy_ids = []
   formData.target_type = 'all'
   formData.host_ids = []
   formData.os_family = []
@@ -226,3 +335,11 @@ onMounted(() => {
   loadHosts()
 })
 </script>
+
+<style scoped>
+.form-tip {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-top: 4px;
+}
+</style>

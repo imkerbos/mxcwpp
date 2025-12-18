@@ -2,9 +2,11 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -304,4 +306,106 @@ func (h *AlertsHandler) GetAlertStatistics(c *gin.Context) {
 		"code": 0,
 		"data": stats,
 	})
+}
+
+// BatchAlertRequest 批量操作请求
+type BatchAlertRequest struct {
+	IDs    []uint `json:"ids" binding:"required"`
+	Reason string `json:"reason"`
+}
+
+// BatchResolveAlerts 批量解决告警
+// POST /api/v1/alerts/batch/resolve
+func (h *AlertsHandler) BatchResolveAlerts(c *gin.Context) {
+	var req BatchAlertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		BadRequest(c, "请选择要解决的告警")
+		return
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{
+		"status":      model.AlertStatusResolved,
+		"resolved_at": &now,
+		"updated_at":  now,
+	}
+	if req.Reason != "" {
+		updates["resolve_reason"] = req.Reason
+	}
+
+	result := h.db.Model(&model.Alert{}).
+		Where("id IN ? AND status = ?", req.IDs, model.AlertStatusActive).
+		Updates(updates)
+
+	if result.Error != nil {
+		h.logger.Error("批量解决告警失败", zap.Error(result.Error))
+		InternalError(c, "批量解决告警失败")
+		return
+	}
+
+	h.logger.Info("批量解决告警", zap.Int64("count", result.RowsAffected))
+	SuccessWithMessage(c, fmt.Sprintf("成功解决 %d 个告警", result.RowsAffected), nil)
+}
+
+// BatchIgnoreAlerts 批量忽略告警
+// POST /api/v1/alerts/batch/ignore
+func (h *AlertsHandler) BatchIgnoreAlerts(c *gin.Context) {
+	var req BatchAlertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		BadRequest(c, "请选择要忽略的告警")
+		return
+	}
+
+	now := time.Now()
+	result := h.db.Model(&model.Alert{}).
+		Where("id IN ? AND status = ?", req.IDs, model.AlertStatusActive).
+		Updates(map[string]interface{}{
+			"status":     model.AlertStatusIgnored,
+			"updated_at": now,
+		})
+
+	if result.Error != nil {
+		h.logger.Error("批量忽略告警失败", zap.Error(result.Error))
+		InternalError(c, "批量忽略告警失败")
+		return
+	}
+
+	h.logger.Info("批量忽略告警", zap.Int64("count", result.RowsAffected))
+	SuccessWithMessage(c, fmt.Sprintf("成功忽略 %d 个告警", result.RowsAffected), nil)
+}
+
+// BatchDeleteAlerts 批量删除告警
+// POST /api/v1/alerts/batch/delete
+func (h *AlertsHandler) BatchDeleteAlerts(c *gin.Context) {
+	var req BatchAlertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		BadRequest(c, "请选择要删除的告警")
+		return
+	}
+
+	result := h.db.Where("id IN ?", req.IDs).Delete(&model.Alert{})
+
+	if result.Error != nil {
+		h.logger.Error("批量删除告警失败", zap.Error(result.Error))
+		InternalError(c, "批量删除告警失败")
+		return
+	}
+
+	h.logger.Info("批量删除告警", zap.Int64("count", result.RowsAffected))
+	SuccessWithMessage(c, fmt.Sprintf("成功删除 %d 个告警", result.RowsAffected), nil)
 }

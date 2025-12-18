@@ -26,6 +26,16 @@
         <a-select-option value="low">低危</a-select-option>
       </a-select>
       <a-select
+        v-model:value="localFilters.alert_type"
+        placeholder="告警类型"
+        allow-clear
+        style="width: 150px"
+        @change="handleSearch"
+      >
+        <a-select-option value="baseline">基线安全</a-select-option>
+        <a-select-option value="agent_offline">Agent 离线</a-select-option>
+      </a-select>
+      <a-select
         v-model:value="localFilters.category"
         placeholder="类别"
         allow-clear
@@ -47,12 +57,35 @@
       </a-button>
     </div>
 
+    <!-- 批量操作栏 -->
+    <div v-if="selectedRowKeys.length > 0" class="batch-actions">
+      <span class="selection-info">
+        已选择 <strong>{{ selectedRowKeys.length }}</strong> 项
+      </span>
+      <a-space>
+        <a-button v-if="status === 'active'" type="primary" @click="handleBatchResolve" :loading="batchLoading">
+          <template #icon><CheckOutlined /></template>
+          批量解决
+        </a-button>
+        <a-button v-if="status === 'active'" @click="handleBatchIgnore" :loading="batchLoading">
+          <template #icon><EyeInvisibleOutlined /></template>
+          批量忽略
+        </a-button>
+        <a-button danger @click="handleBatchDelete" :loading="batchLoading">
+          <template #icon><DeleteOutlined /></template>
+          批量删除
+        </a-button>
+        <a-button @click="clearSelection">取消选择</a-button>
+      </a-space>
+    </div>
+
     <!-- 告警表格 -->
     <a-table
       :columns="columns"
       :data-source="alerts"
       :loading="loading"
       :pagination="pagination"
+      :row-selection="rowSelection"
       row-key="id"
       @change="handleTableChange"
     >
@@ -134,11 +167,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { message, Modal } from 'ant-design-vue'
+import {
+  SearchOutlined,
+  ReloadOutlined,
+  CheckOutlined,
+  EyeInvisibleOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons-vue'
 import { formatDateTime } from '@/utils/date'
-import type { Alert } from '@/api/alerts'
+import { alertsApi, type Alert } from '@/api/alerts'
 import type { TableProps } from 'ant-design-vue'
 
 const props = defineProps<{
@@ -163,6 +203,94 @@ const ignoreModalVisible = ref(false)
 const currentAlert = ref<Alert | null>(null)
 const ignoreAlert = ref<Alert | null>(null)
 const resolveReason = ref('')
+
+// 批量选择相关
+const selectedRowKeys = ref<number[]>([])
+const batchLoading = ref(false)
+
+// 行选择配置
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  onChange: (keys: number[]) => {
+    selectedRowKeys.value = keys
+  },
+}))
+
+// 清除选择
+const clearSelection = () => {
+  selectedRowKeys.value = []
+}
+
+// 批量解决
+const handleBatchResolve = () => {
+  Modal.confirm({
+    title: '批量解决告警',
+    content: `确定要解决选中的 ${selectedRowKeys.value.length} 个告警吗？`,
+    okText: '确认解决',
+    cancelText: '取消',
+    async onOk() {
+      batchLoading.value = true
+      try {
+        await alertsApi.batchResolve(selectedRowKeys.value)
+        message.success(`成功解决 ${selectedRowKeys.value.length} 个告警`)
+        clearSelection()
+        emit('refresh')
+      } catch (error: any) {
+        message.error(error?.message || '批量解决失败')
+      } finally {
+        batchLoading.value = false
+      }
+    },
+  })
+}
+
+// 批量忽略
+const handleBatchIgnore = () => {
+  Modal.confirm({
+    title: '批量忽略告警',
+    content: `确定要忽略选中的 ${selectedRowKeys.value.length} 个告警吗？`,
+    okText: '确认忽略',
+    okButtonProps: { danger: true },
+    cancelText: '取消',
+    async onOk() {
+      batchLoading.value = true
+      try {
+        await alertsApi.batchIgnore(selectedRowKeys.value)
+        message.success(`成功忽略 ${selectedRowKeys.value.length} 个告警`)
+        clearSelection()
+        emit('refresh')
+      } catch (error: any) {
+        message.error(error?.message || '批量忽略失败')
+      } finally {
+        batchLoading.value = false
+      }
+    },
+  })
+}
+
+// 批量删除
+const handleBatchDelete = () => {
+  Modal.confirm({
+    title: '批量删除告警',
+    content: `确定要删除选中的 ${selectedRowKeys.value.length} 个告警吗？此操作不可恢复！`,
+    okText: '确认删除',
+    okButtonProps: { danger: true },
+    cancelText: '取消',
+    async onOk() {
+      batchLoading.value = true
+      try {
+        await alertsApi.batchDelete(selectedRowKeys.value)
+        message.success(`成功删除 ${selectedRowKeys.value.length} 个告警`)
+        clearSelection()
+        emit('refresh')
+      } catch (error: any) {
+        message.error(error?.message || '批量删除失败')
+      } finally {
+        batchLoading.value = false
+      }
+    },
+  })
+}
 
 watch(
   () => props.filters,
@@ -314,5 +442,25 @@ const handleIgnoreConfirm = () => {
   gap: 12px;
   margin-bottom: 16px;
   align-items: center;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
+
+.selection-info {
+  color: #1890ff;
+  font-size: 14px;
+  
+  strong {
+    font-weight: 600;
+  }
 }
 </style>

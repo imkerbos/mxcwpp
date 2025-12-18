@@ -21,6 +21,10 @@ export interface Component {
   created_by: string
   created_at: string
   latest_version?: string
+  current_version?: string
+  status?: string
+  start_time?: string
+  updated_at?: string
   version_count?: number
   package_count?: number
 }
@@ -178,6 +182,58 @@ export const componentsApi = {
   getPluginSyncStatus: async (): Promise<PluginSyncStatus[]> => {
     return await apiClient.get('/components/plugin-status')
   },
+
+  /**
+   * 推送 Agent 更新
+   */
+  pushAgentUpdate: async (data: { host_ids?: string[]; force?: boolean }): Promise<any> => {
+    return await apiClient.post('/components/agent/push-update', data)
+  },
+
+  /**
+   * 获取推送记录列表
+   */
+  listPushRecords: async (params?: {
+    page?: number
+    page_size?: number
+    component_name?: string
+    status?: string
+  }): Promise<PaginatedResponse<ComponentPushRecord>> => {
+    return await apiClient.get('/components/push-records', { params })
+  },
+
+  /**
+   * 获取推送记录详情
+   */
+  getPushRecord: async (id: number): Promise<ComponentPushRecord> => {
+    return await apiClient.get(`/components/push-records/${id}`)
+  },
+}
+
+// 推送记录类型
+export interface ComponentPushRecord {
+  id: number
+  component_name: string
+  version: string
+  target_type: 'all' | 'selected'
+  target_hosts: string[]
+  status: 'pending' | 'pushing' | 'success' | 'failed' | 'cancelled'
+  total_count: number
+  success_count: number
+  failed_count: number
+  failed_hosts: string[]
+  progress: number
+  message: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  completed_at?: string
+}
+
+// 分页响应类型
+export interface PaginatedResponse<T> {
+  total: number
+  items: T[]
 }
 
 export default componentsApi

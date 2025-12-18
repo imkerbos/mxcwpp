@@ -51,9 +51,9 @@ func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, uploadDir, urlPrefix 
 
 // CreateComponentRequest 创建组件请求
 type CreateComponentRequest struct {
-	Name        string `json:"name" binding:"required"`        // 组件名称
-	Category    string `json:"category" binding:"required"`    // 分类: agent, plugin
-	Description string `json:"description"`                    // 描述
+	Name        string `json:"name" binding:"required"`     // 组件名称
+	Category    string `json:"category" binding:"required"` // 分类: agent, plugin
+	Description string `json:"description"`                 // 描述
 }
 
 // CreateComponent 创建组件
@@ -161,16 +161,141 @@ func (h *ComponentsHandler) ListComponents(c *gin.Context) {
 			Where("component_versions.component_id = ?", comp.ID).
 			Count(&packageCount)
 
+		// 获取当前版本和安装状态
+		var currentVersion string
+		var status string
+		var startTime string
+		var updatedAt string
+
+		if comp.Category == model.ComponentCategoryAgent {
+			// Agent: 从 hosts 表统计
+			var installedCount int64
+			h.db.Model(&model.Host{}).Where("agent_version IS NOT NULL AND agent_version != ''").Count(&installedCount)
+
+			h.logger.Debug("查询 Agent 安装统计",
+				zap.String("component_name", comp.Name),
+				zap.Int64("installed_count", installedCount))
+
+			if installedCount > 0 {
+				// 获取最常见的安装版本
+				type VersionCount struct {
+					Version string
+					Count   int64
+				}
+				var versionCounts []VersionCount
+				if err := h.db.Model(&model.Host{}).
+					Select("agent_version as version, COUNT(*) as count").
+					Where("agent_version IS NOT NULL AND agent_version != ''").
+					Group("agent_version").
+					Order("count DESC").
+					Limit(1).
+					Scan(&versionCounts).Error; err != nil {
+					h.logger.Error("查询 Agent 版本统计失败", zap.Error(err))
+				}
+
+				h.logger.Debug("Agent 版本统计结果",
+					zap.String("component_name", comp.Name),
+					zap.Int("version_count", len(versionCounts)),
+					zap.Any("versions", versionCounts))
+
+				if len(versionCounts) > 0 {
+					currentVersion = versionCounts[0].Version
+					status = "running" // Agent 如果上报了版本，通常是在运行中
+				} else {
+					status = "not_installed"
+				}
+			} else {
+				status = "not_installed"
+			}
+		} else {
+			// Plugin: 从 host_plugins 表统计（排除软删除的记录）
+			var installedCount int64
+			h.db.Model(&model.HostPlugin{}).Where("name = ? AND version IS NOT NULL AND version != '' AND deleted_at IS NULL", comp.Name).Count(&installedCount)
+
+			h.logger.Debug("查询 Plugin 安装统计",
+				zap.String("component_name", comp.Name),
+				zap.Int64("installed_count", installedCount))
+
+			if installedCount > 0 {
+				// 获取最常见的安装版本
+				type VersionCount struct {
+					Version string
+					Count   int64
+				}
+				var versionCounts []VersionCount
+				if err := h.db.Model(&model.HostPlugin{}).
+					Select("version, COUNT(*) as count").
+					Where("name = ? AND version IS NOT NULL AND version != '' AND deleted_at IS NULL", comp.Name).
+					Group("version").
+					Order("count DESC").
+					Limit(1).
+					Scan(&versionCounts).Error; err != nil {
+					h.logger.Error("查询 Plugin 版本统计失败", zap.String("component_name", comp.Name), zap.Error(err))
+				}
+
+				h.logger.Debug("Plugin 版本统计结果",
+					zap.String("component_name", comp.Name),
+					zap.Int("version_count", len(versionCounts)),
+					zap.Any("versions", versionCounts))
+
+				if len(versionCounts) > 0 {
+					currentVersion = versionCounts[0].Version
+					// 获取最常见的状态
+					type StatusCount struct {
+						Status string
+						Count  int64
+					}
+					var statusCounts []StatusCount
+					if err := h.db.Model(&model.HostPlugin{}).
+						Select("status, COUNT(*) as count").
+						Where("name = ? AND version = ? AND deleted_at IS NULL", comp.Name, currentVersion).
+						Group("status").
+						Order("count DESC").
+						Limit(1).
+						Scan(&statusCounts).Error; err != nil {
+						h.logger.Error("查询 Plugin 状态统计失败", zap.String("component_name", comp.Name), zap.Error(err))
+					}
+
+					if len(statusCounts) > 0 {
+						status = statusCounts[0].Status
+					} else {
+						status = "running"
+					}
+
+					// 获取最新的启动时间和更新时间
+					var latestPlugin model.HostPlugin
+					if err := h.db.Where("name = ? AND version = ? AND deleted_at IS NULL", comp.Name, currentVersion).
+						Order("updated_at DESC").
+						First(&latestPlugin).Error; err != nil {
+						h.logger.Warn("查询 Plugin 最新记录失败", zap.String("component_name", comp.Name), zap.Error(err))
+					} else {
+						if latestPlugin.StartTime != nil {
+							startTime = latestPlugin.StartTime.Time().Format("2006-01-02 15:04:05")
+						}
+						updatedAt = latestPlugin.UpdatedAt.Time().Format("2006-01-02 15:04:05")
+					}
+				} else {
+					status = "not_installed"
+				}
+			} else {
+				status = "not_installed"
+			}
+		}
+
 		result = append(result, gin.H{
-			"id":             comp.ID,
-			"name":           comp.Name,
-			"category":       comp.Category,
-			"description":    comp.Description,
-			"created_by":     comp.CreatedBy,
-			"created_at":     comp.CreatedAt,
-			"latest_version": latestVersion.Version,
-			"version_count":  versionCount,
-			"package_count":  packageCount,
+			"id":              comp.ID,
+			"name":            comp.Name,
+			"category":        comp.Category,
+			"description":     comp.Description,
+			"created_by":      comp.CreatedBy,
+			"created_at":      comp.CreatedAt,
+			"latest_version":  latestVersion.Version,
+			"current_version": currentVersion,
+			"status":          status,
+			"start_time":      startTime,
+			"updated_at":      updatedAt,
+			"version_count":   versionCount,
+			"package_count":   packageCount,
 		})
 	}
 
@@ -1262,4 +1387,301 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 		zap.String("name", componentName),
 		zap.String("version", version.Version),
 	)
+}
+
+// PushAgentUpdate 手动推送 Agent 更新
+// POST /api/v1/components/agent/push-update
+func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
+	var req struct {
+		HostIDs []string `json:"host_ids"` // 主机 ID 列表，空则推送给所有在线主机
+		Force   bool     `json:"force"`    // 是否强制更新（即使版本相同也更新）
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 查找 agent 组件的最新版本
+	var agentComponent model.Component
+	if err := h.db.Where("name = ? AND category = ?", "agent", model.ComponentCategoryAgent).First(&agentComponent).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    404,
+				"message": "Agent 组件不存在",
+			})
+			return
+		}
+		h.logger.Error("查询 Agent 组件失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询 Agent 组件失败",
+		})
+		return
+	}
+
+	var latestVersion model.ComponentVersion
+	if err := h.db.Where("component_id = ? AND is_latest = ?", agentComponent.ID, true).First(&latestVersion).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    404,
+				"message": "未找到 Agent 最新版本",
+			})
+			return
+		}
+		h.logger.Error("查询 Agent 最新版本失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询 Agent 最新版本失败",
+		})
+		return
+	}
+
+	// 查询需要更新的主机
+	var hosts []model.Host
+	query := h.db.Where("status = ?", model.HostStatusOnline)
+	if len(req.HostIDs) > 0 {
+		query = query.Where("host_id IN ?", req.HostIDs)
+	}
+	if err := query.Find(&hosts).Error; err != nil {
+		h.logger.Error("查询主机失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询主机失败",
+		})
+		return
+	}
+
+	if len(hosts) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    0,
+			"message": "没有需要更新的在线主机",
+			"data": gin.H{
+				"total":          0,
+				"success":        0,
+				"failed":         0,
+				"latest_version": latestVersion.Version,
+			},
+		})
+		return
+	}
+
+	// 统计需要更新的主机数量
+	needUpdateCount := 0
+	var targetHostIDs []string
+	for _, host := range hosts {
+		if req.Force || host.AgentVersion == "" || host.AgentVersion != latestVersion.Version {
+			needUpdateCount++
+			targetHostIDs = append(targetHostIDs, host.HostID)
+		}
+	}
+
+	// 创建推送记录（即使没有需要更新的主机也创建，用于记录操作）
+	targetType := "all"
+	if len(req.HostIDs) > 0 {
+		targetType = "selected"
+	}
+
+	// 如果没有指定主机，使用所有在线主机作为目标
+	if len(req.HostIDs) == 0 {
+		for _, host := range hosts {
+			targetHostIDs = append(targetHostIDs, host.HostID)
+		}
+		needUpdateCount = len(targetHostIDs) // 重新计算
+	}
+
+	pushRecord := model.ComponentPushRecord{
+		ComponentID:   agentComponent.ID,
+		ComponentName: "agent",
+		Version:       latestVersion.Version,
+		TargetType:    targetType,
+		TargetHosts:   model.StringArray(targetHostIDs),
+		Status:        model.ComponentPushStatusPending,
+		TotalCount:    len(targetHostIDs),
+		SuccessCount:  0,
+		FailedCount:   0,
+		Message:       fmt.Sprintf("推送 Agent 更新到 %d 台主机（需要更新: %d）", len(targetHostIDs), needUpdateCount),
+		CreatedBy:     h.getCurrentUser(c),
+	}
+
+	if err := h.db.Create(&pushRecord).Error; err != nil {
+		h.logger.Error("创建推送记录失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "创建推送记录失败: " + err.Error(),
+		})
+		return
+	}
+
+	h.logger.Info("创建推送记录成功",
+		zap.Uint("record_id", pushRecord.ID),
+		zap.Int("total_count", pushRecord.TotalCount))
+
+	h.logger.Info("Agent 更新推送请求",
+		zap.Uint("record_id", pushRecord.ID),
+		zap.Int("total_hosts", len(hosts)),
+		zap.Int("need_update", needUpdateCount),
+		zap.String("latest_version", latestVersion.Version),
+		zap.Bool("force", req.Force))
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "更新请求已提交，AgentCenter 将在下次检查时推送更新",
+		"data": gin.H{
+			"record_id":      pushRecord.ID,
+			"total":          len(hosts),
+			"need_update":    needUpdateCount,
+			"latest_version": latestVersion.Version,
+			"note":           "实际推送由 AgentCenter 调度器完成（每30秒检查一次）",
+		},
+	})
+}
+
+// ListPushRecords 获取推送记录列表
+// GET /api/v1/components/push-records
+func (h *ComponentsHandler) ListPushRecords(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	componentName := c.Query("component_name")
+	status := c.Query("status")
+
+	query := h.db.Model(&model.ComponentPushRecord{})
+
+	// 过滤条件
+	if componentName != "" {
+		query = query.Where("component_name = ?", componentName)
+	}
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	// 查询总数
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		h.logger.Error("查询推送记录总数失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询失败",
+		})
+		return
+	}
+
+	// 查询列表
+	var records []model.ComponentPushRecord
+	offset := (page - 1) * pageSize
+	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&records).Error; err != nil {
+		h.logger.Error("查询推送记录列表失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询失败",
+		})
+		return
+	}
+
+	// 计算进度并构建响应
+	var response []map[string]interface{}
+	for _, record := range records {
+		progress := 0.0
+		if record.TotalCount > 0 {
+			progress = float64(record.SuccessCount+record.FailedCount) / float64(record.TotalCount) * 100
+		}
+
+		item := map[string]interface{}{
+			"id":             record.ID,
+			"component_name": record.ComponentName,
+			"version":        record.Version,
+			"target_type":    record.TargetType,
+			"target_hosts":   record.TargetHosts,
+			"status":         string(record.Status),
+			"total_count":    record.TotalCount,
+			"success_count":  record.SuccessCount,
+			"failed_count":   record.FailedCount,
+			"failed_hosts":   record.FailedHosts,
+			"progress":       progress,
+			"message":        record.Message,
+			"created_by":     record.CreatedBy,
+			"created_at":     record.CreatedAt.Time().Format("2006-01-02 15:04:05"),
+			"updated_at":     record.UpdatedAt.Time().Format("2006-01-02 15:04:05"),
+			"completed_at":   nil,
+		}
+		if record.CompletedAt != nil {
+			item["completed_at"] = record.CompletedAt.Time().Format("2006-01-02 15:04:05")
+		}
+		response = append(response, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"total": total,
+			"items": response,
+		},
+	})
+}
+
+// GetPushRecord 获取推送记录详情
+// GET /api/v1/components/push-records/:id
+func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
+	id := c.Param("id")
+	recordID, err := strconv.ParseUint(id, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "无效的记录 ID",
+		})
+		return
+	}
+
+	var record model.ComponentPushRecord
+	if err := h.db.First(&record, recordID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    404,
+				"message": "推送记录不存在",
+			})
+			return
+		}
+		h.logger.Error("查询推送记录失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询失败",
+		})
+		return
+	}
+
+	// 计算进度
+	progress := 0.0
+	if record.TotalCount > 0 {
+		progress = float64(record.SuccessCount+record.FailedCount) / float64(record.TotalCount) * 100
+	}
+
+	response := map[string]interface{}{
+		"id":             record.ID,
+		"component_name": record.ComponentName,
+		"version":        record.Version,
+		"target_type":    record.TargetType,
+		"target_hosts":   record.TargetHosts,
+		"status":         string(record.Status),
+		"total_count":    record.TotalCount,
+		"success_count":  record.SuccessCount,
+		"failed_count":   record.FailedCount,
+		"failed_hosts":   record.FailedHosts,
+		"progress":       progress,
+		"message":        record.Message,
+		"created_by":     record.CreatedBy,
+		"created_at":     record.CreatedAt.Time().Format("2006-01-02 15:04:05"),
+		"updated_at":     record.UpdatedAt.Time().Format("2006-01-02 15:04:05"),
+		"completed_at":   nil,
+	}
+	if record.CompletedAt != nil {
+		response["completed_at"] = record.CompletedAt.Time().Format("2006-01-02 15:04:05")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": response,
+	})
 }

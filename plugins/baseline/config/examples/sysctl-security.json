@@ -506,6 +506,106 @@
         "suggestion": "设置 kernel.exec-shield=1（部分内核版本支持）",
         "command": "sysctl -w kernel.exec-shield=1 2>/dev/null && echo 'kernel.exec-shield=1' >> /etc/sysctl.d/99-security.conf"
       }
+    },
+    {
+      "rule_id": "LINUX_SYSCTL_026",
+      "category": "sysctl",
+      "title": "限制用户命名空间",
+      "description": "限制非特权用户创建用户命名空间，减少容器逃逸风险",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "sysctl",
+            "param": ["user.max_user_namespaces", "0"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 user.max_user_namespaces=0（注意：可能影响容器功能）",
+        "command": "sysctl -w user.max_user_namespaces=0 && echo 'user.max_user_namespaces=0' >> /etc/sysctl.d/99-security.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_SYSCTL_027",
+      "category": "sysctl",
+      "title": "限制性能监控",
+      "description": "限制非特权用户使用性能监控功能，防止侧信道攻击",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "sysctl",
+            "param": ["kernel.perf_event_paranoid", "^[23]$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 kernel.perf_event_paranoid=2 或更高",
+        "command": "sysctl -w kernel.perf_event_paranoid=2 && echo 'kernel.perf_event_paranoid=2' >> /etc/sysctl.d/99-security.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_SYSCTL_028",
+      "category": "sysctl",
+      "title": "IPv6 默认禁止源路由",
+      "description": "默认网卡应禁止接收 IPv6 源路由包",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "sysctl",
+            "param": ["net.ipv6.conf.default.accept_source_route", "0"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 net.ipv6.conf.default.accept_source_route=0",
+        "command": "sysctl -w net.ipv6.conf.default.accept_source_route=0 && echo 'net.ipv6.conf.default.accept_source_route=0' >> /etc/sysctl.d/99-security.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_SYSCTL_029",
+      "category": "sysctl",
+      "title": "IPv6 默认禁止路由广告",
+      "description": "默认网卡应禁止接收 IPv6 路由广告",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "sysctl",
+            "param": ["net.ipv6.conf.default.accept_ra", "0"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 net.ipv6.conf.default.accept_ra=0",
+        "command": "sysctl -w net.ipv6.conf.default.accept_ra=0 && echo 'net.ipv6.conf.default.accept_ra=0' >> /etc/sysctl.d/99-security.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_SYSCTL_030",
+      "category": "sysctl",
+      "title": "IPv6 默认禁止重定向",
+      "description": "默认网卡应禁止接收 IPv6 ICMP 重定向",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "sysctl",
+            "param": ["net.ipv6.conf.default.accept_redirects", "0"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "设置 net.ipv6.conf.default.accept_redirects=0",
+        "command": "sysctl -w net.ipv6.conf.default.accept_redirects=0 && echo 'net.ipv6.conf.default.accept_redirects=0' >> /etc/sysctl.d/99-security.conf"
+      }
     }
   ]
 }

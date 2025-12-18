@@ -375,23 +375,31 @@
       "rule_id": "LINUX_SERVICE_018",
       "category": "service",
       "title": "SELinux 或 AppArmor 应启用",
-      "description": "应启用 SELinux（CentOS/RHEL）或 AppArmor（Ubuntu）",
+      "description": "应启用 SELinux（CentOS/RHEL）或 AppArmor（Ubuntu/Debian）",
       "severity": "high",
       "check": {
         "condition": "any",
         "rules": [
           {
             "type": "command_exec",
-            "param": ["getenforce 2>/dev/null || echo Disabled", "^(Enforcing|Permissive)$"]
+            "param": ["if command -v getenforce >/dev/null 2>&1; then getenforce; else echo 'getenforce_not_found'; fi", "^(Enforcing|Permissive)$"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["if [ -f /sys/kernel/security/apparmor/profiles ]; then cat /sys/kernel/security/apparmor/profiles 2>/dev/null | wc -l; else echo 0; fi", "^[1-9][0-9]*$"]
           },
           {
             "type": "service_status",
             "param": ["apparmor", "active"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["aa-status --enabled 2>/dev/null && echo 'enabled' || echo 'disabled'", "^enabled$"]
           }
         ]
       },
       "fix": {
-        "suggestion": "启用 SELinux：setenforce 1 并修改 /etc/selinux/config"
+        "suggestion": "SELinux: setenforce 1 并修改 /etc/selinux/config；AppArmor: systemctl enable --now apparmor"
       }
     },
     {
@@ -440,6 +448,125 @@
       "fix": {
         "suggestion": "启动 rsyslog 服务：systemctl start rsyslog && systemctl enable rsyslog",
         "command": "systemctl start rsyslog && systemctl enable rsyslog"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_021",
+      "category": "service",
+      "title": "禁用 rpcbind 服务",
+      "description": "rpcbind 服务应被禁用（除非使用 NFS）",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["rpcbind", "inactive"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "禁用 rpcbind 服务：systemctl stop rpcbind && systemctl disable rpcbind",
+        "command": "systemctl stop rpcbind 2>/dev/null; systemctl disable rpcbind 2>/dev/null; systemctl mask rpcbind 2>/dev/null; true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_022",
+      "category": "service",
+      "title": "postfix 仅本地监听",
+      "description": "postfix 邮件服务应仅监听本地接口",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "service_status",
+            "param": ["postfix", "inactive"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/postfix/main.cf", "inet_interfaces\\s*=\\s*localhost", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "配置 postfix 仅监听本地：在 /etc/postfix/main.cf 中设置 inet_interfaces = localhost",
+        "command": "postconf -e 'inet_interfaces = localhost' && systemctl restart postfix"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_023",
+      "category": "service",
+      "title": "X Window 系统未安装",
+      "description": "服务器应不安装 X Window 系统，减少攻击面",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["rpm -q xorg-x11-server-Xorg 2>/dev/null || dpkg -l xorg 2>/dev/null || echo not_installed", "not_installed"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "卸载 X Window 系统",
+        "command": "yum remove xorg-x11-server-Xorg -y 2>/dev/null || apt remove xorg -y 2>/dev/null || true"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_024",
+      "category": "service",
+      "title": "时间同步服务开机自启",
+      "description": "时间同步服务应配置为开机自启动",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "command_exec",
+            "param": ["systemctl is-enabled chronyd 2>/dev/null || echo disabled", "^enabled$"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["systemctl is-enabled ntpd 2>/dev/null || echo disabled", "^enabled$"]
+          },
+          {
+            "type": "command_exec",
+            "param": ["systemctl is-enabled systemd-timesyncd 2>/dev/null || echo disabled", "^enabled$"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "启用时间同步服务开机自启",
+        "command": "systemctl enable chronyd 2>/dev/null || systemctl enable ntpd 2>/dev/null || systemctl enable systemd-timesyncd 2>/dev/null"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_025",
+      "category": "service",
+      "title": "时间同步源已配置",
+      "description": "应配置可靠的时间同步源（NTP 服务器）",
+      "severity": "medium",
+      "check": {
+        "condition": "any",
+        "rules": [
+          {
+            "type": "file_line_match",
+            "param": ["/etc/chrony.conf", "^(server|pool)\\s+", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/ntp.conf", "^server\\s+", "match"]
+          },
+          {
+            "type": "file_line_match",
+            "param": ["/etc/systemd/timesyncd.conf", "^NTP=", "match"]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "配置 NTP 服务器，编辑 /etc/chrony.conf 添加 server 或 pool 配置"
       }
     }
   ]

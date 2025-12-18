@@ -170,15 +170,18 @@ func loadPoliciesFromDir(dir string, logger *zap.Logger) ([]*engine.Policy, erro
 // savePolicyToDB 保存策略到数据库
 func savePolicyToDB(db *gorm.DB, policy *engine.Policy, groupID string, logger *zap.Logger) error {
 	// 转换 Policy 模型
+	// 默认设置 RuntimeTypes 为 ["vm"]（仅虚拟机适用）
+	// 这样确保 Linux 系统基线规则不会应用于 Docker 容器
 	dbPolicy := &model.Policy{
-		ID:          policy.ID,
-		Name:        policy.Name,
-		Version:     policy.Version,
-		Description: policy.Description,
-		OSFamily:    model.StringArray(policy.OSFamily),
-		OSVersion:   policy.OSVersion,
-		Enabled:     policy.Enabled,
-		GroupID:     groupID, // 关联到策略组
+		ID:           policy.ID,
+		Name:         policy.Name,
+		Version:      policy.Version,
+		Description:  policy.Description,
+		OSFamily:     model.StringArray(policy.OSFamily),
+		OSVersion:    policy.OSVersion,
+		RuntimeTypes: model.StringArray{"vm"}, // 默认仅适用于虚拟机
+		Enabled:      policy.Enabled,
+		GroupID:      groupID, // 关联到策略组
 	}
 
 	// 创建策略
@@ -218,6 +221,8 @@ func savePolicyToDB(db *gorm.DB, policy *engine.Policy, groupID string, logger *
 			Title:       rule.Title,
 			Description: rule.Description,
 			Severity:    rule.Severity,
+			// RuntimeTypes 为空，表示继承策略的设置
+			// 策略已设置为 ["vm"]，规则自动继承
 			CheckConfig: checkConfig,
 			FixConfig:   fixConfig,
 		}
@@ -249,9 +254,9 @@ func initDefaultPolicyGroup(db *gorm.DB, logger *zap.Logger) error {
 	// 创建默认策略组
 	defaultGroup := &model.PolicyGroup{
 		ID:          DefaultPolicyGroupID,
-		Name:        "系统基线组",
-		Description: "系统内置的基线检查策略组，包含 Linux 操作系统安全基线检查策略",
-		Icon:        "🛡",
+		Name:        "主机系统基线组",
+		Description: "系统内置的基线检查策略组，包含 Linux 主机操作系统安全基线检查策略（仅适用于主机/虚拟机，不适用于容器）",
+		Icon:        "🖥",
 		Color:       "#1890ff",
 		SortOrder:   0,
 		Enabled:     true,

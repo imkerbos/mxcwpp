@@ -40,6 +40,17 @@ export interface HostRiskStatistics {
   }
 }
 
+export interface HostPlugin {
+  id?: number
+  name: string
+  version: string
+  status: 'running' | 'stopped' | 'error' | 'not_installed' | 'updating'
+  start_time?: string
+  updated_at?: string
+  latest_version: string
+  need_update: boolean
+}
+
 export const hostsApi = {
   // 获取主机列表
   list: (params?: {
@@ -49,7 +60,8 @@ export const hostsApi = {
     status?: string
     business_line?: string
     search?: string // 搜索关键词（主机名、host_id等）
-    is_container?: boolean // 容器/主机类型筛选
+    is_container?: boolean // 容器/主机类型筛选（废弃，使用 runtime_type）
+    runtime_type?: 'vm' | 'docker' | 'k8s' // 运行环境类型筛选
   }) => {
     return apiClient.get<PaginatedResponse<Host>>('/hosts', { params })
   },
@@ -100,5 +112,15 @@ export const hostsApi = {
   // 更新主机业务线
   updateBusinessLine: (hostId: string, businessLine: string) => {
     return apiClient.put(`/hosts/${hostId}/business-line`, { business_line: businessLine })
+  },
+
+  // 获取主机插件列表
+  getPlugins: (hostId: string) => {
+    return apiClient.get<HostPlugin[]>(`/hosts/${hostId}/plugins`)
+  },
+
+  // 删除主机
+  delete: (hostId: string) => {
+    return apiClient.delete(`/hosts/${hostId}`)
   },
 }
