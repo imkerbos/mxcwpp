@@ -3,16 +3,10 @@
     <!-- 页面头部 -->
     <div class="page-header">
       <h2>组件管理</h2>
-      <a-space>
-        <a-button @click="showPushRecordsModal = true">
-          <template #icon><HistoryOutlined /></template>
-          推送记录
-        </a-button>
-        <a-button type="primary" @click="showCreateModal = true">
-          <template #icon><PlusOutlined /></template>
-          新建组件
-        </a-button>
-      </a-space>
+      <a-button type="primary" @click="showCreateModal = true">
+        <template #icon><PlusOutlined /></template>
+        新建组件
+      </a-button>
     </div>
 
     <!-- 插件同步状态 -->
@@ -79,38 +73,25 @@
           <span style="margin-left: 8px; font-weight: 500">{{ record.name }}</span>
         </template>
 
-        <!-- 当前版本 -->
-        <template v-else-if="column.key === 'current_version'">
-          <span v-if="record.current_version">{{ record.current_version }}</span>
-          <span v-else style="color: #999">-</span>
-          <a-tag v-if="record.current_version && record.latest_version && record.current_version !== record.latest_version" color="orange" style="margin-left: 8px;">
-            可更新
-          </a-tag>
-        </template>
-
         <!-- 最新版本 -->
         <template v-else-if="column.key === 'latest_version'">
           <span v-if="record.latest_version">{{ record.latest_version }}</span>
           <span v-else style="color: #999">-</span>
         </template>
 
-        <!-- 状态 -->
-        <template v-else-if="column.key === 'status'">
-          <a-tag :color="getStatusColor(record.status)">
-            {{ getStatusText(record.status) }}
-          </a-tag>
+        <!-- 版本数量 -->
+        <template v-else-if="column.key === 'version_count'">
+          <span>{{ record.version_count || 0 }}</span>
         </template>
 
-        <!-- 启动时间 -->
-        <template v-else-if="column.key === 'start_time'">
-          <span v-if="record.start_time">{{ record.start_time }}</span>
-          <span v-else style="color: #999">-</span>
+        <!-- 创建者 -->
+        <template v-else-if="column.key === 'created_by'">
+          <span>{{ record.created_by }}</span>
         </template>
 
-        <!-- 更新时间 -->
-        <template v-else-if="column.key === 'updated_at'">
-          <span v-if="record.updated_at">{{ record.updated_at }}</span>
-          <span v-else style="color: #999">-</span>
+        <!-- 创建时间 -->
+        <template v-else-if="column.key === 'created_at'">
+          <span>{{ formatDate(record.created_at) }}</span>
         </template>
 
         <!-- 操作 -->
@@ -121,15 +102,6 @@
             </a-button>
             <a-button type="link" size="small" @click="openVersionsModal(record)">
               详情
-            </a-button>
-            <a-button
-              v-if="record.latest_version"
-              type="link"
-              size="small"
-              @click="handlePushUpdate(record)"
-              :loading="pushingUpdate === record.id"
-            >
-              推送更新
             </a-button>
             <a-popconfirm
               title="确定要删除这个组件吗？"
@@ -439,172 +411,32 @@
         </a-table>
       </a-spin>
     </a-modal>
-
-    <!-- 推送记录弹窗 -->
-    <a-modal
-      v-model:open="showPushRecordsModal"
-      title="推送记录"
-      :footer="null"
-      :width="1000"
-    >
-      <a-spin :spinning="loadingPushRecords">
-        <div style="margin-bottom: 16px;">
-          <a-space>
-            <a-select
-              v-model:value="pushRecordsFilter.component_name"
-              placeholder="组件名称"
-              allow-clear
-              style="width: 150px"
-              @change="loadPushRecords"
-            >
-              <a-select-option value="agent">Agent</a-select-option>
-              <a-select-option value="baseline">Baseline</a-select-option>
-              <a-select-option value="collector">Collector</a-select-option>
-            </a-select>
-            <a-select
-              v-model:value="pushRecordsFilter.status"
-              placeholder="状态"
-              allow-clear
-              style="width: 120px"
-              @change="loadPushRecords"
-            >
-              <a-select-option value="pending">待推送</a-select-option>
-              <a-select-option value="pushing">推送中</a-select-option>
-              <a-select-option value="success">成功</a-select-option>
-              <a-select-option value="failed">失败</a-select-option>
-            </a-select>
-            <a-button @click="loadPushRecords">刷新</a-button>
-          </a-space>
-        </div>
-        <a-table
-          :columns="pushRecordColumns"
-          :data-source="pushRecords"
-          :pagination="pushRecordsPagination"
-          row-key="id"
-          size="small"
-          @change="handlePushRecordsTableChange"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'component_name'">
-              <a-tag :color="record.component_name === 'agent' ? 'blue' : 'green'">
-                {{ record.component_name }}
-              </a-tag>
-            </template>
-            <template v-else-if="column.key === 'status'">
-              <a-tag :color="getPushStatusColor(record.status)">
-                {{ getPushStatusText(record.status) }}
-              </a-tag>
-            </template>
-            <template v-else-if="column.key === 'progress'">
-              <a-progress
-                :percent="Math.round(record.progress)"
-                :status="record.status === 'failed' ? 'exception' : record.status === 'success' ? 'success' : 'active'"
-                :stroke-color="record.status === 'pushing' ? '#1890ff' : undefined"
-              />
-            </template>
-            <template v-else-if="column.key === 'count'">
-              <span>
-                <span style="color: #52c41a;">{{ record.success_count }}</span>
-                /
-                <span>{{ record.total_count }}</span>
-                <span v-if="record.failed_count > 0" style="color: #ff4d4f; margin-left: 8px;">
-                  (失败: {{ record.failed_count }})
-                </span>
-              </span>
-            </template>
-            <template v-else-if="column.key === 'target_type'">
-              {{ record.target_type === 'all' ? '所有主机' : `选中主机 (${record.target_hosts?.length || 0})` }}
-            </template>
-            <template v-else-if="column.key === 'action'">
-              <a-button type="link" size="small" @click="viewPushRecordDetail(record)">
-                查看详情
-              </a-button>
-            </template>
-          </template>
-        </a-table>
-      </a-spin>
-    </a-modal>
-
-    <!-- 推送记录详情弹窗 -->
-    <a-modal
-      v-model:open="showPushRecordDetailModal"
-      :title="`推送记录详情 - ${selectedPushRecord?.component_name} v${selectedPushRecord?.version}`"
-      :footer="null"
-      :width="800"
-    >
-      <a-descriptions :column="2" bordered v-if="selectedPushRecord">
-        <a-descriptions-item label="组件名称">
-          <a-tag :color="selectedPushRecord.component_name === 'agent' ? 'blue' : 'green'">
-            {{ selectedPushRecord.component_name }}
-          </a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="版本">{{ selectedPushRecord.version }}</a-descriptions-item>
-        <a-descriptions-item label="推送目标">
-          {{ selectedPushRecord.target_type === 'all' ? '所有在线主机' : `选中主机 (${selectedPushRecord.target_hosts?.length || 0})` }}
-        </a-descriptions-item>
-        <a-descriptions-item label="状态">
-          <a-tag :color="getPushStatusColor(selectedPushRecord.status)">
-            {{ getPushStatusText(selectedPushRecord.status) }}
-          </a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="总主机数">{{ selectedPushRecord.total_count }}</a-descriptions-item>
-        <a-descriptions-item label="成功数">
-          <span style="color: #52c41a;">{{ selectedPushRecord.success_count }}</span>
-        </a-descriptions-item>
-        <a-descriptions-item label="失败数">
-          <span style="color: #ff4d4f;">{{ selectedPushRecord.failed_count }}</span>
-        </a-descriptions-item>
-        <a-descriptions-item label="进度">
-          <a-progress
-            :percent="Math.round(selectedPushRecord.progress)"
-            :status="selectedPushRecord.status === 'failed' ? 'exception' : selectedPushRecord.status === 'success' ? 'success' : 'active'"
-          />
-        </a-descriptions-item>
-        <a-descriptions-item label="创建时间" :span="2">
-          {{ formatDate(selectedPushRecord.created_at) }}
-        </a-descriptions-item>
-        <a-descriptions-item label="完成时间" :span="2" v-if="selectedPushRecord.completed_at">
-          {{ formatDate(selectedPushRecord.completed_at) }}
-        </a-descriptions-item>
-        <a-descriptions-item label="失败主机" :span="2" v-if="selectedPushRecord.failed_hosts && selectedPushRecord.failed_hosts.length > 0">
-          <a-tag v-for="hostId in selectedPushRecord.failed_hosts" :key="hostId" style="margin: 4px;">
-            {{ hostId }}
-          </a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="备注" :span="2" v-if="selectedPushRecord.message">
-          {{ selectedPushRecord.message }}
-        </a-descriptions-item>
-      </a-descriptions>
-    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   PlusOutlined,
   UploadOutlined,
   QuestionCircleOutlined,
   PaperClipOutlined,
-  HistoryOutlined,
 } from '@ant-design/icons-vue'
 import {
   componentsApi,
   type Component,
   type ComponentVersion,
   type PluginSyncStatus,
-  type ComponentPushRecord,
 } from '@/api/components'
 
 // 表格列定义
 const columns = [
-  { title: '组件名称', key: 'name', dataIndex: 'name', width: 200 },
-  { title: '当前版本', key: 'current_version', dataIndex: 'current_version', width: 120 },
+  { title: '组件', key: 'name', dataIndex: 'name', width: 200 },
   { title: '最新版本', key: 'latest_version', dataIndex: 'latest_version', width: 120 },
-  { title: '状态', key: 'status', dataIndex: 'status', width: 100 },
-  { title: '启动时间', key: 'start_time', dataIndex: 'start_time', width: 180 },
-  { title: '更新时间', key: 'updated_at', dataIndex: 'updated_at', width: 180 },
+  { title: '版本数', key: 'version_count', dataIndex: 'version_count', width: 80 },
+  { title: '创建者', key: 'created_by', dataIndex: 'created_by', width: 100 },
+  { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 200 },
 ]
 
@@ -620,35 +452,6 @@ const versionColumns = [
 const loading = ref(false)
 const components = ref<Component[]>([])
 const pluginStatuses = ref<PluginSyncStatus[]>([])
-const pushingUpdate = ref<number | null>(null) // 正在推送更新的组件 ID
-
-// 推送记录
-const showPushRecordsModal = ref(false)
-const loadingPushRecords = ref(false)
-const pushRecords = ref<ComponentPushRecord[]>([])
-const pushRecordsFilter = reactive({
-  component_name: undefined as string | undefined,
-  status: undefined as string | undefined,
-})
-const pushRecordsPagination = reactive({
-  current: 1,
-  pageSize: 20,
-  total: 0,
-})
-const pushRecordColumns = [
-  { title: '组件', key: 'component_name', dataIndex: 'component_name', width: 100 },
-  { title: '版本', key: 'version', dataIndex: 'version', width: 120 },
-  { title: '推送目标', key: 'target_type', width: 150 },
-  { title: '状态', key: 'status', dataIndex: 'status', width: 100 },
-  { title: '进度', key: 'progress', width: 200 },
-  { title: '成功/总数', key: 'count', width: 120 },
-  { title: '创建时间', key: 'created_at', dataIndex: 'created_at', width: 180 },
-  { title: '操作', key: 'action', width: 100 },
-]
-
-// 推送记录详情
-const showPushRecordDetailModal = ref(false)
-const selectedPushRecord = ref<ComponentPushRecord | null>(null)
 
 // 新建组件
 const showCreateModal = ref(false)
@@ -891,111 +694,6 @@ const deleteComponent = async (component: Component) => {
   }
 }
 
-// 推送更新
-const handlePushUpdate = async (component: Component) => {
-  if (!component.latest_version) {
-    message.warning('该组件没有最新版本')
-    return
-  }
-
-  pushingUpdate.value = component.id
-  try {
-    if (component.category === 'agent') {
-      // Agent 更新推送
-      const result = await componentsApi.pushAgentUpdate({ force: false })
-      if (result.data?.record_id) {
-        message.success(
-          `更新请求已提交（记录ID: ${result.data.record_id}），AgentCenter 将在下次检查时推送更新。需要更新的主机数: ${result.data?.need_update || 0}`
-        )
-        // 如果推送记录弹窗已打开，刷新记录列表
-        if (showPushRecordsModal.value) {
-          loadPushRecords()
-        }
-      } else {
-        message.warning(result.message || '推送请求已提交，但未返回记录ID')
-      }
-    } else {
-      // 插件更新推送（通过更新 plugin_configs 表触发自动推送）
-      // 注意：插件更新由 AgentCenter 的 PluginUpdateScheduler 自动处理
-      // 当 plugin_configs 表更新时，调度器会自动检测并推送
-      message.info('插件更新已自动触发，AgentCenter 将在下次检查时推送更新（每30秒检查一次）')
-      // 刷新插件状态
-      loadPluginStatus()
-    }
-  } catch (error: any) {
-    console.error('推送更新失败:', error)
-    message.error(error.response?.data?.message || error.message || '推送更新失败')
-  } finally {
-    pushingUpdate.value = null
-  }
-}
-
-// 加载推送记录
-const loadPushRecords = async () => {
-  loadingPushRecords.value = true
-  try {
-    const params: any = {
-      page: pushRecordsPagination.current,
-      page_size: pushRecordsPagination.pageSize,
-    }
-    if (pushRecordsFilter.component_name) {
-      params.component_name = pushRecordsFilter.component_name
-    }
-    if (pushRecordsFilter.status) {
-      params.status = pushRecordsFilter.status
-    }
-    const response = await componentsApi.listPushRecords(params)
-    pushRecords.value = response.items || []
-    pushRecordsPagination.total = response.total || 0
-  } catch (error: any) {
-    message.error(error.message || '加载推送记录失败')
-  } finally {
-    loadingPushRecords.value = false
-  }
-}
-
-// 推送记录表格变化
-const handlePushRecordsTableChange = (pag: any) => {
-  pushRecordsPagination.current = pag.current
-  pushRecordsPagination.pageSize = pag.pageSize
-  loadPushRecords()
-}
-
-// 查看推送记录详情
-const viewPushRecordDetail = async (record: ComponentPushRecord) => {
-  try {
-    const detail = await componentsApi.getPushRecord(record.id)
-    selectedPushRecord.value = detail
-    showPushRecordDetailModal.value = true
-  } catch (error: any) {
-    message.error(error.message || '加载推送记录详情失败')
-  }
-}
-
-// 获取推送状态颜色
-const getPushStatusColor = (status: string): string => {
-  const colors: Record<string, string> = {
-    pending: 'default',
-    pushing: 'processing',
-    success: 'success',
-    failed: 'error',
-    cancelled: 'default',
-  }
-  return colors[status] || 'default'
-}
-
-// 获取推送状态文本
-const getPushStatusText = (status: string): string => {
-  const texts: Record<string, string> = {
-    pending: '待推送',
-    pushing: '推送中',
-    success: '成功',
-    failed: '失败',
-    cancelled: '已取消',
-  }
-  return texts[status] || status
-}
-
 // 格式化日期
 const formatDate = (dateStr: string): string => {
   if (!dateStr) return '-'
@@ -1005,30 +703,6 @@ const formatDate = (dateStr: string): string => {
 // 获取分类颜色
 const getCategoryColor = (category: string): string => {
   return category === 'agent' ? 'blue' : 'green'
-}
-
-// 获取状态颜色
-const getStatusColor = (status: string): string => {
-  const statusMap: Record<string, string> = {
-    running: 'green',
-    stopped: 'default',
-    error: 'red',
-    not_installed: 'orange',
-    updating: 'blue',
-  }
-  return statusMap[status] || 'default'
-}
-
-// 获取状态文本
-const getStatusText = (status: string): string => {
-  const statusMap: Record<string, string> = {
-    running: '运行中',
-    stopped: '已停止',
-    error: '错误',
-    not_installed: '未安装',
-    updating: '更新中',
-  }
-  return statusMap[status] || status
 }
 
 // 获取名称颜色
@@ -1067,26 +741,6 @@ const getPluginStatusLabel = (status: string): string => {
 const getPluginStatusClass = (status: string): string => {
   return `status-${status.replace('_', '-')}`
 }
-
-// 监听推送记录弹窗打开
-watch(showPushRecordsModal, (open) => {
-  if (open) {
-    loadPushRecords()
-    // 如果推送中，每 3 秒刷新一次
-    const interval = setInterval(() => {
-      if (showPushRecordsModal.value) {
-        const hasPushing = pushRecords.value.some(r => r.status === 'pushing' || r.status === 'pending')
-        if (hasPushing) {
-          loadPushRecords()
-        } else {
-          clearInterval(interval)
-        }
-      } else {
-        clearInterval(interval)
-      }
-    }, 3000)
-  }
-})
 
 onMounted(() => {
   loadComponents()
