@@ -12,13 +12,21 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # 配置
-VERSION="${BLS_VERSION:-1.0.0}"
-SERVER_HOST="${BLS_SERVER_HOST:-localhost:6751}"
+SERVER_HOST="${SERVER_HOST:-localhost:6751}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ARCH="${GOARCH:-amd64}"
-OS="${GOOS:-linux}"
-DISTRO="${BLS_DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
-CERT_DIR="${BLS_CERT_DIR:-deploy/docker-compose/certs}"  # 证书目录
+OS="linux"  # 始终构建 Linux 二进制
+DISTRO="${DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
+CERT_DIR="${CERT_DIR:-deploy/docker-compose/certs}"  # 证书目录
+
+# 版本：环境变量 > VERSION 文件 > 默认值
+if [ -n "${VERSION:-}" ]; then
+    : # 使用环境变量
+elif [ -f "VERSION" ]; then
+    VERSION=$(cat VERSION | tr -d '[:space:]')
+else
+    VERSION="1.0.0"
+fi
 
 # 输出目录
 DIST_DIR="dist/agent"
@@ -75,7 +83,7 @@ fi
 
 # 1. 构建 Agent 二进制
 echo -e "${GREEN}[1/4] Building agent binary...${NC}"
-go build -ldflags "\
+CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -ldflags "\
     -X main.serverHost=$SERVER_HOST \
     -X main.buildVersion=$VERSION \
     -X main.buildTime=$BUILD_TIME \
@@ -335,14 +343,8 @@ EOF
 # 4. 打包
 echo -e "${GREEN}[4/4] Packaging...${NC}"
 
-# 打包 RPM
-if [ "$ARCH" = "amd64" ]; then
-    RPM_ARCH="x86_64"
-elif [ "$ARCH" = "arm64" ]; then
-    RPM_ARCH="aarch64"
-else
-    RPM_ARCH="$ARCH"
-fi
+# 打包 RPM - 统一使用 amd64/arm64 命名
+RPM_ARCH="$ARCH"
 
 # RPM 包名（包含发行版信息）
 if [ -n "$RPM_DISTRO" ]; then

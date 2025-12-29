@@ -87,7 +87,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	pluginUpdateScheduler := scheduler.NewPluginUpdateScheduler(db, transferService, logger)
 
 	// 10. 创建 Agent 更新调度器
-	agentUpdateScheduler := scheduler.NewAgentUpdateScheduler(db, transferService, logger)
+	agentUpdateScheduler := scheduler.NewAgentUpdateScheduler(db, transferService, cfg, logger)
 
 	// 11. 创建网络监听器
 	listener, err := net.Listen("tcp", cfg.Server.GRPC.Address())

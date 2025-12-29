@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
 )
 
@@ -24,12 +25,13 @@ import (
 type ComponentsHandler struct {
 	db        *gorm.DB
 	logger    *zap.Logger
-	uploadDir string // 上传文件存储目录
-	urlPrefix string // 文件访问 URL 前缀
+	cfg       *config.Config // Server 配置
+	uploadDir string         // 上传文件存储目录
+	urlPrefix string         // 文件访问 URL 前缀
 }
 
 // NewComponentsHandler 创建组件管理处理器
-func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, uploadDir, urlPrefix string) *ComponentsHandler {
+func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, cfg *config.Config, uploadDir, urlPrefix string) *ComponentsHandler {
 	// 确保上传目录存在
 	packagesDir := filepath.Join(uploadDir, "packages")
 	if err := os.MkdirAll(packagesDir, 0755); err != nil {
@@ -42,6 +44,7 @@ func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, uploadDir, urlPrefix 
 	return &ComponentsHandler{
 		db:        db,
 		logger:    logger,
+		cfg:       cfg,
 		uploadDir: uploadDir,
 		urlPrefix: urlPrefix,
 	}
@@ -161,141 +164,16 @@ func (h *ComponentsHandler) ListComponents(c *gin.Context) {
 			Where("component_versions.component_id = ?", comp.ID).
 			Count(&packageCount)
 
-		// 获取当前版本和安装状态
-		var currentVersion string
-		var status string
-		var startTime string
-		var updatedAt string
-
-		if comp.Category == model.ComponentCategoryAgent {
-			// Agent: 从 hosts 表统计
-			var installedCount int64
-			h.db.Model(&model.Host{}).Where("agent_version IS NOT NULL AND agent_version != ''").Count(&installedCount)
-
-			h.logger.Debug("查询 Agent 安装统计",
-				zap.String("component_name", comp.Name),
-				zap.Int64("installed_count", installedCount))
-
-			if installedCount > 0 {
-				// 获取最常见的安装版本
-				type VersionCount struct {
-					Version string
-					Count   int64
-				}
-				var versionCounts []VersionCount
-				if err := h.db.Model(&model.Host{}).
-					Select("agent_version as version, COUNT(*) as count").
-					Where("agent_version IS NOT NULL AND agent_version != ''").
-					Group("agent_version").
-					Order("count DESC").
-					Limit(1).
-					Scan(&versionCounts).Error; err != nil {
-					h.logger.Error("查询 Agent 版本统计失败", zap.Error(err))
-				}
-
-				h.logger.Debug("Agent 版本统计结果",
-					zap.String("component_name", comp.Name),
-					zap.Int("version_count", len(versionCounts)),
-					zap.Any("versions", versionCounts))
-
-				if len(versionCounts) > 0 {
-					currentVersion = versionCounts[0].Version
-					status = "running" // Agent 如果上报了版本，通常是在运行中
-				} else {
-					status = "not_installed"
-				}
-			} else {
-				status = "not_installed"
-			}
-		} else {
-			// Plugin: 从 host_plugins 表统计（排除软删除的记录）
-			var installedCount int64
-			h.db.Model(&model.HostPlugin{}).Where("name = ? AND version IS NOT NULL AND version != '' AND deleted_at IS NULL", comp.Name).Count(&installedCount)
-
-			h.logger.Debug("查询 Plugin 安装统计",
-				zap.String("component_name", comp.Name),
-				zap.Int64("installed_count", installedCount))
-
-			if installedCount > 0 {
-				// 获取最常见的安装版本
-				type VersionCount struct {
-					Version string
-					Count   int64
-				}
-				var versionCounts []VersionCount
-				if err := h.db.Model(&model.HostPlugin{}).
-					Select("version, COUNT(*) as count").
-					Where("name = ? AND version IS NOT NULL AND version != '' AND deleted_at IS NULL", comp.Name).
-					Group("version").
-					Order("count DESC").
-					Limit(1).
-					Scan(&versionCounts).Error; err != nil {
-					h.logger.Error("查询 Plugin 版本统计失败", zap.String("component_name", comp.Name), zap.Error(err))
-				}
-
-				h.logger.Debug("Plugin 版本统计结果",
-					zap.String("component_name", comp.Name),
-					zap.Int("version_count", len(versionCounts)),
-					zap.Any("versions", versionCounts))
-
-				if len(versionCounts) > 0 {
-					currentVersion = versionCounts[0].Version
-					// 获取最常见的状态
-					type StatusCount struct {
-						Status string
-						Count  int64
-					}
-					var statusCounts []StatusCount
-					if err := h.db.Model(&model.HostPlugin{}).
-						Select("status, COUNT(*) as count").
-						Where("name = ? AND version = ? AND deleted_at IS NULL", comp.Name, currentVersion).
-						Group("status").
-						Order("count DESC").
-						Limit(1).
-						Scan(&statusCounts).Error; err != nil {
-						h.logger.Error("查询 Plugin 状态统计失败", zap.String("component_name", comp.Name), zap.Error(err))
-					}
-
-					if len(statusCounts) > 0 {
-						status = statusCounts[0].Status
-					} else {
-						status = "running"
-					}
-
-					// 获取最新的启动时间和更新时间
-					var latestPlugin model.HostPlugin
-					if err := h.db.Where("name = ? AND version = ? AND deleted_at IS NULL", comp.Name, currentVersion).
-						Order("updated_at DESC").
-						First(&latestPlugin).Error; err != nil {
-						h.logger.Warn("查询 Plugin 最新记录失败", zap.String("component_name", comp.Name), zap.Error(err))
-					} else {
-						if latestPlugin.StartTime != nil {
-							startTime = latestPlugin.StartTime.Time().Format("2006-01-02 15:04:05")
-						}
-						updatedAt = latestPlugin.UpdatedAt.Time().Format("2006-01-02 15:04:05")
-					}
-				} else {
-					status = "not_installed"
-				}
-			} else {
-				status = "not_installed"
-			}
-		}
-
 		result = append(result, gin.H{
-			"id":              comp.ID,
-			"name":            comp.Name,
-			"category":        comp.Category,
-			"description":     comp.Description,
-			"created_by":      comp.CreatedBy,
-			"created_at":      comp.CreatedAt,
-			"latest_version":  latestVersion.Version,
-			"current_version": currentVersion,
-			"status":          status,
-			"start_time":      startTime,
-			"updated_at":      updatedAt,
-			"version_count":   versionCount,
-			"package_count":   packageCount,
+			"id":             comp.ID,
+			"name":           comp.Name,
+			"category":       comp.Category,
+			"description":    comp.Description,
+			"created_by":     comp.CreatedBy,
+			"created_at":     comp.CreatedAt,
+			"latest_version": latestVersion.Version,
+			"version_count":  versionCount,
+			"package_count":  packageCount,
 		})
 	}
 
@@ -394,6 +272,7 @@ type ReleaseVersionRequest struct {
 	Version   string `json:"version" binding:"required"` // 版本号
 	Changelog string `json:"changelog"`                  // 更新日志
 	SetLatest bool   `json:"set_latest"`                 // 是否设为最新版本
+	Force     bool   `json:"force"`                      // 是否强制覆盖已存在的版本
 }
 
 // ReleaseVersion 发布新版本（仅创建版本记录，包文件单独上传）
@@ -437,14 +316,41 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 	}
 
 	// 检查版本是否已存在
-	var existingCount int64
-	h.db.Model(&model.ComponentVersion{}).
-		Where("component_id = ? AND version = ?", component.ID, req.Version).
-		Count(&existingCount)
-	if existingCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": fmt.Sprintf("版本 %s 已存在", req.Version),
+	var existingVersion model.ComponentVersion
+	existErr := h.db.Where("component_id = ? AND version = ?", component.ID, req.Version).First(&existingVersion).Error
+	if existErr == nil {
+		// 版本已存在
+		if !req.Force {
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    409,
+				"message": fmt.Sprintf("版本 %s 已存在，如需覆盖请设置 force=true", req.Version),
+			})
+			return
+		}
+
+		// force=true，删除旧版本及其包文件
+		h.logger.Info("强制覆盖版本，删除旧版本",
+			zap.String("component", component.Name),
+			zap.String("version", req.Version),
+		)
+
+		// 查找并删除关联的包文件
+		var packages []model.ComponentPackage
+		h.db.Where("version_id = ?", existingVersion.ID).Find(&packages)
+		for _, pkg := range packages {
+			if err := os.Remove(pkg.FilePath); err != nil && !os.IsNotExist(err) {
+				h.logger.Warn("删除旧包文件失败", zap.Error(err), zap.String("path", pkg.FilePath))
+			}
+		}
+		// 删除数据库中的包记录
+		h.db.Where("version_id = ?", existingVersion.ID).Delete(&model.ComponentPackage{})
+		// 删除旧版本记录
+		h.db.Delete(&existingVersion)
+	} else if existErr != gorm.ErrRecordNotFound {
+		h.logger.Error("查询版本失败", zap.Error(existErr))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询失败",
 		})
 		return
 	}
@@ -663,8 +569,17 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, componentID).Error; err == nil {
 		if component.Category == model.ComponentCategoryPlugin {
+			h.logger.Info("设置最新版本后同步插件配置",
+				zap.String("name", component.Name),
+				zap.String("version", version.Version),
+			)
 			h.syncPluginConfigForVersion(&version, component.Name)
 		}
+	} else {
+		h.logger.Warn("查询组件失败，无法同步插件配置",
+			zap.Uint("component_id", version.ComponentID),
+			zap.Error(err),
+		)
 	}
 
 	h.logger.Info("设置最新版本成功",
@@ -744,6 +659,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	// 获取表单参数
 	pkgType := c.PostForm("pkg_type") // rpm, deb, binary
 	arch := c.PostForm("arch")        // amd64, arm64
+	force := c.PostForm("force")      // 是否强制覆盖
 
 	// 验证参数
 	if arch != "amd64" && arch != "arm64" {
@@ -806,14 +722,41 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	}
 
 	// 检查是否已存在相同类型的包
-	var existingCount int64
-	h.db.Model(&model.ComponentPackage{}).
-		Where("version_id = ? AND pkg_type = ? AND arch = ?", version.ID, pkgType, arch).
-		Count(&existingCount)
-	if existingCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": fmt.Sprintf("该版本已存在 %s/%s 包", pkgType, arch),
+	var existingPkg model.ComponentPackage
+	err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ?", version.ID, pkgType, arch).First(&existingPkg).Error
+	if err == nil {
+		// 包已存在
+		if force != "true" {
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    409,
+				"message": fmt.Sprintf("该版本已存在 %s/%s 包，如需覆盖请设置 force=true", pkgType, arch),
+			})
+			return
+		}
+
+		// force=true，删除旧包文件和记录
+		h.logger.Info("强制覆盖包，删除旧包",
+			zap.String("component", component.Name),
+			zap.String("version", version.Version),
+			zap.String("pkg_type", pkgType),
+			zap.String("arch", arch),
+		)
+		if err := os.Remove(existingPkg.FilePath); err != nil && !os.IsNotExist(err) {
+			h.logger.Warn("删除旧包文件失败", zap.Error(err), zap.String("path", existingPkg.FilePath))
+		}
+		if err := h.db.Delete(&existingPkg).Error; err != nil {
+			h.logger.Error("删除旧包记录失败", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "删除旧包失败",
+			})
+			return
+		}
+	} else if err != gorm.ErrRecordNotFound {
+		h.logger.Error("查询包失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询失败",
 		})
 		return
 	}
@@ -941,9 +884,24 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		zap.Int64("file_size", fileSize),
 	)
 
-	// 如果是插件且该版本是最新版本，同步更新插件配置
-	if component.Category == model.ComponentCategoryPlugin && version.IsLatest {
-		h.syncPluginConfigForVersion(&version, component.Name)
+	// 如果是插件，尝试同步更新插件配置
+	// 注意：这里需要重新查询版本以获取最新的 is_latest 状态
+	if component.Category == model.ComponentCategoryPlugin {
+		var currentVersion model.ComponentVersion
+		if err := h.db.First(&currentVersion, version.ID).Error; err == nil {
+			if currentVersion.IsLatest {
+				h.logger.Info("上传包后同步插件配置",
+					zap.String("name", component.Name),
+					zap.String("version", currentVersion.Version),
+				)
+				h.syncPluginConfigForVersion(&currentVersion, component.Name)
+			} else {
+				h.logger.Debug("版本不是最新版本，跳过同步",
+					zap.String("name", component.Name),
+					zap.String("version", currentVersion.Version),
+				)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1322,15 +1280,33 @@ func buildPackagesSummary(packages []model.ComponentPackage) string {
 
 // syncPluginConfigForVersion 同步插件配置
 func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentVersion, componentName string) {
+	h.logger.Info("开始同步插件配置",
+		zap.String("name", componentName),
+		zap.String("version", version.Version),
+		zap.Uint("version_id", version.ID),
+	)
+
 	// 获取该版本的包（优先 amd64）
 	var pkg model.ComponentPackage
-	if err := h.db.Where("version_id = ? AND arch = ?", version.ID, "amd64").First(&pkg).Error; err != nil {
-		// 如果没有 amd64，取任意一个
-		if err := h.db.Where("version_id = ?", version.ID).First(&pkg).Error; err != nil {
-			h.logger.Warn("同步插件配置失败：没有找到包", zap.String("name", componentName))
+	if err := h.db.Where("version_id = ? AND arch = ? AND enabled = ?", version.ID, "amd64", true).First(&pkg).Error; err != nil {
+		// 如果没有 amd64，取任意一个启用的包
+		if err := h.db.Where("version_id = ? AND enabled = ?", version.ID, true).First(&pkg).Error; err != nil {
+			h.logger.Warn("同步插件配置失败：没有找到可用的包",
+				zap.String("name", componentName),
+				zap.String("version", version.Version),
+				zap.Uint("version_id", version.ID),
+				zap.Error(err),
+			)
 			return
 		}
 	}
+
+	h.logger.Info("找到插件包",
+		zap.String("name", componentName),
+		zap.String("arch", pkg.Arch),
+		zap.String("sha256", pkg.SHA256),
+		zap.String("file_path", pkg.FilePath),
+	)
 
 	// 确定插件类型
 	var pluginType model.PluginType
@@ -1344,7 +1320,19 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 	}
 
 	// 构建下载 URL
-	downloadURL := fmt.Sprintf("/api/v1/plugins/download/%s", componentName)
+	// 如果配置了 plugins.base_url，使用配置的值；否则使用相对路径
+	var downloadURL string
+	if h.cfg != nil && h.cfg.Plugins.BaseURL != "" {
+		// 使用配置的基础URL（适用于生产环境）
+		downloadURL = fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.Plugins.BaseURL, "/"), componentName)
+	} else {
+		// 使用相对路径（仅限开发环境或内部网络）
+		downloadURL = fmt.Sprintf("/api/v1/plugins/download/%s", componentName)
+		h.logger.Warn("plugins.base_url 未配置，使用相对路径（仅适用于 Agent 和 Manager 在同一网络的场景）",
+			zap.String("download_url", downloadURL),
+			zap.String("hint", "建议在 server.yaml 中配置 plugins.base_url 为 Manager 的完整URL"),
+		)
+	}
 
 	// 查找或创建插件配置
 	var pluginConfig model.PluginConfig
@@ -1365,9 +1353,17 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 			Description: fmt.Sprintf("%s 插件 v%s", componentName, version.Version),
 		}
 		if err := h.db.Create(&pluginConfig).Error; err != nil {
-			h.logger.Error("创建插件配置失败", zap.Error(err))
+			h.logger.Error("创建插件配置失败",
+				zap.String("name", componentName),
+				zap.Error(err),
+			)
 			return
 		}
+		h.logger.Info("创建插件配置成功",
+			zap.String("name", componentName),
+			zap.String("version", version.Version),
+			zap.String("sha256", pkg.SHA256),
+		)
 	} else if err == nil {
 		// 更新已存在的插件配置
 		updates := map[string]interface{}{
@@ -1378,12 +1374,27 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 			"description":   fmt.Sprintf("%s 插件 v%s", componentName, version.Version),
 		}
 		if err := h.db.Model(&pluginConfig).Updates(updates).Error; err != nil {
-			h.logger.Error("更新插件配置失败", zap.Error(err))
+			h.logger.Error("更新插件配置失败",
+				zap.String("name", componentName),
+				zap.Error(err),
+			)
 			return
 		}
+		h.logger.Info("更新插件配置成功",
+			zap.String("name", componentName),
+			zap.String("old_version", pluginConfig.Version),
+			zap.String("new_version", version.Version),
+			zap.String("sha256", pkg.SHA256),
+		)
+	} else {
+		h.logger.Error("查询插件配置失败",
+			zap.String("name", componentName),
+			zap.Error(err),
+		)
+		return
 	}
 
-	h.logger.Info("同步插件配置成功",
+	h.logger.Info("同步插件配置完成",
 		zap.String("name", componentName),
 		zap.String("version", version.Version),
 	)

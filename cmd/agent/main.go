@@ -20,6 +20,7 @@ import (
 	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/logger"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/plugin"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/transport"
+	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/updater"
 )
 
 var (
@@ -130,7 +131,7 @@ func main() {
 	defer cancel()
 
 	wg := &sync.WaitGroup{}
-	wg.Add(3)
+	wg.Add(4)
 
 	// 心跳模块（传递插件管理器引用）
 	go heartbeat.Startup(ctx, wg, cfg, log, transportMgr, agentID, pluginMgr)
@@ -140,6 +141,9 @@ func main() {
 
 	// 插件管理模块（使用已创建的插件管理器）
 	go plugin.StartupWithManager(ctx, wg, pluginMgr)
+
+	// 自更新模块（监听来自 Server 的更新命令）
+	go updater.Startup(ctx, wg, log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
 
 	// 9. 信号处理
 	signalCh := make(chan os.Signal, 1)

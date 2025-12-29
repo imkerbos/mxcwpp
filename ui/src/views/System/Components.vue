@@ -188,7 +188,7 @@
             <template v-if="selectedComponent?.category === 'agent'">
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux RHEL x86-64</span>
+                  <span class="upload-label">* RPM amd64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.rpm_amd64"
                     :before-upload="() => false"
@@ -208,7 +208,7 @@
               </div>
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux RHEL AArch64</span>
+                  <span class="upload-label">* RPM arm64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.rpm_arm64"
                     :before-upload="() => false"
@@ -228,7 +228,7 @@
               </div>
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux Debian x86-64</span>
+                  <span class="upload-label">* DEB amd64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.deb_amd64"
                     :before-upload="() => false"
@@ -248,7 +248,7 @@
               </div>
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux Debian AArch64</span>
+                  <span class="upload-label">* DEB arm64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.deb_arm64"
                     :before-upload="() => false"
@@ -272,7 +272,7 @@
             <template v-else>
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux x86-64</span>
+                  <span class="upload-label">* Binary amd64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.binary_amd64"
                     :before-upload="() => false"
@@ -291,7 +291,7 @@
               </div>
               <div class="upload-item">
                 <div class="upload-header">
-                  <span class="upload-label">* Linux AArch64</span>
+                  <span class="upload-label">* Binary arm64</span>
                   <a-upload
                     v-model:fileList="releaseForm.files.binary_arm64"
                     :before-upload="() => false"
@@ -324,9 +324,14 @@
         </a-form-item>
 
         <a-form-item>
-          <a-checkbox v-model:checked="releaseForm.set_latest">
-            设置为最新版本
-          </a-checkbox>
+          <a-space direction="vertical" :size="8">
+            <a-checkbox v-model:checked="releaseForm.set_latest">
+              设置为最新版本
+            </a-checkbox>
+            <a-checkbox v-model:checked="releaseForm.force">
+              覆盖已存在的版本（如版本号已存在，将删除旧版本后重新创建）
+            </a-checkbox>
+          </a-space>
         </a-form-item>
 
         <a-form-item>
@@ -486,6 +491,7 @@ const releaseForm = reactive({
   version: '',
   changelog: '',
   set_latest: true,
+  force: false,
   files: {
     rpm_amd64: [] as any[],
     rpm_arm64: [] as any[],
@@ -583,6 +589,7 @@ const handleRelease = async () => {
       version: releaseForm.version,
       changelog: releaseForm.changelog,
       set_latest: releaseForm.set_latest,
+      force: releaseForm.force,
     })
 
     // 2. 上传包文件
@@ -602,6 +609,10 @@ const handleRelease = async () => {
         formData.append('file', files[0].originFileObj)
         formData.append('pkg_type', pkgType)
         formData.append('arch', arch)
+        // 传递 force 参数，允许覆盖已存在的包
+        if (releaseForm.force) {
+          formData.append('force', 'true')
+        }
         uploadTasks.push(
           componentsApi.uploadPackage(selectedComponent.value.id, version.id, formData)
         )
@@ -629,6 +640,7 @@ const resetReleaseForm = () => {
   releaseForm.version = ''
   releaseForm.changelog = ''
   releaseForm.set_latest = true
+  releaseForm.force = false
   releaseForm.files = {
     rpm_amd64: [],
     rpm_arm64: [],

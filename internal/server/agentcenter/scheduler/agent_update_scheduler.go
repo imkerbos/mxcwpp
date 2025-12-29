@@ -12,6 +12,7 @@ import (
 
 	grpcProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/transfer"
+	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
 	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
 )
 
@@ -20,19 +21,46 @@ import (
 type AgentUpdateScheduler struct {
 	db              *gorm.DB
 	transferService *transfer.Service
+	cfg             *config.Config
 	logger          *zap.Logger
 	lastCheckTime   time.Time
 	mu              sync.Mutex
 }
 
 // NewAgentUpdateScheduler 创建 Agent 更新调度器
-func NewAgentUpdateScheduler(db *gorm.DB, transferService *transfer.Service, logger *zap.Logger) *AgentUpdateScheduler {
+func NewAgentUpdateScheduler(db *gorm.DB, transferService *transfer.Service, cfg *config.Config, logger *zap.Logger) *AgentUpdateScheduler {
 	return &AgentUpdateScheduler{
 		db:              db,
 		transferService: transferService,
+		cfg:             cfg,
 		logger:          logger,
 		lastCheckTime:   time.Now(),
 	}
+}
+
+// buildDownloadURL 构建完整的下载 URL
+func (s *AgentUpdateScheduler) buildDownloadURL(pkgType model.PackageType, arch string) string {
+	// 构建相对路径
+	relativePath := fmt.Sprintf("/api/v1/agent/download/%s/%s", pkgType, arch)
+
+	// 获取 HTTP 服务地址
+	httpHost := s.cfg.Server.HTTP.Host
+	httpPort := s.cfg.Server.HTTP.Port
+
+	// 如果 HTTP Host 是 0.0.0.0 或空，尝试使用 gRPC Host
+	if httpHost == "0.0.0.0" || httpHost == "" {
+		grpcHost := s.cfg.Server.GRPC.Host
+		if grpcHost != "0.0.0.0" && grpcHost != "" {
+			httpHost = grpcHost
+		} else {
+			// 最后回退到 localhost（仅用于开发环境）
+			httpHost = "localhost"
+			s.logger.Warn("HTTP 和 gRPC Host 都是 0.0.0.0，使用 localhost（仅用于开发环境）")
+		}
+	}
+
+	// 构建完整 URL
+	return fmt.Sprintf("http://%s:%d%s", httpHost, httpPort, relativePath)
 }
 
 // Start 启动 Agent 更新调度器
@@ -121,8 +149,8 @@ func (s *AgentUpdateScheduler) checkAndPushUpdates(ctx context.Context) {
 				continue
 			}
 
-			// 构建下载 URL
-			downloadURL := fmt.Sprintf("/api/v1/agent/download/%s/%s", pkgType, arch)
+			// 构建完整下载 URL
+			downloadURL := s.buildDownloadURL(pkgType, arch)
 
 			// 构建更新命令
 			agentUpdate := &grpcProto.AgentUpdate{
@@ -151,7 +179,8 @@ func (s *AgentUpdateScheduler) checkAndPushUpdates(ctx context.Context) {
 			s.logger.Info("已推送 Agent 更新",
 				zap.String("host_id", host.HostID),
 				zap.String("old_version", host.AgentVersion),
-				zap.String("new_version", latestVersion.Version))
+				zap.String("new_version", latestVersion.Version),
+				zap.String("download_url", downloadURL))
 
 			updatedCount++
 		}
@@ -259,8 +288,8 @@ func (s *AgentUpdateScheduler) TriggerUpdate(ctx context.Context, hostIDs []stri
 			continue
 		}
 
-		// 构建下载 URL
-		downloadURL := fmt.Sprintf("/api/v1/agent/download/%s/%s", pkgType, arch)
+		// 构建完整下载 URL
+		downloadURL := s.buildDownloadURL(pkgType, arch)
 
 		// 构建更新命令
 		agentUpdate := &grpcProto.AgentUpdate{
@@ -288,7 +317,8 @@ func (s *AgentUpdateScheduler) TriggerUpdate(ctx context.Context, hostIDs []stri
 		successCount++
 		s.logger.Info("已手动推送 Agent 更新",
 			zap.String("host_id", host.HostID),
-			zap.String("version", latestVersion.Version))
+			zap.String("version", latestVersion.Version),
+			zap.String("download_url", downloadURL))
 	}
 
 	// 更新推送记录（查找最近的 pending 记录）

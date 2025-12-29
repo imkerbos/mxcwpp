@@ -40,6 +40,10 @@ export interface Host {
   pod_uid?: string // Pod UID（K8s 环境）
   business_line?: string // 业务线
   agent_version?: string // Agent 当前版本号
+  // 时间信息
+  agent_start_time?: string // Agent 启动时间
+  system_boot_time?: string // 系统启动时间
+  last_active_time?: string // 最近活跃时间
 }
 
 // 磁盘信息类型（用于 Host 的 disk_info 字段）

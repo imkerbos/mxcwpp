@@ -819,10 +819,10 @@
                       </a-tag>
                     </template>
                     <template v-else-if="column.key === 'start_time'">
-                      {{ record.start_time || '-' }}
+                      {{ record.start_time ? formatDateTime(record.start_time) : '-' }}
                     </template>
                     <template v-else-if="column.key === 'updated_at'">
-                      {{ record.updated_at || '-' }}
+                      {{ record.updated_at ? formatDateTime(record.updated_at) : '-' }}
                     </template>
                   </template>
                 </a-table>
@@ -1021,6 +1021,8 @@ const loadComponents = async () => {
       version: agentCurrentVersion || '-',
       latest_version: agentLatestVersion,
       status: agentCurrentVersion ? 'running' : 'not_installed',
+      start_time: props.host.agent_start_time,
+      updated_at: props.host.updated_at,
       need_update: agentLatestVersion && agentCurrentVersion && agentCurrentVersion !== agentLatestVersion,
     })
     

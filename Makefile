@@ -1,4 +1,4 @@
-.PHONY: proto generate test clean help build-agent build-server package-agent docker-build docker-up docker-down
+.PHONY: proto generate test clean help build-server package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch docker-build docker-up docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -55,12 +55,7 @@ deps:
 	go mod download
 	go mod tidy
 
-# 构建 Agent
-build-agent:
-	@echo "Building agent..."
-	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) GOARCH=$(GOARCH) GOOS=$(GOOS) ./scripts/build-agent.sh
-
-# 构建 Server
+# 构建 Server（本地二进制，用于开发）
 build-server:
 	@echo "Building server..."
 	@mkdir -p dist/server
@@ -68,50 +63,41 @@ build-server:
 	@go build -ldflags "-s -w" -o dist/server/manager ./cmd/server/manager
 	@echo "Server binaries built: dist/server/"
 
-# 打包 Agent（RPM/DEB）- 单架构
+# ============ 统一打包命令 ============
+# Agent: 输出 RPM/DEB 系统包
+# 插件: 输出二进制文件（由 Agent 动态管理）
+
+# 打包 Agent（单架构）
 package-agent:
-	@echo "Packaging agent ($(GOARCH))..."
-	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=$(GOARCH) GOOS=$(GOOS) ./scripts/package-agent.sh
+	@./scripts/build.sh agent --arch=$(GOARCH) --version=$(VERSION) --server=$(SERVER_HOST)
 
-# 打包 Agent（RPM/DEB）- 所有架构（amd64 + arm64）
+# 打包 Agent（所有架构）
 package-agent-all:
-	@echo "Packaging agent for all architectures..."
-	@echo "=== Building amd64 packages ==="
-	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=amd64 GOOS=linux ./scripts/package-agent.sh
-	@echo "=== Building arm64 packages ==="
-	@BLS_SERVER_HOST=$(SERVER_HOST) BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) BLS_CERT_DIR=$(CERT_DIR) GOARCH=arm64 GOOS=linux ./scripts/package-agent.sh
-	@echo "All agent packages built successfully in dist/packages/"
+	@./scripts/build.sh agent --arch=all --version=$(VERSION) --server=$(SERVER_HOST)
 
-# 构建插件（baseline + collector）
-build-plugins:
-	@echo "Building plugins..."
-	@mkdir -p dist/plugins
-	@echo "Building baseline plugin ($(GOARCH))..."
-	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-s -w" -o dist/plugins/baseline ./plugins/baseline
-	@echo "Building collector plugin ($(GOARCH))..."
-	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags "-s -w" -o dist/plugins/collector ./plugins/collector
-	@echo "Plugins built: dist/plugins/"
+# 构建 Baseline 插件（单架构）- 输出二进制文件
+package-baseline:
+	@./scripts/build.sh baseline --arch=$(GOARCH) --version=$(VERSION)
 
-# 构建插件 - 所有架构（amd64 + arm64）
-build-plugins-all:
-	@echo "Building plugins for all architectures..."
-	@mkdir -p dist/plugins/amd64 dist/plugins/arm64
-	@echo "=== Building amd64 plugins ==="
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/plugins/amd64/baseline ./plugins/baseline
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o dist/plugins/amd64/collector ./plugins/collector
-	@echo "=== Building arm64 plugins ==="
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o dist/plugins/arm64/baseline ./plugins/baseline
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o dist/plugins/arm64/collector ./plugins/collector
-	@echo "All plugins built in dist/plugins/{amd64,arm64}/"
+# 构建 Collector 插件（单架构）- 输出二进制文件
+package-collector:
+	@./scripts/build.sh collector --arch=$(GOARCH) --version=$(VERSION)
 
-# 打包 Server（RPM/DEB）
-package-server:
-	@echo "Packaging server..."
-	@BLS_VERSION=$(VERSION) BLS_DISTRO=$(DISTRO) GOARCH=$(GOARCH) GOOS=$(GOOS) ./scripts/package-server.sh
+# 构建所有插件（单架构）- 输出二进制文件
+package-plugins:
+	@./scripts/build.sh plugins --arch=$(GOARCH) --version=$(VERSION)
 
-# 打包所有（Agent + Server）
-package-all: package-agent package-server
-	@echo "All packages built successfully"
+# 构建所有插件（所有架构）- 输出二进制文件
+package-plugins-all:
+	@./scripts/build.sh plugins --arch=all --version=$(VERSION)
+
+# 构建所有（Agent RPM/DEB + 插件二进制，单架构）
+package-all:
+	@./scripts/build.sh all --arch=$(GOARCH) --version=$(VERSION) --server=$(SERVER_HOST)
+
+# 构建所有（Agent RPM/DEB + 插件二进制，所有架构）
+package-all-arch:
+	@./scripts/build.sh all --arch=all --version=$(VERSION) --server=$(SERVER_HOST)
 
 # Docker 相关命令
 docker-build:
@@ -239,34 +225,30 @@ help:
 	@echo ""
 	@echo "代码生成:"
 	@echo "  make proto          - Generate Protobuf Go code"
-	@echo "  make generate       - Alias for proto"
 	@echo ""
 	@echo "构建:"
-	@echo "  make build-agent      - Build agent binary (SERVER_HOST=host:port VERSION=1.0.0)"
-	@echo "  make build-server     - Build server binaries (agentcenter, manager)"
-	@echo "  make build-plugins    - Build plugins (baseline, collector) for current arch"
-	@echo "  make build-plugins-all- Build plugins for all architectures (amd64 + arm64)"
-	@echo "  make package-agent    - Package agent as RPM/DEB for current arch"
-	@echo "  make package-agent-all- Package agent as RPM/DEB for all architectures"
-	@echo "  make package-server   - Package server as RPM/DEB (VERSION=1.0.0)"
-	@echo "  make package-all      - Package both agent and server"
+	@echo "  Agent (输出 RPM/DEB 系统包):"
+	@echo "    make package-agent       - 打包 Agent (单架构)"
+	@echo "    make package-agent-all   - 打包 Agent (amd64 + arm64)"
 	@echo ""
-	@echo "安装:"
-	@echo "  make install-agent  - Install agent from package (VERSION=1.0.0)"
-	@echo "  make install-server - Install server from package (VERSION=1.0.0)"
+	@echo "  插件 (输出二进制文件，由 Agent 动态管理):"
+	@echo "    make package-baseline    - 构建 Baseline 插件 (单架构)"
+	@echo "    make package-collector   - 构建 Collector 插件 (单架构)"
+	@echo "    make package-plugins     - 构建所有插件 (单架构)"
+	@echo "    make package-plugins-all - 构建所有插件 (amd64 + arm64)"
+	@echo ""
+	@echo "  全部构建:"
+	@echo "    make package-all         - Agent RPM/DEB + 插件二进制 (单架构)"
+	@echo "    make package-all-arch    - Agent RPM/DEB + 插件二进制 (amd64 + arm64)"
+	@echo ""
+	@echo "开发构建:"
+	@echo "  make build-server   - 构建 Server 二进制 (本地开发用)"
 	@echo ""
 	@echo "Docker:"
-	@echo "  make docker-build   - Build Docker images"
 	@echo "  make docker-up      - Start Docker services"
 	@echo "  make docker-down    - Stop Docker services"
 	@echo "  make docker-logs    - Show Docker logs"
-	@echo "  make docker-ps      - Show Docker service status"
-	@echo "  make docker-restart - Restart Docker services"
-	@echo "  make docker-clean   - Clean Docker resources (including volumes)"
-	@echo ""
-	@echo "开发环境:"
-	@echo "  make dev-up         - Start development environment (build + up)"
-	@echo "  make dev-down       - Stop development environment"
+	@echo "  make dev-docker-up  - Start Docker dev environment"
 	@echo ""
 	@echo "测试与质量:"
 	@echo "  make test           - Run tests"
@@ -274,34 +256,15 @@ help:
 	@echo "  make lint           - Run linter"
 	@echo ""
 	@echo "工具:"
-	@echo "  make deps           - Download and tidy dependencies"
+	@echo "  make deps           - Download dependencies"
 	@echo "  make certs          - Generate mTLS certificates"
 	@echo "  make clean          - Clean generated files"
-	@echo "  make help           - Show this help message"
 	@echo ""
 	@echo "示例:"
-	@echo "  make build-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0"
-	@echo "  make package-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0 DISTRO=rocky9"
-	@echo "  make package-agent-all SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0"
-	@echo "  make package-agent SERVER_HOST=10.0.0.1:6751 VERSION=1.0.0 CERT_DIR=./certs"
-	@echo "  make package-server VERSION=1.0.0 DISTRO=debian12"
-	@echo "  make build-plugins GOARCH=arm64"
-	@echo "  make build-plugins-all"
-	@echo "  make dev-up         # Start development environment"
+	@echo "  make package-agent-all VERSION=1.0.5 SERVER_HOST=10.0.0.1:6751"
+	@echo "  make package-plugins-all VERSION=1.0.5"
+	@echo "  make package-all-arch VERSION=1.0.5 SERVER_HOST=10.0.0.1:6751"
 	@echo ""
-	@echo "支持的发行版 (DISTRO):"
-	@echo "  RPM: centos7, centos8, centos9, rocky8, rocky9, el7, el8, el9"
-	@echo "  DEB: debian10, debian11, debian12, ubuntu20, ubuntu22"
-	@echo ""
-	@echo "证书打包说明:"
-	@echo "  默认从 deploy/docker-compose/certs/ 读取证书"
-	@echo "  需要: ca.crt, client.crt, client.key"
-	@echo "  生成证书: make certs"
-	@echo ""
-	@echo "注意: Rocky Linux 9 和 CentOS Stream 9 可以共用 el9 包"
-	@echo ""
-	@echo "插件管理说明:"
-	@echo "  1. 编译插件: make build-plugins-all"
-	@echo "  2. 将插件上传到 Manager: 系统管理 > 组件列表"
-	@echo "  3. Agent 会自动通过 gRPC 获取插件配置并下载更新"
-	@echo "  4. 更新策略: 基于版本号比较，新版本自动替换旧版本"
+	@echo "输出目录:"
+	@echo "  Agent RPM/DEB:  dist/packages/"
+	@echo "  插件二进制:     dist/plugins/"

@@ -68,6 +68,17 @@ agent:
   heartbeat_interval: 60  # 心跳间隔（秒）
   work_dir: "/var/lib/mxsec-agent"
 
+# 插件配置
+plugins:
+  # 插件存放目录（本地路径）
+  dir: "dist/plugins"
+  # 插件下载基础 URL（Agent 用于下载插件的 URL 前缀）
+  # 例如：http://192.168.8.140:8080/api/v1/plugins/download
+  # 重要：必须是 Agent 可以访问的地址（不能使用 localhost）
+  # 格式：http(s)://IP或域名:端口/api/v1/plugins/download
+  # 如果为空，将使用相对路径（仅适用于 Agent 和 Server 在同一网络的场景）
+  base_url: ""
+
 # 监控指标配置
 metrics:
   # MySQL 存储配置（默认启用）

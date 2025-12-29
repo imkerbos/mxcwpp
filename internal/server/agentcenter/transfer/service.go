@@ -216,6 +216,8 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 			s.logger.Debug("收到Agent数据",
 				zap.String("agent_id", agentID),
 				zap.String("hostname", data.Hostname),
+				zap.String("version", data.Version),
+				zap.String("product", data.Product),
 				zap.Int("record_count", len(data.Records)),
 			)
 
@@ -410,6 +412,52 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		dnsServers = model.StringArray(servers)
 	}
 
+	// 版本诊断和备选方案
+	agentVersion := data.Version
+	versionSource := "PackagedData.Version"
+
+	// 如果 PackagedData.Version 为空，尝试从心跳记录中提取（备选方案）
+	if agentVersion == "" && hasHeartbeatData {
+		// 从心跳记录的 fields 中提取版本（Agent 在 heartbeat.go:106 中也会放入 version 字段）
+		for _, record := range data.Records {
+			if record.DataType == 1000 {
+				var bridgeRecord bridge.Record
+				if err := proto.Unmarshal(record.Data, &bridgeRecord); err == nil {
+					if bridgeRecord.Data != nil && bridgeRecord.Data.Fields != nil {
+						if v, ok := bridgeRecord.Data.Fields["version"]; ok && v != "" {
+							agentVersion = v
+							versionSource = "heartbeat.fields.version"
+							s.logger.Info("从心跳记录中提取版本",
+								zap.String("agent_id", conn.AgentID),
+								zap.String("version", agentVersion),
+								zap.String("source", versionSource),
+							)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 版本诊断日志
+	if agentVersion == "" {
+		s.logger.Warn("Agent 版本为空",
+			zap.String("agent_id", conn.AgentID),
+			zap.String("hostname", data.Hostname),
+			zap.String("product", data.Product),
+			zap.String("hint", "请检查 Agent 构建时是否正确嵌入了版本信息（-ldflags \"-X main.buildVersion=VERSION\"）"),
+		)
+	} else {
+		s.logger.Debug("Agent 版本信息",
+			zap.String("agent_id", conn.AgentID),
+			zap.String("hostname", data.Hostname),
+			zap.String("version", agentVersion),
+			zap.String("source", versionSource),
+			zap.String("product", data.Product),
+		)
+	}
+
 	// 更新或创建主机记录
 	nowLocal := model.ToLocalTime(time.Now())
 	host := &model.Host{
@@ -419,7 +467,7 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		IPv6:          model.StringArray(append(data.IntranetIpv6, data.ExtranetIpv6...)),
 		Status:        model.HostStatusOnline,
 		LastHeartbeat: &nowLocal,
-		AgentVersion:  data.Version, // Agent 版本号
+		AgentVersion:  agentVersion, // Agent 版本号（可能来自 PackagedData 或心跳记录）
 		// OS信息
 		OSFamily:      osInfo["os_family"],
 		OSVersion:     osInfo["os_version"],
@@ -468,7 +516,7 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 			"ipv6":           model.StringArray(append(data.IntranetIpv6, data.ExtranetIpv6...)),
 			"status":         model.HostStatusOnline,
 			"last_heartbeat": time.Now(),
-			"agent_version":  data.Version, // Agent 版本号
+			"agent_version":  agentVersion, // Agent 版本号（可能来自 PackagedData 或心跳记录）
 		}
 		// 只有当数据包中包含心跳数据时才更新这些字段
 		if hasHeartbeatData {
@@ -541,6 +589,8 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	s.logger.Debug("心跳处理完成",
 		zap.String("agent_id", conn.AgentID),
 		zap.String("hostname", data.Hostname),
+		zap.String("agent_version", agentVersion),
+		zap.String("version_source", versionSource),
 		zap.Bool("has_disk_info", networkInfo["disk_info"] != ""),
 		zap.Bool("has_network_interfaces", networkInfo["network_interfaces"] != ""),
 	)
@@ -601,9 +651,9 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 			StartTime: startTime,
 		}
 
-		// 查找现有记录
+		// 查找现有记录（排除软删除的记录）
 		var existing model.HostPlugin
-		result := s.db.Where("host_id = ? AND name = ?", hostID, name).First(&existing)
+		result := s.db.Where("host_id = ? AND name = ? AND deleted_at IS NULL", hostID, name).First(&existing)
 		if result.Error == nil {
 			// 记录存在，更新
 			updates := map[string]interface{}{
@@ -618,8 +668,8 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 					zap.Error(err))
 				continue
 			}
-		} else {
-			// 记录不存在，创建
+		} else if result.Error == gorm.ErrRecordNotFound {
+			// 记录不存在（包括软删除），创建新记录
 			if err := s.db.Create(&hostPlugin).Error; err != nil {
 				s.logger.Error("创建插件状态失败",
 					zap.String("host_id", hostID),
@@ -627,6 +677,13 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 					zap.Error(err))
 				continue
 			}
+		} else {
+			// 其他错误
+			s.logger.Error("查询插件状态失败",
+				zap.String("host_id", hostID),
+				zap.String("plugin_name", name),
+				zap.Error(result.Error))
+			continue
 		}
 
 		s.logger.Debug("更新插件状态成功",
@@ -1476,6 +1533,59 @@ func (s *Service) sendCertificateBundleIfNeeded(ctx context.Context, conn *Conne
 	}
 }
 
+// buildPluginDownloadURLs 构建插件下载URL（处理相对路径）
+// 自动从 Server 配置推断 HTTP 地址，无需额外配置 plugins.base_url
+func (s *Service) buildPluginDownloadURLs(originalURLs []string, pluginName string) []string {
+	downloadURLs := make([]string, 0, len(originalURLs))
+	for _, urlStr := range originalURLs {
+		// 如果URL已经是完整URL（包含协议），直接使用
+		if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") || strings.HasPrefix(urlStr, "file://") {
+			downloadURLs = append(downloadURLs, urlStr)
+			continue
+		}
+
+		// 如果是相对路径，自动从 Server 配置构建完整 URL
+		// 优先级：HTTP Host > gRPC Host > localhost
+		httpHost := s.cfg.Server.HTTP.Host
+		httpPort := s.cfg.Server.HTTP.Port
+
+		// 如果 HTTP Host 是 0.0.0.0 或空，尝试使用 gRPC Host
+		if httpHost == "0.0.0.0" || httpHost == "" {
+			grpcHost := s.cfg.Server.GRPC.Host
+			if grpcHost != "0.0.0.0" && grpcHost != "" {
+				// 使用 gRPC Host（假设 HTTP 和 gRPC 在同一台机器上）
+				httpHost = grpcHost
+				s.logger.Debug("HTTP Host 是 0.0.0.0，使用 gRPC Host",
+					zap.String("grpc_host", grpcHost),
+					zap.Int("http_port", httpPort),
+				)
+			} else {
+				// 最后回退到 localhost（仅用于开发环境）
+				httpHost = "localhost"
+				s.logger.Warn("HTTP 和 gRPC Host 都是 0.0.0.0，使用 localhost（仅用于开发环境）",
+					zap.String("plugin_name", pluginName),
+					zap.Int("http_port", httpPort),
+				)
+			}
+		}
+
+		// 构建完整URL
+		baseURL := fmt.Sprintf("http://%s:%d", httpHost, httpPort)
+		if strings.HasPrefix(urlStr, "/") {
+			downloadURLs = append(downloadURLs, baseURL+urlStr)
+		} else {
+			downloadURLs = append(downloadURLs, baseURL+"/"+urlStr)
+		}
+
+		s.logger.Debug("自动构建插件下载URL",
+			zap.String("plugin_name", pluginName),
+			zap.String("original_url", urlStr),
+			zap.String("full_url", downloadURLs[len(downloadURLs)-1]),
+		)
+	}
+	return downloadURLs
+}
+
 // sendPluginConfigsIfNeeded 下发插件配置给 Agent
 func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connection) error {
 	// 从数据库查询启用的插件配置
@@ -1489,16 +1599,19 @@ func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connectio
 		return nil
 	}
 
-	// 转换为 gRPC Config 格式
+	// 转换为 gRPC Config 格式，并处理相对URL
 	var configs []*grpcProto.Config
 	for _, pc := range pluginConfigs {
+		// 使用辅助函数构建下载URL
+		downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+
 		config := &grpcProto.Config{
 			Name:         pc.Name,
 			Type:         string(pc.Type),
 			Version:      pc.Version,
 			Sha256:       pc.SHA256,
 			Signature:    pc.Signature,
-			DownloadUrls: []string(pc.DownloadURLs),
+			DownloadUrls: downloadURLs,
 			Detail:       pc.Detail,
 		}
 		configs = append(configs, config)
@@ -1538,7 +1651,7 @@ func (s *Service) SendCommand(agentID string, cmd *grpcProto.Command) error {
 	s.connMu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("Agent 未连接: %s", agentID)
+		return fmt.Errorf("agent 未连接: %s", agentID)
 	}
 
 	select {
@@ -1565,16 +1678,19 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 		return 0, nil, nil
 	}
 
-	// 转换为 gRPC Config 格式
+	// 转换为 gRPC Config 格式，并处理相对URL
 	var configs []*grpcProto.Config
 	for _, pc := range pluginConfigs {
+		// 使用辅助函数构建下载URL
+		downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+
 		config := &grpcProto.Config{
 			Name:         pc.Name,
 			Type:         string(pc.Type),
 			Version:      pc.Version,
 			Sha256:       pc.SHA256,
 			Signature:    pc.Signature,
-			DownloadUrls: []string(pc.DownloadURLs),
+			DownloadUrls: downloadURLs,
 			Detail:       pc.Detail,
 		}
 		configs = append(configs, config)

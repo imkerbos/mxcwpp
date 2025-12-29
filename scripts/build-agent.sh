@@ -16,9 +16,19 @@ else
 fi
 
 # 设置默认值
-SERVER_HOST=${BLS_SERVER_HOST:-${SERVER_HOST:-localhost:6751}}
-VERSION=${BLS_VERSION:-${VERSION:-dev}}
+SERVER_HOST=${SERVER_HOST:-localhost:6751}
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# 版本：环境变量 > VERSION 文件 > 默认值
+if [ -n "${VERSION:-}" ]; then
+    : # 使用环境变量
+elif [ -f "VERSION" ]; then
+    VERSION=$(cat VERSION | tr -d '[:space:]')
+elif [ -f "/workspace/VERSION" ]; then
+    VERSION=$(cat /workspace/VERSION | tr -d '[:space:]')
+else
+    VERSION="dev"
+fi
 ARCH="${GOARCH:-amd64}"
 OS="${GOOS:-linux}"
 
@@ -44,3 +54,10 @@ echo ""
 echo "=== Build Complete ==="
 echo "Agent: $DIST_DIR/mxsec-agent-$OS-$ARCH"
 ls -lh "$DIST_DIR/mxsec-agent-$OS-$ARCH"
+
+# 如果在 Docker/Air 环境中，复制到 tmp/agent 供 Air 使用
+if [ -d "/workspace" ]; then
+    mkdir -p /workspace/tmp
+    cp "$DIST_DIR/mxsec-agent-$OS-$ARCH" /workspace/tmp/agent
+    echo "Copied to /workspace/tmp/agent for Air hot-reload"
+fi

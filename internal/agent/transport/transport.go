@@ -26,6 +26,7 @@ type Manager struct {
 	sendBuffer     chan *grpc.PackagedData
 	recvBuffer     chan *grpc.Command
 	pluginConfigCh chan []*grpc.Config                              // 插件配置通道
+	agentUpdateCh  chan *grpc.AgentUpdate                           // Agent 更新通道
 	taskCh         chan *grpc.Task                                  // 任务通道（兼容旧代码）
 	taskChannels   map[string]chan *grpc.Task                       // 按插件名称分发的任务通道
 	taskChMu       sync.RWMutex                                     // 任务通道锁
@@ -53,6 +54,7 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 		sendBuffer:     make(chan *grpc.PackagedData, 100),
 		recvBuffer:     make(chan *grpc.Command, 100),
 		pluginConfigCh: make(chan []*grpc.Config, 10),
+		agentUpdateCh:  make(chan *grpc.AgentUpdate, 10),
 		taskCh:         make(chan *grpc.Task, 100),
 		taskChannels:   make(map[string]chan *grpc.Task),
 		cacheMgr:       cacheMgr,
@@ -327,6 +329,24 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 				}
 			}
 
+			// 处理 Agent 更新命令
+			if cmd.AgentUpdate != nil {
+				m.logger.Info("received agent update command from server",
+					zap.String("version", cmd.AgentUpdate.Version),
+					zap.String("download_url", cmd.AgentUpdate.DownloadUrl),
+					zap.String("sha256", cmd.AgentUpdate.Sha256),
+					zap.String("pkg_type", cmd.AgentUpdate.PkgType),
+					zap.String("arch", cmd.AgentUpdate.Arch),
+					zap.Bool("force", cmd.AgentUpdate.Force),
+				)
+				select {
+				case m.agentUpdateCh <- cmd.AgentUpdate:
+					m.logger.Debug("agent update command dispatched to channel")
+				default:
+					m.logger.Warn("agent update channel full, dropping update command")
+				}
+			}
+
 			// 处理任务（按插件名称分发到对应通道）
 			if len(cmd.Tasks) > 0 {
 				m.logger.Info("received tasks from server", zap.Int("count", len(cmd.Tasks)))
@@ -418,6 +438,11 @@ func (m *Manager) ReceiveCommand() (*grpc.Command, error) {
 // GetPluginConfigChannel 获取插件配置通道
 func (m *Manager) GetPluginConfigChannel() <-chan []*grpc.Config {
 	return m.pluginConfigCh
+}
+
+// GetAgentUpdateChannel 获取 Agent 更新通道
+func (m *Manager) GetAgentUpdateChannel() <-chan *grpc.AgentUpdate {
+	return m.agentUpdateCh
 }
 
 // SendPluginData 发送插件数据到 Server

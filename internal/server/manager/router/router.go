@@ -44,7 +44,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// 插件下载路由（不需要认证，Agent 直接下载）
 	// 注意：现在由 componentsHandler 统一处理
-	componentsHandler := api.NewComponentsHandler(db, logger, "./uploads", "/uploads")
+	componentsHandler := api.NewComponentsHandler(db, logger, cfg, "./uploads", "/uploads")
 	router.GET("/api/v1/plugins/download/:name", componentsHandler.DownloadPluginPackage)
 	router.HEAD("/api/v1/plugins/download/:name", componentsHandler.DownloadPluginPackage)
 
@@ -99,7 +99,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, sc
 	setupSystemConfigAPI(router, db, logger)
 	setupNotificationsAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
-	setupComponentsAPI(router, db, logger)
+	setupComponentsAPI(router, db, logger, cfg)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -271,8 +271,8 @@ func setupAlertsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupComponentsAPI 设置组件管理 API 路由
-func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewComponentsHandler(db, logger, "./uploads", "/uploads")
+func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config) {
+	handler := api.NewComponentsHandler(db, logger, cfg, "./uploads", "/uploads")
 
 	// 组件管理
 	router.GET("/components", handler.ListComponents)

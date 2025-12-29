@@ -164,7 +164,6 @@ services:
       - GO_ENV=development
       # Agent 构建时嵌入的配置（通过环境变量传递给 Air）
       - SERVER_HOST=agentcenter:6751
-      - VERSION=dev-test
     # 开发模式：优先使用 Air（如果可用），否则使用 go run
     command: >
       sh -c "

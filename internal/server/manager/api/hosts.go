@@ -267,6 +267,7 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		"public_ipv6":      host.PublicIPv6,
 		"status":           string(host.Status),
 		"last_heartbeat":   host.LastHeartbeat,
+		"agent_version":    host.AgentVersion, // Agent 版本号
 		"created_at":       host.CreatedAt,
 		"updated_at":       host.UpdatedAt,
 		"baseline_results": results,
@@ -319,12 +320,9 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 	if host.BusinessLine != "" {
 		responseData["business_line"] = host.BusinessLine
 	}
-	if host.SystemBootTime != nil {
-		responseData["system_boot_time"] = host.SystemBootTime
-	}
-	if host.AgentStartTime != nil {
-		responseData["agent_start_time"] = host.AgentStartTime
-	}
+	// 时间字段：始终返回，即使为空也返回 nil（让前端处理显示）
+	responseData["system_boot_time"] = host.SystemBootTime
+	responseData["agent_start_time"] = host.AgentStartTime
 	if host.LastActiveTime != nil {
 		responseData["last_active_time"] = host.LastActiveTime
 	} else {
@@ -653,9 +651,9 @@ func (h *HostsHandler) GetHostPlugins(c *gin.Context) {
 		return
 	}
 
-	// 查询主机插件
+	// 查询主机插件（排除软删除的记录）
 	var hostPlugins []model.HostPlugin
-	if err := h.db.Where("host_id = ?", hostID).Find(&hostPlugins).Error; err != nil {
+	if err := h.db.Where("host_id = ? AND deleted_at IS NULL", hostID).Find(&hostPlugins).Error; err != nil {
 		h.logger.Error("查询主机插件失败", zap.String("host_id", hostID), zap.Error(err))
 		InternalError(c, "查询主机插件失败")
 		return

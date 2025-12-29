@@ -70,6 +70,7 @@ export interface ReleaseVersionRequest {
   version: string
   changelog?: string
   set_latest?: boolean
+  force?: boolean  // 强制覆盖已存在的版本
 }
 
 // 版本列表响应
