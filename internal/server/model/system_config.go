@@ -28,7 +28,8 @@ type KubernetesImageConfig struct {
 type SiteConfig struct {
 	SiteName   string `json:"site_name"`   // 站点名称
 	SiteLogo   string `json:"site_logo"`   // Logo URL（相对路径或完整URL）
-	SiteDomain string `json:"site_domain"` // 域名设置
+	SiteDomain string `json:"site_domain"` // 前端访问域名（用于生成安装脚本）
+	BackendURL string `json:"backend_url"` // 后端接口地址（用于 Agent 下载更新）
 }
 
 // AlertConfig 告警配置

@@ -27,11 +27,17 @@ func main() {
 	}
 	defer client.Close()
 
-	// 2. 初始化日志（简化实现，直接输出到 stderr）
-	logger, _ := zap.NewDevelopment()
+	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/baseline.log）
+	logger, err := newPluginLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer logger.Sync()
 
-	logger.Info("baseline plugin starting")
+	logger.Info("baseline plugin starting",
+		zap.Int("pid", os.Getpid()),
+		zap.String("version", "1.0.5"))
 
 	// 3. 创建检查引擎
 	checkEngine := engine.NewEngine(logger)
@@ -71,22 +77,28 @@ func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *br
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Info("receive tasks goroutine stopping due to context cancellation")
 			return
 		default:
 			task, err := client.ReceiveTask()
 			if err != nil {
-				if err.Error() == "EOF" {
-					logger.Info("pipe closed, exiting")
+				// 检查是否是真正的管道关闭（EOF）
+				if err.Error() == "EOF" || err.Error() == "io: read/write on closed pipe" {
+					logger.Warn("pipe closed, plugin will exit", zap.Error(err))
 					return
 				}
-				logger.Error("failed to receive task", zap.Error(err))
+				// 其他错误（如临时网络错误、解析错误等）记录后继续重试
+				logger.Error("failed to receive task, will retry", zap.Error(err))
 				time.Sleep(time.Second)
 				continue
 			}
 
+			// 成功接收任务，发送到处理通道
 			select {
 			case taskCh <- task:
+				logger.Debug("task forwarded to processing channel")
 			case <-ctx.Done():
+				logger.Info("receive tasks goroutine stopping while forwarding task")
 				return
 			}
 		}
@@ -206,4 +218,19 @@ func handleBaselineTask(ctx context.Context, taskData map[string]interface{}, ch
 		zap.String("task_id", taskID),
 		zap.Int("result_count", len(results)))
 	return nil
+}
+
+// newPluginLogger 创建插件专用的 logger
+// 输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/baseline.log
+func newPluginLogger() (*zap.Logger, error) {
+	config := zap.NewProductionConfig()
+	// 输出到 stderr（Agent 会重定向到日志文件）
+	config.OutputPaths = []string{"stderr"}
+	config.ErrorOutputPaths = []string{"stderr"}
+	// 使用 JSON 格式，便于解析
+	config.Encoding = "json"
+	// 设置日志级别为 Info
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+
+	return config.Build()
 }

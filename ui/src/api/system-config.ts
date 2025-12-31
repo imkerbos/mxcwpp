@@ -10,6 +10,7 @@ export interface SiteConfig {
   site_name: string
   site_logo: string
   site_domain: string
+  backend_url: string
 }
 
 export interface AlertConfig {
@@ -42,6 +43,7 @@ export const systemConfigApi = {
     site_name: string
     site_logo?: string
     site_domain: string
+    backend_url: string
   }): Promise<SiteConfig> => {
     return apiClient.put<SiteConfig>('/system-config/site', data)
   },

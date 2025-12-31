@@ -1404,9 +1404,9 @@ const handleConfirmCheckNow = async () => {
       policy_ids: policyIds,  // 使用新的 policy_ids 字段
     }) as any
 
-    const taskId = response.data?.task_id
+    const taskId = response.task_id
 
-    // 如果用户选择立即执行，则调用执行接口
+    // 如果用户选择立即执行,则调用执行接口
     if (checkNowForm.run_immediately && taskId) {
       await tasksApi.run(taskId)
       message.success(`检查任务已创建并开始执行（包含 ${policyIds.length} 个策略）`)
@@ -1783,9 +1783,9 @@ const handleConfirmRecheck = async () => {
       policy_id: recheckPolicy.value.id,
     }) as any
 
-    const taskId = response.data?.task_id
+    const taskId = response.task_id
 
-    // 如果用户选择立即执行，则调用执行接口
+    // 如果用户选择立即执行,则调用执行接口
     if (recheckForm.run_immediately && taskId) {
       await tasksApi.run(taskId)
       message.success('检查任务已创建并开始执行')

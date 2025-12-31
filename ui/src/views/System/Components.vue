@@ -3,10 +3,20 @@
     <!-- 页面头部 -->
     <div class="page-header">
       <h2>组件管理</h2>
-      <a-button type="primary" @click="showCreateModal = true">
-        <template #icon><PlusOutlined /></template>
-        新建组件
-      </a-button>
+      <a-space>
+        <a-button
+          type="primary"
+          :loading="broadcasting"
+          @click="handleBroadcastPluginConfigs"
+        >
+          <template #icon><ReloadOutlined /></template>
+          推送更新
+        </a-button>
+        <a-button type="primary" @click="showCreateModal = true">
+          <template #icon><PlusOutlined /></template>
+          新建组件
+        </a-button>
+      </a-space>
     </div>
 
     <!-- 插件同步状态 -->
@@ -427,6 +437,7 @@ import {
   UploadOutlined,
   QuestionCircleOutlined,
   PaperClipOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons-vue'
 import {
   componentsApi,
@@ -457,6 +468,7 @@ const versionColumns = [
 const loading = ref(false)
 const components = ref<Component[]>([])
 const pluginStatuses = ref<PluginSyncStatus[]>([])
+const broadcasting = ref(false)
 
 // 新建组件
 const showCreateModal = ref(false)
@@ -534,6 +546,24 @@ const loadPluginStatus = async () => {
     pluginStatuses.value = data || []
   } catch (error) {
     console.error('加载插件状态失败:', error)
+  }
+}
+
+// 手动推送插件配置更新
+const handleBroadcastPluginConfigs = async () => {
+  broadcasting.value = true
+  try {
+    const result = await componentsApi.broadcastPluginConfigs()
+    message.success(
+      `推送成功！已触发更新通知到 ${result.online_agent_count} 个在线 Agent，` +
+      `包含 ${result.plugin_count} 个插件配置。将在 30 秒内完成推送。`
+    )
+    // 刷新插件状态
+    await loadPluginStatus()
+  } catch (error: any) {
+    message.error(error.message || '推送失败')
+  } finally {
+    broadcasting.value = false
   }
 }
 

@@ -44,6 +44,7 @@ type Plugin struct {
 	cmd       *exec.Cmd     // 插件进程
 	rx        *os.File      // 接收管道（Agent 从插件读取数据）
 	tx        *os.File      // 发送管道（Agent 向插件写入任务）
+	logWriter *os.File      // 日志文件
 	workDir   string        // 插件工作目录
 	status    Status        // 插件状态
 	mu        sync.RWMutex  // 保护状态
@@ -229,10 +230,37 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		return nil, fmt.Errorf("failed to create tx pipe: %w", err)
 	}
 
-	// 5. 启动插件进程
+	// 5. 设置日志文件重定向
+	// 从 Agent 日志文件路径提取目录，插件日志放在同级的 plugins 子目录
+	agentLogFile := m.cfg.Local.Log.File
+	if agentLogFile == "" {
+		agentLogFile = "/var/log/mxsec-agent/agent.log" // 默认路径
+	}
+	logDir := filepath.Join(filepath.Dir(agentLogFile), "plugins")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		rx_r.Close()
+		rx_w.Close()
+		tx_r.Close()
+		tx_w.Close()
+		return nil, fmt.Errorf("failed to create plugin log dir: %w", err)
+	}
+
+	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", cfg.Name))
+	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		rx_r.Close()
+		rx_w.Close()
+		tx_r.Close()
+		tx_w.Close()
+		return nil, fmt.Errorf("failed to open plugin log file: %w", err)
+	}
+
+	// 6. 启动插件进程
 	cmd := exec.CommandContext(ctx, execPath)
 	cmd.Dir = workDir
 	cmd.ExtraFiles = []*os.File{tx_r, rx_w} // 文件描述符 3 (tx_r), 4 (rx_w)
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true, // 创建新的进程组
 	}
@@ -241,6 +269,7 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	cmd.Env = os.Environ()
 
 	if err := cmd.Start(); err != nil {
+		logWriter.Close()
 		rx_r.Close()
 		rx_w.Close()
 		tx_r.Close()
@@ -252,12 +281,13 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	tx_r.Close()
 	rx_w.Close()
 
-	// 6. 创建插件实例
+	// 7. 创建插件实例
 	plugin := &Plugin{
 		Config:    cfg,
 		cmd:       cmd,
 		rx:        rx_r,
 		tx:        tx_w,
+		logWriter: logWriter,
 		workDir:   workDir,
 		status:    StatusStarting,
 		startTime: time.Now(),
@@ -265,7 +295,7 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		logger:    m.logger.With(zap.String("plugin", cfg.Name)),
 	}
 
-	// 7. 启动管理 goroutine
+	// 8. 启动管理 goroutine
 	go m.waitProcess(plugin)
 	go m.receiveData(plugin)
 	go m.sendTask(plugin)
@@ -520,6 +550,11 @@ func (m *Manager) waitProcess(plugin *Plugin) {
 	// 关闭管道
 	plugin.rx.Close()
 	plugin.tx.Close()
+
+	// 关闭日志文件
+	if plugin.logWriter != nil {
+		plugin.logWriter.Close()
+	}
 
 	// 通知停止
 	close(plugin.stopCh)

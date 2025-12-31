@@ -29,11 +29,17 @@ func main() {
 	}
 	defer client.Close()
 
-	// 2. 初始化日志（简化实现，直接输出到 stderr）
-	logger, _ := zap.NewDevelopment()
+	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/collector.log）
+	logger, err := newPluginLogger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer logger.Sync()
 
-	logger.Info("collector plugin starting")
+	logger.Info("collector plugin starting",
+		zap.Int("pid", os.Getpid()),
+		zap.String("version", "1.0.3"))
 
 	// 3. 创建采集引擎
 	collectEngine := engine.NewEngine(client, logger)
@@ -153,4 +159,19 @@ func handleCollectTask(ctx context.Context, task *bridge.Task, taskData map[stri
 
 	logger.Info("collect task completed", zap.String("type", collectType))
 	return nil
+}
+
+// newPluginLogger 创建插件专用的 logger
+// 输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/collector.log
+func newPluginLogger() (*zap.Logger, error) {
+	config := zap.NewProductionConfig()
+	// 输出到 stderr（Agent 会重定向到日志文件）
+	config.OutputPaths = []string{"stderr"}
+	config.ErrorOutputPaths = []string{"stderr"}
+	// 使用 JSON 格式，便于解析
+	config.Encoding = "json"
+	// 设置日志级别为 Info
+	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+
+	return config.Build()
 }

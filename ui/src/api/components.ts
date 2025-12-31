@@ -94,6 +94,16 @@ export interface PluginSyncStatus {
   status: 'ready' | 'missing_package' | 'outdated' | 'default_config'
 }
 
+// 广播插件配置响应
+export interface BroadcastPluginConfigsResponse {
+  plugin_count: number
+  online_agent_count: number
+  plugins: Array<{
+    name: string
+    version: string
+  }>
+}
+
 // 组件 API
 export const componentsApi = {
   /**
@@ -208,6 +218,14 @@ export const componentsApi = {
    */
   getPushRecord: async (id: number): Promise<ComponentPushRecord> => {
     return await apiClient.get(`/components/push-records/${id}`)
+  },
+
+  /**
+   * 手动广播插件配置
+   * 触发立即广播插件配置到所有在线 Agent
+   */
+  broadcastPluginConfigs: async (): Promise<BroadcastPluginConfigsResponse> => {
+    return await apiClient.post('/components/plugins/broadcast')
   },
 }
 

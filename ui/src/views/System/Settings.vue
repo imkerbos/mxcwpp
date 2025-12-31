@@ -75,13 +75,22 @@
         </div>
       </a-form-item>
 
-      <a-form-item label="域名设置" name="site_domain">
+      <a-form-item label="前端访问域名" name="site_domain">
         <a-input
           v-model:value="form.site_domain"
-          placeholder="请输入域名（例如：https://example.com）"
+          placeholder="例如：http://192.168.8.140:3000"
           :maxlength="200"
         />
-        <div class="form-item-hint">设置平台访问域名，用于生成安装脚本和下载链接</div>
+        <div class="form-item-hint">设置前端访问地址，用于生成安装脚本中的下载链接</div>
+      </a-form-item>
+
+      <a-form-item label="后端接口地址" name="backend_url">
+        <a-input
+          v-model:value="form.backend_url"
+          placeholder="例如：http://192.168.8.140:8080 或 http://manager:8080"
+          :maxlength="200"
+        />
+        <div class="form-item-hint">设置后端 API 地址，用于 Agent 下载更新和插件（必填）</div>
       </a-form-item>
 
       <a-form-item>
@@ -112,6 +121,7 @@ const form = reactive<SiteConfig>({
   site_name: '矩阵云安全平台',
   site_logo: '',
   site_domain: '',
+  backend_url: '',
 })
 
 const rules = {
@@ -121,8 +131,18 @@ const rules = {
   ],
   site_domain: [
     {
-      pattern: /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/,
-      message: '请输入有效的域名格式',
+      // 支持 IP 地址、域名、端口号和路径
+      pattern: /^https?:\/\/([\w-]+(\.[\w-]+)*|(\d{1,3}\.){3}\d{1,3}|[\w-]+)(:\d+)?(\/.*)?$/,
+      message: '请输入有效的URL格式（例如：http://192.168.8.140:3000）',
+      trigger: 'blur',
+    },
+  ],
+  backend_url: [
+    { required: true, message: '请输入后端接口地址', trigger: 'blur' },
+    {
+      // 支持 IP 地址、域名、端口号
+      pattern: /^https?:\/\/([\w-]+(\.[\w-]+)*|(\d{1,3}\.){3}\d{1,3}|[\w-]+)(:\d+)?(\/.*)?$/,
+      message: '请输入有效的URL格式（例如：http://192.168.8.140:8080 或 http://manager:8080）',
       trigger: 'blur',
     },
   ],
@@ -135,6 +155,7 @@ const loadConfig = async () => {
     form.site_name = config.site_name || '矩阵云安全平台'
     form.site_logo = config.site_logo || ''
     form.site_domain = config.site_domain || ''
+    form.backend_url = config.backend_url || ''
   } catch (error) {
     console.error('加载站点配置失败:', error)
     // 使用默认值，不显示错误（因为可能是首次访问，配置不存在）
@@ -232,9 +253,11 @@ const handleSubmit = async () => {
       site_name: string
       site_logo?: string
       site_domain: string
+      backend_url: string
     } = {
       site_name: form.site_name,
       site_domain: form.site_domain,
+      backend_url: form.backend_url,
     }
     // 只有当 site_logo 有值时才传递（包括用户上传的新logo）
     // 如果为空字符串，不传递，让后端保留现有logo

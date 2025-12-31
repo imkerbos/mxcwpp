@@ -3,7 +3,9 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,29 +40,84 @@ func NewAgentUpdateScheduler(db *gorm.DB, transferService *transfer.Service, cfg
 	}
 }
 
+// getBackendURL 从数据库获取后端接口地址配置
+func (s *AgentUpdateScheduler) getBackendURL() string {
+	var config model.SystemConfig
+	if err := s.db.Where("`key` = ? AND category = ?", "site_config", "site").First(&config).Error; err != nil {
+		if err != gorm.ErrRecordNotFound {
+			s.logger.Debug("查询系统配置失败，将使用备选URL方案",
+				zap.String("key", "site_config"),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("系统配置不存在，请在 系统管理-基本设置 中配置后端接口地址",
+				zap.String("key", "site_config"))
+		}
+		return ""
+	}
+
+	if config.Value == "" {
+		s.logger.Debug("系统配置值为空，将使用备选URL方案",
+			zap.String("key", "site_config"))
+		return ""
+	}
+
+	var siteConfig model.SiteConfig
+	if err := json.Unmarshal([]byte(config.Value), &siteConfig); err != nil {
+		s.logger.Warn("解析站点配置失败", zap.Error(err))
+		return ""
+	}
+
+	if siteConfig.BackendURL != "" {
+		s.logger.Debug("成功从系统配置读取后端地址",
+			zap.String("backend_url", siteConfig.BackendURL))
+	} else {
+		s.logger.Debug("系统配置中后端地址为空，将使用备选URL方案")
+	}
+
+	return siteConfig.BackendURL
+}
+
 // buildDownloadURL 构建完整的下载 URL
+// 优先级：后端接口地址 > GRPC Host > localhost
 func (s *AgentUpdateScheduler) buildDownloadURL(pkgType model.PackageType, arch string) string {
 	// 构建相对路径
 	relativePath := fmt.Sprintf("/api/v1/agent/download/%s/%s", pkgType, arch)
 
-	// 获取 HTTP 服务地址
-	httpHost := s.cfg.Server.HTTP.Host
-	httpPort := s.cfg.Server.HTTP.Port
-
-	// 如果 HTTP Host 是 0.0.0.0 或空，尝试使用 gRPC Host
-	if httpHost == "0.0.0.0" || httpHost == "" {
-		grpcHost := s.cfg.Server.GRPC.Host
-		if grpcHost != "0.0.0.0" && grpcHost != "" {
-			httpHost = grpcHost
-		} else {
-			// 最后回退到 localhost（仅用于开发环境）
-			httpHost = "localhost"
-			s.logger.Warn("HTTP 和 gRPC Host 都是 0.0.0.0，使用 localhost（仅用于开发环境）")
-		}
+	// 优先级1: 从数据库获取后端接口地址配置（系统管理-基本设置-后端接口地址）
+	backendURL := s.getBackendURL()
+	if backendURL != "" {
+		// 后端接口地址已包含协议和端口（如果有），直接拼接路径
+		// 去除末尾的斜杠
+		backendURL = strings.TrimSuffix(backendURL, "/")
+		fullURL := backendURL + relativePath
+		s.logger.Info("使用系统配置的后端地址构建下载URL",
+			zap.String("source", "system_config"),
+			zap.String("backend_url", backendURL),
+			zap.String("download_url", fullURL))
+		return fullURL
 	}
 
-	// 构建完整 URL
-	return fmt.Sprintf("http://%s:%d%s", httpHost, httpPort, relativePath)
+	// 优先级2: 使用 GRPC Host（如果不是 0.0.0.0）
+	// Agent 编译时会嵌入 server_host（如 "agentcenter:6751"），同理我们用 GRPC 配置的主机名
+	httpPort := s.cfg.Server.HTTP.Port
+	grpcHost := s.cfg.Server.GRPC.Host
+	if grpcHost != "0.0.0.0" && grpcHost != "" {
+		fullURL := fmt.Sprintf("http://%s:%d%s", grpcHost, httpPort, relativePath)
+		s.logger.Info("使用GRPC Host构建下载URL",
+			zap.String("source", "grpc_host"),
+			zap.String("grpc_host", grpcHost),
+			zap.Int("http_port", httpPort),
+			zap.String("download_url", fullURL))
+		return fullURL
+	}
+
+	// 优先级3: localhost（最后回退，仅开发环境）
+	fullURL := fmt.Sprintf("http://localhost:%d%s", httpPort, relativePath)
+	s.logger.Warn("未配置后端接口地址且 GRPC Host 为 0.0.0.0，使用 localhost（仅用于开发环境）",
+		zap.String("source", "localhost_fallback"),
+		zap.String("download_url", fullURL),
+		zap.String("建议", "在 系统管理-基本设置 中配置后端接口地址（如 http://manager:8080 或 http://192.168.x.x:8080）"))
+	return fullURL
 }
 
 // Start 启动 Agent 更新调度器

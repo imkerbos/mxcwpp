@@ -78,13 +78,13 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV1Auth.Use(authHandler.AuthMiddleware())
 
 	// 注册所有 API 路由
-	setupAPIRoutes(apiV1Auth, db, logger, scoreCache, metricsService)
+	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService)
 
 	return router
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -294,6 +294,12 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 
 	// Agent 更新推送
 	router.POST("/components/agent/push-update", handler.PushAgentUpdate)
+
+	// 同步所有插件到最新版本
+	router.POST("/components/plugins/sync-latest", handler.SyncAllPluginsToLatest)
+
+	// 插件配置手动广播
+	router.POST("/components/plugins/broadcast", handler.BroadcastPluginConfigs)
 
 	// 推送记录查询
 	router.GET("/components/push-records", handler.ListPushRecords)

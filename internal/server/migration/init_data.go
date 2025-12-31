@@ -354,25 +354,12 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 		err := db.Where("name = ?", plugin.Name).First(&existing).Error
 
 		if err == nil {
-			// 插件已存在，检查是否需要更新版本
-			if existing.Version != plugin.Version {
-				existing.Version = plugin.Version
-				existing.SHA256 = plugin.SHA256
-				existing.DownloadURLs = plugin.DownloadURLs
-				existing.Detail = plugin.Detail
-				if err := db.Save(&existing).Error; err != nil {
-					return fmt.Errorf("更新插件配置 %s 失败: %w", plugin.Name, err)
-				}
-				logger.Info("插件配置已更新",
-					zap.String("name", plugin.Name),
-					zap.String("version", plugin.Version),
-				)
-			} else {
-				logger.Debug("插件配置已存在，跳过",
-					zap.String("name", plugin.Name),
-					zap.String("version", existing.Version),
-				)
-			}
+			// 插件已存在，跳过（不覆盖已有配置）
+			// 版本应该由组件管理系统（component_versions）统一管理
+			logger.Debug("插件配置已存在，跳过初始化",
+				zap.String("name", plugin.Name),
+				zap.String("current_version", existing.Version),
+			)
 			continue
 		}
 
@@ -380,7 +367,7 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			return fmt.Errorf("检查插件配置 %s 失败: %w", plugin.Name, err)
 		}
 
-		// 创建新的插件配置
+		// 创建新的插件配置（仅在不存在时）
 		if err := db.Create(&plugin).Error; err != nil {
 			return fmt.Errorf("创建插件配置 %s 失败: %w", plugin.Name, err)
 		}

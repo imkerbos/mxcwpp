@@ -1534,54 +1534,80 @@ func (s *Service) sendCertificateBundleIfNeeded(ctx context.Context, conn *Conne
 }
 
 // buildPluginDownloadURLs 构建插件下载URL（处理相对路径）
-// 自动从 Server 配置推断 HTTP 地址，无需额外配置 plugins.base_url
+// 优先从系统配置读取后端地址，确保与 Agent 更新使用相同的 URL
 func (s *Service) buildPluginDownloadURLs(originalURLs []string, pluginName string) []string {
 	downloadURLs := make([]string, 0, len(originalURLs))
 	for _, urlStr := range originalURLs {
-		// 如果URL已经是完整URL（包含协议），直接使用
-		if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") || strings.HasPrefix(urlStr, "file://") {
+		// 如果URL已经是HTTP/HTTPS URL，直接使用
+		if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") {
 			downloadURLs = append(downloadURLs, urlStr)
 			continue
 		}
 
-		// 如果是相对路径，自动从 Server 配置构建完整 URL
-		// 优先级：HTTP Host > gRPC Host > localhost
-		httpHost := s.cfg.Server.HTTP.Host
-		httpPort := s.cfg.Server.HTTP.Port
+		// 如果是 file:// URL（开发环境遗留），提取路径并转换为HTTP URL
+		var relativePath string
+		if strings.HasPrefix(urlStr, "file://") {
+			// file:///workspace/dist/plugins/baseline -> /api/v1/plugins/download/baseline
+			relativePath = fmt.Sprintf("/api/v1/plugins/download/%s", pluginName)
+			s.logger.Info("转换开发环境 file:// URL 为 HTTP URL",
+				zap.String("plugin_name", pluginName),
+				zap.String("old_url", urlStr),
+				zap.String("new_path", relativePath))
+		} else {
+			// 相对路径
+			relativePath = urlStr
+		}
 
-		// 如果 HTTP Host 是 0.0.0.0 或空，尝试使用 gRPC Host
-		if httpHost == "0.0.0.0" || httpHost == "" {
+		// 构建完整 URL（使用相对路径）
+		// 优先级：1.系统配置的 backend_url > 2.gRPC Host > 3.localhost
+		var baseURL string
+
+		// 优先级1: 从数据库获取后端接口地址配置（与 Agent 更新保持一致）
+		var config model.SystemConfig
+		if err := s.db.Where("`key` = ? AND category = ?", "site_config", "site").First(&config).Error; err == nil {
+			var siteConfig model.SiteConfig
+			if err := json.Unmarshal([]byte(config.Value), &siteConfig); err == nil && siteConfig.BackendURL != "" {
+				backendURL := strings.TrimSuffix(siteConfig.BackendURL, "/")
+				baseURL = backendURL
+				s.logger.Debug("使用系统配置的后端地址构建插件下载URL",
+					zap.String("source", "system_config"),
+					zap.String("backend_url", backendURL),
+					zap.String("plugin_name", pluginName))
+			}
+		}
+
+		// 优先级2: 使用 gRPC Host
+		if baseURL == "" {
+			httpPort := s.cfg.Server.HTTP.Port
 			grpcHost := s.cfg.Server.GRPC.Host
 			if grpcHost != "0.0.0.0" && grpcHost != "" {
-				// 使用 gRPC Host（假设 HTTP 和 gRPC 在同一台机器上）
-				httpHost = grpcHost
-				s.logger.Debug("HTTP Host 是 0.0.0.0，使用 gRPC Host",
+				baseURL = fmt.Sprintf("http://%s:%d", grpcHost, httpPort)
+				s.logger.Debug("使用 gRPC Host 构建插件下载URL",
+					zap.String("source", "grpc_host"),
 					zap.String("grpc_host", grpcHost),
 					zap.Int("http_port", httpPort),
-				)
+					zap.String("plugin_name", pluginName))
 			} else {
-				// 最后回退到 localhost（仅用于开发环境）
-				httpHost = "localhost"
-				s.logger.Warn("HTTP 和 gRPC Host 都是 0.0.0.0，使用 localhost（仅用于开发环境）",
+				// 优先级3: localhost（仅用于开发环境）
+				baseURL = fmt.Sprintf("http://localhost:%d", httpPort)
+				s.logger.Warn("未配置后端接口地址且 gRPC Host 为 0.0.0.0，使用 localhost（仅用于开发环境）",
+					zap.String("source", "localhost_fallback"),
 					zap.String("plugin_name", pluginName),
-					zap.Int("http_port", httpPort),
-				)
+					zap.Int("http_port", httpPort))
 			}
 		}
 
 		// 构建完整URL
-		baseURL := fmt.Sprintf("http://%s:%d", httpHost, httpPort)
-		if strings.HasPrefix(urlStr, "/") {
-			downloadURLs = append(downloadURLs, baseURL+urlStr)
+		if strings.HasPrefix(relativePath, "/") {
+			downloadURLs = append(downloadURLs, baseURL+relativePath)
 		} else {
-			downloadURLs = append(downloadURLs, baseURL+"/"+urlStr)
+			downloadURLs = append(downloadURLs, baseURL+"/"+relativePath)
 		}
 
-		s.logger.Debug("自动构建插件下载URL",
+		s.logger.Debug("插件下载URL构建完成",
 			zap.String("plugin_name", pluginName),
 			zap.String("original_url", urlStr),
-			zap.String("full_url", downloadURLs[len(downloadURLs)-1]),
-		)
+			zap.String("download_url", downloadURLs[len(downloadURLs)-1]))
 	}
 	return downloadURLs
 }

@@ -224,6 +224,7 @@ func (h *SystemConfigHandler) GetSiteConfig(c *gin.Context) {
 		SiteName:   "矩阵云安全平台",
 		SiteLogo:   "",
 		SiteDomain: "",
+		BackendURL: "",
 	}
 
 	// 尝试查询配置
@@ -287,9 +288,10 @@ func (h *SystemConfigHandler) GetSiteConfig(c *gin.Context) {
 
 // UpdateSiteConfigRequest 更新站点配置请求
 type UpdateSiteConfigRequest struct {
-	SiteName   string  `json:"site_name"`   // 站点名称（必填，手动验证）
-	SiteLogo   *string `json:"site_logo"`   // Logo URL（指针类型，nil表示不修改，空字符串表示删除）
-	SiteDomain string  `json:"site_domain"` // 域名设置（可选）
+	SiteName   string  `json:"site_name"`    // 站点名称（必填，手动验证）
+	SiteLogo   *string `json:"site_logo"`    // Logo URL（指针类型，nil表示不修改，空字符串表示删除）
+	SiteDomain string  `json:"site_domain"`  // 前端访问域名（可选）
+	BackendURL string  `json:"backend_url"`  // 后端接口地址（必填）
 }
 
 // UpdateSiteConfig 更新站点配置
@@ -330,6 +332,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 	h.logger.Info("收到更新站点配置请求",
 		zap.String("site_name", req.SiteName),
 		zap.String("site_domain", req.SiteDomain),
+		zap.String("backend_url", req.BackendURL),
 		zap.String("site_logo", siteLogoValue),
 		zap.Bool("site_logo_provided", req.SiteLogo != nil),
 	)
@@ -344,9 +347,19 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 		return
 	}
 
+	if strings.TrimSpace(req.BackendURL) == "" {
+		h.logger.Warn("后端接口地址为空")
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "后端接口地址不能为空",
+		})
+		return
+	}
+
 	// 清理空格
 	req.SiteName = strings.TrimSpace(req.SiteName)
 	req.SiteDomain = strings.TrimSpace(req.SiteDomain)
+	req.BackendURL = strings.TrimSpace(req.BackendURL)
 
 	// 检查数据库连接
 	if h.db == nil {
@@ -431,6 +444,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 		SiteName:   req.SiteName,
 		SiteLogo:   finalLogo,
 		SiteDomain: req.SiteDomain,
+		BackendURL: req.BackendURL,
 	}
 
 	// 序列化配置值
@@ -635,6 +649,7 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 		SiteName:   "矩阵云安全平台", // 默认值，实际应该从现有配置读取
 		SiteLogo:   logoURL,
 		SiteDomain: "", // 默认值，实际应该从现有配置读取
+		BackendURL: "", // 默认值，实际应该从现有配置读取
 	}
 
 	// 如果存在现有配置，保留其他字段
@@ -643,6 +658,7 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 		if err := json.Unmarshal([]byte(existingConfig.Value), &existingSiteConfig); err == nil {
 			siteConfig.SiteName = existingSiteConfig.SiteName
 			siteConfig.SiteDomain = existingSiteConfig.SiteDomain
+			siteConfig.BackendURL = existingSiteConfig.BackendURL
 		}
 	}
 

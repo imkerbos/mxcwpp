@@ -105,6 +105,19 @@ func (m *Manager) handleUpdate(ctx context.Context, update *grpc.AgentUpdate) {
 		return
 	}
 
+	// 检查是否为版本降级
+	if m.isDowngrade(m.currentVersion, update.Version) {
+		m.logger.Warn("detected version downgrade (rollback)",
+			zap.String("current_version", m.currentVersion),
+			zap.String("target_version", update.Version),
+			zap.Bool("force", update.Force),
+		)
+		// 如果不是强制更新，记录警告但继续（允许回退）
+		if !update.Force {
+			m.logger.Info("allowing downgrade without force flag")
+		}
+	}
+
 	// 验证架构匹配
 	currentArch := runtime.GOARCH
 	if currentArch == "amd64" && update.Arch != "amd64" {
@@ -262,34 +275,111 @@ func (m *Manager) calculateSHA256(filePath string) (string, error) {
 
 // installPackage 安装包
 func (m *Manager) installPackage(pkgType string, pkgPath string) error {
+	// 预检查：验证包文件存在并可读
+	if _, err := os.Stat(pkgPath); err != nil {
+		return fmt.Errorf("package file not accessible: %w", err)
+	}
+
+	// 预检查：诊断系统环境
+	m.diagnoseSystemEnv(pkgType)
+
 	var cmd *exec.Cmd
 
 	switch pkgType {
 	case "rpm":
 		// 使用 rpm -Uvh 升级安装（-U: upgrade, -v: verbose, -h: hash marks）
-		cmd = exec.Command("rpm", "-Uvh", "--force", pkgPath)
+		// --force: 强制安装（覆盖现有版本）
+		// --nodeps: 跳过依赖检查（因为是自包含的 Agent）
+		// --oldpackage: 允许降级安装（回退到旧版本）
+		// --ignorearch: 忽略架构检查（适用于 Docker 虚拟化环境）
+		cmd = exec.Command("rpm", "-Uvh", "--force", "--nodeps", "--oldpackage", "--ignorearch", pkgPath)
+
+		m.logger.Info("executing RPM install command",
+			zap.String("command", fmt.Sprintf("rpm -Uvh --force --nodeps --oldpackage --ignorearch %s", pkgPath)),
+			zap.Int("uid", os.Getuid()),
+			zap.Int("gid", os.Getgid()),
+		)
 	case "deb":
 		// 使用 dpkg -i 安装 deb 包
 		cmd = exec.Command("dpkg", "-i", pkgPath)
+
+		m.logger.Info("executing DEB install command",
+			zap.String("command", fmt.Sprintf("dpkg -i %s", pkgPath)),
+			zap.Int("uid", os.Getuid()),
+			zap.Int("gid", os.Getgid()),
+		)
 	default:
 		return fmt.Errorf("unsupported package type: %s", pkgType)
 	}
 
 	// 执行安装命令
 	output, err := cmd.CombinedOutput()
+
+	// 记录详细的输出，无论成功失败
+	m.logger.Info("package installation output",
+		zap.String("output", string(output)),
+		zap.Bool("success", err == nil),
+	)
+
 	if err != nil {
 		m.logger.Error("package installation failed",
+			zap.String("command", cmd.String()),
 			zap.String("output", string(output)),
 			zap.Error(err),
 		)
 		return fmt.Errorf("installation failed: %s, output: %s", err, string(output))
 	}
 
-	m.logger.Info("package installed successfully",
-		zap.String("output", string(output)),
+	m.logger.Info("package installed successfully")
+	return nil
+}
+
+// diagnoseSystemEnv 诊断系统环境
+func (m *Manager) diagnoseSystemEnv(pkgType string) {
+	// 检查当前用户权限
+	uid := os.Getuid()
+	gid := os.Getgid()
+
+	m.logger.Info("system environment diagnostic",
+		zap.Int("uid", uid),
+		zap.Int("gid", gid),
+		zap.Bool("is_root", uid == 0),
 	)
 
-	return nil
+	if uid != 0 {
+		m.logger.Warn("agent is not running as root, package installation may fail",
+			zap.Int("current_uid", uid),
+			zap.String("hint", "ensure mxsec-agent.service has User=root in systemd config"),
+		)
+	}
+
+	// 检查 RPM 数据库
+	if pkgType == "rpm" {
+		rpmDbPath := "/var/lib/rpm"
+		if stat, err := os.Stat(rpmDbPath); err != nil {
+			m.logger.Warn("rpm database directory not accessible",
+				zap.String("path", rpmDbPath),
+				zap.Error(err),
+			)
+		} else {
+			m.logger.Debug("rpm database directory status",
+				zap.String("path", rpmDbPath),
+				zap.String("mode", stat.Mode().String()),
+				zap.Bool("is_dir", stat.IsDir()),
+			)
+		}
+
+		// 检查文件系统只读状态
+		if _, err := os.CreateTemp(rpmDbPath, "test-write-*"); err != nil {
+			m.logger.Error("rpm database directory is not writable",
+				zap.String("path", rpmDbPath),
+				zap.Error(err),
+				zap.String("hint", "check filesystem mount options with 'mount | grep /var'"),
+			)
+		} else {
+			m.logger.Debug("rpm database directory is writable")
+		}
+	}
 }
 
 // restartAgent 重启 Agent 服务
@@ -312,4 +402,45 @@ func (m *Manager) restartAgent() {
 			os.Exit(0)
 		}
 	}()
+}
+
+// isDowngrade 检查是否为版本降级
+// 简单的版本比较：假设版本格式为 major.minor.patch
+func (m *Manager) isDowngrade(currentVer, targetVer string) bool {
+	// 移除 'v' 前缀（如果有）
+	currentVer = strings.TrimPrefix(currentVer, "v")
+	targetVer = strings.TrimPrefix(targetVer, "v")
+
+	// 分割版本号
+	currentParts := strings.Split(currentVer, ".")
+	targetParts := strings.Split(targetVer, ".")
+
+	// 逐段比较
+	maxLen := len(currentParts)
+	if len(targetParts) > maxLen {
+		maxLen = len(targetParts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var current, target int
+
+		// 解析当前版本的段
+		if i < len(currentParts) {
+			fmt.Sscanf(currentParts[i], "%d", &current)
+		}
+
+		// 解析目标版本的段
+		if i < len(targetParts) {
+			fmt.Sscanf(targetParts[i], "%d", &target)
+		}
+
+		if target < current {
+			return true // 目标版本更小，是降级
+		} else if target > current {
+			return false // 目标版本更大，是升级
+		}
+		// 相等则继续比较下一段
+	}
+
+	return false // 版本相同，不是降级
 }

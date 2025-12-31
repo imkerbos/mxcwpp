@@ -570,10 +570,17 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 	if err := h.db.First(&component, componentID).Error; err == nil {
 		if component.Category == model.ComponentCategoryPlugin {
 			h.logger.Info("设置最新版本后同步插件配置",
-				zap.String("name", component.Name),
+				zap.String("component_name", component.Name),
 				zap.String("version", version.Version),
+				zap.Uint("version_id", version.ID),
+				zap.Bool("is_latest", true),
 			)
 			h.syncPluginConfigForVersion(&version, component.Name)
+		} else {
+			h.logger.Debug("组件不是插件类型，跳过同步插件配置",
+				zap.String("component_name", component.Name),
+				zap.String("category", string(component.Category)),
+			)
 		}
 	} else {
 		h.logger.Warn("查询组件失败，无法同步插件配置",
@@ -891,17 +898,35 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		if err := h.db.First(&currentVersion, version.ID).Error; err == nil {
 			if currentVersion.IsLatest {
 				h.logger.Info("上传包后同步插件配置",
-					zap.String("name", component.Name),
+					zap.String("component_name", component.Name),
 					zap.String("version", currentVersion.Version),
+					zap.Uint("version_id", currentVersion.ID),
+					zap.Bool("is_latest", currentVersion.IsLatest),
+					zap.String("package_arch", pkg.Arch),
+					zap.String("package_sha256", pkg.SHA256[:16]+"..."),
 				)
 				h.syncPluginConfigForVersion(&currentVersion, component.Name)
 			} else {
-				h.logger.Debug("版本不是最新版本，跳过同步",
-					zap.String("name", component.Name),
+				h.logger.Warn("版本不是最新版本，跳过同步插件配置",
+					zap.String("component_name", component.Name),
 					zap.String("version", currentVersion.Version),
+					zap.Uint("version_id", currentVersion.ID),
+					zap.Bool("is_latest", currentVersion.IsLatest),
+					zap.String("hint", "如需同步，请先调用 SetLatestVersion API 将此版本设为最新版本"),
 				)
 			}
+		} else {
+			h.logger.Error("查询版本失败，无法同步插件配置",
+				zap.String("component_name", component.Name),
+				zap.Uint("version_id", version.ID),
+				zap.Error(err),
+			)
 		}
+	} else {
+		h.logger.Debug("组件不是插件类型，跳过同步",
+			zap.String("component_name", component.Name),
+			zap.String("category", string(component.Category)),
+		)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -1695,4 +1720,154 @@ func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
 		"code": 0,
 		"data": response,
 	})
+}
+
+// SyncAllPluginsToLatest 同步所有插件配置到最新版本
+// POST /api/v1/components/plugins/sync-latest
+func (h *ComponentsHandler) SyncAllPluginsToLatest(c *gin.Context) {
+	h.logger.Info("收到同步所有插件到最新版本的请求")
+
+	// 查询所有插件组件
+	var components []model.Component
+	if err := h.db.Where("category = ?", model.ComponentCategoryPlugin).Find(&components).Error; err != nil {
+		h.logger.Error("查询插件组件失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询插件组件失败",
+		})
+		return
+	}
+
+	if len(components) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    0,
+			"message": "没有找到插件组件",
+			"data": gin.H{
+				"synced_count": 0,
+			},
+		})
+		return
+	}
+
+	// 对每个插件，同步到最新版本
+	syncedCount := 0
+	var syncResults []map[string]interface{}
+
+	for _, component := range components {
+		// 查询最新版本
+		var latestVersion model.ComponentVersion
+		if err := h.db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&latestVersion).Error; err != nil {
+			h.logger.Warn("未找到插件的最新版本",
+				zap.String("plugin_name", component.Name),
+				zap.Error(err))
+			syncResults = append(syncResults, map[string]interface{}{
+				"name":    component.Name,
+				"success": false,
+				"error":   "未找到最新版本",
+			})
+			continue
+		}
+
+		// 调用同步方法
+		h.logger.Info("同步插件到最新版本",
+			zap.String("plugin_name", component.Name),
+			zap.String("version", latestVersion.Version),
+			zap.Bool("is_latest", latestVersion.IsLatest))
+
+		h.syncPluginConfigForVersion(&latestVersion, component.Name)
+		syncedCount++
+
+		syncResults = append(syncResults, map[string]interface{}{
+			"name":    component.Name,
+			"version": latestVersion.Version,
+			"success": true,
+		})
+	}
+
+	h.logger.Info("同步所有插件完成",
+		zap.Int("total_count", len(components)),
+		zap.Int("synced_count", syncedCount))
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "同步完成",
+		"data": gin.H{
+			"total_count":  len(components),
+			"synced_count": syncedCount,
+			"results":      syncResults,
+		},
+	})
+}
+
+// BroadcastPluginConfigs 手动广播插件配置
+// POST /api/v1/components/plugins/broadcast
+func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
+	h.logger.Info("收到手动广播插件配置请求")
+
+	// 查询所有启用的插件配置
+	var pluginConfigs []model.PluginConfig
+	if err := h.db.Where("enabled = ?", true).Find(&pluginConfigs).Error; err != nil {
+		h.logger.Error("查询插件配置失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询插件配置失败",
+		})
+		return
+	}
+
+	if len(pluginConfigs) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    0,
+			"message": "没有启用的插件配置，无需广播",
+			"data": gin.H{
+				"plugin_count": 0,
+			},
+		})
+		return
+	}
+
+	// 更新所有插件配置的 updated_at 时间戳，触发自动广播
+	// 这会让 PluginUpdateScheduler 在下一次检查时（30秒内）检测到更新并广播
+	result := h.db.Model(&model.PluginConfig{}).
+		Where("enabled = ?", true).
+		Update("updated_at", time.Now())
+
+	if result.Error != nil {
+		h.logger.Error("更新插件配置时间戳失败", zap.Error(result.Error))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "触发广播失败",
+		})
+		return
+	}
+
+	h.logger.Info("手动触发插件配置广播成功",
+		zap.Int("plugin_count", len(pluginConfigs)),
+		zap.Int64("updated_rows", result.RowsAffected))
+
+	// 获取在线 Agent 数量（用于返回给前端）
+	var onlineCount int64
+	h.db.Model(&model.Host{}).Where("status = ?", model.HostStatusOnline).Count(&onlineCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "广播触发成功，将在30秒内推送到所有在线Agent",
+		"data": gin.H{
+			"plugin_count":      len(pluginConfigs),
+			"online_agent_count": onlineCount,
+			"plugins":           pluginConfigsToNames(pluginConfigs),
+		},
+	})
+}
+
+// pluginConfigsToNames 提取插件配置的名称和版本
+func pluginConfigsToNames(configs []model.PluginConfig) []map[string]string {
+	result := make([]map[string]string, len(configs))
+	for i, cfg := range configs {
+		result[i] = map[string]string{
+			"name":    cfg.Name,
+			"version": cfg.Version,
+		}
+	}
+	return result
 }
