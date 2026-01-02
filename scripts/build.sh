@@ -120,13 +120,30 @@ package_agent() {
     # 脚本
     cat > "$pkg_tmp/scripts/postinstall.sh" <<'SCRIPT'
 #!/bin/bash
-systemctl daemon-reload
-systemctl enable mxsec-agent
+# $1 == 1: 首次安装 (DEB: configure with empty $2, RPM: 1)
+# $1 == 2: 升级安装 (DEB: configure with non-empty $2, RPM: 2)
+
+if [ "$1" = "configure" -a -z "$2" ] || [ "$1" == "1" ]; then
+    # 首次安装：启用并启动服务
+    systemctl daemon-reload
+    systemctl enable mxsec-agent
+    systemctl start mxsec-agent
+elif [ "$1" = "configure" -a -n "$2" ] || [ "$1" == "2" ]; then
+    # 升级：只 reload daemon，服务保持运行
+    systemctl daemon-reload
+fi
 SCRIPT
     cat > "$pkg_tmp/scripts/preremove.sh" <<'SCRIPT'
 #!/bin/bash
-systemctl stop mxsec-agent || true
-systemctl disable mxsec-agent || true
+# $1 == 0: 卸载 (DEB: remove, RPM: 0)
+# $1 == 1: 升级 (RPM: 1)
+
+if [ "$1" == "remove" ] || [ "$1" == "0" ]; then
+    # 只有真正卸载时才停止和禁用服务
+    systemctl stop mxsec-agent || true
+    systemctl disable mxsec-agent || true
+fi
+# 升级时 ($1 == 1) 不做任何操作，保持服务运行
 SCRIPT
     chmod +x "$pkg_tmp/scripts/"*.sh
 

@@ -18,7 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 )
 
 // Manager 是更新管理器
@@ -287,15 +287,15 @@ func (m *Manager) installPackage(pkgType string, pkgPath string) error {
 
 	switch pkgType {
 	case "rpm":
-		// 使用 rpm -Uvh 升级安装（-U: upgrade, -v: verbose, -h: hash marks）
-		// --force: 强制安装（覆盖现有版本）
-		// --nodeps: 跳过依赖检查（因为是自包含的 Agent）
-		// --oldpackage: 允许降级安装（回退到旧版本）
-		// --ignorearch: 忽略架构检查（适用于 Docker 虚拟化环境）
-		cmd = exec.Command("rpm", "-Uvh", "--force", "--nodeps", "--oldpackage", "--ignorearch", pkgPath)
+		// 参考 Elkeid 设计：直接使用 rpm -Uvh 升级
+		// RPM 的 lifecycle 脚本会处理：
+		// - preremove: 升级时 ($1==1) 不停止服务，只有卸载时 ($1==0) 才停止
+		// - postinstall: 升级时 ($1==2) 只 reload daemon，不启动服务
+		// 这样升级过程中 Agent 进程保持运行，避免 systemd Restart=always 竞态
+		cmd = exec.Command("rpm", "-Uvh", pkgPath)
 
-		m.logger.Info("executing RPM install command",
-			zap.String("command", fmt.Sprintf("rpm -Uvh --force --nodeps --oldpackage --ignorearch %s", pkgPath)),
+		m.logger.Info("executing RPM upgrade command",
+			zap.String("command", fmt.Sprintf("rpm -Uvh %s", pkgPath)),
 			zap.Int("uid", os.Getuid()),
 			zap.Int("gid", os.Getgid()),
 		)

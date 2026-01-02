@@ -15,11 +15,10 @@ StandardError=journal
 SyslogIdentifier=mxsec-agent
 
 # 安全设置
+# 注意: 不使用 ProtectSystem/ProtectHome/PrivateTmp 等限制
+# 因为 Agent 需要自更新能力，必须能写入 /usr/bin 等系统目录
+# 参考 Elkeid 等成熟 Agent 的设计，以 root 权限运行的安全软件不需要这些限制
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/mxsec-agent /var/log/mxsec-agent
 
 # 资源限制
 LimitNOFILE=65536
