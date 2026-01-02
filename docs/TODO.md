@@ -507,12 +507,35 @@ plugins/baseline/config/examples/
 
 ## 当前任务
 
-**当前阶段**：Phase 2.5 CIS 基线规则完善
+**当前阶段**：v1.0 生产环境部署准备
 
-### 🔄 进行中：CIS 基线规则完善（2025-12-18）
+### ✅ 已完成：生产环境部署文档（2025-01-03）
+
+- [x] 创建生产环境部署方案文档 (`docs/deployment/production-deployment.md`)
+- [x] 更新 README.md 文档索引
+- [x] 基线规则已扩展到 200+ 条
+
+### 🔄 进行中：v1.0 生产部署
+
+**部署步骤**：
+1. [x] 准备部署文档
+2. [ ] 部署 MySQL 数据库
+3. [ ] 部署 Server（AgentCenter + Manager）
+4. [ ] 部署前端 UI
+5. [ ] 构建并部署插件
+6. [ ] 部署 Agent 到目标主机
+7. [ ] 验证完整流程
+
+**待完成功能**（可在部署后迭代）：
+- [ ] 告警对接（Webhook、Lark、邮件等）
+- [ ] 架构区分功能（VM/Docker/K8s）
+
+---
+
+### ⏳ 待办：Phase 2.5 CIS 基线规则完善
 
 **优先级排序**：
-1. **P0-0 架构区分功能**（必须先做）
+1. **P0-0 架构区分功能**
    - [ ] Agent 端识别运行环境（VM/Docker/K8s）
    - [ ] 心跳数据和 Host 模型增加 `runtime_type` 字段
    - [ ] 策略/规则增加 `runtime_types` 适用范围
@@ -535,8 +558,8 @@ plugins/baseline/config/examples/
    - [ ] 登录横幅
 
 **背景**：
-- 当前基线规则 ~125 条，但都是示例级别
-- 需要按 CIS Rocky Linux 9 Benchmark 完善
+- 当前基线规则 200+ 条，已覆盖主要安全基线
+- 后续按 CIS Rocky Linux 9 Benchmark 继续完善
 - Docker 容器不应检测 SSH 等 VM 专属规则，需先实现架构区分
 
 ---
