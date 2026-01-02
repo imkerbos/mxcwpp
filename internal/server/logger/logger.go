@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
 )
 
 // Init 初始化日志器

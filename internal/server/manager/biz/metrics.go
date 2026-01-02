@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/prometheus"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/prometheus"
 )
 
 // MetricsService 是监控数据查询服务

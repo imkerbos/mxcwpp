@@ -10,11 +10,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/cache"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/connection"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/agent/cache"
+	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
 )
 
 // Manager 是传输管理器

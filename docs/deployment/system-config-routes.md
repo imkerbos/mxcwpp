@@ -13,7 +13,7 @@ package main
 
 import (
 	// ... 其他导入
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/api"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 )
 
 func main() {
@@ -76,7 +76,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/api"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	// ... 其他导入
 )
 

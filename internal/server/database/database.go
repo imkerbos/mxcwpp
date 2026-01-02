@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/migration"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/migration"
 )
 
 // DB 是全局数据库实例

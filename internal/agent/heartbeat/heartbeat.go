@@ -18,11 +18,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/resource"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/transport"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/agent/resource"
+	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 )
 
 // Manager 是心跳管理器

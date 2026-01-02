@@ -15,7 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/plugins/collector/engine"
+	"github.com/imkerbos/mxsec-platform/plugins/collector/engine"
 )
 
 // ProcessHandler 是进程采集器

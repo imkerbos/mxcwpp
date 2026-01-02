@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // SystemConfigHandler 是系统配置 API 处理器

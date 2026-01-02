@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // UsersHandler 是用户管理 API 处理器

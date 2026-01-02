@@ -97,7 +97,7 @@
 
 ```go
 import (
-    "github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+    "github.com/imkerbos/mxsec-platform/internal/server/model"
     "gorm.io/driver/mysql"
     "gorm.io/gorm"
 )

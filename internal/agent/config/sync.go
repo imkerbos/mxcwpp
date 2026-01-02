@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 )
 
 // SyncFromServer 从 Server 下发的 AgentConfig 同步配置

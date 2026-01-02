@@ -39,7 +39,7 @@ import (
     "context"
     "time"
     "github.com/redis/go-redis/v9"
-    "github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
+    "github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 )
 
 type RedisClientImpl struct {

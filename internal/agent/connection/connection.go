@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/agent/config"
 )
 
 // Manager 是连接管理器

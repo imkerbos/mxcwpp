@@ -63,8 +63,8 @@ import (
     "context"
     "os"
     
-    "github.com/mxcsec-platform/mxcsec-platform/plugins/lib/go"
-    "github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
+    "github.com/imkerbos/mxsec-platform/plugins/lib/go"
+    "github.com/imkerbos/mxsec-platform/api/proto/bridge"
 )
 
 func main() {

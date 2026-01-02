@@ -12,15 +12,15 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/connection"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/heartbeat"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/id"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/logger"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/plugin"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/transport"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/updater"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
+	"github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
+	"github.com/imkerbos/mxsec-platform/internal/agent/id"
+	"github.com/imkerbos/mxsec-platform/internal/agent/logger"
+	"github.com/imkerbos/mxsec-platform/internal/agent/plugin"
+	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
+	"github.com/imkerbos/mxsec-platform/internal/agent/updater"
 )
 
 var (

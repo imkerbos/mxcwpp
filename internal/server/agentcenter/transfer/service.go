@@ -18,12 +18,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	grpcProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/service"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // Connection 表示一个 Agent 连接
@@ -165,7 +165,7 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 
 	// 注册连接
 	s.registerConnection(agentID, conn)
-	defer s.unregisterConnection(agentID)
+	defer s.unregisterConnection(agentID, conn)
 
 	// 检查并发送 Agent 上线恢复通知（如果之前离线）
 	go s.checkAndSendAgentOnlineNotification(agentID, conn)
@@ -1411,11 +1411,24 @@ func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Conn
 }
 
 // unregisterConnection 注销连接
-func (s *Service) unregisterConnection(agentID string) {
+func (s *Service) unregisterConnection(agentID string, connToRemove *Connection) {
 	s.connMu.Lock()
-	conn, exists := s.connections[agentID]
-	delete(s.connections, agentID)
+	currentConn, exists := s.connections[agentID]
+	// 只删除确实是当前连接的记录（指针比对，避免删除新连接）
+	shouldDelete := exists && currentConn == connToRemove
+	if shouldDelete {
+		delete(s.connections, agentID)
+	}
 	s.connMu.Unlock()
+
+	// 如果没有删除，说明已经有新连接，不需要发送离线通知
+	if !shouldDelete {
+		s.logger.Debug("跳过连接注销（已有新连接）",
+			zap.String("agent_id", agentID),
+			zap.Bool("exists", exists),
+		)
+		return
+	}
 
 	// 查询主机信息用于发送离线通知
 	var host model.Host
@@ -1428,8 +1441,8 @@ func (s *Service) unregisterConnection(agentID string) {
 			hostIP := ""
 			if len(host.IPv4) > 0 {
 				hostIP = strings.Join(host.IPv4, ",")
-			} else if exists && conn != nil && len(conn.IPv4) > 0 {
-				hostIP = strings.Join(conn.IPv4, ",")
+			} else if currentConn != nil && len(currentConn.IPv4) > 0 {
+				hostIP = strings.Join(currentConn.IPv4, ",")
 			}
 
 			offlineData := &biz.AgentOfflineData{

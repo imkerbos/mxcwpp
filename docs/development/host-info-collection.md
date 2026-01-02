@@ -105,8 +105,8 @@ import (
     
     "go.uber.org/zap"
     
-    bridgeProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-    "github.com/mxcsec-platform/mxcsec-platform/internal/agent/heartbeat"
+    bridgeProto "github.com/imkerbos/mxsec-platform/api/proto/bridge"
+    "github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
 )
 
 func SendHeartbeat(ctx context.Context, logger *zap.Logger, agentID string) (*bridgeProto.Record, error) {
@@ -170,8 +170,8 @@ import (
     
     "go.uber.org/zap"
     
-    bridgeProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-    "github.com/mxcsec-platform/mxcsec-platform/internal/agent/heartbeat"
+    bridgeProto "github.com/imkerbos/mxsec-platform/api/proto/bridge"
+    "github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
 )
 
 func SendHeartbeat(ctx context.Context, logger *zap.Logger, agentID string) (*bridgeProto.Record, error) {

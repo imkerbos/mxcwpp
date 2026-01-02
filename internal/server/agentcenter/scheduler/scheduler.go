@@ -6,8 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/service"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/transfer"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/transfer"
 )
 
 // StartTaskScheduler 启动任务调度器（定期分发待执行任务）

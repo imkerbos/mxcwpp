@@ -12,8 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/router"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/setup"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
 )
 
 var (

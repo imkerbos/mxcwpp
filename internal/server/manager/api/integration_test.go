@@ -21,8 +21,8 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // setupTestDB 创建测试数据库（使用 MySQL 环境）

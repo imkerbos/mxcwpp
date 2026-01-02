@@ -11,9 +11,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
-	"github.com/mxcsec-platform/mxcsec-platform/plugins/baseline/engine"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/plugins/baseline/engine"
 )
 
 // DefaultPolicyGroupID 默认策略组ID

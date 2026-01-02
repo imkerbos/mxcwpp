@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/service"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // RulesHandler 是规则管理 API 处理器

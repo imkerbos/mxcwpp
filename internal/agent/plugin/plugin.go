@@ -18,12 +18,13 @@ import (
 	"syscall"
 	"time"
 
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/agent/transport"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -40,16 +41,16 @@ type Manager struct {
 
 // Plugin 表示一个插件实例
 type Plugin struct {
-	Config    *grpc.Config  // 插件配置
-	cmd       *exec.Cmd     // 插件进程
-	rx        *os.File      // 接收管道（Agent 从插件读取数据）
-	tx        *os.File      // 发送管道（Agent 向插件写入任务）
-	logWriter *os.File      // 日志文件
-	workDir   string        // 插件工作目录
-	status    Status        // 插件状态
-	mu        sync.RWMutex  // 保护状态
-	startTime time.Time     // 启动时间
-	stopCh    chan struct{} // 停止信号
+	Config    *grpc.Config   // 插件配置
+	cmd       *exec.Cmd      // 插件进程
+	rx        *os.File       // 接收管道（Agent 从插件读取数据）
+	tx        *os.File       // 发送管道（Agent 向插件写入任务）
+	logWriter io.WriteCloser // 日志写入器（支持日志轮转）
+	workDir   string         // 插件工作目录
+	status    Status         // 插件状态
+	mu        sync.RWMutex   // 保护状态
+	startTime time.Time      // 启动时间
+	stopCh    chan struct{}  // 停止信号
 	logger    *zap.Logger
 }
 
@@ -230,7 +231,7 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		return nil, fmt.Errorf("failed to create tx pipe: %w", err)
 	}
 
-	// 5. 设置日志文件重定向
+	// 5. 设置日志文件重定向（带轮转功能）
 	// 从 Agent 日志文件路径提取目录，插件日志放在同级的 plugins 子目录
 	agentLogFile := m.cfg.Local.Log.File
 	if agentLogFile == "" {
@@ -245,14 +246,26 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		return nil, fmt.Errorf("failed to create plugin log dir: %w", err)
 	}
 
+	// 配置日志轮转（与 Agent 保持一致：按天轮转，保留30天）
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", cfg.Name))
-	logWriter, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	maxAge := 30 * 24 * time.Hour // 保留30天
+	if m.cfg.Local.Log.MaxAge > 0 {
+		maxAge = time.Duration(m.cfg.Local.Log.MaxAge) * 24 * time.Hour
+	}
+
+	logWriter, err := rotatelogs.New(
+		logFile+".%Y-%m-%d",                      // 轮转后的文件名格式：{plugin}.log.YYYY-MM-DD
+		rotatelogs.WithLinkName(logFile),         // 当前日志文件链接
+		rotatelogs.WithMaxAge(maxAge),            // 保留时间（默认30天）
+		rotatelogs.WithRotationTime(24*time.Hour), // 每24小时轮转一次
+		rotatelogs.WithRotationCount(0),          // 不限制文件数量，由 MaxAge 控制
+	)
 	if err != nil {
 		rx_r.Close()
 		rx_w.Close()
 		tx_r.Close()
 		tx_w.Close()
-		return nil, fmt.Errorf("failed to open plugin log file: %w", err)
+		return nil, fmt.Errorf("failed to create plugin log rotator: %w", err)
 	}
 
 	// 6. 启动插件进程

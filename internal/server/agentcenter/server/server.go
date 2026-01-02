@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
 )
 
 // CreateGRPCServer 创建并配置 gRPC Server

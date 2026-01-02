@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"google.golang.org/protobuf/proto"
 )
 

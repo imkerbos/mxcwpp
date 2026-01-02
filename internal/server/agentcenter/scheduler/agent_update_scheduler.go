@@ -12,10 +12,10 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	grpcProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/transfer"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/transfer"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // AgentUpdateScheduler Agent 更新调度器

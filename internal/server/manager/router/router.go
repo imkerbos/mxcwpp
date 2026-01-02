@@ -6,11 +6,11 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/api"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/middleware"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/metrics"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
+	"github.com/imkerbos/mxsec-platform/internal/server/metrics"
 )
 
 // Setup 设置并返回配置好的 Gin 路由引擎

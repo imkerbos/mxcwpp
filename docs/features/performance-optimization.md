@@ -20,7 +20,7 @@
 索引会在数据库迁移时自动创建。如果需要手动创建，可以运行：
 
 ```go
-import "github.com/mxcsec-platform/mxcsec-platform/internal/server/migration"
+import "github.com/imkerbos/mxsec-platform/internal/server/migration"
 
 err := migration.AddPerformanceIndexes(db, logger)
 ```
@@ -52,7 +52,7 @@ WHERE rn = 1
 使用内存缓存存储主机基线得分，默认 TTL 为 5 分钟。
 
 ```go
-import "github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
+import "github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 
 cache := biz.NewBaselineScoreCache(db, logger, 5*time.Minute)
 score, err := cache.GetHostScore(hostID)
@@ -67,7 +67,7 @@ score, err := cache.GetHostScore(hostID)
 首先需要实现 `RedisClient` 接口：
 
 ```go
-import "github.com/mxcsec-platform/mxcsec-platform/internal/server/manager/biz"
+import "github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 
 type MyRedisClient struct {
     // 实现 RedisClient 接口
@@ -156,7 +156,7 @@ Manager HTTP API Server 默认在 `/metrics` 端点导出 Prometheus 指标。
 #### 3.3.1 记录指标
 
 ```go
-import "github.com/mxcsec-platform/mxcsec-platform/internal/server/metrics"
+import "github.com/imkerbos/mxsec-platform/internal/server/metrics"
 
 // 记录心跳
 metrics.RecordHeartbeat(hostID)

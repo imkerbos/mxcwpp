@@ -13,9 +13,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	"github.com/mxcsec-platform/mxcsec-platform/plugins/baseline/engine"
-	plugins "github.com/mxcsec-platform/mxcsec-platform/plugins/lib/go"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/plugins/baseline/engine"
+	plugins "github.com/imkerbos/mxsec-platform/plugins/lib/go"
 )
 
 // 版本信息（编译时注入）

@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/setup"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/setup"
 )
 
 var (

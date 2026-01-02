@@ -1,4 +1,4 @@
-module github.com/mxcsec-platform/mxcsec-platform
+module github.com/imkerbos/mxsec-platform
 
 go 1.25.5
 

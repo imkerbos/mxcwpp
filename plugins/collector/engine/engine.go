@@ -9,8 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	plugins "github.com/mxcsec-platform/mxcsec-platform/plugins/lib/go"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	plugins "github.com/imkerbos/mxsec-platform/plugins/lib/go"
 )
 
 // Handler 是采集器接口

@@ -24,13 +24,13 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	grpcProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/service"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/agentcenter/transfer"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/config"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
-	"github.com/mxcsec-platform/mxcsec-platform/plugins/baseline/engine"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/transfer"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/plugins/baseline/engine"
 )
 
 // TestAgentServerPluginE2E 测试 Agent + Server + Plugin 完整流程

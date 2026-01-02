@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	bridgeProto "github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
+	bridgeProto "github.com/imkerbos/mxsec-platform/api/proto/bridge"
 )
 
 // SendHeartbeatExample 心跳上报示例函数

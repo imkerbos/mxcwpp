@@ -19,8 +19,8 @@
 
 ```go
 import (
-    "github.com/mxcsec-platform/mxcsec-platform/internal/server/migration"
-    "github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
+    "github.com/imkerbos/mxsec-platform/internal/server/migration"
+    "github.com/imkerbos/mxsec-platform/internal/server/model"
     "gorm.io/driver/mysql"
     "gorm.io/gorm"
     "go.uber.org/zap"
@@ -59,7 +59,7 @@ import (
     "fmt"
     "os"
     
-    "github.com/mxcsec-platform/mxcsec-platform/internal/server/migration"
+    "github.com/imkerbos/mxsec-platform/internal/server/migration"
     // ... 其他导入
 )
 

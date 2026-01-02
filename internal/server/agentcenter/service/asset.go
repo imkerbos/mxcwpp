@@ -9,9 +9,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-	"github.com/mxcsec-platform/mxcsec-platform/internal/server/model"
-	"github.com/mxcsec-platform/mxcsec-platform/plugins/collector/engine"
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/plugins/collector/engine"
 )
 
 // AssetService 资产数据处理服务

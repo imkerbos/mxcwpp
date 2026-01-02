@@ -12,7 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mxcsec-platform/mxcsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 )
 
 // Manager 是缓存管理器

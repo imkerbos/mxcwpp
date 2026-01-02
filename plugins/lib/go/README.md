@@ -22,8 +22,8 @@ import (
     "log"
     "time"
     
-    "github.com/mxcsec-platform/mxcsec-platform/api/proto/bridge"
-    "github.com/mxcsec-platform/mxcsec-platform/plugins/lib/go"
+    "github.com/imkerbos/mxsec-platform/api/proto/bridge"
+    "github.com/imkerbos/mxsec-platform/plugins/lib/go"
 )
 
 func main() {
