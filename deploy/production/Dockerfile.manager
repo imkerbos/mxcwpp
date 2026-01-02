@@ -1,0 +1,29 @@
+# Manager 生产镜像
+FROM --platform=linux/amd64 golang:1.25-alpine AS builder
+
+ARG VERSION=dev
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X github.com/imkerbos/mxsec-platform/internal/server/manager/api.BuildVersion=${VERSION}" \
+    -o manager ./cmd/server/manager
+
+FROM --platform=linux/amd64 alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata curl
+
+COPY --from=builder /app/manager /usr/bin/manager
+COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/baseline-policies
+
+RUN mkdir -p /etc/mxsec-platform /var/log/mxsec-platform /opt/mxsec-platform/plugins
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/bin/manager"]
+CMD ["-config", "/etc/mxsec-platform/server.yaml"]

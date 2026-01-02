@@ -27,6 +27,11 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 
 	logger.Info("开始初始化默认数据", zap.String("policy_dir", policyDir))
 
+	// 初始化默认用户（优先执行，确保admin用户始终存在）
+	if err := initDefaultUsers(db, logger); err != nil {
+		return fmt.Errorf("初始化默认用户失败: %w", err)
+	}
+
 	// 初始化默认策略组（始终执行，确保策略组存在）
 	if err := initDefaultPolicyGroup(db, logger); err != nil {
 		return fmt.Errorf("初始化默认策略组失败: %w", err)
@@ -53,13 +58,19 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 
 		// 从示例策略文件加载
 		if policyDir == "" {
-			// 默认使用项目中的示例策略目录
-			policyDir = "plugins/baseline/config/examples"
+			// 优先使用生产环境路径，回退到开发环境路径
+			if _, err := os.Stat("/opt/mxsec-platform/baseline-policies"); err == nil {
+				policyDir = "/opt/mxsec-platform/baseline-policies"
+			} else {
+				policyDir = "plugins/baseline/config/examples"
+			}
 		}
 
 		policies, err := loadPoliciesFromDir(policyDir, logger)
 		if err != nil {
-			return fmt.Errorf("加载策略文件失败: %w", err)
+			// 策略文件加载失败不阻止启动，只记录警告
+			logger.Warn("加载策略文件失败，跳过策略初始化", zap.Error(err), zap.String("policy_dir", policyDir))
+			return nil
 		}
 
 		// 保存到数据库（关联到默认策略组）
@@ -71,11 +82,6 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		}
 
 		logger.Info("默认数据初始化完成", zap.Int("policy_count", len(policies)))
-	}
-
-	// 初始化默认用户（始终执行，确保admin用户存在）
-	if err := initDefaultUsers(db, logger); err != nil {
-		return fmt.Errorf("初始化默认用户失败: %w", err)
 	}
 
 	return nil

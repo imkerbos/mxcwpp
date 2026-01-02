@@ -12,6 +12,9 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
+// BuildVersion 构建版本，通过 -ldflags "-X ...api.BuildVersion=x.x.x" 注入
+var BuildVersion = "dev"
+
 // HealthHandler 是健康检查 API 处理器
 type HealthHandler struct {
 	db     *gorm.DB
@@ -41,7 +44,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 		Status:    "ok",
 		Timestamp: time.Now().Format(model.TimeFormat),
 		Checks:    make(map[string]string),
-		Version:   "dev", // 可以从构建信息中获取
+		Version:   BuildVersion,
 	}
 
 	// 检查数据库连接

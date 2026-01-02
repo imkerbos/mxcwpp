@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mxsec-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-mxsec}
+      MYSQL_USER: ${MYSQL_USER:-mxsec_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ${DATA_DIR}/mysql:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=500
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - mxsec-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  agentcenter:
+    build:
+      context: ../..
+      dockerfile: deploy/production/Dockerfile.agentcenter
+      args:
+        VERSION: ${VERSION:-dev}
+    image: mxsec-agentcenter:${VERSION:-latest}
+    container_name: mxsec-agentcenter
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${GRPC_PORT:-6751}:6751"
+    volumes:
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - ${DATA_DIR}/logs/agentcenter:/var/log/mxsec-platform
+      - ${DATA_DIR}/plugins:/opt/mxsec-platform/plugins
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mxsec-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  manager:
+    build:
+      context: ../..
+      dockerfile: deploy/production/Dockerfile.manager
+      args:
+        VERSION: ${VERSION:-dev}
+    image: mxsec-manager:${VERSION:-latest}
+    container_name: mxsec-manager
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      agentcenter:
+        condition: service_healthy
+    ports:
+      - "${MANAGER_PORT:-8080}:8080"
+    volumes:
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - ${DATA_DIR}/logs/manager:/var/log/mxsec-platform
+      - ${DATA_DIR}/plugins:/opt/mxsec-platform/plugins:ro
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mxsec-net
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  ui:
+    build:
+      context: ../..
+      dockerfile: deploy/production/Dockerfile.ui
+    image: mxsec-ui:${VERSION:-latest}
+    container_name: mxsec-ui
+    restart: always
+    depends_on:
+      manager:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs/ssl:/etc/nginx/ssl:ro
+      - ${DATA_DIR}/logs/nginx:/var/log/nginx
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mxsec-net
+
+networks:
+  mxsec-net:
+    driver: bridge

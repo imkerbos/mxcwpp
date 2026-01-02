@@ -1,0 +1,28 @@
+# AgentCenter 生产镜像
+FROM --platform=linux/amd64 golang:1.25-alpine AS builder
+
+ARG VERSION=dev
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.buildVersion=${VERSION}" \
+    -o agentcenter ./cmd/server/agentcenter
+
+FROM --platform=linux/amd64 alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
+
+COPY --from=builder /app/agentcenter /usr/bin/agentcenter
+
+RUN mkdir -p /etc/mxsec-platform/certs /var/log/mxsec-platform /opt/mxsec-platform/plugins
+
+EXPOSE 6751
+
+ENTRYPOINT ["/usr/bin/agentcenter"]
+CMD ["-config", "/etc/mxsec-platform/server.yaml"]
