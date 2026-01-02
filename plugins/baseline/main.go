@@ -18,6 +18,12 @@ import (
 	plugins "github.com/mxcsec-platform/mxcsec-platform/plugins/lib/go"
 )
 
+// 版本信息（编译时注入）
+var (
+	buildVersion = "dev" // 通过 -ldflags "-X main.buildVersion=x.x.x" 注入
+	buildTime    = ""    // 通过 -ldflags "-X main.buildTime=xxx" 注入
+)
+
 func main() {
 	// 1. 初始化插件客户端（通过 Pipe 与 Agent 通信）
 	client, err := plugins.NewClient()
@@ -37,7 +43,8 @@ func main() {
 
 	logger.Info("baseline plugin starting",
 		zap.Int("pid", os.Getpid()),
-		zap.String("version", "1.0.5"))
+		zap.String("version", buildVersion),
+		zap.String("build_time", buildTime))
 
 	// 3. 创建检查引擎
 	checkEngine := engine.NewEngine(logger)

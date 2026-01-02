@@ -176,9 +176,10 @@ build_plugin() {
     local plugin_dir="dist/plugins"
     mkdir -p "$plugin_dir"
 
-    # 编译二进制文件
+    # 编译二进制文件（注入版本号和构建时间）
     local output_name="${name}-linux-${arch}"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags "-s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
+        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -s -w" \
         -o "$plugin_dir/$output_name" ./plugins/$name
 
     chmod +x "$plugin_dir/$output_name"

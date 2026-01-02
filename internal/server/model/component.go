@@ -79,10 +79,10 @@ func (ComponentVersion) TableName() string {
 // 存储组件版本的具体文件（不同平台、架构）
 type ComponentPackage struct {
 	ID         uint           `gorm:"primaryKey" json:"id"`
-	VersionID  uint           `gorm:"not null;index:idx_package_version" json:"version_id"`              // 关联的版本 ID
+	VersionID  uint           `gorm:"not null;uniqueIndex:idx_unique_package" json:"version_id"`         // 关联的版本 ID
 	OS         string         `gorm:"size:32;not null;default:linux" json:"os"`                          // 操作系统 (linux)
-	Arch       string         `gorm:"size:32;not null" json:"arch"`                                      // 架构 (amd64, arm64)
-	PkgType    PackageType    `gorm:"size:16;not null" json:"pkg_type"`                                  // 包类型 (rpm, deb, binary)
+	Arch       string         `gorm:"size:32;not null;uniqueIndex:idx_unique_package" json:"arch"`       // 架构 (amd64, arm64)
+	PkgType    PackageType    `gorm:"size:16;not null;uniqueIndex:idx_unique_package" json:"pkg_type"`  // 包类型 (rpm, deb, binary)
 	FilePath   string         `gorm:"size:512;not null" json:"file_path"`                                // 文件存储路径
 	FileName   string         `gorm:"size:256;not null" json:"file_name"`                                // 原始文件名
 	FileSize   int64          `gorm:"not null" json:"file_size"`                                         // 文件大小 (字节)
@@ -90,7 +90,7 @@ type ComponentPackage struct {
 	Enabled    bool           `gorm:"default:true" json:"enabled"`                                       // 是否启用
 	UploadedBy string         `gorm:"size:64" json:"uploaded_by"`                                        // 上传用户
 	UploadedAt LocalTime      `json:"uploaded_at"`                                                       // 上传时间
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`                                                    // 软删除
+	DeletedAt  gorm.DeletedAt `gorm:"uniqueIndex:idx_unique_package" json:"-"`                           // 软删除（包含在唯一索引中，支持软删除后重新上传）
 
 	// 关联
 	Version *ComponentVersion `gorm:"foreignKey:VersionID" json:"version,omitempty"`
