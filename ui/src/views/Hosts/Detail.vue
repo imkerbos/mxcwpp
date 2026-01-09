@@ -44,7 +44,6 @@
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
-import { message } from 'ant-design-vue'
 import { hostsApi } from '@/api/hosts'
 import type { HostDetail } from '@/api/types'
 import HostOverview from './components/HostOverview.vue'
@@ -98,7 +97,7 @@ const handleBack = () => {
   router.push('/hosts')
 }
 
-const handleTabChange = (key: string) => {
+const handleTabChange = (_key: string) => {
   // 可以在这里加载对应标签页的数据
 }
 

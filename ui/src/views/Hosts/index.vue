@@ -363,15 +363,6 @@ const filters = reactive({
   runtime_type: undefined as string | undefined, // 运行环境类型筛选：vm/docker/k8s
 })
 
-const statusTotal = computed(() => {
-  return (
-    statusDistribution.value.running +
-    statusDistribution.value.abnormal +
-    statusDistribution.value.offline +
-    statusDistribution.value.not_installed +
-    statusDistribution.value.uninstalled
-  )
-})
 
 // 主机状态分布饼图配置
 const statusChartOption = computed(() => {
@@ -610,16 +601,6 @@ const handleSearch = () => {
   loadHosts()
 }
 
-const handleReset = () => {
-  filters.hostRange = 'all'
-  filters.search = ''
-  filters.business_line = undefined
-  filters.os_family = undefined
-  filters.status = undefined
-  filters.runtime_type = undefined
-  pagination.current = 1
-  loadHosts()
-}
 
 const handleTableChange = (pag: any) => {
   pagination.current = pag.current

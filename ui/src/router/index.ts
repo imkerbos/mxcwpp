@@ -159,7 +159,7 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
   const { useSiteConfigStore } = await import('@/stores/site-config')
   const siteConfigStore = useSiteConfigStore()

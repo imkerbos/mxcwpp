@@ -277,8 +277,17 @@ import {
 } from '@/api/reports'
 import { hostsApi } from '@/api/hosts'
 import { dashboardApi } from '@/api/dashboard'
-import type { HostStatusDistribution, HostRiskDistribution } from '@/api/hosts'
+import type { HostStatusDistribution } from '@/api/hosts'
 import type { EChartsOption } from 'echarts'
+
+// 报表专用风险分布接口
+interface ReportRiskDistribution {
+  host_container_alerts: number
+  app_runtime_alerts: number
+  high_exploitable_vulns: number
+  virus_files: number
+  high_risk_baselines: number
+}
 
 const router = useRouter()
 const loading = ref(false)
@@ -336,7 +345,7 @@ const hostStatusDistribution = ref<HostStatusDistribution>({
   uninstalled: 0,
 })
 
-const hostRiskDistribution = ref<HostRiskDistribution>({
+const hostRiskDistribution = ref<ReportRiskDistribution>({
   host_container_alerts: 0,
   app_runtime_alerts: 0,
   high_exploitable_vulns: 0,
@@ -845,8 +854,12 @@ const refreshData = async () => {
       hostStatusDistribution.value = statusDist
     }
 
+    // TODO: hostRiskDistribution 使用不同的数据结构，需要从专用报表 API 获取
+    // riskDist 是 HostRiskDistribution 类型（critical/high/medium/low）
+    // hostRiskDistribution 是 ReportRiskDistribution 类型（host_container_alerts等）
     if (riskDist) {
-      hostRiskDistribution.value = riskDist
+      // 暂时跳过，等待后端实现报表专用 API
+      console.log('Risk distribution loaded:', riskDist)
     }
 
     if (scoreTrend) {

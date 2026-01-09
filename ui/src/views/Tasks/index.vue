@@ -455,7 +455,6 @@ import {
   PlusOutlined,
   SearchOutlined,
   PlayCircleOutlined,
-  EyeOutlined,
   SyncOutlined,
   StopOutlined,
   DeleteOutlined,
@@ -468,7 +467,7 @@ import {
 import { tasksApi } from '@/api/tasks'
 import { resultsApi } from '@/api/results'
 import { hostsApi } from '@/api/hosts'
-import type { ScanTask, ScanResult } from '@/api/types'
+import type { ScanTask } from '@/api/types'
 import TaskModal from './components/TaskModal.vue'
 
 interface TaskLog {

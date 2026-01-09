@@ -7,6 +7,7 @@ export const useSiteConfigStore = defineStore('siteConfig', () => {
     site_name: '矩阵云安全平台',
     site_logo: '',
     site_domain: '',
+    backend_url: '',
   })
 
   const siteName = computed(() => config.value.site_name || '矩阵云安全平台')
@@ -27,6 +28,7 @@ export const useSiteConfigStore = defineStore('siteConfig', () => {
         site_name: '矩阵云安全平台',
         site_logo: '',
         site_domain: '',
+        backend_url: '',
       }
       updateDocumentTitle()
     }

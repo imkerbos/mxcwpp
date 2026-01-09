@@ -393,7 +393,7 @@ const handleRefresh = () => {
   emit('refresh')
 }
 
-const handleTableChange: TableProps['onChange'] = (pag, filters, sorter) => {
+const handleTableChange: TableProps['onChange'] = (pag, _filters, _sorter) => {
   if (pag) {
     emit('change', { ...localFilters.value, page: pag.current, pageSize: pag.pageSize })
   }

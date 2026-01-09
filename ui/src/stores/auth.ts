@@ -8,10 +8,12 @@ const USER_KEY = 'mxcsec_user'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
-  const user = ref<{ username: string; role: string } | null>(() => {
-    const stored = localStorage.getItem(USER_KEY)
-    return stored ? JSON.parse(stored) : null
-  })
+  const user = ref<{ username: string; role: string } | null>(
+    (() => {
+      const stored = localStorage.getItem(USER_KEY)
+      return stored ? JSON.parse(stored) : null
+    })()
+  )
 
   const isAuthenticated = () => {
     return !!token.value

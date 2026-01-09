@@ -1,0 +1,43 @@
+# Matrix Cloud Security Platform - Server 配置
+
+server:
+  grpc:
+    host: "0.0.0.0"
+    port: 6751
+  http:
+    host: "0.0.0.0"
+    port: 8080
+
+database:
+  type: "mysql"
+  mysql:
+    host: "mysql"
+    port: 3306
+    user: "mxsec_user"
+    password: "MYSQL_PASSWORD_PLACEHOLDER"
+    database: "mxsec"
+    charset: "utf8mb4"
+    parse_time: true
+    loc: "Asia/Shanghai"
+    max_idle_conns: 20
+    max_open_conns: 200
+    conn_max_lifetime: "1h"
+
+mtls:
+  ca_cert: "/etc/mxsec-platform/certs/ca.crt"
+  server_cert: "/etc/mxsec-platform/certs/server.crt"
+  server_key: "/etc/mxsec-platform/certs/server.key"
+
+log:
+  level: "info"
+  format: "json"
+  file: "/var/log/mxsec-platform/server.log"
+  max_age: 30
+
+agent:
+  heartbeat_interval: 60
+  work_dir: "/var/lib/mxsec-agent"
+
+plugins:
+  dir: "/opt/mxsec-platform/plugins"
+  base_url: "PLUGINS_BASE_URL_PLACEHOLDER"

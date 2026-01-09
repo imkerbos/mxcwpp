@@ -19,9 +19,12 @@ FROM --platform=linux/amd64 alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata curl
 
 COPY --from=builder /app/manager /usr/bin/manager
-COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/baseline-policies
+COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/policies
+COPY --from=builder /app/scripts /opt/mxsec-platform/scripts
 
 RUN mkdir -p /etc/mxsec-platform /var/log/mxsec-platform /opt/mxsec-platform/plugins
+
+WORKDIR /opt/mxsec-platform
 
 EXPOSE 8080
 

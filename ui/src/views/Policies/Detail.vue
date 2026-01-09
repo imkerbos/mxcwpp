@@ -696,7 +696,7 @@ const handleHostSelectorConfirm = async (data: {
       rule_ids: pendingRecheckRuleIds.value.length > 0 ? pendingRecheckRuleIds.value : undefined,
     }
 
-    const task = await tasksApi.create(taskData) as any
+    await tasksApi.create(taskData)
     message.success('检查任务创建成功，请前往任务执行页面手动执行')
 
     // 清空待检查规则

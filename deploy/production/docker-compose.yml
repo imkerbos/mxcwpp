@@ -86,6 +86,7 @@ services:
       - ./certs:/etc/mxsec-platform/certs:ro
       - ${DATA_DIR}/logs/manager:/var/log/mxsec-platform
       - ${DATA_DIR}/plugins:/opt/mxsec-platform/plugins:ro
+      - ${DATA_DIR}/uploads:/opt/mxsec-platform/uploads
     environment:
       TZ: ${TZ:-Asia/Shanghai}
     healthcheck:

@@ -133,13 +133,9 @@
                 </a-select-option>
               </a-select>
             </div>
-            <div v-if="selectedBusinessLine" class="command-box" style="margin-top: 12px">
-              <code class="command">{{ advancedInstallCommand }}</code>
-              <a-button type="link" @click="copyCommand(advancedInstallCommand)" class="copy-btn">
-                <template #icon><CopyOutlined /></template>
-                复制命令
-              </a-button>
-            </div>
+            <p v-if="selectedBusinessLine" class="tip" style="margin-top: 8px">
+              <InfoCircleOutlined /> 已选择业务线，上方安装命令已自动包含业务线配置
+            </p>
           </a-collapse-panel>
         </a-collapse>
       </div>
@@ -261,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   CopyOutlined,
@@ -284,7 +280,6 @@ const isLocalhost = computed(() => {
 // 初始化服务器地址
 const initServerAddresses = () => {
   const hostname = window.location.hostname
-  const port = window.location.port || '80'
 
   // 如果是 localhost，提示用户输入实际地址
   if (isLocalhost.value) {
@@ -311,11 +306,18 @@ const businessLines = ref<BusinessLine[]>([])
 const autoInstallCommand = computed(() => {
   const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
   const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
-  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
+  // curl 通过当前访问地址获取脚本（nginx 代理 /agent 路径）
   // MXSEC_HTTP_SERVER 使用后端地址（8080），因为脚本内部需要下载安装包
   const hostname = window.location.hostname
-  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : httpAddr
-  return `MXSEC_HTTP_SERVER=${httpAddr} MXSEC_AGENT_SERVER=${grpcAddr} bash -c "$(curl -fsSL http://${curlAddr}/agent/install.sh)"`
+  const port = window.location.port
+  // 开发环境（3000）或生产环境（80/空）都通过当前地址访问
+  const curlAddr = port && port !== '80' && port !== '443' ? `${hostname}:${port}` : hostname
+  let envVars = `MXSEC_HTTP_SERVER=${httpAddr} MXSEC_AGENT_SERVER=${grpcAddr}`
+  // 如果选择了业务线，添加到环境变量
+  if (selectedBusinessLine.value) {
+    envVars += ` MXSEC_BUSINESS_LINE=${selectedBusinessLine.value}`
+  }
+  return `${envVars} bash -c "$(curl -fsSL http://${curlAddr}/agent/install.sh)"`
 })
 
 const manualInstallCommand = computed(() => {
@@ -329,29 +331,15 @@ const manualInstallCommand = computed(() => {
   }
 })
 
-const advancedInstallCommand = computed(() => {
-  const httpAddr = httpServerAddress.value || 'YOUR_HTTP_SERVER:8080'
-  const grpcAddr = grpcServerAddress.value || 'YOUR_GRPC_SERVER:6751'
-  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
-  // MXSEC_HTTP_SERVER 使用后端地址（8080），因为脚本内部需要下载安装包
-  const hostname = window.location.hostname
-  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : httpAddr
-  let envVars = `MXSEC_HTTP_SERVER=${httpAddr} MXSEC_AGENT_SERVER=${grpcAddr}`
-
-  if (selectedBusinessLine.value) {
-    envVars += ` MXSEC_BUSINESS_LINE=${selectedBusinessLine.value}`
-  }
-
-  return `${envVars} bash -c "$(curl -fsSL http://${curlAddr}/agent/install.sh)"`
-})
-
 const statusCommand = 'systemctl status mxsec-agent'
 const logCommand = 'journalctl -u mxsec-agent -n 50 --no-pager | grep -i connect'
 
 const uninstallCommand = computed(() => {
-  // curl 使用前端地址（3000），因为前端代理了 /agent 路径
+  // curl 通过当前访问地址获取脚本（nginx 代理 /agent 路径）
   const hostname = window.location.hostname
-  const curlAddr = window.location.port === '3000' ? `${hostname}:3000` : (httpServerAddress.value || 'YOUR_HTTP_SERVER:8080')
+  const port = window.location.port
+  // 开发环境（3000）或生产环境（80/空）都通过当前地址访问
+  const curlAddr = port && port !== '80' && port !== '443' ? `${hostname}:${port}` : hostname
   return `bash -c "$(curl -fsSL http://${curlAddr}/agent/uninstall.sh)"`
 })
 

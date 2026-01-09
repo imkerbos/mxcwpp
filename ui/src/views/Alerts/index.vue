@@ -106,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import { alertsApi, type Alert, type AlertStatistics } from '@/api/alerts'
@@ -151,10 +151,6 @@ const filters = ref({
   keyword: undefined as string | undefined,
 })
 
-// 根据标签页设置状态过滤
-const statusFilter = computed(() => {
-  return activeTab.value === 'active' ? 'active' : undefined
-})
 
 const loadStatistics = async () => {
   try {

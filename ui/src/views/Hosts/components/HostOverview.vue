@@ -715,7 +715,7 @@
                         :percent="record.usage_percent"
                         :status="record.usage_percent > 90 ? 'exception' : record.usage_percent > 80 ? 'active' : 'success'"
                         :stroke-width="8"
-                        :format="(percent) => `${percent?.toFixed(1)}%`"
+                        :format="(percent: number) => `${percent?.toFixed(1)}%`"
                       />
                     </template>
                   </template>
@@ -888,7 +888,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import { message } from 'ant-design-vue'
-import { hostsApi, type HostRiskStatistics, type HostPlugin } from '@/api/hosts'
+import { hostsApi, type HostRiskStatistics } from '@/api/hosts'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 import { componentsApi } from '@/api/components'
 import type { HostDetail, BaselineScore, DiskInfo, NetworkInterfaceInfo } from '@/api/types'
@@ -1023,7 +1023,7 @@ const loadComponents = async () => {
       status: agentCurrentVersion ? 'running' : 'not_installed',
       start_time: props.host.agent_start_time,
       updated_at: props.host.updated_at,
-      need_update: agentLatestVersion && agentCurrentVersion && agentCurrentVersion !== agentLatestVersion,
+      need_update: !!(agentLatestVersion && agentCurrentVersion && agentCurrentVersion !== agentLatestVersion),
     })
     
     // 添加插件
@@ -1174,7 +1174,7 @@ const loadOverviewData = async () => {
 // has_value: 有值
 // not_collected: 未采集（Agent 未连接或代码未更新）
 // no_data: 无数据（Agent 已连接但采集不到数据，如容器环境）
-const getFieldStatus = (fieldValue: any, fieldType: 'hardware' | 'normal' = 'normal'): 'has_value' | 'not_collected' | 'no_data' => {
+const getFieldStatus = (fieldValue: any, _fieldType: 'hardware' | 'normal' | 'ip' = 'normal'): 'has_value' | 'not_collected' | 'no_data' => {
   // 如果有值，返回有值
   if (fieldValue !== null && fieldValue !== undefined && fieldValue !== '') {
     return 'has_value'
@@ -1195,7 +1195,7 @@ const getFieldStatus = (fieldValue: any, fieldType: 'hardware' | 'normal' = 'nor
 
 // 获取字段状态的显示文本和提示
 const getFieldStatusText = (fieldValue: any, fieldType: 'hardware' | 'normal' | 'ip' = 'normal'): { text: string, tooltip: string } => {
-  const status = getFieldStatus(fieldValue, fieldType)
+  const status = getFieldStatus(fieldValue, fieldType as 'hardware' | 'normal' | 'ip')
   
   if (status === 'has_value') {
     return { text: String(fieldValue), tooltip: String(fieldValue) }
@@ -1310,7 +1310,7 @@ const handleCancelTags = () => {
 }
 
 // 通用的复制文本方法
-const copyText = async (text: string, label: string = '内容') => {
+const copyText = async (text: string | undefined, label: string = '内容') => {
   if (!text) return
   
   try {

@@ -746,10 +746,6 @@ const enabledPolicies = computed(() => {
   return policies.value.filter((p) => p.enabled)
 })
 
-// 启用的策略组
-const enabledPolicyGroups = computed(() => {
-  return policyGroups.value.filter((g) => g.enabled)
-})
 
 // 根据运行时类型筛选的策略组（用于立即检查-按策略组选择）
 // 只显示包含匹配运行时类型策略的策略组，并计算匹配策略数量

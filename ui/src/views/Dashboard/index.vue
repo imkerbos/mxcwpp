@@ -117,8 +117,8 @@
             <div class="agent-stat-item">
               <div class="stat-label">内存平均使用量</div>
               <div class="stat-value">
-                <span class="stat-number">{{ formatMemory(stats.avgMemoryUsage) }}</span>
-                <span class="stat-suffix">较昨日 {{ formatMemoryChange(stats.avgMemoryUsageChange) }}</span>
+                <span class="stat-number">{{ formatMemory(stats.avgMemoryUsage ?? 0) }}</span>
+                <span class="stat-suffix">较昨日 {{ formatMemoryChange(stats.avgMemoryUsageChange ?? 0) }}</span>
               </div>
             </div>
           </a-space>

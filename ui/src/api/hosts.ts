@@ -1,6 +1,8 @@
 import apiClient from './client'
 import type { Host, HostDetail, PaginatedResponse, BaselineScore, BaselineSummary, HostMetrics } from './types'
 
+export type { Host } from './types'
+
 export interface HostStatusDistribution {
   running: number
   abnormal: number

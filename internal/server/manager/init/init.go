@@ -61,8 +61,8 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	}
 
 	// 5.1 初始化默认数据（策略和规则）
-	policyDir := "plugins/baseline/config/examples"
-	if err := migration.InitDefaultData(db, logger, policyDir, &cfg.Plugins); err != nil {
+	// policyDir 传空字符串，让 InitDefaultData 自动检测生产/开发环境路径
+	if err := migration.InitDefaultData(db, logger, "", &cfg.Plugins); err != nil {
 		logger.Warn("初始化默认数据失败", zap.Error(err))
 		// 不中断启动，允许后续手动初始化
 	}

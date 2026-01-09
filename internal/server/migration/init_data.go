@@ -42,25 +42,21 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		return fmt.Errorf("初始化默认插件配置失败: %w", err)
 	}
 
-	// 检查是否已有策略数据
+	// 检查默认策略组是否已有策略数据
 	var count int64
-	if err := db.Model(&model.Policy{}).Count(&count).Error; err != nil {
+	if err := db.Model(&model.Policy{}).Where("group_id = ?", DefaultPolicyGroupID).Count(&count).Error; err != nil {
 		return fmt.Errorf("检查现有数据失败: %w", err)
 	}
 
 	if count > 0 {
-		logger.Info("数据库中已存在策略数据，跳过策略初始化", zap.Int64("count", count))
-		// 检查并更新已存在策略的 group_id（如果为空）
-		if err := associateExistingPoliciesWithGroup(db, logger); err != nil {
-			logger.Warn("关联已存在策略到默认策略组失败", zap.Error(err))
-		}
+		logger.Info("默认策略组已存在策略数据，跳过策略初始化", zap.Int64("count", count))
 	} else {
 
 		// 从示例策略文件加载
 		if policyDir == "" {
 			// 优先使用生产环境路径，回退到开发环境路径
-			if _, err := os.Stat("/opt/mxsec-platform/baseline-policies"); err == nil {
-				policyDir = "/opt/mxsec-platform/baseline-policies"
+			if _, err := os.Stat("/opt/mxsec-platform/policies"); err == nil {
+				policyDir = "/opt/mxsec-platform/policies"
 			} else {
 				policyDir = "plugins/baseline/config/examples"
 			}

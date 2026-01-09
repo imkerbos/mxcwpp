@@ -112,7 +112,6 @@ import { UploadOutlined } from '@ant-design/icons-vue'
 import type { UploadFile, UploadProps } from 'ant-design-vue'
 import { systemConfigApi, type SiteConfig } from '@/api/system-config'
 
-const formRef = ref<InstanceType<typeof import('ant-design-vue')['Form']>>()
 const saving = ref(false)
 const logoPreview = ref<string>('')
 const fileList = ref<UploadFile[]>([])

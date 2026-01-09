@@ -57,6 +57,9 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// API 路由
 	apiV1 := router.Group("/api/v1")
 
+	// API 健康检查（用于前端获取版本信息）
+	apiV1.GET("/health", healthHandler.Health)
+
 	// 认证相关路由（不需要认证）
 	jwtSecret := cfg.Server.JWTSecret
 	if jwtSecret == "" {

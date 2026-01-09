@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { Policy, Rule, PolicyStatistics } from './types'
+import type { Policy, PolicyStatistics } from './types'
 
 export const policiesApi = {
   // 获取策略列表
@@ -24,8 +24,10 @@ export const policiesApi = {
     description?: string
     os_family?: string[]
     os_version?: string
+    os_requirements?: Array<{ os_family: string; min_version?: string; max_version?: string }>
     enabled?: boolean
     group_id?: string
+    runtime_types?: string[]
     rules?: Array<{
       rule_id: string
       category?: string
@@ -46,8 +48,10 @@ export const policiesApi = {
     description?: string
     os_family?: string[]
     os_version?: string
+    os_requirements?: Array<{ os_family: string; min_version?: string; max_version?: string }>
     enabled?: boolean
     group_id?: string
+    runtime_types?: string[]
     rules?: Array<{
       rule_id: string
       category?: string

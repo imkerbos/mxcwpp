@@ -195,7 +195,7 @@
               mode="multiple"
               placeholder="请选择业务线"
               style="width: 100%"
-              :filter-option="(input, option) => filterBusinessLineOption(input, { label: option.label || option.children })"
+              :filter-option="(input: string, option: any) => filterBusinessLineOption(input, { label: option.label || option.children })"
               allow-clear
               show-search
             >
@@ -211,7 +211,7 @@
               placeholder="请选择主机"
               style="width: 100%"
               show-search
-              :filter-option="(input, option) => filterHostOption(input, { label: option.label || option.children })"
+              :filter-option="(input: string, option: any) => filterHostOption(input, { label: option.label || option.children })"
               allow-clear
             >
               <a-select-option
@@ -357,7 +357,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
-import { SearchOutlined, ReloadOutlined, PlusOutlined } from '@ant-design/icons-vue'
+import { SearchOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import {
   notificationsApi,
   type Notification,
@@ -508,11 +508,6 @@ const modalTitle = computed(() => (isEdit.value ? '编辑通知' : '新建通知
 const getScopeText = (scope: string) => SCOPE_TEXT_MAP[scope] || scope
 const getTypeText = (type: string) => TYPE_TEXT_MAP[type] || type
 
-const filterNotificationTypeOption = (input: string, option: any) => {
-  if (!input) return true
-  const text = option.children || option.label || ''
-  return String(text).toLowerCase().indexOf(input.toLowerCase()) >= 0
-}
 
 const filterBusinessLineOption = (input: string, option: any) => {
   if (!input) return true
@@ -671,7 +666,11 @@ const handleSubmit = async () => {
 
   submitting.value = true
   try {
-    const scopeValue: ScopeValueData = {}
+    const scopeValue: ScopeValueData = {
+      tags: [],
+      business_lines: [],
+      host_ids: [],
+    }
     if (formData.scope === 'host_tags') {
       scopeValue.tags = formData.scope_value.tags || []
     } else if (formData.scope === 'business_line') {

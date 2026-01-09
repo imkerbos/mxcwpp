@@ -13,7 +13,7 @@
           <div v-else class="logo-icon">M</div>
           <div class="logo-text">
             <div class="logo-title">{{ siteConfigStore.siteName }}</div>
-            <div class="logo-version">V1.0.0</div>
+            <div class="logo-version">{{ appVersion }}</div>
           </div>
         </div>
       </div>
@@ -145,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   DashboardOutlined,
@@ -163,6 +163,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useSiteConfigStore } from '@/stores/site-config'
 import { authApi } from '@/api/auth'
+import apiClient from '@/api/client'
 import { message } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
 import { onMounted } from 'vue'
@@ -172,9 +173,23 @@ const route = useRoute()
 const authStore = useAuthStore()
 const siteConfigStore = useSiteConfigStore()
 
+// 应用版本号
+const appVersion = ref('--')
+
+// 获取应用版本
+const fetchAppVersion = async () => {
+  try {
+    const response = await apiClient.get<{ version: string; status: string }>('/health')
+    appVersion.value = response.version ? `V${response.version}` : '--'
+  } catch {
+    appVersion.value = '--'
+  }
+}
+
 // 初始化站点配置
 onMounted(() => {
   siteConfigStore.init()
+  fetchAppVersion()
 })
 
 const collapsed = ref(false)

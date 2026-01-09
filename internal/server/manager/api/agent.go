@@ -130,6 +130,7 @@ func (h *AgentHandler) readInstallScript() (string, error) {
 	possiblePaths := []string{
 		"scripts/install.sh",
 		"./scripts/install.sh",
+		"/opt/mxsec-platform/scripts/install.sh",
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts/install.sh"),
 	}
 
@@ -151,6 +152,7 @@ func (h *AgentHandler) readUninstallScript() (string, error) {
 	possiblePaths := []string{
 		"scripts/uninstall.sh",
 		"./scripts/uninstall.sh",
+		"/opt/mxsec-platform/scripts/uninstall.sh",
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts/uninstall.sh"),
 	}
 

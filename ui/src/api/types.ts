@@ -83,6 +83,7 @@ export interface HostDetail extends Host {
   device_id?: string
   public_ipv4?: string[]
   public_ipv6?: string[]
+  ipv6?: string[] // IPv6 地址列表
   business_line?: string
   system_boot_time?: string
   agent_start_time?: string

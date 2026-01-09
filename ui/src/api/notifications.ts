@@ -25,9 +25,9 @@ export interface Notification {
 }
 
 export interface ScopeValueData {
-  tags?: string[]
-  business_lines?: string[]
-  host_ids?: string[]
+  tags: string[]
+  business_lines: string[]
+  host_ids: string[]
 }
 
 export interface CreateNotificationRequest {
@@ -38,7 +38,7 @@ export interface CreateNotificationRequest {
   type: 'lark' | 'webhook'
   severities?: string[] // 仅基线告警需要
   scope: 'global' | 'host_tags' | 'business_line' | 'specified'
-  scope_value?: ScopeValueData
+  scope_value: ScopeValueData
   frontend_url?: string
   config: {
     webhook_url: string

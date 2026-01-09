@@ -109,7 +109,6 @@ import UserModal from './components/UserModal.vue'
 
 const loading = ref(false)
 const users = ref<User[]>([])
-const total = ref(0)
 const modalVisible = ref(false)
 const currentUser = ref<User | null>(null)
 

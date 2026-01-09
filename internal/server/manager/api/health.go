@@ -54,11 +54,19 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	// 如果数据库不可用，整体状态设为 degraded
 	if dbStatus != "ok" {
 		response.Status = "degraded"
-		c.JSON(http.StatusServiceUnavailable, response)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    503,
+			"message": "服务不可用",
+			"data":    response,
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data":    response,
+	})
 }
 
 // checkDatabase 检查数据库连接状态

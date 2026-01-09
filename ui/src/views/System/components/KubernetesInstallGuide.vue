@@ -160,7 +160,7 @@ import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { CopyOutlined } from '@ant-design/icons-vue'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
-import { systemConfigApi, type KubernetesImageConfig } from '@/api/system-config'
+import { systemConfigApi } from '@/api/system-config'
 
 // 获取当前页面的基础 URL（用于构建 Server 地址）
 const getBaseUrl = () => {
