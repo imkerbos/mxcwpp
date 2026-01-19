@@ -390,7 +390,8 @@
             :columns="detailedResultColumns"
             :data-source="filteredDetailedResults"
             :loading="detailResultsLoading"
-            :pagination="{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total: number) => `共 ${total} 条` }"
+            :pagination="detailPagination"
+            @change="handleDetailTableChange"
             row-key="rule_id"
             size="small"
           >
@@ -513,6 +514,12 @@ interface DetailedResult {
 const detailedResults = ref<DetailedResult[]>([])
 const detailResultsLoading = ref(false)
 const resultFilter = ref<'all' | 'fail' | 'error' | 'pass'>('all')
+const detailPagination = ref({
+  pageSize: 20,
+  showSizeChanger: true,
+  pageSizeOptions: ['10', '20', '50', '100'],
+  showTotal: (total: number) => `共 ${total} 条`
+})
 
 // 批量操作相关
 const selectedRowKeys = ref<string[]>([])
@@ -1097,6 +1104,10 @@ const handleTableChange = (pag: any) => {
   pagination.current = pag.current
   pagination.pageSize = pag.pageSize
   loadTasks()
+}
+
+const handleDetailTableChange = (pag: any) => {
+  detailPagination.value.pageSize = pag.pageSize
 }
 
 const getStatusColor = (status: string) => {

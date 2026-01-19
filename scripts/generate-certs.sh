@@ -29,6 +29,9 @@ VALIDITY_DAYS="${VALIDITY_DAYS:-3650}"  # 默认 10 年
 # 额外的 IP 地址（用于外部访问，如 192.168.8.140）
 EXTRA_IPS="${EXTRA_IPS:-}"  # 逗号分隔的 IP 列表，如 "192.168.8.140,10.0.0.1"
 
+# 额外的域名（用于域名访问）
+EXTRA_DOMAINS="${EXTRA_DOMAINS:-}"  # 逗号分隔的域名列表，如 "agent.example.com,*.example.com"
+
 # 创建证书目录
 mkdir -p "${CERT_DIR}"
 
@@ -84,6 +87,22 @@ IP.${IP_INDEX} = ${ip}"
     done
 fi
 
+# 构建额外域名配置
+EXTRA_DNS_CONFIG=""
+if [ -n "$EXTRA_DOMAINS" ]; then
+    DNS_INDEX=5
+    IFS=',' read -ra DOMAINS <<< "$EXTRA_DOMAINS"
+    for domain in "${DOMAINS[@]}"; do
+        domain=$(echo "$domain" | xargs)  # 去除空格
+        if [ -n "$domain" ]; then
+            EXTRA_DNS_CONFIG="${EXTRA_DNS_CONFIG}
+DNS.${DNS_INDEX} = ${domain}"
+            DNS_INDEX=$((DNS_INDEX + 1))
+            echo -e "${GREEN}  → 添加域名: ${domain}${NC}"
+        fi
+    done
+fi
+
 openssl x509 -req -days "${VALIDITY_DAYS}" \
     -in "${SERVER_CSR}" \
     -CA "${CA_CERT}" \
@@ -102,7 +121,7 @@ subjectAltName = @alt_names
 DNS.1 = localhost
 DNS.2 = *.local
 DNS.3 = agentcenter
-DNS.4 = agentcenter.mxsec-network
+DNS.4 = agentcenter.mxsec-network${EXTRA_DNS_CONFIG}
 IP.1 = 127.0.0.1
 IP.2 = ::1${EXTRA_IP_CONFIG}
 EOF

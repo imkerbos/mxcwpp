@@ -215,7 +215,7 @@
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'hostname'">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <a-button type="link" @click="handleViewDetail(record)">
+            <a-button type="link" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.host_id, e)">
               {{ record.hostname }}
             </a-button>
             <a-tag v-if="record.runtime_type === 'docker'" color="blue" style="margin: 0;">
@@ -248,7 +248,7 @@
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
-            <a-button type="link" @click="handleViewDetail(record)">查看详情</a-button>
+            <a-button type="link" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.host_id, e)">查看详情</a-button>
             <a-popconfirm
               title="确定要删除这台主机吗？"
               description="删除后将同时删除该主机的所有扫描结果、告警和相关数据，此操作不可恢复。"
@@ -608,8 +608,21 @@ const handleTableChange = (pag: any) => {
   loadHosts()
 }
 
-const handleViewDetail = (record: Host) => {
+const handleViewDetail = (record: Host, e?: MouseEvent) => {
+  // 如果按下 Ctrl/Cmd 键，不执行默认导航（由 mousedown 处理）
+  if (e && (e.ctrlKey || e.metaKey)) {
+    return
+  }
   router.push(`/hosts/${record.host_id}`)
+}
+
+// 处理链接鼠标按下事件（支持 Ctrl/Cmd+Click 新标签打开）
+const handleLinkMouseDown = (hostId: string, e: MouseEvent) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    const url = `${window.location.origin}/hosts/${hostId}`
+    window.open(url, '_blank')
+  }
 }
 
 // 删除主机

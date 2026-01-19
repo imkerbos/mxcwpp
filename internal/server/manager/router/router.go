@@ -170,6 +170,7 @@ func setupResultsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/results/:result_id", handler.GetResult)
 	router.GET("/results/host/:host_id/score", handler.GetHostBaselineScore)
 	router.GET("/results/host/:host_id/summary", handler.GetHostBaselineSummary)
+	router.GET("/results/host/:host_id/export", handler.ExportHostBaselineResults)
 }
 
 // setupDashboardAPI 设置 Dashboard API 路由

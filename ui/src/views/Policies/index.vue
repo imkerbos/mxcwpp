@@ -114,7 +114,7 @@
           </template>
           <template v-else-if="column.key === 'action'">
             <span class="action-cell">
-              <a-button type="link" size="small" @click="handleViewDetail(record)">详情</a-button>
+              <a-button type="link" size="small" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.id, e)">详情</a-button>
               <a-button type="link" size="small" @click="handleRecheck(record)">重新检查</a-button>
             </span>
           </template>
@@ -1640,8 +1640,19 @@ const getCheckTimeText = (_task: ScanTask): string => {
   return '定时执行'
 }
 
-const handleViewDetail = (record: Policy) => {
+const handleViewDetail = (record: Policy, e?: MouseEvent) => {
+  if (e && (e.ctrlKey || e.metaKey)) {
+    return
+  }
   router.push(`/policies/${record.id}`)
+}
+
+const handleLinkMouseDown = (policyId: string, e: MouseEvent) => {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    const url = `${window.location.origin}/policies/${policyId}`
+    window.open(url, '_blank')
+  }
 }
 
 const handleRecheck = async (record: Policy) => {

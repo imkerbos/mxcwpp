@@ -27,19 +27,40 @@
         <a-radio-button value="fail">失败 ({{ failCount + errorCount }})</a-radio-button>
         <a-radio-button value="pass">通过 ({{ passCount }})</a-radio-button>
       </a-radio-group>
-      <a-input-search
-        v-model:value="searchKeyword"
-        placeholder="搜索规则ID或标题"
-        style="width: 250px"
-        allow-clear
-      />
+      <div class="filter-right">
+        <a-input-search
+          v-model:value="searchKeyword"
+          placeholder="搜索规则ID或标题"
+          style="width: 250px"
+          allow-clear
+        />
+        <a-dropdown>
+          <template #overlay>
+            <a-menu @click="handleExport">
+              <a-menu-item key="markdown">
+                <FileMarkdownOutlined />
+                导出为 Markdown
+              </a-menu-item>
+              <a-menu-item key="excel">
+                <FileExcelOutlined />
+                导出为 Excel
+              </a-menu-item>
+            </a-menu>
+          </template>
+          <a-button type="primary" :loading="exporting">
+            <DownloadOutlined />
+            导出
+          </a-button>
+        </a-dropdown>
+      </div>
     </div>
 
     <a-table
       :columns="columns"
       :data-source="filteredResults"
       :loading="loading"
-      :pagination="{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100', '200'], showTotal: (total: number) => `共 ${total} 条` }"
+      :pagination="pagination"
+      @change="handleTableChange"
       row-key="result_id"
       size="small"
     >
@@ -78,6 +99,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { message } from 'ant-design-vue'
+import { DownloadOutlined, FileMarkdownOutlined, FileExcelOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
 import type { ScanResult } from '@/api/types'
 
@@ -86,9 +109,16 @@ const props = defineProps<{
 }>()
 
 const loading = ref(false)
+const exporting = ref(false)
 const results = ref<ScanResult[]>([])
 const statusFilter = ref<'all' | 'fail' | 'pass'>('all')
 const searchKeyword = ref('')
+const pagination = ref({
+  pageSize: 20,
+  showSizeChanger: true,
+  pageSizeOptions: ['10', '20', '50', '100', '200'],
+  showTotal: (total: number) => `共 ${total} 条`
+})
 
 // 统计数据
 const totalCount = computed(() => results.value.length)
@@ -216,6 +246,24 @@ const getSeverityText = (severity: string) => {
   return texts[severity] || severity
 }
 
+const handleExport = async ({ key }: { key: string }) => {
+  exporting.value = true
+  try {
+    const format = key as 'markdown' | 'excel'
+    await hostsApi.exportBaselineResults(props.hostId, format)
+    message.success(`导出${format === 'markdown' ? 'Markdown' : 'Excel'}成功`)
+  } catch (error) {
+    console.error('导出失败:', error)
+    message.error('导出失败，请重试')
+  } finally {
+    exporting.value = false
+  }
+}
+
+const handleTableChange = (pag: any) => {
+  pagination.value.pageSize = pag.pageSize
+}
+
 onMounted(() => {
   loadBaselineResults()
 })
@@ -266,6 +314,12 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.filter-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
 .failure-reason {

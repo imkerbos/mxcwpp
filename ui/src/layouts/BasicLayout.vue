@@ -60,6 +60,7 @@
               mode="inline"
               :inline-collapsed="collapsed"
               @click="handleMenuClick"
+              @mousedown="handleMenuMouseDown"
             >
               <a-menu-item key="dashboard">
                 <template #icon>
@@ -279,37 +280,48 @@ watch(
   { immediate: true }
 )
 
+// 路由映射表
+const routeMap: Record<string, string> = {
+  'dashboard': '/dashboard',
+  'hosts': '/hosts',
+  'business-lines': '/business-lines',
+  'policy-groups': '/policy-groups',
+  'policies': '/policies',
+  'tasks': '/tasks',
+  'users': '/users',
+  'system-collection': '/system/collection',
+  'system-settings': '/system/settings',
+  'system-notification': '/system/notification',
+  'system-components': '/system/components',
+  'system-install': '/system/install',
+  'system-reports': '/system/reports',
+  'system-task-report': '/system/task-report',
+  'alerts': '/alerts',
+}
+
+// 处理菜单鼠标按下事件（支持 Ctrl/Cmd+Click 新标签打开）
+const handleMenuMouseDown = (e: MouseEvent) => {
+  // 检测是否按下 Ctrl（Windows/Linux）或 Cmd（Mac）键
+  if (e.ctrlKey || e.metaKey) {
+    // 找到点击的菜单项
+    const target = e.target as HTMLElement
+    const menuItem = target.closest('.ant-menu-item')
+    if (menuItem) {
+      const key = menuItem.getAttribute('data-menu-id')
+      if (key && routeMap[key]) {
+        e.preventDefault()
+        // 在新标签页打开
+        const url = window.location.origin + routeMap[key]
+        window.open(url, '_blank')
+      }
+    }
+  }
+}
+
 const handleMenuClick = ({ key }: { key: string }) => {
-  if (key === 'dashboard') {
-    router.push('/dashboard')
-  } else if (key === 'hosts') {
-    router.push('/hosts')
-  } else if (key === 'business-lines') {
-    router.push('/business-lines')
-  } else if (key === 'policy-groups') {
-    router.push('/policy-groups')
-  } else if (key === 'policies') {
-    router.push('/policies')
-  } else if (key === 'tasks') {
-    router.push('/tasks')
-  } else if (key === 'users') {
-    router.push('/users')
-  } else if (key === 'system-collection') {
-    router.push('/system/collection')
-  } else if (key === 'system-settings') {
-    router.push('/system/settings')
-  } else if (key === 'system-notification') {
-    router.push('/system/notification')
-  } else if (key === 'system-components') {
-    router.push('/system/components')
-  } else if (key === 'system-install') {
-    router.push('/system/install')
-  } else if (key === 'system-reports') {
-    router.push('/system/reports')
-  } else if (key === 'system-task-report') {
-    router.push('/system/task-report')
-  } else if (key === 'alerts') {
-    router.push('/alerts')
+  const path = routeMap[key]
+  if (path) {
+    router.push(path)
   }
 }
 
