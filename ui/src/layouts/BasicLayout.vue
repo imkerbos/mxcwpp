@@ -181,7 +181,7 @@ const appVersion = ref('--')
 const fetchAppVersion = async () => {
   try {
     const response = await apiClient.get<{ version: string; status: string }>('/health')
-    appVersion.value = response.version ? `V${response.version}` : '--'
+    appVersion.value = response.version || '--'
   } catch {
     appVersion.value = '--'
   }
