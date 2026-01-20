@@ -30,7 +30,8 @@
               <strong>更多信息：</strong>
             </a-typography-paragraph>
             <a-typography-paragraph>
-              如需了解更多信息，请访问项目仓库或查看文档。
+              • GitHub 仓库: <a href="https://github.com/imkerbos/mxsec-platform" target="_blank">https://github.com/imkerbos/mxsec-platform</a><br>
+              • Powered by Kerbos
             </a-typography-paragraph>
           </a-typography>
         </template>

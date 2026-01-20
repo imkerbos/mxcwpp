@@ -53,7 +53,7 @@
             </div>
             <div class="info-row" v-if="status.has_package">
               <span class="label">组件包:</span>
-              <span class="value">v{{ status.package_version }} ({{ status.package_arch }})</span>
+              <span class="value">{{ status.package_version }} ({{ status.package_arch }})</span>
             </div>
             <div class="info-row">
               <span class="label">状态:</span>
