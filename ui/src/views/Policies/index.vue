@@ -114,7 +114,7 @@
           </template>
           <template v-else-if="column.key === 'action'">
             <span class="action-cell">
-              <a-button type="link" size="small" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.id, e)">详情</a-button>
+              <a-button type="link" size="small" @click="(e: MouseEvent) => handleViewDetail(record, e)" @mousedown="(e: MouseEvent) => handleLinkMouseDown(record.id, e)">详情</a-button>
               <a-button type="link" size="small" @click="handleRecheck(record)">重新检查</a-button>
             </span>
           </template>

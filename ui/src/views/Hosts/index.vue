@@ -215,7 +215,7 @@
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'hostname'">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <a-button type="link" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.host_id, e)">
+            <a-button type="link" @click="(e: MouseEvent) => handleViewDetail(record, e)" @mousedown="(e: MouseEvent) => handleLinkMouseDown(record.host_id, e)">
               {{ record.hostname }}
             </a-button>
             <a-tag v-if="record.runtime_type === 'docker'" color="blue" style="margin: 0;">
@@ -248,7 +248,7 @@
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
-            <a-button type="link" @click="(e) => handleViewDetail(record, e)" @mousedown="(e) => handleLinkMouseDown(record.host_id, e)">查看详情</a-button>
+            <a-button type="link" @click="(e: MouseEvent) => handleViewDetail(record, e)" @mousedown="(e: MouseEvent) => handleLinkMouseDown(record.host_id, e)">查看详情</a-button>
             <a-popconfirm
               title="确定要删除这台主机吗？"
               description="删除后将同时删除该主机的所有扫描结果、告警和相关数据，此操作不可恢复。"
