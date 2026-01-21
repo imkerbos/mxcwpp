@@ -150,12 +150,22 @@ func (s *PolicyService) GetPoliciesForHostWithRuntime(osFamily, osVersion string
 	query := s.db.Where("enabled = ?", true)
 
 	// 如果指定了 OS 系列，过滤匹配的策略
-	// 注意：这里简化实现，实际应该支持 JSON 数组查询和版本约束匹配
+	// 支持 OS Family 兼容性：Rocky Linux 9 和 CentOS Stream 9 互相兼容
 	if osFamily != "" {
-		// MySQL/PostgreSQL 的 JSON 查询
-		// MySQL: JSON_CONTAINS(os_family, '"rocky"')
-		// PostgreSQL: os_family @> '["rocky"]'::jsonb
-		query = query.Where("JSON_CONTAINS(os_family, ?)", fmt.Sprintf(`"%s"`, osFamily))
+		// 获取兼容的 OS Family 列表
+		compatibleFamilies := getCompatibleOSFamilies(osFamily)
+
+		// 构建 OR 查询条件
+		var conditions []string
+		var args []interface{}
+		for _, family := range compatibleFamilies {
+			conditions = append(conditions, "JSON_CONTAINS(os_family, ?)")
+			args = append(args, fmt.Sprintf(`"%s"`, family))
+		}
+
+		if len(conditions) > 0 {
+			query = query.Where(strings.Join(conditions, " OR "), args...)
+		}
 	}
 
 	if err := query.Preload("Rules").Find(&policies).Error; err != nil {
@@ -165,9 +175,15 @@ func (s *PolicyService) GetPoliciesForHostWithRuntime(osFamily, osVersion string
 	// 过滤版本约束匹配的策略
 	var matchedPolicies []model.Policy
 	for _, policy := range policies {
-		// 检查版本约束
-		if osVersion != "" && policy.OSVersion != "" && !matchVersion(osVersion, policy.OSVersion) {
-			continue
+		// 检查版本约束（优先使用 os_requirements，向后兼容 os_version）
+		if osFamily != "" && osVersion != "" {
+			if !matchOSRequirements(osFamily, osVersion, policy) {
+				s.logger.Debug("策略版本约束不匹配",
+					zap.String("policy_id", policy.ID),
+					zap.String("host_os_family", osFamily),
+					zap.String("host_os_version", osVersion))
+				continue
+			}
 		}
 
 		// 检查运行时类型匹配
@@ -276,4 +292,61 @@ func compareVersion(v1, v2 string) int {
 	}
 
 	return 0
+}
+
+// getCompatibleOSFamilies 获取兼容的 OS Family 列表
+// 例如：rocky 和 centos 在 EL9 上互相兼容
+func getCompatibleOSFamilies(osFamily string) []string {
+	// 定义 OS Family 兼容性映射
+	compatibilityMap := map[string][]string{
+		"rocky":  {"rocky", "centos", "rhel"},  // Rocky Linux 兼容 CentOS 和 RHEL
+		"centos": {"centos", "rocky", "rhel"},  // CentOS 兼容 Rocky Linux 和 RHEL
+		"rhel":   {"rhel", "rocky", "centos"},  // RHEL 兼容 Rocky Linux 和 CentOS
+		"oracle": {"oracle", "rhel"},           // Oracle Linux 兼容 RHEL
+	}
+
+	// 如果有兼容性映射，返回兼容列表
+	if compatible, ok := compatibilityMap[osFamily]; ok {
+		return compatible
+	}
+
+	// 否则只返回自身
+	return []string{osFamily}
+}
+
+// matchOSRequirements 检查主机是否满足策略的 OS 版本要求
+// 优先使用 os_requirements，向后兼容 os_version
+func matchOSRequirements(osFamily, osVersion string, policy model.Policy) bool {
+	// 如果有详细的 os_requirements，使用它
+	if len(policy.OSRequirements) > 0 {
+		// 查找匹配的 OS Family 要求
+		for _, req := range policy.OSRequirements {
+			if req.OSFamily == osFamily {
+				// 检查最小版本
+				if req.MinVersion != "" {
+					if compareVersion(osVersion, req.MinVersion) < 0 {
+						return false
+					}
+				}
+				// 检查最大版本
+				if req.MaxVersion != "" {
+					if compareVersion(osVersion, req.MaxVersion) > 0 {
+						return false
+					}
+				}
+				// 找到匹配的 OS Family 且版本满足要求
+				return true
+			}
+		}
+		// os_requirements 中没有该 OS Family，不匹配
+		return false
+	}
+
+	// 向后兼容：使用旧的 os_version 字段
+	if policy.OSVersion != "" {
+		return matchVersion(osVersion, policy.OSVersion)
+	}
+
+	// 没有版本约束，匹配
+	return true
 }

@@ -60,13 +60,13 @@
           placeholder="选择适用的操作系统"
           @change="handleOSFamilyChange"
         >
-          <a-select-option value="rocky">Rocky Linux</a-select-option>
-          <a-select-option value="centos">CentOS</a-select-option>
-          <a-select-option value="oracle">Oracle Linux</a-select-option>
-          <a-select-option value="debian">Debian</a-select-option>
-          <a-select-option value="ubuntu">Ubuntu</a-select-option>
-          <a-select-option value="openeuler">openEuler</a-select-option>
-          <a-select-option value="alibaba">Alibaba Cloud Linux</a-select-option>
+          <a-select-option
+            v-for="os in osOptions"
+            :key="os.value"
+            :value="os.value"
+          >
+            {{ os.label }}
+          </a-select-option>
         </a-select>
       </a-form-item>
       <a-form-item label="OS版本要求" name="os_requirements">
@@ -116,6 +116,7 @@ import { policiesApi } from '@/api/policies'
 import { policyGroupsApi } from '@/api/policy-groups'
 import type { Policy, PolicyGroup, OSRequirement } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue/es/form'
+import { OS_OPTIONS, getOSFamilyLabel } from '@/constants/os'
 
 const props = defineProps<{
   visible: boolean
@@ -150,19 +151,7 @@ const rules = {
   name: [{ required: true, message: '请输入策略名称', trigger: 'blur' }],
 }
 
-const osFamilyLabels: Record<string, string> = {
-  rocky: 'Rocky Linux',
-  centos: 'CentOS',
-  oracle: 'Oracle Linux',
-  debian: 'Debian',
-  ubuntu: 'Ubuntu',
-  openeuler: 'openEuler',
-  alibaba: 'Alibaba Cloud Linux',
-}
-
-const getOSFamilyLabel = (family: string) => {
-  return osFamilyLabels[family] || family
-}
+const osOptions = OS_OPTIONS
 
 // 当 OS 列表变化时，更新 OS 版本要求
 const handleOSFamilyChange = (selectedFamilies: string[]) => {

@@ -108,11 +108,13 @@
           mode="multiple"
           placeholder="选择操作系统"
         >
-          <a-select-option value="rocky">Rocky Linux</a-select-option>
-          <a-select-option value="centos">CentOS</a-select-option>
-          <a-select-option value="oracle">Oracle Linux</a-select-option>
-          <a-select-option value="debian">Debian</a-select-option>
-          <a-select-option value="ubuntu">Ubuntu</a-select-option>
+          <a-select-option
+            v-for="os in osOptions"
+            :key="os.value"
+            :value="os.value"
+          >
+            {{ os.label }}
+          </a-select-option>
         </a-select>
       </a-form-item>
     </a-form>
@@ -133,6 +135,7 @@ import { policiesApi } from '@/api/policies'
 import { hostsApi } from '@/api/hosts'
 import type { Policy, Host } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue/es/form'
+import { OS_OPTIONS } from '@/constants/os'
 
 const props = defineProps<{
   visible: boolean
@@ -148,6 +151,7 @@ const policies = ref<Policy[]>([])
 const hosts = ref<Host[]>([])
 const policiesLoading = ref(false)
 const hostsLoading = ref(false)
+const osOptions = OS_OPTIONS
 
 const formData = reactive({
   name: '',

@@ -159,10 +159,13 @@
           style="width: 150px"
           allow-clear
         >
-          <a-select-option value="rocky">Rocky Linux</a-select-option>
-          <a-select-option value="centos">CentOS</a-select-option>
-          <a-select-option value="debian">Debian</a-select-option>
-          <a-select-option value="ubuntu">Ubuntu</a-select-option>
+          <a-select-option
+            v-for="os in osOptions"
+            :key="os.value"
+            :value="os.value"
+          >
+            {{ os.label }}
+          </a-select-option>
         </a-select>
         <a-select
           v-model:value="filters.status"
@@ -326,11 +329,13 @@ import type { Host } from '@/api/types'
 import ScoreDisplay from './components/ScoreDisplay.vue'
 import { message } from 'ant-design-vue'
 import { formatDateTime } from '@/utils/date'
+import { OS_OPTIONS } from '@/constants/os'
 
 // 注册 ECharts 组件
 use([CanvasRenderer, PieChart, TitleComponent, TooltipComponent, LegendComponent])
 
 const router = useRouter()
+const osOptions = OS_OPTIONS
 
 const loading = ref(false)
 const hosts = ref<Host[]>([])

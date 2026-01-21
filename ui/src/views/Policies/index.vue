@@ -271,7 +271,7 @@
             :loading="businessLinesLoading"
             style="width: 100%"
           >
-            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.name">
               {{ bl.name }} ({{ bl.host_count || 0 }}台)
             </a-select-option>
           </a-select>
@@ -441,7 +441,7 @@
             :loading="businessLinesLoading"
             style="width: 100%"
           >
-            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.name">
               {{ bl.name }} ({{ bl.host_count || 0 }}台)
             </a-select-option>
           </a-select>
@@ -655,6 +655,7 @@ import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 import type { Policy, ScanResult, PolicyGroup, Host, ScanTask } from '@/api/types'
 import { message } from 'ant-design-vue'
 import PolicyModal from './components/PolicyModal.vue'
+import { OS_OPTIONS } from '@/constants/os'
 
 const router = useRouter()
 const route = useRoute()
@@ -841,15 +842,7 @@ const hostOptions = computed(() => {
   }))
 })
 
-const osOptions = [
-  { label: 'Rocky Linux', value: 'rocky' },
-  { label: 'CentOS', value: 'centos' },
-  { label: 'Oracle Linux', value: 'oracle' },
-  { label: 'Debian', value: 'debian' },
-  { label: 'Ubuntu', value: 'ubuntu' },
-  { label: 'openEuler', value: 'openeuler' },
-  { label: 'Alibaba Cloud Linux', value: 'alibaba' },
-]
+const osOptions = OS_OPTIONS
 
 const taskColumns = [
   {
