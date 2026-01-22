@@ -147,6 +147,52 @@
       <a-card title="策略列表" :bordered="false">
         <template #extra>
           <a-space>
+            <!-- 批量操作按钮 -->
+            <template v-if="selectedPolicyIds.length > 0">
+              <span style="color: #666;">已选 {{ selectedPolicyIds.length }} 项</span>
+              <a-button @click="handleBatchEnable(true)">批量启用</a-button>
+              <a-button @click="handleBatchEnable(false)">批量禁用</a-button>
+              <a-button @click="handleBatchExport">批量导出</a-button>
+              <a-popconfirm
+                title="确定要删除选中的策略吗？"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm="handleBatchDelete"
+              >
+                <a-button danger>批量删除</a-button>
+              </a-popconfirm>
+              <a-divider type="vertical" />
+            </template>
+            <a-dropdown>
+              <a-button>
+                <template #icon>
+                  <DownloadOutlined />
+                </template>
+                导出
+              </a-button>
+              <template #overlay>
+                <a-menu @click="handleExportMenuClick">
+                  <a-menu-item key="export-all">
+                    <ExportOutlined /> 导出所有策略
+                  </a-menu-item>
+                  <a-menu-item key="export-group">
+                    <FileTextOutlined /> 导出当前策略组
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+            <a-upload
+              :show-upload-list="false"
+              :before-upload="handleImportFile"
+              accept=".json"
+            >
+              <a-button>
+                <template #icon>
+                  <UploadOutlined />
+                </template>
+                导入
+              </a-button>
+            </a-upload>
             <a-input-search
               v-model:value="policySearchKeyword"
               placeholder="搜索策略名称"
@@ -168,6 +214,10 @@
           row-key="id"
           :scroll="{ x: 900 }"
           :pagination="policyPagination"
+          :row-selection="{
+            selectedRowKeys: selectedPolicyIds,
+            onChange: (keys: string[]) => { selectedPolicyIds = keys },
+          }"
           @change="handlePolicyTableChange"
         >
           <template #bodyCell="{ column, record }">
@@ -307,6 +357,10 @@ import {
   StopOutlined,
   CheckOutlined,
   ReloadOutlined,
+  DownloadOutlined,
+  UploadOutlined,
+  ExportOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons-vue'
 import { policyGroupsApi } from '@/api/policy-groups'
 import { policiesApi } from '@/api/policies'
@@ -331,6 +385,7 @@ const groupPolicies = ref<Policy[]>([])
 const policySearchKeyword = ref('')
 const policyModalVisible = ref(false)
 const editingPolicy = ref<Policy | null>(null)
+const selectedPolicyIds = ref<string[]>([])
 
 // 分页配置
 const policyPagination = reactive({
@@ -682,6 +737,150 @@ const handlePolicyModalSuccess = () => {
   loadGroupPolicies()
   // 同时刷新策略组列表以更新统计数据
   loadPolicyGroups()
+}
+
+// === 批量操作 ===
+
+// 批量启用/禁用
+const handleBatchEnable = async (enabled: boolean) => {
+  try {
+    await policiesApi.batchEnableDisable(selectedPolicyIds.value, enabled)
+    message.success(`已${enabled ? '启用' : '禁用'} ${selectedPolicyIds.value.length} 个策略`)
+    selectedPolicyIds.value = []
+    loadGroupPolicies()
+  } catch (error) {
+    console.error('批量操作失败:', error)
+    message.error('批量操作失败')
+  }
+}
+
+// 批量删除
+const handleBatchDelete = async () => {
+  try {
+    await policiesApi.batchDelete(selectedPolicyIds.value)
+    message.success(`已删除 ${selectedPolicyIds.value.length} 个策略`)
+    selectedPolicyIds.value = []
+    loadGroupPolicies()
+  } catch (error) {
+    console.error('批量删除失败:', error)
+    message.error('批量删除失败')
+  }
+}
+
+// 批量导出
+const handleBatchExport = async () => {
+  try {
+    const response = await policiesApi.batchExport(selectedPolicyIds.value)
+    downloadJSON(response, `policies-batch-${Date.now()}.json`)
+    message.success(`已导出 ${selectedPolicyIds.value.length} 个策略`)
+  } catch (error) {
+    console.error('批量导出失败:', error)
+    message.error('批量导出失败')
+  }
+}
+
+// === 导入/导出功能 ===
+
+// 导出菜单点击
+const handleExportMenuClick = async ({ key }: { key: string }) => {
+  try {
+    if (key === 'export-all') {
+      // 导出所有策略
+      const response = await policiesApi.exportAll()
+      downloadJSON(response, 'policies-all.json')
+      message.success('导出成功')
+    } else if (key === 'export-group' && currentGroup.value) {
+      // 导出当前策略组的所有策略
+      const policies = groupPolicies.value
+      if (policies.length === 0) {
+        message.warning('当前策略组没有策略')
+        return
+      }
+
+      // 导出每个策略的详细信息
+      const exportData = []
+      for (const policy of policies) {
+        const detail = await policiesApi.export(policy.id)
+        exportData.push(detail)
+      }
+
+      downloadJSON(exportData, `policies-${currentGroup.value.id}.json`)
+      message.success(`已导出 ${exportData.length} 个策略`)
+    }
+  } catch (error) {
+    console.error('导出失败:', error)
+    message.error('导出失败')
+  }
+}
+
+// 导入文件
+const handleImportFile = async (file: File) => {
+  if (!currentGroup.value) {
+    message.error('请先选择一个策略组')
+    return false
+  }
+
+  try {
+    // 读取文件内容
+    const text = await file.text()
+    const data = JSON.parse(text)
+
+    // 显示导入确认对话框
+    Modal.confirm({
+      title: '确认导入',
+      content: `即将导入 ${Array.isArray(data) ? data.length : 1} 个策略到「${currentGroup.value.name}」策略组，导入模式为"更新"（保留未在文件中的规则）。是否继续？`,
+      okText: '导入',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('group_id', currentGroup.value!.id)
+
+          const result = await policiesApi.import(formData)
+
+          message.success(
+            `导入完成：新增 ${result.imported} 个，更新 ${result.updated} 个，跳过 ${result.skipped} 个`
+          )
+
+          if (result.errors && result.errors.length > 0) {
+            Modal.warning({
+              title: '部分导入失败',
+              content: result.errors.join('\n'),
+            })
+          }
+
+          // 刷新列表
+          if (currentGroup.value) {
+            loadGroupPolicies()
+          }
+          loadPolicyGroups()
+        } catch (error: any) {
+          console.error('导入失败:', error)
+          message.error(error.response?.data?.message || '导入失败')
+        }
+      },
+    })
+  } catch (error) {
+    console.error('读取文件失败:', error)
+    message.error('文件格式错误，请上传有效的 JSON 文件')
+  }
+
+  // 返回 false 阻止自动上传
+  return false
+}
+
+// 下载 JSON 文件
+const downloadJSON = (data: any, filename: string) => {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 
 // 从 URL 参数恢复状态

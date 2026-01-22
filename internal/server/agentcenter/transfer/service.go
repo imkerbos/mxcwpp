@@ -919,14 +919,10 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		CheckedAt:     model.ToLocalTime(timestamp),
 	}
 
-	// 保存到数据库（使用 UPSERT 去重：基于 host_id + rule_id + task_id 唯一约束）
-	// 如果同一任务、同一主机、同一规则已有结果，则更新
+	// 保存到数据库（使用 UPSERT 去重：基于 host_id + rule_id 唯一约束）
+	// 每个主机的每个规则只保留一条最新结果，新检查会覆盖旧结果
 	var existingResult model.ScanResult
-	queryCondition := s.db.Where("host_id = ? AND rule_id = ?", hostID, ruleID)
-	if taskID != "" {
-		queryCondition = queryCondition.Where("task_id = ?", taskID)
-	}
-	err := queryCondition.First(&existingResult).Error
+	err := s.db.Where("host_id = ? AND rule_id = ?", hostID, ruleID).First(&existingResult).Error
 
 	if err == gorm.ErrRecordNotFound {
 		// 不存在，创建新记录
@@ -947,6 +943,7 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		existingResult.CheckedAt = scanResult.CheckedAt
 		existingResult.Severity = scanResult.Severity
 		existingResult.FixSuggestion = scanResult.FixSuggestion
+		existingResult.TaskID = scanResult.TaskID // 更新为最新任务ID
 
 		if err := s.db.Save(&existingResult).Error; err != nil {
 			return fmt.Errorf("更新检测结果失败: %w", err)

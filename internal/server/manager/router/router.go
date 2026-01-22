@@ -103,6 +103,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupNotificationsAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
 	setupComponentsAPI(router, db, logger, cfg)
+	setupPolicyImportExportAPI(router, db, logger)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -140,6 +141,11 @@ func setupPoliciesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 	router.POST("/policies", handler.CreatePolicy)
 	router.PUT("/policies/:policy_id", handler.UpdatePolicy)
 	router.DELETE("/policies/:policy_id", handler.DeletePolicy)
+
+	// 批量操作
+	router.POST("/policies/batch/enable", handler.BatchEnableDisable)
+	router.POST("/policies/batch/delete", handler.BatchDelete)
+	router.POST("/policies/batch/export", handler.BatchExport)
 }
 
 // setupRulesAPI 设置规则 API 路由
@@ -308,4 +314,9 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 	// 推送记录查询
 	router.GET("/components/push-records", handler.ListPushRecords)
 	router.GET("/components/push-records/:id", handler.GetPushRecord)
+}
+
+// setupPolicyImportExportAPI 设置策略导入导出 API 路由
+func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	api.RegisterPolicyImportExportRoutes(router, db, logger)
 }

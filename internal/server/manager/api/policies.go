@@ -544,3 +544,81 @@ func (h *PoliciesHandler) GetPolicyStatistics(c *gin.Context) {
 		},
 	})
 }
+
+// BatchEnableDisable 批量启用/禁用策略
+func (h *PoliciesHandler) BatchEnableDisable(c *gin.Context) {
+	var req struct {
+		PolicyIDs []string `json:"policy_ids" binding:"required"`
+		Enabled   bool     `json:"enabled"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误")
+		return
+	}
+
+	if err := h.db.Model(&model.Policy{}).Where("id IN ?", req.PolicyIDs).Update("enabled", req.Enabled).Error; err != nil {
+		h.logger.Error("批量更新策略状态失败", zap.Error(err))
+		InternalError(c, "批量更新策略状态失败")
+		return
+	}
+
+	Success(c, gin.H{"updated": len(req.PolicyIDs)})
+}
+
+// BatchDelete 批量删除策略
+func (h *PoliciesHandler) BatchDelete(c *gin.Context) {
+	var req struct {
+		PolicyIDs []string `json:"policy_ids" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误")
+		return
+	}
+
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("policy_id IN ?", req.PolicyIDs).Delete(&model.Rule{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id IN ?", req.PolicyIDs).Delete(&model.Policy{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		h.logger.Error("批量删除策略失败", zap.Error(err))
+		InternalError(c, "批量删除策略失败")
+		return
+	}
+
+	Success(c, gin.H{"deleted": len(req.PolicyIDs)})
+}
+
+// BatchExport 批量导出策略
+func (h *PoliciesHandler) BatchExport(c *gin.Context) {
+	var req struct {
+		PolicyIDs []string `json:"policy_ids" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误")
+		return
+	}
+
+	var policies []model.Policy
+	if err := h.db.Preload("Rules").Where("id IN ?", req.PolicyIDs).Find(&policies).Error; err != nil {
+		h.logger.Error("查询策略失败", zap.Error(err))
+		InternalError(c, "查询策略失败")
+		return
+	}
+
+	exportHandler := NewPolicyImportExportHandler(h.db, h.logger)
+	var exportData []PolicyExportFormat
+	for _, policy := range policies {
+		exportData = append(exportData, exportHandler.convertPolicyToExportFormat(&policy))
+	}
+
+	Success(c, exportData)
+}

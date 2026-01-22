@@ -240,10 +240,18 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		return
 	}
 
-	// 查询基线结果（移除数量限制，返回所有结果）
+	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果）
 	var results []model.ScanResult
-	h.db.Where("host_id = ?", hostID).
-		Order("checked_at DESC").
+	subQuery := h.db.Model(&model.ScanResult{}).
+		Select("rule_id, MAX(checked_at) as max_checked_at").
+		Where("host_id = ?", hostID).
+		Group("rule_id")
+
+	h.db.Table("scan_results").
+		Select("scan_results.*").
+		Joins("INNER JOIN (?) AS latest ON scan_results.rule_id = latest.rule_id AND scan_results.checked_at = latest.max_checked_at", subQuery).
+		Where("scan_results.host_id = ?", hostID).
+		Order("scan_results.checked_at DESC").
 		Find(&results)
 
 	// 查询最新监控数据
