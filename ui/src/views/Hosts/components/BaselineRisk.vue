@@ -18,15 +18,46 @@
         <span class="stat-label">错误</span>
         <span class="stat-value">{{ errorCount }}</span>
       </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item critical" @click="setSeverityFilter('critical')" :class="{ clickable: criticalCount > 0 }">
+        <span class="stat-label">严重</span>
+        <span class="stat-value">{{ criticalCount }}</span>
+      </div>
+      <div class="stat-item high" @click="setSeverityFilter('high')" :class="{ clickable: highCount > 0 }">
+        <span class="stat-label">高危</span>
+        <span class="stat-value">{{ highCount }}</span>
+      </div>
+      <div class="stat-item medium" @click="setSeverityFilter('medium')" :class="{ clickable: mediumCount > 0 }">
+        <span class="stat-label">中危</span>
+        <span class="stat-value">{{ mediumCount }}</span>
+      </div>
+      <div class="stat-item low" @click="setSeverityFilter('low')" :class="{ clickable: lowCount > 0 }">
+        <span class="stat-label">低危</span>
+        <span class="stat-value">{{ lowCount }}</span>
+      </div>
     </div>
 
     <!-- 筛选器 -->
     <div class="filter-bar">
-      <a-radio-group v-model:value="statusFilter" button-style="solid" size="small">
-        <a-radio-button value="all">全部 ({{ totalCount }})</a-radio-button>
-        <a-radio-button value="fail">失败 ({{ failCount + errorCount }})</a-radio-button>
-        <a-radio-button value="pass">通过 ({{ passCount }})</a-radio-button>
-      </a-radio-group>
+      <div class="filter-left">
+        <a-radio-group v-model:value="statusFilter" button-style="solid" size="small">
+          <a-radio-button value="all">全部 ({{ totalCount }})</a-radio-button>
+          <a-radio-button value="fail">失败 ({{ failCount + errorCount }})</a-radio-button>
+          <a-radio-button value="pass">通过 ({{ passCount }})</a-radio-button>
+        </a-radio-group>
+        <a-select
+          v-model:value="severityFilter"
+          placeholder="严重级别"
+          style="width: 120px"
+          size="small"
+          allow-clear
+        >
+          <a-select-option value="critical">严重</a-select-option>
+          <a-select-option value="high">高危</a-select-option>
+          <a-select-option value="medium">中危</a-select-option>
+          <a-select-option value="low">低危</a-select-option>
+        </a-select>
+      </div>
       <div class="filter-right">
         <a-input-search
           v-model:value="searchKeyword"
@@ -112,6 +143,7 @@ const loading = ref(false)
 const exporting = ref(false)
 const results = ref<ScanResult[]>([])
 const statusFilter = ref<'all' | 'fail' | 'pass'>('all')
+const severityFilter = ref<string | undefined>(undefined)
 const searchKeyword = ref('')
 const pagination = ref({
   pageSize: 20,
@@ -126,6 +158,22 @@ const passCount = computed(() => results.value.filter(r => r.status === 'pass').
 const failCount = computed(() => results.value.filter(r => r.status === 'fail').length)
 const errorCount = computed(() => results.value.filter(r => r.status === 'error').length)
 
+// 按严重级别统计失败项
+const failedResults = computed(() => results.value.filter(r => r.status === 'fail' || r.status === 'error'))
+const criticalCount = computed(() => failedResults.value.filter(r => r.severity === 'critical').length)
+const highCount = computed(() => failedResults.value.filter(r => r.severity === 'high').length)
+const mediumCount = computed(() => failedResults.value.filter(r => r.severity === 'medium').length)
+const lowCount = computed(() => failedResults.value.filter(r => r.severity === 'low').length)
+
+// 点击严重级别快速筛选
+const setSeverityFilter = (severity: string) => {
+  const count = failedResults.value.filter(r => r.severity === severity).length
+  if (count > 0) {
+    statusFilter.value = 'fail'
+    severityFilter.value = severity
+  }
+}
+
 // 过滤后的结果
 const filteredResults = computed(() => {
   let filtered = results.value
@@ -135,6 +183,11 @@ const filteredResults = computed(() => {
     filtered = filtered.filter(r => r.status === 'fail' || r.status === 'error')
   } else if (statusFilter.value === 'pass') {
     filtered = filtered.filter(r => r.status === 'pass')
+  }
+
+  // 严重级别筛选
+  if (severityFilter.value) {
+    filtered = filtered.filter(r => r.severity === severityFilter.value)
   }
 
   // 关键词搜索
@@ -309,11 +362,48 @@ onMounted(() => {
   color: #faad14;
 }
 
+.stat-divider {
+  width: 1px;
+  background: #d9d9d9;
+  margin: 0 8px;
+}
+
+.stat-item.critical .stat-value {
+  color: #cf1322;
+}
+
+.stat-item.high .stat-value {
+  color: #fa541c;
+}
+
+.stat-item.medium .stat-value {
+  color: #faad14;
+}
+
+.stat-item.low .stat-value {
+  color: #1890ff;
+}
+
+.stat-item.clickable {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.stat-item.clickable:hover {
+  transform: scale(1.05);
+}
+
 .filter-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.filter-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
 .filter-right {
