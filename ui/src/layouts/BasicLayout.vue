@@ -84,6 +84,7 @@
                 <a-menu-item key="policy-groups">策略组管理</a-menu-item>
                 <a-menu-item key="policies">基线检查</a-menu-item>
                 <a-menu-item key="tasks">任务执行</a-menu-item>
+                <a-menu-item key="baseline-fix">基线修复</a-menu-item>
               </a-sub-menu>
               <a-menu-item key="alerts">
                 <template #icon>
@@ -247,6 +248,9 @@ watch(
     } else if (name === 'Tasks') {
       selectedKeys.value = ['tasks']
       openKeys.value = ['baseline-menu']
+    } else if (name === 'BaselineFix') {
+      selectedKeys.value = ['baseline-fix']
+      openKeys.value = ['baseline-menu']
     } else if (name === 'Users') {
       selectedKeys.value = ['users']
       openKeys.value = ['system-menu']
@@ -288,6 +292,7 @@ const routeMap: Record<string, string> = {
   'policy-groups': '/policy-groups',
   'policies': '/policies',
   'tasks': '/tasks',
+  'baseline-fix': '/baseline/fix',
   'users': '/users',
   'system-collection': '/system/collection',
   'system-settings': '/system/settings',

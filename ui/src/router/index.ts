@@ -71,6 +71,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '任务执行' },
       },
       {
+        path: 'baseline/fix',
+        name: 'BaselineFix',
+        component: () => import('@/views/Baseline/Fix.vue'),
+        meta: { title: '基线修复' },
+      },
+      {
         path: 'system/collection',
         name: 'SystemCollection',
         component: () => import('@/views/System/Collection.vue'),

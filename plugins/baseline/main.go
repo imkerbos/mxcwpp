@@ -46,8 +46,9 @@ func main() {
 		zap.String("version", buildVersion),
 		zap.String("build_time", buildTime))
 
-	// 3. 创建检查引擎
+	// 3. 创建检查引擎和修复执行器
 	checkEngine := engine.NewEngine(logger)
+	fixer := engine.NewFixer(logger)
 
 	// 4. 创建上下文
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,7 +73,7 @@ func main() {
 			cancel()
 			return
 		case task := <-taskCh:
-			if err := handleTask(ctx, task, checkEngine, client, logger); err != nil {
+			if err := handleTask(ctx, task, checkEngine, fixer, client, logger); err != nil {
 				logger.Error("failed to handle task", zap.Error(err))
 			}
 		}
@@ -113,7 +114,7 @@ func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *br
 }
 
 // handleTask 处理任务
-func handleTask(ctx context.Context, task *bridge.Task, checkEngine *engine.Engine, client *plugins.Client, logger *zap.Logger) error {
+func handleTask(ctx context.Context, task *bridge.Task, checkEngine *engine.Engine, fixer *engine.Fixer, client *plugins.Client, logger *zap.Logger) error {
 	logger.Info("received task", zap.String("data_type", fmt.Sprintf("%d", task.DataType)), zap.String("object_name", task.ObjectName))
 
 	// 解析任务数据（JSON）
@@ -126,6 +127,8 @@ func handleTask(ctx context.Context, task *bridge.Task, checkEngine *engine.Engi
 	switch task.DataType {
 	case 8000: // 基线检查任务
 		return handleBaselineTask(ctx, taskData, checkEngine, client, logger)
+	case 8002: // 基线修复任务
+		return handleFixTask(ctx, taskData, fixer, client, logger)
 	default:
 		logger.Warn("unknown task type", zap.Int32("data_type", task.DataType))
 		return nil
@@ -240,4 +243,109 @@ func newPluginLogger() (*zap.Logger, error) {
 	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 
 	return config.Build()
+}
+
+// handleFixTask 处理基线修复任务
+func handleFixTask(ctx context.Context, taskData map[string]interface{}, fixer *engine.Fixer, client *plugins.Client, logger *zap.Logger) error {
+	// 提取任务 ID
+	taskID, _ := taskData["task_id"].(string)
+	fixTaskID, _ := taskData["fix_task_id"].(string)
+
+	// 提取策略配置
+	policiesJSON, ok := taskData["policies"].(string)
+	if !ok {
+		return fmt.Errorf("missing policies in task data")
+	}
+
+	var policiesData []map[string]interface{}
+	if err := json.Unmarshal([]byte(policiesJSON), &policiesData); err != nil {
+		return fmt.Errorf("failed to unmarshal policies: %w", err)
+	}
+
+	// 转换为 Policy 对象
+	var policies []*engine.Policy
+	for _, pd := range policiesData {
+		policyJSON, _ := json.Marshal(pd)
+		var p engine.Policy
+		if err := json.Unmarshal(policyJSON, &p); err != nil {
+			logger.Warn("failed to unmarshal policy", zap.Error(err))
+			continue
+		}
+		policies = append(policies, &p)
+	}
+
+	// 提取规则 ID 列表
+	ruleIDsInterface, _ := taskData["rule_ids"].([]interface{})
+	var ruleIDs []string
+	for _, id := range ruleIDsInterface {
+		if idStr, ok := id.(string); ok {
+			ruleIDs = append(ruleIDs, idStr)
+		}
+	}
+
+	// 提取主机信息（用于 OS 匹配）
+	osFamily, _ := taskData["os_family"].(string)
+	osVersion, _ := taskData["os_version"].(string)
+
+	logger.Info("executing baseline fix",
+		zap.String("task_id", taskID),
+		zap.String("fix_task_id", fixTaskID),
+		zap.String("os_family", osFamily),
+		zap.String("os_version", osVersion),
+		zap.Int("policy_count", len(policies)),
+		zap.Int("rule_count", len(ruleIDs)))
+
+	// 执行修复
+	results := fixer.FixBatch(ctx, policies, ruleIDs, osFamily, osVersion)
+
+	// 上报结果
+	for _, result := range results {
+		record := &bridge.Record{
+			DataType:  8003, // 基线修复结果
+			Timestamp: time.Now().UnixNano(),
+			Data: &bridge.Payload{
+				Fields: map[string]string{
+					"task_id":      taskID,
+					"fix_task_id":  fixTaskID,
+					"rule_id":      result.RuleID,
+					"policy_id":    result.PolicyID,
+					"status":       string(result.Status),
+					"command":      result.Command,
+					"output":       result.Output,
+					"error_msg":    result.ErrorMsg,
+					"message":      result.Message,
+					"fixed_at":     result.FixedAt.Format(time.RFC3339),
+				},
+			},
+		}
+
+		if err := client.SendRecord(record); err != nil {
+			logger.Error("failed to send fix result", zap.Error(err))
+			continue
+		}
+	}
+
+	// 发送任务完成信号
+	completeRecord := &bridge.Record{
+		DataType:  8004, // 修复任务完成信号
+		Timestamp: time.Now().UnixNano(),
+		Data: &bridge.Payload{
+			Fields: map[string]string{
+				"task_id":      taskID,
+				"fix_task_id":  fixTaskID,
+				"status":       "completed",
+				"result_count": fmt.Sprintf("%d", len(results)),
+				"completed_at": time.Now().Format(time.RFC3339),
+			},
+		},
+	}
+	if err := client.SendRecord(completeRecord); err != nil {
+		logger.Error("failed to send fix task completion signal", zap.Error(err))
+	}
+
+	logger.Info("baseline fix completed",
+		zap.String("task_id", taskID),
+		zap.String("fix_task_id", fixTaskID),
+		zap.Int("result_count", len(results)))
+	return nil
 }

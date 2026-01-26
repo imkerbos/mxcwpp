@@ -149,6 +149,9 @@
           show-search
           :filter-option="filterBusinessLineOption"
         >
+          <a-select-option value="__unbound__">
+            <span style="color: #8c8c8c;">无业务线</span>
+          </a-select-option>
           <a-select-option v-for="bl in businessLines" :key="bl.name" :value="bl.name">
             {{ bl.name }}
           </a-select-option>

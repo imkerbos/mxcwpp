@@ -63,7 +63,12 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 	if businessLine != "" {
-		query = query.Where("business_line = ?", businessLine)
+		if businessLine == "__unbound__" {
+			// 筛选无业务线的主机
+			query = query.Where("business_line = '' OR business_line IS NULL")
+		} else {
+			query = query.Where("business_line = ?", businessLine)
+		}
 	}
 	// 运行环境类型筛选（优先使用新参数）
 	if runtimeType != "" && model.IsValidRuntimeType(runtimeType) {

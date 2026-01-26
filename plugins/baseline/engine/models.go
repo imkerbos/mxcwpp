@@ -48,8 +48,9 @@ type CheckRule struct {
 
 // Fix 是修复建议
 type Fix struct {
-	Suggestion string `json:"suggestion"`
-	Command    string `json:"command,omitempty"`
+	Suggestion      string   `json:"suggestion"`
+	Command         string   `json:"command,omitempty"`
+	RestartServices []string `json:"restart_services,omitempty"` // 修复后需重启的服务
 }
 
 // Result 是检查结果

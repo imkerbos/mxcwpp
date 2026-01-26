@@ -434,3 +434,51 @@ export interface PolicyStatistics {
     low: { pass: number; fail: number }
   }
 }
+
+// 基线修复相关类型
+export interface FixTask {
+  task_id: string
+  host_ids: string[]
+  rule_ids: string[]
+  severities?: string[]
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  total_count: number
+  success_count: number
+  failed_count: number
+  progress: number
+  created_by: string
+  created_at: string
+  completed_at?: string
+}
+
+export interface FixResult {
+  result_id: string
+  task_id: string
+  host_id: string
+  hostname?: string
+  rule_id: string
+  title: string
+  status: 'success' | 'failed' | 'skipped'
+  message?: string
+  command?: string
+  output?: string
+  error_msg?: string
+  fixed_at: string
+}
+
+export interface FixableItem {
+  result_id: string
+  host_id: string
+  hostname: string
+  ip: string
+  business_line?: string
+  rule_id: string
+  title: string
+  category: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  fix_suggestion?: string
+  fix_command?: string
+  actual?: string
+  expected?: string
+  has_fix: boolean
+}

@@ -832,6 +832,12 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 	case 8001: // 任务完成信号
 		return s.handleTaskCompletion(ctx, record, conn)
 
+	case 8003: // 基线修复结果
+		return s.handleFixResult(ctx, record, conn)
+
+	case 8004: // 修复任务完成信号
+		return s.handleFixTaskComplete(ctx, record, conn)
+
 	case 5050, 5051, 5052, 5053, 5054, 5055, 5056, 5057, 5058, 5059, 5060:
 		// 资产数据
 		return s.assetService.HandleAssetData(conn.AgentID, record.DataType, record.Data)
@@ -1800,3 +1806,205 @@ func (s *Service) GetOnlineAgentIDs() []string {
 	}
 	return ids
 }
+
+// handleFixResult 处理基线修复结果
+func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	// 解析 EncodedRecord.data 为 bridge.Record
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 Record 失败: %w", err)
+	}
+
+	// 从 Payload 中提取字段
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	// 提取必要字段
+	resultID := fields["result_id"]
+	if resultID == "" {
+		// 如果没有 result_id，生成一个
+		resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().UnixNano()%1000000000)
+		if len(resultID) > 64 {
+			resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().Unix()%1000000)
+		}
+	}
+
+	fixTaskID := fields["fix_task_id"]
+	hostID := conn.AgentID
+	ruleID := fields["rule_id"]
+	status := fields["status"]
+	command := fields["command"]
+	output := fields["output"]
+	errorMsg := fields["error_msg"]
+	message := fields["message"]
+
+	// 解析时间戳
+	timestamp := time.Unix(0, record.Timestamp)
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+
+	// 转换为 FixResultStatus
+	var resultStatus model.FixResultStatus
+	switch status {
+	case "success":
+		resultStatus = model.FixResultStatusSuccess
+	case "failed":
+		resultStatus = model.FixResultStatusFailed
+	case "skipped":
+		resultStatus = model.FixResultStatusSkipped
+	default:
+		resultStatus = model.FixResultStatusFailed
+	}
+
+	// 创建 FixResult
+	fixResult := &model.FixResult{
+		ResultID: resultID,
+		TaskID:   fixTaskID,
+		HostID:   hostID,
+		RuleID:   ruleID,
+		Status:   resultStatus,
+		Command:  command,
+		Output:   output,
+		ErrorMsg: errorMsg,
+		Message:  message,
+		FixedAt:  model.ToLocalTime(timestamp),
+	}
+
+	// 保存到数据库
+	if err := s.db.Create(fixResult).Error; err != nil {
+		return fmt.Errorf("保存修复结果失败: %w", err)
+	}
+
+	s.logger.Info("修复结果已保存",
+		zap.String("agent_id", conn.AgentID),
+		zap.String("result_id", resultID),
+		zap.String("fix_task_id", fixTaskID),
+		zap.String("rule_id", ruleID),
+		zap.String("status", string(resultStatus)),
+	)
+
+	// 更新任务统计
+	var task model.FixTask
+	if err := s.db.Where("task_id = ?", fixTaskID).First(&task).Error; err == nil {
+		// 更新成功/失败计数
+		updates := make(map[string]interface{})
+		if resultStatus == model.FixResultStatusSuccess {
+			updates["success_count"] = gorm.Expr("success_count + 1")
+		} else if resultStatus == model.FixResultStatusFailed {
+			updates["failed_count"] = gorm.Expr("failed_count + 1")
+		}
+
+		// 计算进度
+		totalProcessed := task.SuccessCount + task.FailedCount + 1 // +1 for current result
+		if task.TotalCount > 0 {
+			progress := int(float64(totalProcessed) / float64(task.TotalCount) * 100)
+			if progress > 100 {
+				progress = 100
+			}
+			updates["progress"] = progress
+		}
+
+		if err := s.db.Model(&task).Updates(updates).Error; err != nil {
+			s.logger.Error("更新修复任务统计失败",
+				zap.String("fix_task_id", fixTaskID),
+				zap.Error(err),
+			)
+		}
+	}
+
+	return nil
+}
+
+// handleFixTaskComplete 处理修复任务完成信号
+func (s *Service) handleFixTaskComplete(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	// 解析 EncodedRecord.data 为 bridge.Record
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析修复任务完成信号失败: %w", err)
+	}
+
+	// 从 Payload 中提取字段
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	taskID := fields["task_id"]
+	fixTaskID := fields["fix_task_id"]
+	status := fields["status"]
+	resultCount := fields["result_count"]
+	completedAt := fields["completed_at"]
+
+	if fixTaskID == "" {
+		s.logger.Warn("修复任务完成信号缺少 fix_task_id", zap.String("agent_id", conn.AgentID))
+		return nil
+	}
+
+	s.logger.Info("收到修复任务完成信号",
+		zap.String("agent_id", conn.AgentID),
+		zap.String("task_id", taskID),
+		zap.String("fix_task_id", fixTaskID),
+		zap.String("status", status),
+		zap.String("result_count", resultCount),
+		zap.String("completed_at", completedAt),
+	)
+
+	// 查询任务
+	var task model.FixTask
+	if err := s.db.Where("task_id = ?", fixTaskID).First(&task).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			s.logger.Warn("修复任务不存在", zap.String("fix_task_id", fixTaskID))
+			return nil
+		}
+		return fmt.Errorf("查询修复任务失败: %w", err)
+	}
+
+	// 如果任务已经完成或失败，不再处理
+	if task.Status == model.FixTaskStatusCompleted || task.Status == model.FixTaskStatusFailed {
+		s.logger.Debug("修复任务已完成/失败，忽略完成信号",
+			zap.String("fix_task_id", fixTaskID),
+			zap.String("status", string(task.Status)),
+		)
+		return nil
+	}
+
+	// 统计已完成的主机数（通过查询不同的 host_id）
+	var completedHosts int64
+	s.db.Model(&model.FixResult{}).
+		Where("task_id = ?", fixTaskID).
+		Distinct("host_id").
+		Count(&completedHosts)
+
+	s.logger.Info("修复任务主机完成统计",
+		zap.String("fix_task_id", fixTaskID),
+		zap.Int64("completed_hosts", completedHosts),
+		zap.Int("total_hosts", len(task.HostIDs)),
+	)
+
+	// 检查是否所有主机都已完成
+	if int(completedHosts) >= len(task.HostIDs) {
+		// 所有主机都已返回结果，标记任务为 completed
+		now := model.Now()
+		updates := map[string]interface{}{
+			"status":       model.FixTaskStatusCompleted,
+			"completed_at": &now,
+			"progress":     100,
+		}
+
+		if err := s.db.Model(&task).Updates(updates).Error; err != nil {
+			return fmt.Errorf("更新修复任务状态失败: %w", err)
+		}
+
+		s.logger.Info("修复任务所有主机都已完成，状态更新为 completed",
+			zap.String("fix_task_id", fixTaskID),
+			zap.Int64("completed_hosts", completedHosts),
+			zap.Int("total_hosts", len(task.HostIDs)),
+		)
+	}
+
+	return nil
+}
+

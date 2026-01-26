@@ -94,6 +94,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupRulesAPI(router, db, logger)
 	setupTasksAPI(router, db, logger)
 	setupResultsAPI(router, db, logger)
+	setupFixAPI(router, db, logger)
 	setupDashboardAPI(router, db, logger)
 	setupUsersAPI(router, db, logger)
 	setupAssetsAPI(router, db, logger)
@@ -178,6 +179,19 @@ func setupResultsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/results/host/:host_id/summary", handler.GetHostBaselineSummary)
 	router.GET("/results/host/:host_id/export", handler.ExportHostBaselineResults)
 }
+
+// setupFixAPI 设置基线修复 API 路由
+func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewFixHandler(db, logger)
+	router.GET("/fix/fixable-items", handler.GetFixableItems)
+	router.POST("/fix-tasks", handler.CreateFixTask)
+	router.GET("/fix-tasks", handler.ListFixTasks)
+	router.GET("/fix-tasks/:task_id", handler.GetFixTask)
+	router.GET("/fix-tasks/:task_id/results", handler.GetFixResults)
+	router.POST("/fix-tasks/:task_id/cancel", handler.CancelFixTask)
+	router.DELETE("/fix-tasks/:task_id", handler.DeleteFixTask)
+}
+
 
 // setupDashboardAPI 设置 Dashboard API 路由
 func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {

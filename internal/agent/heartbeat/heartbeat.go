@@ -217,8 +217,12 @@ func (m *Manager) sendHeartbeat() {
 		m.logger.Debug("network interfaces collected", zap.Int("length", len(networkInterfacesJSON)))
 	}
 
-	// 添加业务线信息（从环境变量读取）
-	if businessLine := os.Getenv("BLS_BUSINESS_LINE"); businessLine != "" {
+	// 添加业务线信息（从环境变量读取，优先级：MXSEC_BUSINESS_LINE > BLS_BUSINESS_LINE）
+	businessLine := os.Getenv("MXSEC_BUSINESS_LINE")
+	if businessLine == "" {
+		businessLine = os.Getenv("BLS_BUSINESS_LINE")
+	}
+	if businessLine != "" {
 		record.Data.Fields["business_line"] = businessLine
 		m.logger.Debug("business line from environment", zap.String("business_line", businessLine))
 	}

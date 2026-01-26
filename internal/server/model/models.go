@@ -146,6 +146,8 @@ var (
 		&Rule{},
 		&ScanResult{},
 		&ScanTask{},
+		&FixTask{},
+		&FixResult{},
 		&User{},
 		&Process{},
 		&Port{},

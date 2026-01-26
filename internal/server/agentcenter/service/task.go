@@ -635,3 +635,229 @@ func compareVersionNumbers(v1, v2 string) int {
 
 	return 0
 }
+
+// DispatchFixTask 下发修复任务到 Agent
+func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	// 1. 查询目标主机（只查询在线主机）
+	var hosts []model.Host
+	// 将 StringArray 转换为 []string 以便 GORM 查询
+	hostIDs := []string(fixTask.HostIDs)
+	if err := s.db.Where("host_id IN ? AND status = ?", hostIDs, model.HostStatusOnline).Find(&hosts).Error; err != nil {
+		return fmt.Errorf("查询主机失败: %w", err)
+	}
+
+	if len(hosts) == 0 {
+		s.logger.Warn("没有在线主机，修复任务失败",
+			zap.String("task_id", fixTask.TaskID),
+			zap.Int("requested_hosts", len(fixTask.HostIDs)),
+		)
+		s.db.Model(fixTask).Updates(map[string]interface{}{
+			"status":        model.FixTaskStatusFailed,
+			"completed_at":  model.Now(),
+		})
+		return fmt.Errorf("没有在线主机")
+	}
+
+	// 2. 查询规则信息
+	var rules []model.Rule
+	// 将 StringArray 转换为 []string 以便 GORM 查询
+	ruleIDs := []string(fixTask.RuleIDs)
+	if err := s.db.Where("rule_id IN ?", ruleIDs).Find(&rules).Error; err != nil {
+		return fmt.Errorf("查询规则失败: %w", err)
+	}
+
+	if len(rules) == 0 {
+		s.logger.Warn("没有找到规则，修复任务失败",
+			zap.String("task_id", fixTask.TaskID),
+		)
+		s.db.Model(fixTask).Updates(map[string]interface{}{
+			"status":        model.FixTaskStatusFailed,
+			"completed_at":  model.Now(),
+		})
+		return fmt.Errorf("没有找到规则")
+	}
+
+	// 3. 按策略组织规则
+	policyRulesMap := make(map[string][]*model.Rule)
+	for i := range rules {
+		rule := &rules[i]
+		policyRulesMap[rule.PolicyID] = append(policyRulesMap[rule.PolicyID], rule)
+	}
+
+	// 4. 查询所有相关策略
+	policyIDs := make([]string, 0, len(policyRulesMap))
+	for policyID := range policyRulesMap {
+		policyIDs = append(policyIDs, policyID)
+	}
+
+	policyService := NewPolicyService(s.db, s.logger)
+	var policies []*model.Policy
+	for _, policyID := range policyIDs {
+		policy, err := policyService.GetPolicy(policyID)
+		if err != nil {
+			s.logger.Error("查询策略失败",
+				zap.String("task_id", fixTask.TaskID),
+				zap.String("policy_id", policyID),
+				zap.Error(err),
+			)
+			continue
+		}
+		// 只保留需要修复的规则
+		var filteredRules []model.Rule
+		for _, rule := range policyRulesMap[policyID] {
+			filteredRules = append(filteredRules, *rule)
+		}
+		policy.Rules = filteredRules
+		policies = append(policies, policy)
+	}
+
+	if len(policies) == 0 {
+		s.logger.Warn("没有有效的策略，修复任务失败",
+			zap.String("task_id", fixTask.TaskID),
+		)
+		s.db.Model(fixTask).Updates(map[string]interface{}{
+			"status":        model.FixTaskStatusFailed,
+			"completed_at":  model.Now(),
+		})
+		return fmt.Errorf("没有有效的策略")
+	}
+
+	// 5. 更新任务状态为 running
+	if err := s.db.Model(fixTask).Update("status", model.FixTaskStatusRunning).Error; err != nil {
+		return fmt.Errorf("更新任务状态失败: %w", err)
+	}
+
+	s.logger.Info("准备下发修复任务",
+		zap.String("task_id", fixTask.TaskID),
+		zap.Int("host_count", len(hosts)),
+		zap.Int("rule_count", len(rules)),
+		zap.Int("policy_count", len(policies)),
+	)
+
+	// 6. 为每个主机下发修复任务
+	successCount := 0
+	for _, host := range hosts {
+		// 过滤匹配主机 OS 的策略
+		var matchedPolicies []*model.Policy
+		for _, policy := range policies {
+			if s.matchPolicyOS(policy, &host) {
+				matchedPolicies = append(matchedPolicies, policy)
+			}
+		}
+
+		if len(matchedPolicies) == 0 {
+			s.logger.Debug("主机不匹配任何策略 OS 要求，跳过",
+				zap.String("task_id", fixTask.TaskID),
+				zap.String("host_id", host.HostID),
+			)
+			continue
+		}
+
+		// 构建策略数据
+		policiesData := s.buildMultiPoliciesData(matchedPolicies, &host)
+
+		// 构建任务数据（JSON）
+		taskData := map[string]interface{}{
+			"task_id":      fmt.Sprintf("%s-%s", fixTask.TaskID, host.HostID), // 子任务ID
+			"fix_task_id":  fixTask.TaskID,                                     // 修复任务ID
+			"policies":     policiesData,
+			"rule_ids":     fixTask.RuleIDs,
+			"os_family":    host.OSFamily,
+			"os_version":   host.OSVersion,
+		}
+
+		taskDataJSON, err := json.Marshal(taskData)
+		if err != nil {
+			s.logger.Error("序列化任务数据失败",
+				zap.String("task_id", fixTask.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// 构建 Task
+		grpcTask := &grpcProto.Task{
+			DataType:   8002,       // 基线修复任务
+			ObjectName: "baseline", // 插件名称
+			Data:       string(taskDataJSON),
+			Token:      fixTask.TaskID, // 使用 fix_task_id 作为 token
+		}
+
+		// 构建 Command
+		cmd := &grpcProto.Command{
+			Tasks: []*grpcProto.Task{grpcTask},
+		}
+
+		// 发送命令
+		if err := transferService.SendCommand(host.HostID, cmd); err != nil {
+			s.logger.Error("下发修复任务到主机失败",
+				zap.String("task_id", fixTask.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		successCount++
+		s.logger.Debug("修复任务已下发",
+			zap.String("task_id", fixTask.TaskID),
+			zap.String("host_id", host.HostID),
+		)
+	}
+
+	// 7. 检查是否成功下发到任何主机
+	if successCount == 0 {
+		s.logger.Warn("修复任务下发失败，没有成功下发到任何主机",
+			zap.String("task_id", fixTask.TaskID),
+			zap.Int("matched_hosts", len(hosts)),
+		)
+		s.db.Model(fixTask).Updates(map[string]interface{}{
+			"status":        model.FixTaskStatusFailed,
+			"completed_at":  model.Now(),
+		})
+		return fmt.Errorf("没有成功下发到任何主机")
+	}
+
+	s.logger.Info("修复任务分发完成",
+		zap.String("task_id", fixTask.TaskID),
+		zap.Int("total_hosts", len(hosts)),
+		zap.Int("success_count", successCount),
+	)
+
+	return nil
+}
+
+// DispatchPendingFixTasks 分发待执行的修复任务
+// 查询 fix_tasks 表中状态为 pending 的任务并下发
+func (s *TaskService) DispatchPendingFixTasks(transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	// 查询待执行的修复任务
+	var tasks []model.FixTask
+	if err := s.db.Where("status = ?", model.FixTaskStatusPending).Find(&tasks).Error; err != nil {
+		return fmt.Errorf("查询待执行修复任务失败: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return nil // 没有待执行任务
+	}
+
+	s.logger.Info("发现待执行修复任务", zap.Int("count", len(tasks)))
+
+	// 处理每个任务
+	for _, task := range tasks {
+		if err := s.DispatchFixTask(&task, transferService); err != nil {
+			s.logger.Error("分发修复任务失败",
+				zap.String("task_id", task.TaskID),
+				zap.Error(err),
+			)
+			// 继续处理下一个任务
+			continue
+		}
+	}
+
+	return nil
+}

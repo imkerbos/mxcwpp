@@ -260,6 +260,7 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 	}
 
 	// 如果更新名称，检查是否与其他业务线冲突
+	oldName := businessLine.Name
 	if req.Name != "" && req.Name != businessLine.Name {
 		var existing model.BusinessLine
 		if err := h.db.Where("name = ? AND id != ?", req.Name, id).First(&existing).Error; err == nil {
@@ -293,6 +294,16 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 			"message": "更新业务线失败",
 		})
 		return
+	}
+
+	// 如果名称发生变化，同步更新所有关联主机的 business_line 字段
+	if oldName != businessLine.Name {
+		if err := h.db.Model(&model.Host{}).Where("business_line = ?", oldName).Update("business_line", businessLine.Name).Error; err != nil {
+			h.logger.Error("更新关联主机的业务线失败", zap.Error(err), zap.String("old_name", oldName), zap.String("new_name", businessLine.Name))
+			// 不返回错误，业务线已更新成功，只是关联主机更新失败
+		} else {
+			h.logger.Info("已同步更新关联主机的业务线", zap.String("old_name", oldName), zap.String("new_name", businessLine.Name))
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

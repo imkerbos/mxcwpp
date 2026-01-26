@@ -322,12 +322,21 @@ func (m *Manager) installPackage(pkgType string, pkgPath string) error {
 	)
 
 	if err != nil {
+		// 检查是否是 "already installed" 错误（RPM exit status 3）
+		outputStr := string(output)
+		if strings.Contains(outputStr, "is already installed") {
+			m.logger.Info("package is already installed, treating as success",
+				zap.String("output", outputStr),
+			)
+			return nil
+		}
+
 		m.logger.Error("package installation failed",
 			zap.String("command", cmd.String()),
-			zap.String("output", string(output)),
+			zap.String("output", outputStr),
 			zap.Error(err),
 		)
-		return fmt.Errorf("installation failed: %s, output: %s", err, string(output))
+		return fmt.Errorf("installation failed: %s, output: %s", err, outputStr)
 	}
 
 	m.logger.Info("package installed successfully")

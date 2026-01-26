@@ -180,7 +180,8 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /var/log/lastlog -p wa -k logins",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/lastlog/d' /etc/audit/rules.d/audit.rules && echo '-w /var/log/lastlog -p wa -k logins' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/lastlog/d' /etc/audit/rules.d/audit.rules && echo '-w /var/log/lastlog -p wa -k logins' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -208,7 +209,8 @@
       },
       "fix": {
         "suggestion": "添加审计规则监控时间修改",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-a.*adjtimex.*time-change/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-a.*adjtimex.*time-change/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -236,7 +238,8 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/passwd -p wa -k identity",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/passwd/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/passwd -p wa -k identity' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/passwd/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/passwd -p wa -k identity' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -264,7 +267,8 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/hosts -p wa -k system-locale",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/hosts/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/hosts -p wa -k system-locale' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/hosts/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/hosts -p wa -k system-locale' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -292,7 +296,8 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/sudoers -p wa -k scope",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/sudoers/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/sudoers -p wa -k scope' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/sudoers/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/sudoers -p wa -k scope' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -382,7 +387,8 @@
       },
       "fix": {
         "suggestion": "添加 chmod 审计规则",
-        "command": "echo '-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules"
+        "command": "echo '-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -406,7 +412,8 @@
       },
       "fix": {
         "suggestion": "添加 chown 审计规则",
-        "command": "echo '-a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules"
+        "command": "echo '-a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -430,7 +437,8 @@
       },
       "fix": {
         "suggestion": "添加 setxattr 审计规则",
-        "command": "echo '-a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules"
+        "command": "echo '-a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -454,7 +462,8 @@
       },
       "fix": {
         "suggestion": "添加失败文件访问审计规则",
-        "command": "echo '-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access' >> /etc/audit/rules.d/audit.rules"
+        "command": "echo '-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -482,7 +491,8 @@
       },
       "fix": {
         "suggestion": "为常用特权命令添加审计规则",
-        "command": "echo '-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/chsh -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules"
+        "command": "echo '-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/chsh -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -505,8 +515,9 @@
         ]
       },
       "fix": {
-        "suggestion": "添加内核模块审计规则，并重启 auditd 服务",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/insmod/d; /^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/rmmod/d; /^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/modprobe/d' /etc/audit/rules.d/audit.rules && echo '-w /sbin/insmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/rmmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/modprobe -p x -k modules' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "suggestion": "添加内核模块审计规则",
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/insmod/d; /^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/rmmod/d; /^[[:space:]]*#*[[:space:]]*-w \\/sbin\\/modprobe/d' /etc/audit/rules.d/audit.rules && echo '-w /sbin/insmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/rmmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/modprobe -p x -k modules' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -530,7 +541,8 @@
       },
       "fix": {
         "suggestion": "添加 MAC 策略审计规则",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/selinux/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/selinux/ -p wa -k MAC-policy' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/etc\\/selinux/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/selinux/ -p wa -k MAC-policy' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -557,8 +569,9 @@
         ]
       },
       "fix": {
-        "suggestion": "在审计规则末尾添加 -e 2，并重启 auditd 服务",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-e[[:space:]]*2/d' /etc/audit/rules.d/audit.rules && echo '-e 2' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "suggestion": "在审计规则末尾添加 -e 2",
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-e[[:space:]]*2/d' /etc/audit/rules.d/audit.rules && echo '-e 2' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
@@ -582,7 +595,8 @@
       },
       "fix": {
         "suggestion": "添加会话审计规则",
-        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/var\\/run\\/utmp/d; /^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/wtmp/d; /^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/btmp/d' /etc/audit/rules.d/audit.rules && echo '-w /var/run/utmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/wtmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/btmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && service auditd restart"
+        "command": "sed -i '/^[[:space:]]*#*[[:space:]]*-w \\/var\\/run\\/utmp/d; /^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/wtmp/d; /^[[:space:]]*#*[[:space:]]*-w \\/var\\/log\\/btmp/d' /etc/audit/rules.d/audit.rules && echo '-w /var/run/utmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/wtmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/btmp -p wa -k session' >> /etc/audit/rules.d/audit.rules",
+        "restart_services": ["auditd"]
       }
     },
     {
