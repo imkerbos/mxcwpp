@@ -1,9 +1,21 @@
-# README.md
+# Matrix Cloud Security Platform（矩阵云安全平台）
 
-# Matrix Cloud Security Platform（矩阵云安全平台，项目简称：mxsec-platform）
-
-> 面向 Linux 主机与中间件的基线检查平台。  
+> 面向 Linux 主机与中间件的基线检查平台。
 > v1 聚焦 **操作系统基线**，参考 ByteDance 开源的 Elkeid（特别是 baseline 插件和 agent 设计），重新设计一套 **Server + UI + Agent + Baseline 引擎**，兼容新系统版本（如 Rocky Linux 9、Debian 12 等）。
+
+**当前版本**：v1.0.0
+**开发状态**：核心功能已完成，生产可用
+
+## 功能亮点
+
+| 功能模块 | 说明 |
+|---------|------|
+| **基线检查** | 9 种检查器，13 个规则文件，覆盖 SSH、密码策略、文件权限、服务状态等 |
+| **基线修复** | 支持单机/批量自动修复，配置化服务重启 |
+| **资产采集** | 10 种采集器：进程、端口、用户、软件、容器、应用、网卡、磁盘、内核模块、服务 |
+| **多 OS 支持** | Rocky Linux 9、CentOS 7/8、Oracle Linux 7/8/9、Debian 10/11/12、Ubuntu 等 |
+| **Web 控制台** | 主机管理、策略管理、任务调度、告警管理、报表统计 |
+| **插件架构** | Agent + Plugin 架构，支持插件热更新和版本管理 |
 
 ---
 
@@ -52,52 +64,93 @@
   - 作为 Agent 的子进程运行，负责：
     - 加载基线策略（从 Server 下发或本地文件）。
     - 执行基线检查（文件、命令、权限、sysctl 等）。
-    - 上报检测结果。
+    - 执行基线修复（自动修复不合规配置项）。
+    - 上报检测结果和修复结果。
+  - **已实现 9 种检查器**：
+    - `file_kv`：配置文件键值检查
+    - `file_exists`：文件存在性检查
+    - `file_permission`：文件权限检查
+    - `file_line_match`：文件行匹配检查
+    - `file_owner`：文件属主检查
+    - `command_exec`：命令执行检查
+    - `sysctl`：内核参数检查
+    - `service_status`：服务状态检查
+    - `package_installed`：软件包安装检查
   - 技术栈：Golang，通过 Pipe + Protobuf 与 Agent 通信。
 
 - **Collector Plugin（资产采集插件）**
   - 作为 Agent 的子进程运行，负责：
-    - 周期性采集主机资产信息：
-      - 进程信息（PID、命令行、MD5、容器关联等）
-      - 端口信息（TCP/UDP 监听端口、进程关联）
-      - 账户信息（用户列表、弱密码检测、sudoers 配置）
-      - 软件包信息（系统包、Python 包、JAR 包等）
-      - 容器信息（Docker、containerd 等运行时）
-      - 应用信息（数据库、消息队列、Web 服务等）
-      - 硬件信息（网卡、磁盘等）
-      - 内核模块信息
-      - 系统服务与定时任务
-    - 上报资产数据。
+    - 周期性采集主机资产信息（1-12 小时周期）
+    - 上报资产数据
+  - **已实现 10 种采集器**：
+    - `ProcessHandler`：进程信息（PID、命令行、MD5、容器关联）
+    - `PortHandler`：端口信息（TCP/UDP 监听端口、进程关联）
+    - `UserHandler`：账户信息（用户列表、弱密码检测、sudoers）
+    - `SoftwareHandler`：软件包信息（系统包、Python 包、JAR 包）
+    - `ContainerHandler`：容器信息（Docker、containerd）
+    - `AppHandler`：应用信息（数据库、消息队列、Web 服务）
+    - `NetInterfaceHandler`：网卡信息
+    - `VolumeHandler`：磁盘信息
+    - `KmodHandler`：内核模块信息
+    - `ServiceHandler` / `CronHandler`：系统服务与定时任务
   - 技术栈：Golang，通过 Pipe + Protobuf 与 Agent 通信。
 
 - **mxsec-server（后端）**
-  - 提供：
-    - Agent 注册与心跳（gRPC 双向流）。
-    - 插件管理（版本控制、配置下发、升级）。
-    - 策略管理（创建/修改/下发）。  
-    - 扫描任务调度（全量、单机、分组等）。
-    - 检测结果接收、存储、查询 API。
-    - 资产数据接收、存储、查询 API。
-    - 监控数据查询 API（支持 MySQL 和 Prometheus 混合查询）。
-  - 技术栈：
-    - Golang（gRPC Server + Gorm + Viper + Zap）。
-    - MySQL / PostgreSQL 作为配置 & 结果存储。
-    - 支持 Prometheus 查询（可选，用于监控数据查询）。
-    - 支持 mTLS 双向认证。
+  - **AgentCenter（gRPC Server）**：
+    - Agent 注册与心跳（gRPC 双向流）
+    - 插件管理（版本控制、配置下发、升级）
+    - 任务下发与状态追踪
+    - 后台调度器（插件更新、Agent 更新、任务超时、告警调度）
+  - **Manager（HTTP API Server）**：
+    - **100+ 个 HTTP 端点**，22 个 API 处理器
+    - 主机管理 API（列表、详情、指标、风险统计、插件状态）
+    - 策略管理 API（CRUD、批量操作、导入导出）
+    - 任务管理 API（创建、运行、取消、查询）
+    - 基线修复 API（可修复项查询、修复任务管理）
+    - 资产采集 API（进程、端口、用户、软件、容器等 11 种资产）
+    - 报表 API（统计、趋势、任务报告、Top 规则/主机）
+    - 告警管理 API（告警状态、批量操作）
+    - 通知管理 API（Webhook 支持）
+    - 组件管理 API（插件/Agent 包上传、版本管理、推送）
+    - 用户管理 API（JWT 认证）
+    - 系统配置 API（站点、告警、K8s 镜像配置）
+  - **数据模型**：30+ 个数据表
+  - 技术栈：Golang（gRPC + Gin + Gorm + Viper + Zap）、MySQL、mTLS
 
 - **mxsec-console（前端 UI）**
-  - 功能：
-    - 主机视图：主机列表、基线得分、详情。
-    - 策略视图：策略列表、规则编辑、策略详情（检查概览、检查项视角、影响的主机列表）。
-    - 任务视图：扫描任务、任务历史。
-    - Dashboard：统计概览、主机状态、基线得分趋势。
-    - 报表 / 导出。
-  - 技术栈：Vue3 + TypeScript + Pinia + Ant Design Vue。
+  - **已实现页面**：
+    - **Dashboard**：统计概览、主机状态分布、风险趋势
+    - **主机管理**：列表（基线评分、风险等级、业务线筛选）、详情页（概览、基线风险、资产指纹、性能监控）
+    - **策略管理**：策略列表、规则编辑器、策略详情（检查概览、检查项视角、影响的主机列表）
+    - **策略组管理**：策略组列表、规则关联
+    - **任务管理**：任务列表、任务创建、执行详情
+    - **基线修复**：可修复项列表、修复任务管理、修复结果查看
+    - **告警管理**：告警列表、告警详情、批量处理
+    - **资产管理**：进程、端口、用户、软件、容器等资产展示
+    - **业务线管理**：业务线列表、主机关联
+    - **报表统计**：统计趋势、任务报告、导出功能
+    - **系统设置**：安装指南、组件管理、通知配置、安全配置
+    - **用户管理**：用户列表、权限管理
+  - **组件数量**：45+ 个 Vue 组件
+  - 技术栈：Vue 3 + TypeScript + Pinia + Ant Design Vue 4
 
 - **Policy Repository（策略仓库）**
-  - 将基线规则抽象为统一策略模型：
-    - 规则 ID、类别（账号、安全加固、SSH、日志审计…）、适用 OS、检查方式（命令、文件内容、sysctl、服务状态等）、期望值、修复建议、严重级别。
-  - 形式：YAML / JSON 文件 + 数据库映射。
+  - 将基线规则抽象为统一策略模型
+  - **已实现 13 个规则文件**：
+    - `ssh-baseline.json`：SSH 安全配置（24 条规则）
+    - `password-policy.json`：密码策略
+    - `file-permissions.json`：文件权限
+    - `account-security.json`：账户安全
+    - `service-status.json`：服务状态
+    - `sysctl-security.json`：内核参数
+    - `audit-logging.json`：审计日志
+    - `network-protocols.json`：网络协议
+    - `login-banner.json`：登录横幅
+    - `secure-boot.json`：安全启动
+    - `cron-security.json`：定时任务安全
+    - `file-integrity.json`：文件完整性
+    - `mac-security.json`：强制访问控制
+  - 规则特性：多 OS 版本适配、检查逻辑、修复建议、修复命令、严重级别（Critical/High/Medium/Low）
 
 ### 2.2 通信协议
 
@@ -203,75 +256,7 @@ v1 初版建议覆盖：
 
 ---
 
-## 4. Phase 0：Elkeid 代码学习计划
-
-目标：**用 Cursor 系统性读懂 Elkeid 的 baseline & agent 实现原理，再抽象出自己的需求和设计。**
-
-参考文档 / 仓库：
-
-- Elkeid 总体 README & 架构介绍
-- Agent 文档：包括通信模型（双向 gRPC、mTLS、自发现）、插件机制、打包方式等
-- 基线插件说明 / 打包方式：基线插件以独立包形式存在，通过配置与策略做基线检查
-- Elkeid-HUB 规则引擎（后续可参考其规则思想，而不是直接引入）
-- Elkeid代码就在项目根目录下的Elkeid文件，可以直接阅读和了解它的源代码
-
-### 4.1 阅读顺序建议
-
-#### 文档层面
-
-- 阅读 Elkeid README 及架构图，理解整体组件划分。
-- 阅读官方 Agent 文档中 5.1 Agent & 5.5 Plugins 相关章节，重点是插件通信机制。
-
-#### Agent 源码
-
-- 找到 Agent 主循环、配置加载、与 Server 建立 gRPC + mTLS 连接的代码。
-- 重点研究：
-  - 与 ServiceDiscovery / AgentCenter 的连接配置；
-  - 插件生命周期管理（启动、停止、升级）；
-  - 插件与 Agent 间的 Pipe / protobuf 数据流。
-
-#### Baseline 插件代码
-
-- 阅读 baseline 插件 main 入口（`plugins/baseline/main.go`）；
-- 阅读策略配置解析逻辑（config 文件格式）；
-- 阅读具体检查实现（如执行命令、读取文件、解析配置等）；
-- 阅读结果上报格式（protobuf 定义 / JSON 结构）。
-
-#### Collector 插件代码
-
-- 阅读 collector 插件 main 入口（`plugins/collector/main.go`）；
-- 理解资产采集引擎（`plugins/collector/engine/`）；
-- 理解各类资产采集器（进程、端口、账户、软件包、容器等）；
-- 理解资产数据上报格式。
-
-#### 插件 SDK
-
-- 阅读插件 SDK（`plugins/lib/go/client.go`）；
-- 理解 `plugins.Client` 如何封装 Pipe 通信；
-- 理解 `SendRecord()` 和 `ReceiveTask()` 的实现。
-
-#### Server 侧数据流程
-
-- 检查 Server 如何接收 Agent / 插件数据；
-- 看 baseline 相关 topic / index（如何将检测结果存储到 ES / DB）。
-
-### 4.2 转换为 Todo（示例）
-
-> 这部分后续可以直接放在 Issue / Project 里，也可以和 .mdc 联动。
-
-- [ ] 文档：通读 Elkeid README & 架构介绍，截取与基线相关的关键结构图和说明。
-- [ ] 文档：整理 “Elkeid Agent 插件机制” 笔记（父子进程、pipe、protobuf 流程）。
-- [ ] 代码：定位 Elkeid baseline 插件入口函数和初始化流程。
-- [ ] 代码：梳理 baseline 策略配置文件模型（字段、匹配 OS、严重级别等）。
-- [ ] 代码：梳理 baseline 检查执行框架（如何按规则类型调用不同检查器）。
-- [ ] 代码：整理 baseline 检测结果的数据结构（字段含义、状态取值）。
-- [ ] 设计：基于上面笔记，画出“自己的 baseline Agent + Server + Policy 模型”的草图。
-- [ ] 设计：基于 Elkeid 架构，设计我们的 Agent + 插件 + Server 架构。
-- [ ] 设计：列出与 Elkeid 的差异（主要是策略模型优化、新系统版本支持等）。
-
----
-
-## 5. 项目结构规划（建议）
+## 4. 项目结构
 
 > 实际可以随着开发迭代微调，这里作为 v1 初始规划。
 
@@ -368,7 +353,7 @@ mxcsec-platform/
 
 ---
 
-## 6. 开发建议与工作流
+## 5. 开发建议与工作流
 
 > 具体的细节规则在 `.cursor/rules/baseline-security.mdc` 中，这里只做概要。
 
@@ -389,7 +374,7 @@ mxcsec-platform/
 
 ---
 
-## 7. Roadmap（初版）
+## 6. Roadmap
 
 > 后续可以拆到 GitHub Project / 自研任务系统里。
 
@@ -429,18 +414,38 @@ mxcsec-platform/
 - [x] 实现通知管理模块（通知列表、通知详情）。
 - [x] 清理过时文档和脚本，优化项目结构。
 
-### v1.0 – OS 基线稳定版本 🔄
+### v1.0 – OS 基线稳定版本 ✅
 
-- [x] 扩展基线规则覆盖范围（账号、权限、日志、sysctl 等）- 已完成 200+ 条规则
-- [x] 完善多 OS 适配与测试（Rocky 9、Debian 12、Ubuntu 22.04 等）
-- [ ] 与现有告警体系（如 Lark / Teams / 邮件）打通
-- [x] 编写部署文档与操作手册 - 已完成
+**核心功能已完成，生产可用**
+
+- [x] Agent + Plugin 架构完整实现
+- [x] 9 种检查器、10 种采集器
+- [x] 13 个规则文件，覆盖主要安全基线
+- [x] 基线自动修复功能（单机/批量修复、配置化服务重启）
+- [x] 100+ 个 HTTP API 端点、30+ 个数据表
+- [x] 完整的 Web 控制台（45+ 个 Vue 组件）
+- [x] 多 OS 适配（Rocky 9、CentOS 7/8、Oracle Linux、Debian、Ubuntu）
+- [x] Docker Compose 和 Systemd 两种部署方式
+- [x] 完善的部署文档与操作手册
+
+### v1.1 – 架构区分与告警对接（规划中）
+
+- [ ] **架构区分功能**：识别主机运行环境（VM/Docker/K8s），按环境过滤基线规则
+- [ ] **告警对接增强**：支持 Lark、Teams、邮件等更多告警通道
+- [ ] **CIS 基线完善**：按 CIS Rocky Linux 9 Benchmark 补充 P0/P1 级别规则
+
+### v2.0 – 中间件基线（规划中）
+
+- [ ] Nginx 基线检查
+- [ ] Redis 基线检查
+- [ ] MySQL 基线检查
+- [ ] 其他中间件基线
 
 ---
 
-## 8. 文档索引
+## 7. 文档索引
 
-### 8.1 部署文档
+### 7.1 部署文档
 
 - [生产环境部署方案](docs/deployment/production-deployment.md) - 完整的生产环境部署指南（推荐）
 - [Server 部署指南](docs/deployment/server-deployment.md) - Server 部署方式（Docker Compose、二进制部署）
@@ -449,7 +454,7 @@ mxcsec-platform/
 - [发行版支持](docs/deployment/distribution-support.md) - 支持的 Linux 发行版列表
 - [快速开始](docs/deployment/quick-start.md) - 快速部署指南
 
-### 8.2 开发文档
+### 7.2 开发文档
 
 - [快速开始指南](docs/development/quick-start.md) - 快速搭建开发环境
 - [开发指南](docs/development/development-guide.md) - 开发流程和规范
@@ -459,21 +464,42 @@ mxcsec-platform/
 - [Baseline 策略模型](docs/design/baseline-policy-model.md) - 策略模型设计
 - [Server API 设计](docs/design/server-api.md) - Server API 接口设计
 
-### 8.3 测试文档
+### 7.3 测试文档
 
 - [前端 API 集成测试](docs/testing/frontend-api-integration-test.md) - 前端 API 集成测试指南
 - [验证清单](docs/testing/verification-checklist.md) - 功能验证清单
 
-### 8.4 功能文档
+### 7.4 功能文档
 
 - [字段状态显示说明](docs/features/field-status-display.md) - 字段状态显示功能说明
 - [系统配置路由说明](docs/deployment/system-config-routes.md) - 系统配置 API 路由注册说明
+- [基线修复功能说明](docs/BASELINE_FIX_IMPLEMENTATION.md) - 基线自动修复功能实现说明
 
-### 8.5 其他文档
+### 7.5 规则编写
+
+- [规则编写指南](docs/RULE_WRITING_GUIDE.md) - 如何编写基线检查规则
+- [基线导入导出指南](docs/BASELINE_IMPORT_EXPORT_GUIDE.md) - 基线策略导入导出操作指南
+
+### 7.6 其他文档
 
 - [TODO 列表](docs/TODO.md) - 项目开发任务和进度
-- [下一步计划](docs/NEXT_STEPS.md) - 后续开发计划
-- [Elkeid 研究笔记](docs/elkeid-notes/) - Elkeid 架构分析笔记
+- [Agent 连接故障排查](docs/AGENT_CONNECTION_TROUBLESHOOTING.md) - Agent 连接问题排查指南
+- [Agent 更新指南](docs/AGENT_UPDATE.md) - Agent 升级和更新说明
+
+---
+
+## 8. 项目统计
+
+| 模块 | 规模 |
+|------|------|
+| Agent | 15 个 Go 文件 |
+| Server API | 22 个处理器，13,000+ 行代码 |
+| 数据模型 | 30+ 个数据表 |
+| Baseline Plugin | 9 种检查器，13 个规则文件 |
+| Collector Plugin | 10 种采集器 |
+| 前端 UI | 45+ 个 Vue 组件 |
+| HTTP 端点 | 100+ 个 |
+| 单元测试 | 15 个测试文件 |
 
 ---
 
