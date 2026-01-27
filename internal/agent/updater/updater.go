@@ -292,10 +292,11 @@ func (m *Manager) installPackage(pkgType string, pkgPath string) error {
 		// - preremove: 升级时 ($1==1) 不停止服务，只有卸载时 ($1==0) 才停止
 		// - postinstall: 升级时 ($1==2) 只 reload daemon，不启动服务
 		// 这样升级过程中 Agent 进程保持运行，避免 systemd Restart=always 竞态
-		cmd = exec.Command("rpm", "-Uvh", pkgPath)
+		// 使用 --force 选项避免 "already installed" 错误
+		cmd = exec.Command("rpm", "-Uvh", "--force", pkgPath)
 
 		m.logger.Info("executing RPM upgrade command",
-			zap.String("command", fmt.Sprintf("rpm -Uvh %s", pkgPath)),
+			zap.String("command", fmt.Sprintf("rpm -Uvh --force %s", pkgPath)),
 			zap.Int("uid", os.Getuid()),
 			zap.Int("gid", os.Getgid()),
 		)

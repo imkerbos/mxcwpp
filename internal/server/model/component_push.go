@@ -26,6 +26,7 @@ type ComponentPushRecord struct {
 	SuccessCount  int                 `gorm:"default:0" json:"success_count"`         // 成功数
 	FailedCount   int                 `gorm:"default:0" json:"failed_count"`          // 失败数
 	FailedHosts   StringArray         `gorm:"type:json" json:"failed_hosts"`          // 失败的主机 ID 列表
+	Force         bool                `gorm:"default:false" json:"force"`             // 是否强制更新（即使版本相同也更新）
 	Message       string              `gorm:"type:text" json:"message"`               // 推送消息/备注
 	CreatedBy     string              `gorm:"size:64" json:"created_by"`              // 创建者
 	CreatedAt     LocalTime           `json:"created_at"`                             // 创建时间

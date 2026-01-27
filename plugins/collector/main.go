@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/collector/engine"
@@ -179,6 +180,8 @@ func newPluginLogger() (*zap.Logger, error) {
 	config.Encoding = "json"
 	// 设置日志级别为 Info
 	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+	// 使用人类可读的时间格式
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
 	return config.Build()
 }

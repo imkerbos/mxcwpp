@@ -1371,14 +1371,28 @@ const handleConfirmCheckNow = async () => {
       }
     }
 
-    // 构建任务名称
+    // 构建任务名称 - 格式: {运行时类型}{目标}检查 - {策略信息} - {时间}
+    const runtimeLabel = checkNowForm.runtime_type === 'docker' ? '容器' : '主机'
+    const dateStr = new Date().toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).replace(/\//g, '-')
+
     const policyNames = policyIds.map(pid => {
       const policy = allPolicies.value.find(p => p.id === pid) || policies.value.find(p => p.id === pid)
       return policy?.name || pid
     })
-    const taskName = policyIds.length === 1
-      ? `立即检查-${policyNames[0]}`
-      : `立即检查-${policyNames.length}个策略`
+
+    let taskName: string
+    if (policyIds.length === 1) {
+      // 单策略: 主机检查 - CIS_Ubuntu - 01-26 14:30
+      taskName = `${runtimeLabel}检查 - ${policyNames[0]} - ${dateStr}`
+    } else {
+      // 多策略: 主机检查 - 3个策略 - 01-26 14:30
+      taskName = `${runtimeLabel}检查 - ${policyNames.length}个策略 - ${dateStr}`
+    }
 
     // 创建单个包含多策略的任务
     const response = await tasksApi.create({

@@ -31,7 +31,10 @@ func Init(cfg LogConfig) (*zap.Logger, error) {
 	// 配置编码器
 	var encoder zapcore.Encoder
 	encoderConfig := zap.NewProductionEncoderConfig()
-	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	// 自定义时间格式：2026-01-26 22:13:48.123+0800 (空格分隔，带毫秒和时区)
+	encoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(t.Format("2006-01-02 15:04:05.000-0700"))
+	}
 	encoderConfig.EncodeLevel = zapcore.LowercaseLevelEncoder
 
 	if cfg.Format == "json" {

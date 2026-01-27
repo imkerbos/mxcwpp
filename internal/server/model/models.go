@@ -146,6 +146,7 @@ var (
 		&Rule{},
 		&ScanResult{},
 		&ScanTask{},
+		&TaskHostStatus{},
 		&FixTask{},
 		&FixResult{},
 		&User{},

@@ -1505,28 +1505,24 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		return
 	}
 
-	// 统计需要更新的主机数量
-	needUpdateCount := 0
-	var targetHostIDs []string
-	for _, host := range hosts {
-		if req.Force || host.AgentVersion == "" || host.AgentVersion != latestVersion.Version {
-			needUpdateCount++
-			targetHostIDs = append(targetHostIDs, host.HostID)
-		}
-	}
-
-	// 创建推送记录（即使没有需要更新的主机也创建，用于记录操作）
+	// 确定目标主机列表
 	targetType := "all"
 	if len(req.HostIDs) > 0 {
 		targetType = "selected"
 	}
 
-	// 如果没有指定主机，使用所有在线主机作为目标
-	if len(req.HostIDs) == 0 {
-		for _, host := range hosts {
-			targetHostIDs = append(targetHostIDs, host.HostID)
+	// 构建目标主机 ID 列表（所有在线主机）
+	var targetHostIDs []string
+	for _, host := range hosts {
+		targetHostIDs = append(targetHostIDs, host.HostID)
+	}
+
+	// 统计实际需要更新的主机数量
+	needUpdateCount := 0
+	for _, host := range hosts {
+		if req.Force || host.AgentVersion == "" || host.AgentVersion != latestVersion.Version {
+			needUpdateCount++
 		}
-		needUpdateCount = len(targetHostIDs) // 重新计算
 	}
 
 	pushRecord := model.ComponentPushRecord{
@@ -1539,7 +1535,8 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		TotalCount:    len(targetHostIDs),
 		SuccessCount:  0,
 		FailedCount:   0,
-		Message:       fmt.Sprintf("推送 Agent 更新到 %d 台主机（需要更新: %d）", len(targetHostIDs), needUpdateCount),
+		Force:         req.Force, // 保存 force 标志
+		Message:       fmt.Sprintf("推送 Agent 更新到 %d 台主机（需要更新: %d，强制: %v）", len(targetHostIDs), needUpdateCount, req.Force),
 		CreatedBy:     h.getCurrentUser(c),
 	}
 
@@ -1565,13 +1562,12 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
-		"message": "更新请求已提交，AgentCenter 将在下次检查时推送更新",
+		"message": "推送任务已创建，AgentCenter 将在 30 秒内开始推送",
 		"data": gin.H{
 			"record_id":      pushRecord.ID,
 			"total":          len(hosts),
 			"need_update":    needUpdateCount,
 			"latest_version": latestVersion.Version,
-			"note":           "实际推送由 AgentCenter 调度器完成（每30秒检查一次）",
 		},
 	})
 }
@@ -1694,6 +1690,10 @@ func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
 		progress = float64(record.SuccessCount+record.FailedCount) / float64(record.TotalCount) * 100
 	}
 
+	// 查询主机推送详情
+	var pushHosts []model.ComponentPushHost
+	h.db.Where("record_id = ?", record.ID).Order("status DESC, hostname ASC").Find(&pushHosts)
+
 	response := map[string]interface{}{
 		"id":             record.ID,
 		"component_name": record.ComponentName,
@@ -1711,6 +1711,7 @@ func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
 		"created_at":     record.CreatedAt.Time().Format("2006-01-02 15:04:05"),
 		"updated_at":     record.UpdatedAt.Time().Format("2006-01-02 15:04:05"),
 		"completed_at":   nil,
+		"push_hosts":     pushHosts,
 	}
 	if record.CompletedAt != nil {
 		response["completed_at"] = record.CompletedAt.Time().Format("2006-01-02 15:04:05")
@@ -1826,6 +1827,87 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 		return
 	}
 
+	// 获取在线 Agent 数量和主机列表
+	var onlineHosts []model.Host
+	if err := h.db.Where("status = ?", model.HostStatusOnline).Find(&onlineHosts).Error; err != nil {
+		h.logger.Error("查询在线主机失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "查询在线主机失败",
+		})
+		return
+	}
+	onlineCount := len(onlineHosts)
+
+	h.logger.Info("查询到在线主机",
+		zap.Int("online_count", onlineCount),
+		zap.Int("plugin_count", len(pluginConfigs)))
+
+	// 为每个插件创建推送记录
+	var pushRecords []model.ComponentPushRecord
+	for _, cfg := range pluginConfigs {
+		// 查找对应的组件
+		var component model.Component
+		if err := h.db.Where("name = ?", cfg.Name).First(&component).Error; err != nil {
+			h.logger.Warn("找不到对应的组件", zap.String("name", cfg.Name), zap.Error(err))
+			continue
+		}
+
+		record := model.ComponentPushRecord{
+			ComponentID:   component.ID,
+			ComponentName: cfg.Name,
+			Version:       cfg.Version,
+			TargetType:    "all",
+			Status:        model.ComponentPushStatusPushing,
+			TotalCount:    onlineCount,
+			SuccessCount:  0,
+			FailedCount:   0,
+			Message:       "手动触发推送",
+			CreatedBy:     h.getCurrentUser(c),
+			CreatedAt:     model.Now(),
+			UpdatedAt:     model.Now(),
+		}
+		pushRecords = append(pushRecords, record)
+	}
+
+	// 批量创建推送记录
+	if len(pushRecords) > 0 {
+		if err := h.db.Create(&pushRecords).Error; err != nil {
+			h.logger.Error("创建推送记录失败", zap.Error(err))
+			// 不影响主流程，继续执行
+		} else {
+			h.logger.Info("创建推送记录成功", zap.Int("count", len(pushRecords)))
+
+			// 为每个推送记录创建主机推送详情
+			for _, record := range pushRecords {
+				var pushHosts []model.ComponentPushHost
+				for _, host := range onlineHosts {
+					pushHost := model.ComponentPushHost{
+						RecordID:  record.ID,
+						HostID:    host.HostID,
+						Hostname:  host.Hostname,
+						Status:    model.ComponentPushHostStatusPending,
+						CreatedAt: model.Now(),
+						UpdatedAt: model.Now(),
+					}
+					pushHosts = append(pushHosts, pushHost)
+				}
+
+				if len(pushHosts) > 0 {
+					if err := h.db.Create(&pushHosts).Error; err != nil {
+						h.logger.Error("创建主机推送记录失败",
+							zap.Uint("record_id", record.ID),
+							zap.Error(err))
+					} else {
+						h.logger.Info("创建主机推送记录成功",
+							zap.Uint("record_id", record.ID),
+							zap.Int("host_count", len(pushHosts)))
+					}
+				}
+			}
+		}
+	}
+
 	// 更新所有插件配置的 updated_at 时间戳，触发自动广播
 	// 这会让 PluginUpdateScheduler 在下一次检查时（30秒内）检测到更新并广播
 	result := h.db.Model(&model.PluginConfig{}).
@@ -1843,19 +1925,16 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 
 	h.logger.Info("手动触发插件配置广播成功",
 		zap.Int("plugin_count", len(pluginConfigs)),
-		zap.Int64("updated_rows", result.RowsAffected))
-
-	// 获取在线 Agent 数量（用于返回给前端）
-	var onlineCount int64
-	h.db.Model(&model.Host{}).Where("status = ?", model.HostStatusOnline).Count(&onlineCount)
+		zap.Int64("updated_rows", result.RowsAffected),
+		zap.Int("push_records", len(pushRecords)))
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
 		"message": "广播触发成功，将在30秒内推送到所有在线Agent",
 		"data": gin.H{
-			"plugin_count":      len(pluginConfigs),
+			"plugin_count":       len(pluginConfigs),
 			"online_agent_count": onlineCount,
-			"plugins":           pluginConfigsToNames(pluginConfigs),
+			"plugins":            pluginConfigsToNames(pluginConfigs),
 		},
 	})
 }

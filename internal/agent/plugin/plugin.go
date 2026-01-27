@@ -30,13 +30,14 @@ import (
 
 // Manager 是插件管理器
 type Manager struct {
-	cfg       *config.Config
-	logger    *zap.Logger
-	transport *transport.Manager
-	plugins   map[string]*Plugin // 插件名称 -> 插件实例
-	mu        sync.RWMutex       // 保护 plugins map
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg         *config.Config
+	logger      *zap.Logger
+	transport   *transport.Manager
+	plugins     map[string]*Plugin // 插件名称 -> 插件实例
+	mu          sync.RWMutex       // 保护 plugins map
+	ctx         context.Context
+	cancel      context.CancelFunc
+	taskTracker *TaskTracker // 任务追踪器
 }
 
 // Plugin 表示一个插件实例
@@ -68,13 +69,21 @@ const (
 // NewManager 创建新的插件管理器
 func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 创建任务追踪器
+	taskTracker, err := NewTaskTracker(cfg.GetWorkDir(), logger)
+	if err != nil {
+		logger.Warn("failed to create task tracker, task recovery disabled", zap.Error(err))
+	}
+
 	return &Manager{
-		cfg:       cfg,
-		logger:    logger,
-		transport: transportMgr,
-		plugins:   make(map[string]*Plugin),
-		ctx:       ctx,
-		cancel:    cancel,
+		cfg:         cfg,
+		logger:      logger,
+		transport:   transportMgr,
+		plugins:     make(map[string]*Plugin),
+		ctx:         ctx,
+		cancel:      cancel,
+		taskTracker: taskTracker,
 	}
 }
 
@@ -325,6 +334,11 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 
 	plugin.logger.Info("plugin loaded successfully", zap.String("version", cfg.Version))
 
+	// 9. 重新分发未完成的任务（如果有任务追踪器）
+	if m.taskTracker != nil {
+		go m.retryPendingTasks(plugin)
+	}
+
 	return plugin, nil
 }
 
@@ -547,6 +561,7 @@ func (m *Manager) waitProcess(plugin *Plugin) {
 	err := plugin.cmd.Wait()
 
 	plugin.mu.Lock()
+	wasRunning := plugin.status == StatusRunning
 	if plugin.status == StatusStopping {
 		plugin.status = StatusStopped
 	} else {
@@ -571,6 +586,49 @@ func (m *Manager) waitProcess(plugin *Plugin) {
 
 	// 通知停止
 	close(plugin.stopCh)
+
+	// 如果插件是意外退出（不是主动停止），尝试重启
+	if wasRunning && err != nil {
+		plugin.logger.Warn("plugin crashed unexpectedly, will attempt to restart",
+			zap.String("plugin", plugin.Config.Name),
+			zap.Error(err))
+		go m.restartPlugin(plugin)
+	}
+}
+
+// restartPlugin 重启崩溃的插件
+func (m *Manager) restartPlugin(oldPlugin *Plugin) {
+	// 等待一小段时间，避免快速重启循环
+	time.Sleep(3 * time.Second)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 检查插件是否还在管理列表中
+	currentPlugin, exists := m.plugins[oldPlugin.Config.Name]
+	if !exists || currentPlugin != oldPlugin {
+		m.logger.Info("plugin already removed or replaced, skip restart",
+			zap.String("plugin", oldPlugin.Config.Name))
+		return
+	}
+
+	m.logger.Info("restarting crashed plugin",
+		zap.String("plugin", oldPlugin.Config.Name),
+		zap.String("version", oldPlugin.Config.Version))
+
+	// 重新加载插件
+	newPlugin, err := m.loadPlugin(m.ctx, oldPlugin.Config)
+	if err != nil {
+		m.logger.Error("failed to restart plugin",
+			zap.String("plugin", oldPlugin.Config.Name),
+			zap.Error(err))
+		return
+	}
+
+	// 替换插件实例
+	m.plugins[oldPlugin.Config.Name] = newPlugin
+	m.logger.Info("plugin restarted successfully",
+		zap.String("plugin", oldPlugin.Config.Name))
 }
 
 // receiveData 接收插件数据（从 Pipe 读取）
@@ -618,6 +676,21 @@ func (m *Manager) receiveData(plugin *Plugin) {
 				continue
 			}
 
+			// 检查是否是任务完成信号（DataType 8001 或 8004）
+			if m.taskTracker != nil && (record.DataType == 8001 || record.DataType == 8004) {
+				// 从 payload 中提取 task_id
+				if record.Data != nil && record.Data.Fields != nil {
+					if taskID, ok := record.Data.Fields["task_id"]; ok && taskID != "" {
+						// 标记任务完成
+						if err := m.taskTracker.MarkCompleted(taskID); err != nil {
+							plugin.logger.Warn("failed to mark task as completed",
+								zap.String("task_id", taskID),
+								zap.Error(err))
+						}
+					}
+				}
+			}
+
 			// 透传到 Server（通过 transport 模块）
 			if err := m.transport.SendPluginData(plugin.Config.Name, record); err != nil {
 				plugin.logger.Error("failed to send plugin data to server", zap.Error(err))
@@ -655,6 +728,13 @@ func (m *Manager) sendTask(plugin *Plugin) {
 				return
 			}
 
+			// 追踪任务（如果有任务追踪器）
+			if m.taskTracker != nil {
+				if err := m.taskTracker.TrackTask(task, plugin.Config.Name); err != nil {
+					plugin.logger.Error("failed to track task", zap.Error(err))
+				}
+			}
+
 			// 序列化任务为 bridge.Task
 			bridgeTask := &bridge.Task{
 				DataType:   task.DataType,
@@ -667,6 +747,9 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			taskData, err := proto.Marshal(bridgeTask)
 			if err != nil {
 				plugin.logger.Error("failed to marshal task", zap.Error(err))
+				if m.taskTracker != nil {
+					m.taskTracker.MarkFailed(task.Token)
+				}
 				continue
 			}
 
@@ -674,19 +757,35 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			len := uint32(len(taskData))
 			if err := binary.Write(writer, binary.LittleEndian, len); err != nil {
 				plugin.logger.Error("failed to write task size", zap.Error(err))
+				if m.taskTracker != nil {
+					m.taskTracker.MarkFailed(task.Token)
+				}
 				continue
 			}
 
 			// 写入数据
 			if _, err := writer.Write(taskData); err != nil {
 				plugin.logger.Error("failed to write task data", zap.Error(err))
+				if m.taskTracker != nil {
+					m.taskTracker.MarkFailed(task.Token)
+				}
 				continue
 			}
 
 			// 刷新缓冲区
 			if err := writer.Flush(); err != nil {
 				plugin.logger.Error("failed to flush task data", zap.Error(err))
+				if m.taskTracker != nil {
+					m.taskTracker.MarkFailed(task.Token)
+				}
 				continue
+			}
+
+			// 标记任务已分发
+			if m.taskTracker != nil {
+				if err := m.taskTracker.MarkDispatched(task.Token); err != nil {
+					plugin.logger.Warn("failed to mark task as dispatched", zap.Error(err))
+				}
 			}
 
 			plugin.logger.Info("task sent to plugin",
@@ -784,4 +883,34 @@ func (m *Manager) GetAllPluginStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+// retryPendingTasks 重新分发未完成的任务
+func (m *Manager) retryPendingTasks(plugin *Plugin) {
+	// 等待插件完全启动
+	time.Sleep(2 * time.Second)
+
+	// 获取该插件的未完成任务
+	pendingTasks := m.taskTracker.GetPendingTasks(plugin.Config.Name)
+	if len(pendingTasks) == 0 {
+		plugin.logger.Info("no pending tasks to retry")
+		return
+	}
+
+	plugin.logger.Info("retrying pending tasks",
+		zap.String("plugin", plugin.Config.Name),
+		zap.Int("count", len(pendingTasks)))
+
+	// 重新分发任务
+	for _, task := range pendingTasks {
+		if err := m.transport.SendTaskToPlugin(plugin.Config.Name, task); err != nil {
+			plugin.logger.Error("failed to re-dispatch pending task",
+				zap.String("token", task.Token),
+				zap.Error(err))
+		} else {
+			plugin.logger.Info("pending task re-dispatched",
+				zap.String("token", task.Token),
+				zap.Int32("data_type", task.DataType))
+		}
+	}
 }

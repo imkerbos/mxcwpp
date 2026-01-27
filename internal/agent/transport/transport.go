@@ -635,3 +635,24 @@ func (m *Manager) GetTaskChannelForPlugin(pluginName string) <-chan *grpc.Task {
 	}
 	return nil
 }
+
+// SendTaskToPlugin 向指定插件的任务通道发送任务（用于任务重试）
+func (m *Manager) SendTaskToPlugin(pluginName string, task *grpc.Task) error {
+	m.taskChMu.RLock()
+	ch, ok := m.taskChannels[pluginName]
+	m.taskChMu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("task channel not found for plugin: %s", pluginName)
+	}
+
+	select {
+	case ch <- task:
+		m.logger.Debug("task sent to plugin channel",
+			zap.String("plugin", pluginName),
+			zap.String("token", task.Token))
+		return nil
+	default:
+		return fmt.Errorf("task channel full for plugin: %s", pluginName)
+	}
+}

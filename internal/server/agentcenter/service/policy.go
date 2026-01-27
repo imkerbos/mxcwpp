@@ -128,8 +128,16 @@ func (s *PolicyService) UpdateRule(rule *model.Rule) error {
 	return nil
 }
 
-// DeleteRule 删除规则
+// DeleteRule 删除规则及其关联的检测结果
 func (s *PolicyService) DeleteRule(ruleID string) error {
+	// 先删除关联的检测结果
+	if result := s.db.Where("rule_id = ?", ruleID).Delete(&model.ScanResult{}); result.Error != nil {
+		s.logger.Warn("删除规则关联的检测结果失败", zap.String("rule_id", ruleID), zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		s.logger.Info("已清理规则关联的检测结果", zap.String("rule_id", ruleID), zap.Int64("count", result.RowsAffected))
+	}
+
+	// 删除规则
 	if err := s.db.Delete(&model.Rule{}, "rule_id = ?", ruleID).Error; err != nil {
 		return fmt.Errorf("删除规则失败: %w", err)
 	}

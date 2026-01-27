@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { FixTask, FixResult, FixableItem, ApiResponse, PaginatedResponse } from './types'
+import type { FixTask, FixResult, FixableItem, PaginatedResponse } from './types'
 
 export const fixApi = {
   // 获取可修复项列表

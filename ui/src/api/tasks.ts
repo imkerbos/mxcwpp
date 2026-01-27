@@ -49,4 +49,23 @@ export const tasksApi = {
   delete: (taskId: string) => {
     return apiClient.delete(`/tasks/${taskId}`)
   },
+
+  // 获取任务主机执行状态
+  getHostStatus: (taskId: string) => {
+    return apiClient.get<{
+      task_id: string
+      hosts: Array<{
+        id: number
+        task_id: string
+        host_id: string
+        hostname: string
+        status: 'dispatched' | 'completed' | 'timeout' | 'failed'
+        dispatched_at: string
+        completed_at?: string
+        error_message?: string
+        created_at: string
+        updated_at: string
+      }>
+    }>(`/tasks/${taskId}/host-status`)
+  },
 }

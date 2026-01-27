@@ -143,6 +143,168 @@ func (s *AgentUpdateScheduler) checkAndPushUpdates(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.logger.Debug("开始检查 Agent 更新")
+
+	// 优先处理 pending 状态的推送记录（手动触发的推送）
+	var pendingRecords []model.ComponentPushRecord
+	if err := s.db.Where("component_name = ? AND status = ?", "agent", model.ComponentPushStatusPending).
+		Order("created_at ASC").Find(&pendingRecords).Error; err != nil {
+		s.logger.Error("查询 pending 推送记录失败", zap.Error(err))
+		return
+	}
+
+	s.logger.Debug("查询到 pending 推送记录", zap.Int("count", len(pendingRecords)))
+
+	if len(pendingRecords) > 0 {
+		for _, record := range pendingRecords {
+			s.logger.Info("开始处理推送记录",
+				zap.Uint("record_id", record.ID),
+				zap.String("version", record.Version),
+				zap.Int("total_count", record.TotalCount))
+			s.processPushRecord(ctx, &record)
+		}
+		return // 处理完 pending 记录后返回，下次再检查自动更新
+	}
+
+	// 如果没有 pending 记录，执行自动更新检查
+	s.autoCheckAndPushUpdates(ctx)
+}
+
+// processPushRecord 处理单个推送记录
+func (s *AgentUpdateScheduler) processPushRecord(ctx context.Context, pushRecord *model.ComponentPushRecord) {
+	// 更新状态为 pushing
+	s.db.Model(pushRecord).Update("status", model.ComponentPushStatusPushing)
+
+	// 查找对应版本（必须是 agent 组件的版本）
+	var latestVersion model.ComponentVersion
+	if err := s.db.Where("component_id = ? AND version = ?", pushRecord.ComponentID, pushRecord.Version).First(&latestVersion).Error; err != nil {
+		s.logger.Error("查询版本失败", zap.Error(err), zap.Uint("component_id", pushRecord.ComponentID))
+		s.db.Model(pushRecord).Updates(map[string]interface{}{
+			"status":  model.ComponentPushStatusFailed,
+			"message": "查询版本失败: " + err.Error(),
+		})
+		return
+	}
+
+	// 查询目标主机
+	var hosts []model.Host
+	query := s.db.Where("status = ?", model.HostStatusOnline)
+	if len(pushRecord.TargetHosts) > 0 {
+		// 将 StringArray 转换为 []string 以便 GORM 正确处理 IN 子句
+		targetHostIDs := []string(pushRecord.TargetHosts)
+		query = query.Where("host_id IN ?", targetHostIDs)
+	}
+	if err := query.Find(&hosts).Error; err != nil {
+		s.logger.Error("查询主机失败", zap.Error(err))
+		s.db.Model(pushRecord).Updates(map[string]interface{}{
+			"status":  model.ComponentPushStatusFailed,
+			"message": "查询主机失败: " + err.Error(),
+		})
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+	var failedHostIDs []string
+
+	for _, host := range hosts {
+		// 检查是否需要更新（考虑 force 标志）
+		if !pushRecord.Force && host.AgentVersion != "" && host.AgentVersion == latestVersion.Version {
+			// 版本相同且不强制更新，跳过
+			continue
+		}
+
+		// 根据主机的架构和 OS 查找对应的包
+		pkgType := s.detectPackageType(host.OSFamily)
+		arch := host.Arch
+		if arch == "" {
+			arch = "amd64"
+		}
+
+		var pkg model.ComponentPackage
+		if err := s.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
+			latestVersion.ID, pkgType, arch, true).First(&pkg).Error; err != nil {
+			s.logger.Debug("未找到对应的 Agent 包",
+				zap.String("host_id", host.HostID),
+				zap.String("pkg_type", string(pkgType)),
+				zap.String("arch", arch),
+				zap.Error(err))
+			failedCount++
+			failedHostIDs = append(failedHostIDs, host.HostID)
+			continue
+		}
+
+		// 构建完整下载 URL
+		downloadURL := s.buildDownloadURL(pkgType, arch)
+
+		// 构建更新命令
+		agentUpdate := &grpcProto.AgentUpdate{
+			Version:     latestVersion.Version,
+			DownloadUrl: downloadURL,
+			Sha256:      pkg.SHA256,
+			PkgType:     string(pkg.PkgType),
+			Arch:        pkg.Arch,
+			Force:       pushRecord.Force, // 使用推送记录中的 force 标志
+		}
+
+		cmd := &grpcProto.Command{
+			AgentUpdate: agentUpdate,
+		}
+
+		// 发送更新命令
+		if err := s.transferService.SendCommand(host.HostID, cmd); err != nil {
+			s.logger.Warn("推送 Agent 更新失败",
+				zap.String("host_id", host.HostID),
+				zap.String("version", latestVersion.Version),
+				zap.Error(err))
+			failedCount++
+			failedHostIDs = append(failedHostIDs, host.HostID)
+			continue
+		}
+
+		s.logger.Info("已推送 Agent 更新",
+			zap.String("host_id", host.HostID),
+			zap.String("old_version", host.AgentVersion),
+			zap.String("new_version", latestVersion.Version),
+			zap.Bool("force", pushRecord.Force),
+			zap.String("download_url", downloadURL))
+
+		successCount++
+	}
+
+	// 更新推送记录的最终状态
+	now := model.ToLocalTime(time.Now())
+	updates := map[string]interface{}{
+		"success_count": successCount,
+		"failed_count":  failedCount,
+		"failed_hosts":  model.StringArray(failedHostIDs),
+		"completed_at":  &now,
+	}
+
+	if failedCount == 0 && successCount > 0 {
+		updates["status"] = model.ComponentPushStatusSuccess
+		updates["message"] = fmt.Sprintf("推送完成，成功 %d 台", successCount)
+	} else if successCount == 0 {
+		updates["status"] = model.ComponentPushStatusFailed
+		updates["message"] = fmt.Sprintf("推送失败，失败 %d 台", failedCount)
+	} else {
+		updates["status"] = model.ComponentPushStatusSuccess
+		updates["message"] = fmt.Sprintf("推送完成，成功 %d 台，失败 %d 台", successCount, failedCount)
+	}
+
+	s.db.Model(pushRecord).Updates(updates)
+
+	s.logger.Info("推送记录处理完成",
+		zap.Uint("record_id", pushRecord.ID),
+		zap.Int("success_count", successCount),
+		zap.Int("failed_count", failedCount))
+}
+
+// autoCheckAndPushUpdates 自动检查并推送 Agent 更新（原有逻辑）
+func (s *AgentUpdateScheduler) autoCheckAndPushUpdates(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// 查找 agent 组件的最新版本
 	var agentComponent model.Component
 	if err := s.db.Where("name = ? AND category = ?", "agent", model.ComponentCategoryAgent).First(&agentComponent).Error; err != nil {

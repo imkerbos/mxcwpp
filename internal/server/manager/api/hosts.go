@@ -245,19 +245,20 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		return
 	}
 
-	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果）
+	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果，过滤已删除的规则）
 	var results []model.ScanResult
 	subQuery := h.db.Model(&model.ScanResult{}).
 		Select("rule_id, MAX(checked_at) as max_checked_at").
 		Where("host_id = ?", hostID).
 		Group("rule_id")
 
-	h.db.Table("scan_results").
+	resultQuery := h.db.Table("scan_results").
 		Select("scan_results.*").
 		Joins("INNER JOIN (?) AS latest ON scan_results.rule_id = latest.rule_id AND scan_results.checked_at = latest.max_checked_at", subQuery).
+		Joins("INNER JOIN rules ON scan_results.rule_id = rules.rule_id").
 		Where("scan_results.host_id = ?", hostID).
-		Order("scan_results.checked_at DESC").
-		Find(&results)
+		Order("scan_results.checked_at DESC")
+	resultQuery.Find(&results)
 
 	// 查询最新监控数据
 	var latestMetric model.HostMetric
@@ -558,7 +559,7 @@ func (h *HostsHandler) GetHostRiskStatistics(c *gin.Context) {
 
 // UpdateHostBusinessLineRequest 更新主机业务线请求
 type UpdateHostBusinessLineRequest struct {
-	BusinessLine string `json:"business_line"` // 业务线名称（空字符串表示取消绑定）
+	BusinessLine string `json:"business_line"` // 业务线代码（空字符串表示取消绑定）
 }
 
 // UpdateHostBusinessLine 更新主机业务线
@@ -593,10 +594,10 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 		return
 	}
 
-	// 如果指定了业务线，验证业务线是否存在
+	// 如果指定了业务线，验证业务线是否存在（使用 code 查询）
 	if req.BusinessLine != "" {
 		var businessLine model.BusinessLine
-		if err := h.db.Where("name = ? AND enabled = ?", req.BusinessLine, true).First(&businessLine).Error; err != nil {
+		if err := h.db.Where("code = ? AND enabled = ?", req.BusinessLine, true).First(&businessLine).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"code":    400,
@@ -611,10 +612,14 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 			})
 			return
 		}
+		// 使用业务线代码（code）而不是名称（name）
+		host.BusinessLine = businessLine.Code
+	} else {
+		// 取消绑定
+		host.BusinessLine = ""
 	}
 
 	// 更新业务线
-	host.BusinessLine = req.BusinessLine
 	if err := h.db.Save(&host).Error; err != nil {
 		h.logger.Error("更新主机业务线失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{

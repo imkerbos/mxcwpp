@@ -517,3 +517,37 @@ func (h *TasksHandler) DeleteTask(c *gin.Context) {
 		"message": "任务已删除",
 	})
 }
+
+// GetTaskHostStatus 获取任务的主机执行状态
+// GET /api/v1/tasks/:task_id/host-status
+func (h *TasksHandler) GetTaskHostStatus(c *gin.Context) {
+	taskID := c.Param("task_id")
+
+	// 查询任务是否存在
+	var task model.ScanTask
+	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "任务不存在")
+			return
+		}
+		h.logger.Error("查询任务失败", zap.Error(err))
+		InternalError(c, "查询任务失败")
+		return
+	}
+
+	// 查询主机执行状态
+	var hostStatuses []model.TaskHostStatus
+	if err := h.db.Where("task_id = ?", taskID).
+		Order("dispatched_at DESC").
+		Find(&hostStatuses).Error; err != nil {
+		h.logger.Error("查询主机执行状态失败", zap.Error(err))
+		InternalError(c, "查询主机执行状态失败")
+		return
+	}
+
+	Success(c, gin.H{
+		"task_id": taskID,
+		"hosts":   hostStatuses,
+	})
+}
+

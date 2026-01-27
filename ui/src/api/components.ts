@@ -247,6 +247,20 @@ export interface ComponentPushRecord {
   created_at: string
   updated_at: string
   completed_at?: string
+  push_hosts?: ComponentPushHost[]
+}
+
+// 主机推送详情类型
+export interface ComponentPushHost {
+  id: number
+  record_id: number
+  host_id: string
+  hostname: string
+  status: 'pending' | 'success' | 'failed'
+  message: string
+  pushed_at?: string
+  created_at: string
+  updated_at: string
 }
 
 // 分页响应类型

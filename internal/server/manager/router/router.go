@@ -164,6 +164,7 @@ func setupTasksAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewTasksHandler(db, logger)
 	router.GET("/tasks", handler.ListTasks)
 	router.GET("/tasks/:task_id", handler.GetTask)
+	router.GET("/tasks/:task_id/host-status", handler.GetTaskHostStatus)
 	router.POST("/tasks", handler.CreateTask)
 	router.POST("/tasks/:task_id/run", handler.RunTask)
 	router.POST("/tasks/:task_id/cancel", handler.CancelTask)

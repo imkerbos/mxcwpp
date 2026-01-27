@@ -661,15 +661,25 @@ const handleHostSelectorConfirm = async (data: {
 
   recheckLoading.value = true
   try {
-    // 构建任务名称
+    // 构建任务名称 - 格式: {策略名} - {检查范围} - {时间}
+    const dateStr = new Date().toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).replace(/\//g, '-')
+
     let taskName = ''
     if (pendingRecheckRuleIds.value.length === 0) {
-      taskName = `${policy.value.name} - 立即检查`
+      taskName = `${policy.value.name} - 全量检查 - ${dateStr}`
     } else if (pendingRecheckRuleIds.value.length === 1) {
       const rule = rules.value.find(r => r.rule_id === pendingRecheckRuleIds.value[0])
-      taskName = `${policy.value.name} - 检查: ${rule?.title || pendingRecheckRuleIds.value[0]}`
+      const ruleTitle = rule?.title || pendingRecheckRuleIds.value[0]
+      // 规则标题过长时截断
+      const shortTitle = ruleTitle.length > 20 ? ruleTitle.slice(0, 20) + '...' : ruleTitle
+      taskName = `${policy.value.name} - ${shortTitle} - ${dateStr}`
     } else {
-      taskName = `${policy.value.name} - 批量检查 ${pendingRecheckRuleIds.value.length} 个规则`
+      taskName = `${policy.value.name} - ${pendingRecheckRuleIds.value.length}个规则 - ${dateStr}`
     }
 
     // 构建任务目标

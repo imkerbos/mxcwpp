@@ -189,7 +189,7 @@
 
     <!-- 创建任务对话框 -->
     <TaskModal
-      v-model:visible="modalVisible"
+      v-model:open="modalVisible"
       @success="handleModalSuccess"
     />
 
@@ -324,6 +324,51 @@
         <p class="progress-tip">
           <SyncOutlined spin /> 任务正在执行中，请稍候...
         </p>
+      </div>
+
+      <!-- 主机执行状态 -->
+      <div v-if="selectedTask && (selectedTask.status === 'running' || selectedTask.status === 'completed' || selectedTask.status === 'failed')" class="host-status-section">
+        <a-divider>主机执行状态</a-divider>
+        <a-table
+          :columns="hostStatusColumns"
+          :data-source="hostStatuses"
+          :loading="hostStatusLoading"
+          :pagination="false"
+          size="small"
+          row-key="id"
+          :scroll="{ x: 'max-content' }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'host_id'">
+              <a-tooltip :title="record.host_id">
+                <span
+                  class="host-id-cell"
+                  @click="handleCopyHostId(record.host_id)"
+                >
+                  {{ truncateHostId(record.host_id) }}
+                  <CopyOutlined class="copy-icon" />
+                </span>
+              </a-tooltip>
+            </template>
+            <template v-else-if="column.key === 'status'">
+              <a-tag :color="getHostStatusColor(record.status)">
+                {{ getHostStatusText(record.status) }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'dispatched_at'">
+              {{ formatTime(record.dispatched_at) }}
+            </template>
+            <template v-else-if="column.key === 'completed_at'">
+              {{ formatTime(record.completed_at) || '-' }}
+            </template>
+            <template v-else-if="column.key === 'error_message'">
+              <a-tooltip v-if="record.error_message" :title="record.error_message">
+                <span class="error-message-text">{{ record.error_message.slice(0, 30) }}...</span>
+              </a-tooltip>
+              <span v-else>-</span>
+            </template>
+          </template>
+        </a-table>
       </div>
 
       <!-- 执行结果统计（如果已完成） -->
@@ -464,6 +509,7 @@ import {
   ExclamationCircleOutlined,
   UnorderedListOutlined,
   ReloadOutlined,
+  CopyOutlined,
 } from '@ant-design/icons-vue'
 import { tasksApi } from '@/api/tasks'
 import { resultsApi } from '@/api/results'
@@ -500,6 +546,63 @@ const taskLogs = ref<TaskLog[]>([])
 const logsLoading = ref(false)
 const logsContainer = ref<HTMLElement | null>(null)
 const detailRefreshing = ref(false)
+
+// 主机执行状态
+interface HostStatus {
+  id: number
+  task_id: string
+  host_id: string
+  hostname: string
+  status: 'dispatched' | 'completed' | 'timeout' | 'failed'
+  dispatched_at: string
+  completed_at?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+const hostStatuses = ref<HostStatus[]>([])
+const hostStatusLoading = ref(false)
+const hostStatusColumns = [
+  {
+    title: '主机ID',
+    dataIndex: 'host_id',
+    key: 'host_id',
+    width: 180,
+    ellipsis: true,
+  },
+  {
+    title: '主机名',
+    dataIndex: 'hostname',
+    key: 'hostname',
+    width: 150,
+    ellipsis: true,
+  },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    key: 'status',
+    width: 90,
+    align: 'center' as const,
+  },
+  {
+    title: '下发时间',
+    dataIndex: 'dispatched_at',
+    key: 'dispatched_at',
+    width: 160,
+  },
+  {
+    title: '完成时间',
+    dataIndex: 'completed_at',
+    key: 'completed_at',
+    width: 160,
+  },
+  {
+    title: '错误信息',
+    dataIndex: 'error_message',
+    key: 'error_message',
+    ellipsis: true,
+  },
+]
 
 // 任务详细结果
 interface DetailedResult {
@@ -882,9 +985,13 @@ const handleViewDetail = async (record: ScanTask) => {
   taskResultStats.fail = 0
   taskResultStats.error = 0
   taskLogs.value = []
+  hostStatuses.value = []
 
   // 加载任务结果统计
   await loadTaskResultStats(record.task_id)
+
+  // 加载主机执行状态
+  await loadHostStatus(record.task_id)
 
   // 生成执行日志
   generateTaskLogs(record)
@@ -900,6 +1007,7 @@ const refreshTaskDetail = async (taskId: string) => {
     const task = await tasksApi.get(taskId) as any
     selectedTask.value = task
     await loadTaskResultStats(taskId)
+    await loadHostStatus(taskId)
     generateTaskLogs(task)
 
     // 如果任务已完成，停止刷新
@@ -911,14 +1019,81 @@ const refreshTaskDetail = async (taskId: string) => {
   }
 }
 
+// 加载主机执行状态
+const loadHostStatus = async (taskId: string) => {
+  hostStatusLoading.value = true
+  try {
+    const response = await tasksApi.getHostStatus(taskId) as any
+    hostStatuses.value = response.hosts || []
+  } catch (error) {
+    console.error('获取主机执行状态失败:', error)
+    message.error('获取主机执行状态失败')
+  } finally {
+    hostStatusLoading.value = false
+  }
+}
+
+// 获取主机状态颜色
+const getHostStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
+    dispatched: 'blue',
+    completed: 'green',
+    timeout: 'orange',
+    failed: 'red',
+  }
+  return colors[status] || 'default'
+}
+
+// 获取主机状态文本
+const getHostStatusText = (status: string) => {
+  const texts: Record<string, string> = {
+    dispatched: '已下发',
+    completed: '已完成',
+    timeout: '超时',
+    failed: '失败',
+  }
+  return texts[status] || status
+}
+
+// 截断主机ID显示
+const truncateHostId = (hostId: string) => {
+  if (!hostId) return '-'
+  if (hostId.length <= 16) return hostId
+  return hostId.slice(0, 8) + '...' + hostId.slice(-6)
+}
+
+// 复制主机ID
+const handleCopyHostId = async (hostId: string) => {
+  try {
+    await navigator.clipboard.writeText(hostId)
+    message.success('已复制主机ID')
+  } catch (err) {
+    message.error('复制失败')
+  }
+}
+
 const loadTaskResultStats = async (taskId: string) => {
   detailResultsLoading.value = true
   try {
-    const response = await resultsApi.list({
+    // 先获取总数
+    const firstResponse = await resultsApi.list({
       task_id: taskId,
-      page_size: 1000,
+      page: 1,
+      page_size: 1,
     }) as any
-    const results = response.items || []
+    const totalCount = firstResponse.total || 0
+
+    // 如果有结果，获取所有数据
+    let results: any[] = []
+    if (totalCount > 0) {
+      const fullResponse = await resultsApi.list({
+        task_id: taskId,
+        page: 1,
+        page_size: totalCount,
+      }) as any
+      results = fullResponse.items || []
+    }
+
     taskResultStats.total = results.length
     taskResultStats.pass = results.filter((r: any) => r.status === 'pass').length
     taskResultStats.fail = results.filter((r: any) => r.status === 'fail').length
@@ -1402,5 +1577,43 @@ onUnmounted(() => {
   color: #666;
   font-size: 12px;
   margin-left: 4px;
+}
+
+/* 主机执行状态表格样式 */
+.host-status-section {
+  margin-top: 16px;
+}
+
+.host-id-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  color: #1890ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.host-id-cell:hover {
+  background-color: #e6f7ff;
+}
+
+.host-id-cell .copy-icon {
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.host-id-cell:hover .copy-icon {
+  opacity: 1;
+}
+
+.error-message-text {
+  color: #ff4d4f;
+  font-size: 12px;
+  cursor: help;
 }
 </style>

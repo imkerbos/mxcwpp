@@ -134,6 +134,14 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			zap.Int("dispatched_host_count", task.DispatchedHostCount),
 		)
 
+		// 标记所有未完成的主机为超时
+		db.Model(&model.TaskHostStatus{}).
+			Where("task_id = ? AND status = ?", task.TaskID, model.TaskHostStatusDispatched).
+			Updates(map[string]interface{}{
+				"status":        model.TaskHostStatusTimeout,
+				"error_message": "任务执行超时：主机未返回结果",
+			})
+
 		db.Model(task).Updates(map[string]interface{}{
 			"status":        model.TaskStatusFailed,
 			"failed_reason": "任务执行超时：没有收到任何主机的结果",
@@ -147,6 +155,14 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			zap.Int("completed_host_count", task.CompletedHostCount),
 			zap.Int64("result_count", resultCount),
 		)
+
+		// 标记所有未完成的主机为超时
+		db.Model(&model.TaskHostStatus{}).
+			Where("task_id = ? AND status = ?", task.TaskID, model.TaskHostStatusDispatched).
+			Updates(map[string]interface{}{
+				"status":        model.TaskHostStatusTimeout,
+				"error_message": "任务执行超时：主机未返回结果",
+			})
 
 		failedHostCount := task.DispatchedHostCount - task.CompletedHostCount
 		db.Model(task).Updates(map[string]interface{}{

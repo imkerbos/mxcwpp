@@ -208,13 +208,28 @@ func (h *FixHandler) CreateFixTask(c *gin.Context) {
 
 	// 创建任务
 	taskID := uuid.New().String()
+
+	// 查询实际需要修复的项数（只统计失败的记录）
+	var actualCount int64
+	h.db.Model(&model.ScanResult{}).
+		Where("host_id IN ?", req.HostIDs).
+		Where("rule_id IN ?", req.RuleIDs).
+		Where("status IN ?", []string{"fail", "error"}).
+		Count(&actualCount)
+
+	// 如果没有查询到失败记录，使用主机数×规则数作为默认值
+	totalCount := int(actualCount)
+	if totalCount == 0 {
+		totalCount = len(req.HostIDs) * len(req.RuleIDs)
+	}
+
 	task := &model.FixTask{
 		TaskID:       taskID,
 		HostIDs:      req.HostIDs,
 		RuleIDs:      req.RuleIDs,
 		Severities:   req.Severities,
 		Status:       model.FixTaskStatusPending,
-		TotalCount:   len(req.HostIDs) * len(req.RuleIDs),
+		TotalCount:   totalCount,
 		SuccessCount: 0,
 		FailedCount:  0,
 		Progress:     0,

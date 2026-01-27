@@ -14,7 +14,9 @@ const (
 type ScanResult struct {
 	ResultID      string       `gorm:"primaryKey;column:result_id;type:varchar(64);not null" json:"result_id"`
 	HostID        string       `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
+	Hostname      string       `gorm:"column:hostname;type:varchar(255)" json:"hostname"` // 冗余存储，避免主机删除后数据丢失
 	PolicyID      string       `gorm:"column:policy_id;type:varchar(64);index" json:"policy_id"`
+	PolicyName    string       `gorm:"column:policy_name;type:varchar(255)" json:"policy_name"` // 冗余存储，避免策略删除后数据丢失
 	RuleID        string       `gorm:"column:rule_id;type:varchar(64);not null;index" json:"rule_id"`
 	TaskID        string       `gorm:"column:task_id;type:varchar(64);index" json:"task_id"`
 	Status        ResultStatus `gorm:"column:status;type:varchar(20);not null" json:"status"`
@@ -27,7 +29,7 @@ type ScanResult struct {
 	CheckedAt     LocalTime    `gorm:"column:checked_at;type:timestamp;not null" json:"checked_at"`
 	CreatedAt     LocalTime    `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 
-	// 关联关系
+	// 关联关系（可选，主要用于查询时预加载）
 	Host Host `gorm:"foreignKey:HostID;references:HostID" json:"host,omitempty"`
 	Rule Rule `gorm:"foreignKey:RuleID;references:RuleID" json:"rule,omitempty"`
 }

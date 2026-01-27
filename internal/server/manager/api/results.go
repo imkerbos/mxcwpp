@@ -138,7 +138,7 @@ func (h *ResultsHandler) GetHostBaselineScore(c *gin.Context) {
 		Severity string
 	}
 
-	// 使用子查询获取每个规则的最新结果
+	// 使用子查询获取每个规则的最新结果（过滤已删除的规则）
 	subQuery := h.db.Model(&model.ScanResult{}).
 		Select("rule_id, MAX(checked_at) as max_checked_at").
 		Where("host_id = ?", hostID).
@@ -147,6 +147,7 @@ func (h *ResultsHandler) GetHostBaselineScore(c *gin.Context) {
 	if err := h.db.Table("scan_results").
 		Select("scan_results.rule_id, scan_results.status, scan_results.severity").
 		Joins("INNER JOIN (?) AS latest ON scan_results.rule_id = latest.rule_id AND scan_results.checked_at = latest.max_checked_at", subQuery).
+		Joins("INNER JOIN rules ON scan_results.rule_id = rules.rule_id").
 		Where("scan_results.host_id = ?", hostID).
 		Find(&latestResults).Error; err != nil {
 		h.logger.Error("查询主机基线得分失败", zap.Error(err))
@@ -259,6 +260,7 @@ func (h *ResultsHandler) GetHostBaselineSummary(c *gin.Context) {
 	if err := h.db.Table("scan_results").
 		Select("scan_results.rule_id, scan_results.status, scan_results.severity, scan_results.category").
 		Joins("INNER JOIN (?) AS latest ON scan_results.rule_id = latest.rule_id AND scan_results.checked_at = latest.max_checked_at", subQuery).
+		Joins("INNER JOIN rules ON scan_results.rule_id = rules.rule_id").
 		Where("scan_results.host_id = ?", hostID).
 		Find(&latestResults).Error; err != nil {
 		h.logger.Error("查询主机基线摘要失败", zap.Error(err))

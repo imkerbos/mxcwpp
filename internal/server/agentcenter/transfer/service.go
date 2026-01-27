@@ -908,11 +908,22 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		resultStatus = model.ResultStatusError
 	}
 
+	// 获取策略名称（用于冗余存储，避免策略删除后数据丢失）
+	var policyName string
+	if policyID != "" {
+		var policy model.Policy
+		if err := s.db.Select("name").Where("id = ?", policyID).First(&policy).Error; err == nil {
+			policyName = policy.Name
+		}
+	}
+
 	// 创建 ScanResult
 	scanResult := &model.ScanResult{
 		ResultID:      resultID,
 		HostID:        hostID,
+		Hostname:      conn.Hostname, // 冗余存储主机名
 		PolicyID:      policyID,
+		PolicyName:    policyName, // 冗余存储策略名
 		RuleID:        ruleID,
 		TaskID:        taskID,
 		Status:        resultStatus,
@@ -950,6 +961,8 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		existingResult.Severity = scanResult.Severity
 		existingResult.FixSuggestion = scanResult.FixSuggestion
 		existingResult.TaskID = scanResult.TaskID // 更新为最新任务ID
+		existingResult.Hostname = scanResult.Hostname
+		existingResult.PolicyName = scanResult.PolicyName
 
 		if err := s.db.Save(&existingResult).Error; err != nil {
 			return fmt.Errorf("更新检测结果失败: %w", err)
@@ -1195,6 +1208,21 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 	// 增加已完成主机数
 	if err := s.db.Model(&task).Update("completed_host_count", gorm.Expr("completed_host_count + 1")).Error; err != nil {
 		s.logger.Error("更新任务完成主机数失败", zap.String("task_id", taskID), zap.Error(err))
+	}
+
+	// 更新主机状态为 completed
+	now := model.Now()
+	if err := s.db.Model(&model.TaskHostStatus{}).
+		Where("task_id = ? AND host_id = ?", taskID, conn.AgentID).
+		Updates(map[string]interface{}{
+			"status":       model.TaskHostStatusCompleted,
+			"completed_at": &now,
+		}).Error; err != nil {
+		s.logger.Error("更新主机状态失败",
+			zap.String("task_id", taskID),
+			zap.String("host_id", conn.AgentID),
+			zap.Error(err),
+		)
 	}
 
 	// 重新查询任务以获取最新的完成主机数

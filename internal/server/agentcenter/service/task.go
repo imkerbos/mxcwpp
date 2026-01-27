@@ -255,6 +255,7 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 
 	// 为每个匹配的主机下发任务（带重试）
 	successCount := 0
+	now := model.Now()
 	for _, host := range matchedHosts {
 		// 使用重试机制下发任务
 		err := Retry(context.Background(), func() error {
@@ -267,8 +268,41 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 				zap.String("host_id", host.HostID),
 				zap.Error(err),
 			)
+			// 记录失败状态
+			hostStatus := &model.TaskHostStatus{
+				TaskID:       task.TaskID,
+				HostID:       host.HostID,
+				Hostname:     host.Hostname,
+				Status:       model.TaskHostStatusFailed,
+				DispatchedAt: &now,
+				ErrorMessage: err.Error(),
+			}
+			if dbErr := s.db.Create(hostStatus).Error; dbErr != nil {
+				s.logger.Error("记录主机状态失败",
+					zap.String("task_id", task.TaskID),
+					zap.String("host_id", host.HostID),
+					zap.Error(dbErr),
+				)
+			}
 			continue
 		}
+
+		// 记录成功下发状态
+		hostStatus := &model.TaskHostStatus{
+			TaskID:       task.TaskID,
+			HostID:       host.HostID,
+			Hostname:     host.Hostname,
+			Status:       model.TaskHostStatusDispatched,
+			DispatchedAt: &now,
+		}
+		if dbErr := s.db.Create(hostStatus).Error; dbErr != nil {
+			s.logger.Error("记录主机状态失败",
+				zap.String("task_id", task.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(dbErr),
+			)
+		}
+
 		successCount++
 	}
 

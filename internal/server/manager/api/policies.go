@@ -444,9 +444,19 @@ func (h *PoliciesHandler) GetPolicyStatistics(c *gin.Context) {
 		return
 	}
 
-	// 查询该策略的所有检查结果
+	// 构建当前策略中存在的规则ID列表（过滤已删除的规则）
+	currentRuleIDs := make([]string, 0, len(policy.Rules))
+	for _, rule := range policy.Rules {
+		currentRuleIDs = append(currentRuleIDs, rule.RuleID)
+	}
+
+	// 查询该策略的检查结果（仅包含当前存在的规则）
 	var results []model.ScanResult
-	if err := h.db.Where("policy_id = ?", policyID).Find(&results).Error; err != nil {
+	query := h.db.Where("policy_id = ?", policyID)
+	if len(currentRuleIDs) > 0 {
+		query = query.Where("rule_id IN ?", currentRuleIDs)
+	}
+	if err := query.Find(&results).Error; err != nil {
 		h.logger.Error("查询策略统计失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

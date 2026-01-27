@@ -1,6 +1,6 @@
 <template>
   <a-modal
-    v-model:visible="visible"
+    v-model:open="open"
     title="新建扫描任务"
     width="800px"
     @ok="handleSubmit"
@@ -138,11 +138,11 @@ import type { FormInstance } from 'ant-design-vue/es/form'
 import { OS_OPTIONS } from '@/constants/os'
 
 const props = defineProps<{
-  visible: boolean
+  open: boolean
 }>()
 
 const emit = defineEmits<{
-  'update:visible': [value: boolean]
+  'update:open': [value: boolean]
   success: []
 }>()
 
@@ -201,9 +201,9 @@ const rules = {
   ],
 }
 
-const visible = computed({
-  get: () => props.visible,
-  set: (value) => emit('update:visible', value),
+const open = computed({
+  get: () => props.open,
+  set: (value) => emit('update:open', value),
 })
 
 // 根据运行时类型筛选策略
@@ -313,7 +313,7 @@ const handleSubmit = async () => {
 }
 
 const handleCancel = () => {
-  visible.value = false
+  open.value = false
   // 重置表单
   formData.name = ''
   formData.type = 'manual'
@@ -325,9 +325,9 @@ const handleCancel = () => {
 }
 
 watch(
-  () => props.visible,
-  (visible) => {
-    if (visible) {
+  () => props.open,
+  (open) => {
+    if (open) {
       loadPolicies()
       loadHosts()
     }

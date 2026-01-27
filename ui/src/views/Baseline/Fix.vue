@@ -37,7 +37,7 @@
             :filter-option="filterHostOption"
             @change="handleFilterChange"
           >
-            <a-select-option v-for="host in hosts" :key="host.host_id" :value="host.host_id">
+            <a-select-option v-for="host in filteredHosts" :key="host.host_id" :value="host.host_id">
               {{ host.hostname }} ({{ host.ipv4[0] || host.host_id }})
             </a-select-option>
           </a-select>
@@ -48,7 +48,7 @@
             placeholder="选择业务线"
             style="width: 200px"
             allow-clear
-            @change="handleFilterChange"
+            @change="handleBusinessLineChange"
           >
             <a-select-option v-for="line in businessLines" :key="line" :value="line">
               {{ line }}
@@ -423,6 +423,14 @@ const rowSelection = computed(() => ({
   }),
 }))
 
+// 根据业务线筛选主机列表
+const filteredHosts = computed(() => {
+  if (!filters.business_line) {
+    return hosts.value
+  }
+  return hosts.value.filter(host => host.business_line === filters.business_line)
+})
+
 const loadHosts = async () => {
   try {
     const response = await hostsApi.list({ page_size: 1000 }) as any
@@ -463,6 +471,12 @@ const loadFixableItems = async () => {
 
 const handleFilterChange = () => {
   // 筛选条件变化时不自动查询，等待用户点击查询按钮
+}
+
+const handleBusinessLineChange = () => {
+  // 业务线变化时，清空主机选择（因为筛选后的主机列表可能不包含之前选择的主机）
+  filters.host_ids = []
+  handleFilterChange()
 }
 
 const handleSearch = () => {
@@ -511,6 +525,7 @@ const handleSingleFix = async (record: FixableItem) => {
     progressModalVisible.value = true
     fixing.value = true
     fixProgress.value = 0
+    // 单个修复：1 项（后端会根据实际失败记录计算）
     fixTotal.value = 1
     fixSuccessCount.value = 0
     fixFailedCount.value = 0
@@ -550,6 +565,7 @@ const handleBatchFix = async () => {
     // 显示进度 Modal
     progressModalVisible.value = true
     fixProgress.value = 0
+    // 使用选中的可修复项数量作为总数（后端会根据实际失败记录计算）
     fixTotal.value = selectedItems.length
     fixSuccessCount.value = 0
     fixFailedCount.value = 0
@@ -620,8 +636,15 @@ const copyCommand = (command: string) => {
 }
 
 const filterHostOption = (input: string, option: any) => {
-  const text = option.children[0].children.toLowerCase()
-  return text.includes(input.toLowerCase())
+  // 获取主机名和IP地址进行匹配
+  const host = filteredHosts.value.find(h => h.host_id === option.value)
+  if (!host) return false
+
+  const searchText = input.toLowerCase()
+  const hostname = host.hostname.toLowerCase()
+  const ip = host.ipv4[0] || ''
+
+  return hostname.includes(searchText) || ip.includes(searchText)
 }
 
 const getSeverityColor = (severity: string) => {

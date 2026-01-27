@@ -10,7 +10,19 @@
           @click="handleBroadcastPluginConfigs"
         >
           <template #icon><ReloadOutlined /></template>
-          推送更新
+          推送插件配置
+        </a-button>
+        <a-button
+          type="primary"
+          :loading="pushingAgentUpdate"
+          @click="showAgentUpdateModal = true"
+        >
+          <template #icon><CloudUploadOutlined /></template>
+          推送 Agent 更新
+        </a-button>
+        <a-button @click="openPushRecordsModal">
+          <template #icon><HistoryOutlined /></template>
+          推送记录
         </a-button>
         <a-button type="primary" @click="showCreateModal = true">
           <template #icon><PlusOutlined /></template>
@@ -123,6 +135,34 @@
         </template>
       </template>
     </a-table>
+
+    <!-- 推送 Agent 更新弹窗 -->
+    <a-modal
+      v-model:open="showAgentUpdateModal"
+      title="推送 Agent 更新"
+      :confirm-loading="pushingAgentUpdate"
+      @ok="handlePushAgentUpdate"
+      @cancel="resetAgentUpdateForm"
+    >
+      <a-form layout="vertical">
+        <a-alert
+          message="提示"
+          description="将推送最新版本的 Agent 到所有在线主机。如果主机已是最新版本，默认会跳过更新。"
+          type="info"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+
+        <a-form-item>
+          <a-checkbox v-model:checked="agentUpdateForm.force">
+            <span style="font-weight: 500">强制重装</span>
+            <div style="color: #999; font-size: 12px; margin-top: 4px">
+              即使主机已是最新版本，也重新安装（用于修复损坏的安装或覆盖配置）
+            </div>
+          </a-checkbox>
+        </a-form-item>
+      </a-form>
+    </a-modal>
 
     <!-- 新建组件弹窗 -->
     <a-modal
@@ -426,6 +466,165 @@
         </a-table>
       </a-spin>
     </a-modal>
+
+    <!-- 推送记录弹窗 -->
+    <a-modal
+      v-model:open="showPushRecordsModal"
+      title="推送记录"
+      :footer="null"
+      :width="1000"
+    >
+      <a-spin :spinning="loadingPushRecords">
+        <a-table
+          :columns="pushRecordColumns"
+          :data-source="pushRecords"
+          :pagination="pushRecordPagination"
+          @change="handlePushRecordTableChange"
+          row-key="id"
+          size="small"
+        >
+          <template #bodyCell="{ column, record }">
+            <!-- 组件名称 -->
+            <template v-if="column.key === 'component_name'">
+              <a-tag :color="getNameColor(record.component_name)">
+                {{ record.component_name }}
+              </a-tag>
+              <span style="margin-left: 8px">{{ record.version }}</span>
+            </template>
+
+            <!-- 状态 -->
+            <template v-else-if="column.key === 'status'">
+              <a-tag :color="getPushStatusColor(record.status)">
+                {{ getPushStatusText(record.status) }}
+              </a-tag>
+            </template>
+
+            <!-- 进度 -->
+            <template v-else-if="column.key === 'progress'">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <a-progress
+                  :percent="record.progress"
+                  :status="record.status === 'failed' ? 'exception' : record.status === 'success' ? 'success' : 'active'"
+                  :show-info="false"
+                  style="flex: 1; margin: 0;"
+                  size="small"
+                />
+                <span style="font-size: 12px; color: #666;">
+                  {{ record.success_count }}/{{ record.total_count }}
+                </span>
+              </div>
+            </template>
+
+            <!-- 创建时间 -->
+            <template v-else-if="column.key === 'created_at'">
+              <span>{{ formatDate(record.created_at) }}</span>
+            </template>
+
+            <!-- 操作 -->
+            <template v-else-if="column.key === 'action'">
+              <a-button type="link" size="small" @click="viewPushRecordDetail(record)">
+                详情
+              </a-button>
+            </template>
+          </template>
+        </a-table>
+      </a-spin>
+    </a-modal>
+
+    <!-- 推送记录详情弹窗 -->
+    <a-modal
+      v-model:open="showPushRecordDetailModal"
+      :title="`推送详情 - ${selectedPushRecord?.component_name || ''}`"
+      :footer="null"
+      :width="800"
+    >
+      <a-spin :spinning="loadingPushRecordDetail">
+        <div v-if="selectedPushRecord" class="push-record-detail">
+          <a-descriptions :column="2" bordered size="small">
+            <a-descriptions-item label="组件名称">
+              <a-tag :color="getNameColor(selectedPushRecord.component_name)">
+                {{ selectedPushRecord.component_name }}
+              </a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item label="版本">
+              {{ selectedPushRecord.version }}
+            </a-descriptions-item>
+            <a-descriptions-item label="状态">
+              <a-tag :color="getPushStatusColor(selectedPushRecord.status)">
+                {{ getPushStatusText(selectedPushRecord.status) }}
+              </a-tag>
+            </a-descriptions-item>
+            <a-descriptions-item label="进度">
+              <a-progress
+                :percent="selectedPushRecord.progress"
+                :status="selectedPushRecord.status === 'failed' ? 'exception' : selectedPushRecord.status === 'success' ? 'success' : 'active'"
+                size="small"
+              />
+            </a-descriptions-item>
+            <a-descriptions-item label="目标类型">
+              {{ selectedPushRecord.target_type === 'all' ? '全部主机' : '指定主机' }}
+            </a-descriptions-item>
+            <a-descriptions-item label="目标数量">
+              {{ selectedPushRecord.total_count }}
+            </a-descriptions-item>
+            <a-descriptions-item label="成功数量">
+              <span style="color: #52c41a;">{{ selectedPushRecord.success_count }}</span>
+            </a-descriptions-item>
+            <a-descriptions-item label="失败数量">
+              <span style="color: #ff4d4f;">{{ selectedPushRecord.failed_count }}</span>
+            </a-descriptions-item>
+            <a-descriptions-item label="创建者">
+              {{ selectedPushRecord.created_by || '-' }}
+            </a-descriptions-item>
+            <a-descriptions-item label="创建时间">
+              {{ formatDate(selectedPushRecord.created_at) }}
+            </a-descriptions-item>
+            <a-descriptions-item label="完成时间" :span="2">
+              {{ selectedPushRecord.completed_at ? formatDate(selectedPushRecord.completed_at) : '-' }}
+            </a-descriptions-item>
+            <a-descriptions-item v-if="selectedPushRecord.message" label="消息" :span="2">
+              {{ selectedPushRecord.message }}
+            </a-descriptions-item>
+          </a-descriptions>
+
+          <!-- 失败主机列表 -->
+          <div v-if="selectedPushRecord.failed_hosts && selectedPushRecord.failed_hosts.length > 0" class="failed-hosts-section">
+            <div class="section-title">失败主机列表</div>
+            <a-list
+              :data-source="selectedPushRecord.failed_hosts"
+              size="small"
+              bordered
+            >
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <a-tag color="red">{{ item }}</a-tag>
+                </a-list-item>
+              </template>
+            </a-list>
+          </div>
+
+          <!-- 主机推送详情 -->
+          <div v-if="selectedPushRecord.push_hosts && selectedPushRecord.push_hosts.length > 0" class="push-hosts-section">
+            <div class="section-title">主机推送详情</div>
+            <a-table
+              :columns="pushHostColumns"
+              :data-source="selectedPushRecord.push_hosts"
+              :pagination="{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 台主机` }"
+              size="small"
+              row-key="id"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'status'">
+                  <a-tag :color="getPushHostStatusColor(record.status)">
+                    {{ getPushHostStatusText(record.status) }}
+                  </a-tag>
+                </template>
+              </template>
+            </a-table>
+          </div>
+        </div>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -438,12 +637,15 @@ import {
   QuestionCircleOutlined,
   PaperClipOutlined,
   ReloadOutlined,
+  HistoryOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons-vue'
 import {
   componentsApi,
   type Component,
   type ComponentVersion,
   type PluginSyncStatus,
+  type ComponentPushRecord,
 } from '@/api/components'
 
 // 表格列定义
@@ -464,11 +666,27 @@ const versionColumns = [
   { title: '操作', key: 'action', width: 150 },
 ]
 
+const pushRecordColumns = [
+  { title: '组件', key: 'component_name', width: 200 },
+  { title: '状态', key: 'status', width: 100 },
+  { title: '进度', key: 'progress', width: 200 },
+  { title: '创建者', key: 'created_by', dataIndex: 'created_by', width: 100 },
+  { title: '创建时间', key: 'created_at', width: 180 },
+  { title: '操作', key: 'action', width: 80 },
+]
+
 // 数据
 const loading = ref(false)
 const components = ref<Component[]>([])
 const pluginStatuses = ref<PluginSyncStatus[]>([])
 const broadcasting = ref(false)
+
+// 推送 Agent 更新
+const showAgentUpdateModal = ref(false)
+const pushingAgentUpdate = ref(false)
+const agentUpdateForm = reactive({
+  force: false,
+})
 
 // 新建组件
 const showCreateModal = ref(false)
@@ -526,6 +744,23 @@ const showVersionsModal = ref(false)
 const loadingVersions = ref(false)
 const versions = ref<ComponentVersion[]>([])
 
+// 推送记录
+const showPushRecordsModal = ref(false)
+const loadingPushRecords = ref(false)
+const pushRecords = ref<ComponentPushRecord[]>([])
+const pushRecordPagination = reactive({
+  current: 1,
+  pageSize: 10,
+  total: 0,
+  showSizeChanger: true,
+  showTotal: (total: number) => `共 ${total} 条`,
+})
+
+// 推送记录详情
+const showPushRecordDetailModal = ref(false)
+const loadingPushRecordDetail = ref(false)
+const selectedPushRecord = ref<ComponentPushRecord | null>(null)
+
 // 加载组件列表
 const loadComponents = async () => {
   loading.value = true
@@ -560,11 +795,45 @@ const handleBroadcastPluginConfigs = async () => {
     )
     // 刷新插件状态
     await loadPluginStatus()
+
+    // 提示用户可以查看推送记录
+    message.info('推送记录已保存，可点击"推送记录"按钮查看详情和进度', 5)
   } catch (error: any) {
     message.error(error.message || '推送失败')
   } finally {
     broadcasting.value = false
   }
+}
+
+// 推送 Agent 更新
+const handlePushAgentUpdate = async () => {
+  pushingAgentUpdate.value = true
+  try {
+    const result = await componentsApi.pushAgentUpdate({
+      force: agentUpdateForm.force,
+    })
+
+    message.success(
+      `推送成功！已向 ${result.total} 台主机推送 Agent 更新` +
+      `（需要更新: ${result.need_update} 台）`
+    )
+
+    // 关闭对话框
+    showAgentUpdateModal.value = false
+    resetAgentUpdateForm()
+
+    // 提示用户可以查看推送记录
+    message.info('推送记录已保存，可点击"推送记录"按钮查看详情和进度', 5)
+  } catch (error: any) {
+    message.error(error.message || '推送 Agent 更新失败')
+  } finally {
+    pushingAgentUpdate.value = false
+  }
+}
+
+// 重置 Agent 更新表单
+const resetAgentUpdateForm = () => {
+  agentUpdateForm.force = false
 }
 
 // 创建组件
@@ -784,6 +1053,104 @@ const getPluginStatusClass = (status: string): string => {
   return `status-${status.replace('_', '-')}`
 }
 
+// 打开推送记录模态框
+const openPushRecordsModal = () => {
+  showPushRecordsModal.value = true
+  loadPushRecords()
+}
+
+// 加载推送记录列表
+const loadPushRecords = async () => {
+  loadingPushRecords.value = true
+  try {
+    const response = await componentsApi.listPushRecords({
+      page: pushRecordPagination.current,
+      page_size: pushRecordPagination.pageSize,
+    })
+    pushRecords.value = response.items || []
+    pushRecordPagination.total = response.total || 0
+  } catch (error: any) {
+    message.error(error.message || '加载推送记录失败')
+  } finally {
+    loadingPushRecords.value = false
+  }
+}
+
+// 推送记录表格分页变化
+const handlePushRecordTableChange = (pag: any) => {
+  pushRecordPagination.current = pag.current
+  pushRecordPagination.pageSize = pag.pageSize
+  loadPushRecords()
+}
+
+// 查看推送记录详情
+const viewPushRecordDetail = async (record: ComponentPushRecord) => {
+  selectedPushRecord.value = record
+  showPushRecordDetailModal.value = true
+  loadingPushRecordDetail.value = true
+  try {
+    const detail = await componentsApi.getPushRecord(record.id)
+    selectedPushRecord.value = detail
+  } catch (error: any) {
+    message.error(error.message || '加载推送记录详情失败')
+  } finally {
+    loadingPushRecordDetail.value = false
+  }
+}
+
+// 获取推送状态颜色
+const getPushStatusColor = (status: string): string => {
+  const colors: Record<string, string> = {
+    pending: 'default',
+    pushing: 'processing',
+    success: 'success',
+    failed: 'error',
+    cancelled: 'warning',
+  }
+  return colors[status] || 'default'
+}
+
+// 获取推送状态文本
+const getPushStatusText = (status: string): string => {
+  const texts: Record<string, string> = {
+    pending: '待推送',
+    pushing: '推送中',
+    success: '成功',
+    failed: '失败',
+    cancelled: '已取消',
+  }
+  return texts[status] || status
+}
+
+// 主机推送详情列定义
+const pushHostColumns = [
+  { title: '主机名', dataIndex: 'hostname', key: 'hostname', width: 200 },
+  { title: '主机ID', dataIndex: 'host_id', key: 'host_id', width: 200, ellipsis: true },
+  { title: '状态', key: 'status', width: 100 },
+  { title: '消息', dataIndex: 'message', key: 'message', ellipsis: true },
+  { title: '推送时间', dataIndex: 'pushed_at', key: 'pushed_at', width: 180 },
+]
+
+// 获取主机推送状态颜色
+const getPushHostStatusColor = (status: string): string => {
+  const colors: Record<string, string> = {
+    pending: 'default',
+    success: 'success',
+    failed: 'error',
+  }
+  return colors[status] || 'default'
+}
+
+// 获取主机推送状态文本
+const getPushHostStatusText = (status: string): string => {
+  const texts: Record<string, string> = {
+    pending: '待推送',
+    success: '成功',
+    failed: '失败',
+  }
+  return texts[status] || status
+}
+
 onMounted(() => {
   loadComponents()
   loadPluginStatus()
@@ -942,5 +1309,21 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* 推送记录详情样式 */
+.push-record-detail {
+  margin-top: 16px;
+}
+
+.failed-hosts-section {
+  margin-top: 20px;
+}
+
+.failed-hosts-section .section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #262626;
+  margin-bottom: 12px;
 }
 </style>
