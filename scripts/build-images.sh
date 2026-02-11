@@ -65,6 +65,7 @@ cd "$PROJECT_ROOT"
 echo ""
 echo "[1/3] 构建 AgentCenter..."
 docker build \
+    --network=host \
     --build-arg VERSION="${VERSION}" \
     -f deploy/docker/Dockerfile.agentcenter \
     -t "${PREFIX}mxsec-agentcenter:${VERSION}" \
@@ -75,6 +76,7 @@ docker build \
 echo ""
 echo "[2/3] 构建 Manager..."
 docker build \
+    --network=host \
     --build-arg VERSION="${VERSION}" \
     -f deploy/docker/Dockerfile.manager \
     -t "${PREFIX}mxsec-manager:${VERSION}" \
@@ -85,6 +87,7 @@ docker build \
 echo ""
 echo "[3/3] 构建 UI..."
 docker build \
+    --network=host \
     --build-arg VERSION="${VERSION}" \
     -f deploy/docker/Dockerfile.ui \
     -t "${PREFIX}mxsec-ui:${VERSION}" \
