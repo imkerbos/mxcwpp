@@ -10,12 +10,15 @@
 #   ./deploy.sh status       # 查看状态
 #   ./deploy.sh logs         # 查看日志
 #   ./deploy.sh backup       # 备份数据
+#   ./deploy.sh upgrade      # 升级服务（保留数据和配置）
+#   ./deploy.sh clean-logs   # 清理旧日志
+#   ./deploy.sh help         # 显示帮助
 #
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd 2>/dev/null || echo "$SCRIPT_DIR")"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 # 颜色
@@ -105,14 +108,14 @@ init_env() {
     log_step "配置环境变量..."
 
     # 数据库密码
-    read -sp "MySQL Root 密码: " MYSQL_ROOT_PASSWORD
+    read -sp "MySQL Root 密码 (回车自动生成): " MYSQL_ROOT_PASSWORD
     echo
     if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
         MYSQL_ROOT_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         log_info "已自动生成 Root 密码"
     fi
 
-    read -sp "MySQL 应用密码: " MYSQL_PASSWORD
+    read -sp "MySQL 应用密码 (回车自动生成): " MYSQL_PASSWORD
     echo
     if [ -z "$MYSQL_PASSWORD" ]; then
         MYSQL_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
@@ -138,6 +141,10 @@ init_env() {
     read -p "Manager API 端口 [8080]: " MANAGER_PORT
     MANAGER_PORT="${MANAGER_PORT:-8080}"
 
+    # 日志保留天数
+    read -p "日志保留天数 [7]: " LOG_RETENTION_DAYS
+    LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
+
     # 版本
     read -p "部署版本 [v1.0.0]: " VERSION
     VERSION="${VERSION:-v1.0.0}"
@@ -146,24 +153,41 @@ init_env() {
     cat > "$ENV_FILE" << EOF
 # Matrix Cloud Security Platform 配置
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
+# 修改后运行 ./deploy.sh restart 生效
 
-# 数据库
+# ============ 数据库 ============
 MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 MYSQL_PASSWORD=$MYSQL_PASSWORD
 MYSQL_DATABASE=mxsec
 MYSQL_USER=mxsec_user
+MYSQL_HOST=mysql
+MYSQL_PORT=3306
 
-# 数据目录
+# ============ 数据库连接池 ============
+DB_MAX_IDLE_CONNS=20
+DB_MAX_OPEN_CONNS=200
+DB_CONN_MAX_LIFETIME=1h
+
+# ============ 数据目录 ============
 DATA_DIR=$DATA_DIR
 
-# 网络
+# ============ 网络 ============
 SERVER_IP=$SERVER_IP
 GRPC_PORT=$GRPC_PORT
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=443
 MANAGER_PORT=$MANAGER_PORT
 
-# 版本
+# ============ 日志 ============
+LOG_LEVEL=info
+LOG_FORMAT=json
+LOG_MAX_AGE=7
+LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
+
+# ============ Agent ============
+HEARTBEAT_INTERVAL=60
+
+# ============ 版本 ============
 VERSION=$VERSION
 TZ=Asia/Shanghai
 EOF
@@ -179,8 +203,10 @@ init_dirs() {
     source "$ENV_FILE"
 
     log_step "创建数据目录..."
-    sudo mkdir -p "$DATA_DIR"/{mysql,logs/{agentcenter,manager,nginx},plugins}
+    sudo mkdir -p "$DATA_DIR"/{mysql,logs/{agentcenter,manager,nginx,mysql},plugins,uploads}
     sudo chown -R $(id -u):$(id -g) "$DATA_DIR" 2>/dev/null || true
+    # MySQL 日志目录需要 mysql 用户可写（容器内 uid=999）
+    sudo chmod 777 "$DATA_DIR/logs/mysql" 2>/dev/null || true
     log_info "数据目录: $DATA_DIR"
 }
 
@@ -224,14 +250,39 @@ init_certs() {
 init_config() {
     source "$ENV_FILE"
 
-    log_step "更新配置文件..."
+    log_step "生成配置文件..."
 
-    # 更新 server.yaml
-    sed -i.bak "s/MYSQL_PASSWORD_PLACEHOLDER/$MYSQL_PASSWORD/g" "$SCRIPT_DIR/config/server.yaml"
-    sed -i.bak "s|PLUGINS_BASE_URL_PLACEHOLDER|http://$SERVER_IP:$HTTP_PORT/api/v1/plugins/download|g" "$SCRIPT_DIR/config/server.yaml"
+    # 备份模板（首次部署时保存，后续升级可从模板恢复）
+    if [ ! -f "$SCRIPT_DIR/config/server.yaml.tpl" ]; then
+        cp "$SCRIPT_DIR/config/server.yaml" "$SCRIPT_DIR/config/server.yaml.tpl"
+        log_info "已备份配置模板: server.yaml.tpl"
+    fi
+
+    # 从模板生成配置（每次都从模板重新生成，所有配置项来自 .env）
+    cp "$SCRIPT_DIR/config/server.yaml.tpl" "$SCRIPT_DIR/config/server.yaml"
+
+    # 替换所有占位符
+    local PLUGINS_URL="http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download"
+
+    sed -i.bak \
+        -e "s|__MYSQL_HOST__|${MYSQL_HOST:-mysql}|g" \
+        -e "s|__MYSQL_PORT__|${MYSQL_PORT:-3306}|g" \
+        -e "s|__MYSQL_USER__|${MYSQL_USER:-mxsec_user}|g" \
+        -e "s|__MYSQL_PASSWORD__|${MYSQL_PASSWORD}|g" \
+        -e "s|__MYSQL_DATABASE__|${MYSQL_DATABASE:-mxsec}|g" \
+        -e "s|__DB_MAX_IDLE_CONNS__|${DB_MAX_IDLE_CONNS:-20}|g" \
+        -e "s|__DB_MAX_OPEN_CONNS__|${DB_MAX_OPEN_CONNS:-200}|g" \
+        -e "s|__DB_CONN_MAX_LIFETIME__|${DB_CONN_MAX_LIFETIME:-1h}|g" \
+        -e "s|__LOG_LEVEL__|${LOG_LEVEL:-info}|g" \
+        -e "s|__LOG_FORMAT__|${LOG_FORMAT:-json}|g" \
+        -e "s|__LOG_MAX_AGE__|${LOG_MAX_AGE:-7}|g" \
+        -e "s|__HEARTBEAT_INTERVAL__|${HEARTBEAT_INTERVAL:-60}|g" \
+        -e "s|__PLUGINS_BASE_URL__|${PLUGINS_URL}|g" \
+        "$SCRIPT_DIR/config/server.yaml"
+
     rm -f "$SCRIPT_DIR/config/server.yaml.bak"
 
-    log_info "配置更新完成"
+    log_info "配置生成完成（所有参数来自 .env）"
 }
 
 # ============================================================
@@ -243,8 +294,16 @@ dc() {
 }
 
 build() {
-    log_step "构建镜像..."
-    dc build
+    # 检测是否有源码上下文（deploy/ 在项目根目录下时才能 build）
+    if [ -f "$PROJECT_ROOT/go.mod" ]; then
+        log_step "构建镜像（源码模式）..."
+        dc build
+    else
+        log_warn "未检测到源码，跳过构建"
+        log_info "部署包模式请先在开发机构建镜像:"
+        log_info "  ./scripts/build-images.sh --version \${VERSION}"
+        log_info "或推送到私有仓库后使用 docker pull"
+    fi
 }
 
 start() {
@@ -278,6 +337,10 @@ stop() {
 
 restart() {
     log_step "重启服务..."
+    # 重新生成配置（从 .env 更新 server.yaml）
+    if [ -f "$SCRIPT_DIR/config/server.yaml.tpl" ] && [ -f "$ENV_FILE" ]; then
+        init_config
+    fi
     dc restart "$@"
 }
 
@@ -291,12 +354,97 @@ logs() {
 
 backup() {
     source "$ENV_FILE"
-    BACKUP_FILE="$SCRIPT_DIR/backup_$(date +%Y%m%d_%H%M%S).sql"
+    local BACKUP_DIR="$SCRIPT_DIR/backup"
+    mkdir -p "$BACKUP_DIR"
+    BACKUP_FILE="$BACKUP_DIR/mxsec_$(date +%Y%m%d_%H%M%S).sql.gz"
 
     log_step "备份数据库..."
-    dc exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" mxsec > "$BACKUP_FILE"
+    dc exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction mxsec | gzip > "$BACKUP_FILE"
 
-    log_info "备份完成: $BACKUP_FILE"
+    log_info "备份完成: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+
+    # 清理 30 天前的备份
+    find "$BACKUP_DIR" -name "mxsec_*.sql.gz" -mtime +30 -delete 2>/dev/null || true
+}
+
+# ============================================================
+# 升级
+# ============================================================
+upgrade() {
+    if [ ! -f "$ENV_FILE" ]; then
+        log_error "未检测到已有部署，请使用 ./deploy.sh 进行首次部署"
+        exit 1
+    fi
+
+    source "$ENV_FILE"
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Matrix Cloud Security Platform 升级"
+    echo "  当前版本: ${VERSION:-unknown}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    read -p "新版本号: " NEW_VERSION
+    if [ -z "$NEW_VERSION" ]; then
+        log_error "请输入版本号"
+        exit 1
+    fi
+
+    # 1. 备份
+    log_step "[1/4] 备份数据库..."
+    backup
+
+    # 2. 更新版本号
+    log_step "[2/4] 更新版本号: $VERSION → $NEW_VERSION..."
+    sed -i.bak "s/^VERSION=.*/VERSION=$NEW_VERSION/" "$ENV_FILE"
+    rm -f "$ENV_FILE.bak"
+
+    # 3. 重新生成配置（从模板）
+    log_step "[3/4] 更新配置..."
+    if [ -f "$SCRIPT_DIR/config/server.yaml.tpl" ]; then
+        init_config
+    fi
+
+    # 4. 重新构建并启动
+    log_step "[4/4] 构建镜像并重启..."
+    if [ -f "$PROJECT_ROOT/go.mod" ]; then
+        dc up -d --build
+    else
+        dc pull 2>/dev/null || log_warn "拉取镜像失败，尝试使用本地镜像"
+        dc up -d
+    fi
+
+    sleep 10
+    status
+
+    log_info "升级完成! 版本: $NEW_VERSION"
+}
+
+# ============================================================
+# 日志清理
+# ============================================================
+clean_logs() {
+    source "$ENV_FILE"
+
+    local RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
+
+    log_step "清理 ${RETENTION_DAYS} 天前的日志..."
+
+    local TOTAL_BEFORE=$(du -sh "$DATA_DIR/logs" 2>/dev/null | cut -f1)
+
+    # AgentCenter 日志
+    find "$DATA_DIR/logs/agentcenter/" -name "*.log.*" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+    # Manager 日志
+    find "$DATA_DIR/logs/manager/" -name "*.log.*" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+    # Nginx 日志
+    find "$DATA_DIR/logs/nginx/" -name "*.log.*" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+    # MySQL 慢查询日志
+    find "$DATA_DIR/logs/mysql/" -name "*.log.*" -mtime +${RETENTION_DAYS} -delete 2>/dev/null || true
+
+    local TOTAL_AFTER=$(du -sh "$DATA_DIR/logs" 2>/dev/null | cut -f1)
+
+    log_info "清理完成: $TOTAL_BEFORE → $TOTAL_AFTER"
 }
 
 # ============================================================
@@ -329,7 +477,8 @@ full_deploy() {
     log_step "[6/7] 更新配置..."
     init_config
 
-    log_step "[7/7] 构建并启动服务..."
+    log_step "[7/7] 启动服务..."
+    # 源码环境：先构建镜像；部署包环境：直接用预构建镜像
     build
     start
 }
@@ -340,13 +489,15 @@ show_help() {
     echo "用法: $0 [命令]"
     echo ""
     echo "命令:"
-    echo "  (无参数)    交互式部署"
+    echo "  (无参数)    交互式首次部署"
     echo "  start       启动服务"
     echo "  stop        停止服务"
-    echo "  restart     重启服务"
-    echo "  status      查看状态"
-    echo "  logs        查看日志"
-    echo "  backup      备份数据"
+    echo "  restart     重启服务 (可指定服务名: restart agentcenter)"
+    echo "  status      查看服务状态"
+    echo "  logs        查看日志 (可指定服务名: logs agentcenter)"
+    echo "  backup      备份数据库 (gzip 压缩，自动清理 30 天前备份)"
+    echo "  upgrade     升级服务 (自动备份 → 更新版本 → 重启)"
+    echo "  clean-logs  清理旧日志 (默认保留 ${LOG_RETENTION_DAYS:-7} 天)"
     echo "  build       构建镜像"
     echo "  help        显示帮助"
 }
@@ -378,6 +529,12 @@ main() {
             ;;
         backup)
             backup
+            ;;
+        upgrade)
+            upgrade
+            ;;
+        clean-logs)
+            clean_logs
             ;;
         build)
             build

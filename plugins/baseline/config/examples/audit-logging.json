@@ -549,28 +549,24 @@
       "rule_id": "LINUX_AUDIT_023",
       "category": "audit",
       "title": "审计规则不可变",
-      "description": "审计规则应设置为不可变 (-e 2)，防止被篡改",
+      "description": "审计规则应设置为不可变 (-e 2)，且必须放在 99-finalize.rules 中确保最后加载",
       "severity": "high",
       "check": {
-        "condition": "any",
+        "condition": "all",
         "rules": [
-          {
-            "type": "file_line_match",
-            "param": ["/etc/audit/rules.d/audit.rules", "^-e 2$", "match"]
-          },
           {
             "type": "file_line_match",
             "param": ["/etc/audit/rules.d/99-finalize.rules", "^-e 2$", "match"]
           },
           {
-            "type": "command_exec",
-            "param": ["auditctl -s | grep -c 'enabled 2'", "^[1-9]"]
+            "type": "file_line_match",
+            "param": ["/etc/audit/rules.d/audit.rules", "^-e 2$", "not_match"]
           }
         ]
       },
       "fix": {
-        "suggestion": "在审计规则末尾添加 -e 2",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/^-e 2/d' /etc/audit/rules.d/audit.rules && echo '-e 2' >> /etc/audit/rules.d/audit.rules",
+        "suggestion": "将 -e 2 从 audit.rules 移除，并添加到 99-finalize.rules（确保最后加载）",
+        "command": "mkdir -p /etc/audit/rules.d && sed -i '/^-e 2$/d' /etc/audit/rules.d/audit.rules 2>/dev/null; sed -i '/^-e 2$/d' /etc/audit/rules.d/99-finalize.rules 2>/dev/null; echo '-e 2' > /etc/audit/rules.d/99-finalize.rules",
         "restart_services": ["auditd"]
       }
     },

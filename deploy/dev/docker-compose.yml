@@ -1,39 +1,16 @@
 version: '3.8'
 
-services:
-  mysql:
-    image: mysql:8.0
-    container_name: mxsec-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: mxsec_password
-      MYSQL_DATABASE: mxsec
-      MYSQL_USER: mxsec_user
-      MYSQL_PASSWORD: mxsec_password
-      TZ: Asia/Shanghai
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmxsec_password"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - mxsec-network
+# Docker Compose 开发环境（使用外部 MySQL）
+# 使用方式: docker-compose up
+# 注意：需要宿主机已有 MySQL，配置见 configs/server.yaml
 
+services:
   agentcenter:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.agentcenter
+      dockerfile: deploy/docker/Dockerfile.agentcenter
     container_name: mxsec-agentcenter
     restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
     ports:
       - "6751:6751"
     volumes:
@@ -42,6 +19,8 @@ services:
       - agentcenter_logs:/var/log/mxsec-platform
     environment:
       - TZ=Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["-config", "/etc/mxsec-platform/server.yaml"]
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
@@ -63,12 +42,10 @@ services:
   manager:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.manager
+      dockerfile: deploy/docker/Dockerfile.manager
     container_name: mxsec-manager
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
       agentcenter:
         condition: service_healthy
     ports:
@@ -78,6 +55,8 @@ services:
       - manager_logs:/var/log/mxsec-platform
     environment:
       - TZ=Asia/Shanghai
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["-config", "/etc/mxsec-platform/server.yaml"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -99,7 +78,7 @@ services:
   ui:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.ui
+      dockerfile: deploy/docker/Dockerfile.ui
     container_name: mxsec-ui
     restart: unless-stopped
     depends_on:
@@ -131,7 +110,7 @@ services:
   agent:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.agent
+      dockerfile: deploy/docker/Dockerfile.agent
       args:
         SERVER_HOST: agentcenter:6751
         VERSION: dev-test
@@ -159,8 +138,6 @@ services:
           memory: 128M
 
 volumes:
-  mysql_data:
-    driver: local
   agentcenter_logs:
     driver: local
   manager_logs:

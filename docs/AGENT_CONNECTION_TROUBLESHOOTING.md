@@ -88,7 +88,7 @@ lsof -i :6751
 **解决方案**：
 如果端口映射正确但仍无法连接，检查 Docker Compose 配置：
 ```yaml
-# deploy/docker-compose/docker-compose.dev.yml
+# deploy/dev/docker-compose.dev.yml
 services:
   agentcenter:
     ports:

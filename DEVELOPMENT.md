@@ -42,7 +42,7 @@ make dev-docker-up
 - ✅ 支持代码热重载（Air）
 - ✅ 统一开发环境
 
-详细说明请查看：[Docker 开发环境指南](deploy/docker-compose/README.dev.md)
+详细说明请查看：[Docker 开发环境指南](deploy/dev/README.md)
 
 ### 方式二：宿主机开发环境
 
@@ -75,7 +75,7 @@ make init-db
 make certs
 ```
 
-证书会生成到 `deploy/docker-compose/certs/` 目录。
+证书会生成到 `deploy/dev/certs/` 目录。
 
 #### 3. 启动后端 Manager
 
@@ -207,7 +207,7 @@ mysql -h 127.0.0.1 -P 3306 -u root -p123456 -e "SELECT 1;"
 
 ### 2. 证书文件不存在
 
-**问题**：`open deploy/docker-compose/certs/ca.crt: no such file or directory`
+**问题**：`open deploy/dev/certs/ca.crt: no such file or directory`
 
 **解决**：
 ```bash

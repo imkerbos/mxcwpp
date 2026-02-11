@@ -149,6 +149,7 @@ var (
 		&TaskHostStatus{},
 		&FixTask{},
 		&FixResult{},
+		&FixTaskHostStatus{},
 		&User{},
 		&Process{},
 		&Port{},

@@ -273,6 +273,11 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 				TaskID:       task.TaskID,
 				HostID:       host.HostID,
 				Hostname:     host.Hostname,
+				IPAddress:    getHostIPAddress(&host),
+				BusinessLine: host.BusinessLine,
+				OSFamily:     host.OSFamily,
+				OSVersion:    host.OSVersion,
+				RuntimeType:  string(host.RuntimeType),
 				Status:       model.TaskHostStatusFailed,
 				DispatchedAt: &now,
 				ErrorMessage: err.Error(),
@@ -292,6 +297,11 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 			TaskID:       task.TaskID,
 			HostID:       host.HostID,
 			Hostname:     host.Hostname,
+			IPAddress:    getHostIPAddress(&host),
+			BusinessLine: host.BusinessLine,
+			OSFamily:     host.OSFamily,
+			OSVersion:    host.OSVersion,
+			RuntimeType:  string(host.RuntimeType),
 			Status:       model.TaskHostStatusDispatched,
 			DispatchedAt: &now,
 		}
@@ -835,6 +845,30 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			continue
 		}
 
+		// 创建主机状态记录
+		now := model.Now()
+		hostStatus := &model.FixTaskHostStatus{
+			TaskID:       fixTask.TaskID,
+			HostID:       host.HostID,
+			Hostname:     host.Hostname,
+			IPAddress:    getHostIPAddress(&host),
+			BusinessLine: host.BusinessLine,
+			OSFamily:     host.OSFamily,
+			OSVersion:    host.OSVersion,
+			RuntimeType:  string(host.RuntimeType),
+			Status:       model.FixTaskHostStatusDispatched,
+			DispatchedAt: &now,
+		}
+
+		if err := s.db.Create(hostStatus).Error; err != nil {
+			s.logger.Error("创建主机状态记录失败",
+				zap.String("task_id", fixTask.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(err),
+			)
+			// 不影响任务下发，继续
+		}
+
 		successCount++
 		s.logger.Debug("修复任务已下发",
 			zap.String("task_id", fixTask.TaskID),
@@ -894,4 +928,12 @@ func (s *TaskService) DispatchPendingFixTasks(transferService interface {
 	}
 
 	return nil
+}
+
+// getHostIPAddress 获取主机的 IP 地址（优先返回第一个 IPv4 地址）
+func getHostIPAddress(host *model.Host) string {
+	if len(host.IPv4) > 0 {
+		return host.IPv4[0]
+	}
+	return ""
 }

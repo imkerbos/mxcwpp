@@ -189,6 +189,7 @@ func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/fix-tasks", handler.ListFixTasks)
 	router.GET("/fix-tasks/:task_id", handler.GetFixTask)
 	router.GET("/fix-tasks/:task_id/results", handler.GetFixResults)
+	router.GET("/fix-tasks/:task_id/host-status", handler.GetFixTaskHostStatus)
 	router.POST("/fix-tasks/:task_id/cancel", handler.CancelFixTask)
 	router.DELETE("/fix-tasks/:task_id", handler.DeleteFixTask)
 }

@@ -87,7 +87,7 @@ fi
 # 检查证书
 echo ""
 echo -e "${YELLOW}[4/5] 检查mTLS证书...${NC}"
-if [ ! -f "deploy/docker-compose/certs/ca.crt" ]; then
+if [ ! -f "deploy/dev/certs/ca.crt" ]; then
     echo -e "${YELLOW}  警告: 证书文件不存在，正在生成...${NC}"
     make certs || {
         echo -e "${RED}  错误: 证书生成失败${NC}"

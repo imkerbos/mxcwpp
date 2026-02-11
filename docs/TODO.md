@@ -218,7 +218,7 @@
 - [ ] Baseline Plugin 打包脚本 - 可选，后续实现
 - [ ] Collector Plugin 打包脚本（可选，Phase 2）
 - [x] systemd service 文件 - 已完成：`deploy/systemd/`（Agent、AgentCenter、Manager）
-- [x] Server Docker Compose 配置 - 已完成：`deploy/docker-compose/`
+- [x] Server Docker Compose 配置 - 已完成：`deploy/dev/`
 - [x] 证书生成脚本（mTLS）- Server 端实现（`scripts/generate-certs.sh`）
 
 #### 测试
@@ -507,7 +507,135 @@ plugins/baseline/config/examples/
 
 ## 当前任务
 
-**当前阶段**：v1.0 生产环境部署准备
+**当前阶段**：v1.0 生产环境 Bug 修复与功能完善
+
+### 🔥 紧急修复：生产环境 Bug（2026-01-28）
+
+#### Bug 1: 任务主机信息冗余存储 ✅ 已完成
+- [x] **问题描述**：任务执行历史中主机信息不完整，主机删除后任务详情丢失信息
+- [x] **影响范围**：任务执行页面、任务详情对话框
+- [x] **修复方案**：
+  - [x] 扩展 `TaskHostStatus` 模型，增加冗余字段：
+    - `ip_address`：主机 IP 地址
+    - `business_line`：业务线
+    - `os_family`：OS 系列
+    - `os_version`：OS 版本
+    - `runtime_type`：运行时类型（vm/docker/k8s）
+  - [x] 更新任务下发代码，保存完整的主机信息
+  - [x] 添加 `getHostIPAddress` 辅助函数
+- [x] **修复文件**：
+  - `internal/server/model/task_host_status.go`：增加冗余字段
+  - `internal/server/agentcenter/service/task.go`：更新创建 TaskHostStatus 的代码
+- [x] **测试验证**：编译通过
+- [x] **注意事项**：需要数据库迁移（新增字段）
+
+#### Bug 2: 基线修复全选仅选择当前页 ✅ 已完成
+- [x] **问题描述**：基线修复页面全选只能选择当前页的 100 条，无法选择所有筛选结果
+- [x] **影响范围**：基线修复页面
+- [x] **修复方案**：
+  - [x] 后端：扩展 `CreateFixTask` API，支持传递筛选条件
+    - 添加 `use_filters` 参数，当为 true 时使用筛选条件
+    - 添加 `business_line` 参数，支持业务线筛选
+    - 后端根据筛选条件查询所有符合条件的失败记录
+  - [x] 前端：添加"全选所有筛选结果"功能
+    - 当用户全选当前页后，显示提示："已选择当前页 X 条，点击选择全部 Y 条"
+    - 用户点击"选择全部"后，显示"已选择全部 Y 条筛选结果"
+    - 批量修复时，如果选择了全部筛选结果，传递筛选条件而非具体 ID 列表
+- [x] **修复文件**：
+  - `internal/server/manager/api/fix.go`：扩展 CreateFixTask API
+  - `ui/src/api/fix.ts`：更新 API 客户端
+  - `ui/src/views/Baseline/Fix.vue`：添加全选功能和提示
+- [x] **测试验证**：编译通过
+- [x] **用户体验**：
+  - 用户可以选择当前页的记录（最多 100 条）
+  - 用户可以选择所有筛选结果（不限数量）
+  - 清晰的提示告知用户当前选择状态
+
+#### Bug 3: 基线修复筛选顺序不合理 ✅ 已完成
+- [x] **问题描述**：筛选器中业务线和主机的顺序不合理，应该先选业务线再选主机
+- [x] **影响范围**：基线修复页面筛选器
+- [x] **修复方案**：
+  - [x] 调整筛选器布局，业务线在左，主机在右
+  - [x] 保持现有的联动逻辑（选择业务线后，主机选择器根据业务线过滤）
+  - [x] 保持现有的自动清空逻辑（业务线变化时自动清空主机选择）
+- [x] **修复文件**：
+  - `ui/src/views/Baseline/Fix.vue`：调整筛选器顺序
+- [x] **测试验证**：前端代码修改完成
+- [x] **用户体验**：
+  - 业务线筛选器在最左边（更符合筛选逻辑）
+  - 主机选择器在中间（根据业务线动态过滤）
+  - 风险等级在右边（保持不变）
+
+#### Bug 4: 批量修复统计数量不准确 ✅ 已完成
+- [x] **问题描述**：选择100条基线修复时，总计应该是100条，但显示成功144、失败46，与实际不符
+- [x] **影响范围**：批量修复功能的统计数据
+- [x] **根本原因**：
+  - 前端提取唯一的 host_ids 和 rule_ids 发送给后端
+  - 后端使用 `WHERE host_id IN (...) AND rule_id IN (...)` 查询，产生笛卡尔积
+  - 例如：选择100条记录（10个主机 × 20个规则的部分组合），但查询会匹配所有10×20=200种组合
+- [x] **修复方案**：
+  - [x] 修改 API 支持传递 result_ids（精确指定要修复的项）
+  - [x] 后端根据 result_ids 查询具体的失败记录
+  - [x] 从查询结果中提取 host_ids 和 rule_ids
+  - [x] 保留原有的 host_ids + rule_ids 方式（标记为已废弃）
+- [x] **修复文件**：
+  - `internal/server/manager/api/fix.go`：添加 result_ids 支持，优先使用 result_ids
+  - `ui/src/api/fix.ts`：更新 API 类型定义
+  - `ui/src/views/Baseline/Fix.vue`：使用 result_ids 而非 host_ids + rule_ids
+- [x] **测试验证**：编译通过
+- [x] **修复效果**：
+  - 选择100条记录，任务总计显示100条
+  - 统计数据准确（成功+失败=总计）
+  - 不会修复未选择的记录
+
+#### Bug 5: 策略导入报错 Error 1241 ✅ 已完成
+- [x] **问题描述**：导入策略时报错 `Error 1241 (21000): Operand should contain 1 column(s)`
+- [x] **影响范围**：策略导入功能（`POST /api/v1/policies/import`）
+- [x] **根本原因**：
+  - `os_family` 字段在数据库中是 JSON 类型（对应 Go 的 `StringArray` 类型）
+  - 导入时直接传递 `[]string` 类型给 Gorm 的 Updates 方法
+  - MySQL 无法处理 Go 的原生数组类型，导致 SQL 错误
+- [x] **修复方案**：
+  - 在 `updatePolicy` 函数中，将 `data.OSFamily` 转换为 `model.StringArray` 类型
+  - 修改代码：`"os_family": model.StringArray(data.OSFamily)`
+- [x] **修复文件**：
+  - `internal/server/manager/api/policy_import_export.go`：第 292 行
+- [x] **测试验证**：编译通过
+- [x] **修复效果**：
+  - 策略导入成功，不再报 SQL 错误
+  - `os_family` 字段正确存储为 JSON 格式
+
+### 🚀 新需求：批量修复任务化（2026-01-28）
+
+#### 需求 1: 批量修复创建任务并支持进度查看 ✅ 已完成
+- [x] **需求描述**：批量修复应该创建一个 task，可以随时查看修复进度和历史详情
+- [x] **当前问题**：批量修复关闭后无法查看修复进度和结果
+- [x] **实现步骤**：
+  - [x] **数据库模型**：FixTask 和 FixResult 模型已存在（`internal/server/model/fix_task.go`）
+  - [x] **后端 API**：修复任务 API 已完整实现（`internal/server/manager/api/fix.go`）
+    - [x] `POST /api/v1/fix-tasks`：创建批量修复任务（支持筛选条件）
+    - [x] `GET /api/v1/fix-tasks/:task_id`：查询修复任务详情
+    - [x] `GET /api/v1/fix-tasks`：查询修复任务列表
+    - [x] `GET /api/v1/fix-tasks/:task_id/results`：查询修复结果详情（分页）
+    - [x] `DELETE /api/v1/fix-tasks/:task_id`：删除修复任务
+  - [x] **前端 UI 实现**：
+    - [x] 修复历史页面（`ui/src/views/Baseline/FixHistory.vue`）
+    - [x] 任务列表展示（状态、进度、结果统计）
+    - [x] 任务详情对话框（完整任务信息和修复结果列表）
+    - [x] 实时刷新修复进度（任务执行中时自动刷新）
+    - [x] 删除任务功能（已完成或失败的任务）
+    - [x] 路由配置（`ui/src/router/index.ts`）
+    - [x] 导航菜单项（`ui/src/layouts/BasicLayout.vue`）
+- [x] **修复文件**：
+  - `ui/src/views/Baseline/FixHistory.vue`：修复历史页面
+  - `ui/src/router/index.ts`：添加路由配置
+  - `ui/src/layouts/BasicLayout.vue`：添加导航菜单项
+- [x] **功能特性**：
+  - 支持按状态筛选任务（待执行、执行中、已完成、失败）
+  - 显示任务进度条和成功/失败统计
+  - 查看详细修复结果（主机、规则、状态、输出、错误信息）
+  - 自动刷新执行中的任务（5秒间隔）
+  - 删除已完成的任务记录
 
 ### ✅ 已完成：生产环境部署文档（2025-01-03）
 

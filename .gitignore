@@ -170,9 +170,9 @@ configs/server.yaml
 configs/agent.yaml
 configs/*.secret.yaml
 configs/*.secret.yml
-deploy/docker-compose/configs/server.yaml
-deploy/docker-compose/configs/server.dev.yaml
-deploy/docker-compose/configs/*.secret.yaml
+deploy/dev/configs/server.yaml
+deploy/dev/configs/server.dev.yaml
+deploy/dev/configs/*.secret.yaml
 
 # ============================================
 # 数据库文件

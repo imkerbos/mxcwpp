@@ -24,7 +24,7 @@
 
 ```bash
 # 进入 Docker Compose 目录
-cd deploy/docker-compose
+cd deploy/dev
 
 # 启动 Agent 容器
 docker-compose up -d agent
@@ -204,9 +204,9 @@ curl -X POST http://localhost:8080/api/v1/tasks/TASK_ID/run \
 
 ### Docker 方式（macOS/Windows）
 - Agent 数据存储在 Docker volume `agent_data` 中
-- 查看日志：`cd deploy/docker-compose && docker-compose logs -f agent`
-- 停止 Agent：`cd deploy/docker-compose && docker-compose stop agent`
-- 删除 Agent 容器和数据：`cd deploy/docker-compose && docker-compose rm -f agent && docker volume rm deploy_docker-compose_agent_data`
+- 查看日志：`cd deploy/dev && docker-compose logs -f agent`
+- 停止 Agent：`cd deploy/dev && docker-compose stop agent`
+- 删除 Agent 容器和数据：`cd deploy/dev && docker-compose rm -f agent && docker volume rm deploy_dev_agent_data`
 
 ### 本地方式（Linux）
 - 测试 Agent 的数据目录在 `/tmp/mxcsec-agent-test/`，可以随时删除重新开始

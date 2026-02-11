@@ -344,7 +344,7 @@ sudo systemctl reload nginx
 
 ```bash
 # 构建 UI 镜像
-docker build -f deploy/docker-compose/Dockerfile.ui -t mxsec-ui:latest .
+docker build -f deploy/docker/Dockerfile.ui -t mxsec-ui:latest .
 
 # 运行
 docker run -d \

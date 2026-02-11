@@ -160,7 +160,7 @@ func (s *AssetService) handlePortData(hostID, jsonData string) error {
 		}
 
 		if err := s.db.Create(port).Error; err != nil {
-			s.logger.Error("failed to create port",
+			s.logger.Warn("failed to create port",
 				zap.String("host_id", hostID),
 				zap.String("protocol", asset.Protocol),
 				zap.Int("port", asset.Port),

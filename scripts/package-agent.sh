@@ -17,7 +17,7 @@ BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ARCH="${GOARCH:-amd64}"
 OS="linux"  # 始终构建 Linux 二进制
 DISTRO="${DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
-CERT_DIR="${CERT_DIR:-deploy/docker-compose/certs}"  # 证书目录
+CERT_DIR="${CERT_DIR:-deploy/dev/certs}"  # 证书目录
 
 # 版本：环境变量 > VERSION 文件 > 默认值
 if [ -n "${VERSION:-}" ]; then

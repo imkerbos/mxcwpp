@@ -1196,13 +1196,25 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
 
-	// 如果任务已经完成或失败，不再处理
-	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled {
-		s.logger.Debug("任务已完成/失败/取消，忽略完成信号",
+	// 如果任务已经完成或取消，不再处理
+	if task.Status == model.TaskStatusCompleted || task.Status == model.TaskStatusCancelled {
+		s.logger.Debug("任务已完成/取消，忽略完成信号",
 			zap.String("task_id", taskID),
 			zap.String("status", string(task.Status)),
 		)
 		return nil
+	}
+
+	// 如果任务因超时被标记为 failed，仍然允许处理完成信号
+	// 因为 agent 可能实际已完成，只是完成信号到达晚于超时调度器的判定
+	isRecoveryFromTimeout := task.Status == model.TaskStatusFailed
+
+	if isRecoveryFromTimeout {
+		s.logger.Info("任务已被标记为失败，但收到主机完成信号，尝试恢复",
+			zap.String("task_id", taskID),
+			zap.String("host_id", conn.AgentID),
+			zap.String("failed_reason", task.FailedReason),
+		)
 	}
 
 	// 增加已完成主机数
@@ -1210,20 +1222,67 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		s.logger.Error("更新任务完成主机数失败", zap.String("task_id", taskID), zap.Error(err))
 	}
 
-	// 更新主机状态为 completed
+	// 更新主机状态为 completed（包括从 timeout 状态恢复的情况）
 	now := model.Now()
-	if err := s.db.Model(&model.TaskHostStatus{}).
-		Where("task_id = ? AND host_id = ?", taskID, conn.AgentID).
-		Updates(map[string]interface{}{
-			"status":       model.TaskHostStatusCompleted,
-			"completed_at": &now,
-		}).Error; err != nil {
-		s.logger.Error("更新主机状态失败",
+
+	// 先查询是否存在该记录
+	var existingStatus model.TaskHostStatus
+	if err := s.db.Where("task_id = ? AND host_id = ?", taskID, conn.AgentID).First(&existingStatus).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			s.logger.Warn("未找到主机状态记录，无法更新",
+				zap.String("task_id", taskID),
+				zap.String("host_id", conn.AgentID),
+			)
+			return nil
+		}
+		s.logger.Error("查询主机状态失败",
 			zap.String("task_id", taskID),
 			zap.String("host_id", conn.AgentID),
 			zap.Error(err),
 		)
+		return nil
 	}
+
+	// 记录更新前的状态
+	s.logger.Debug("准备更新主机状态",
+		zap.String("task_id", taskID),
+		zap.String("host_id", conn.AgentID),
+		zap.String("current_status", string(existingStatus.Status)),
+	)
+
+	// 执行更新（允许从 dispatched 和 timeout 状态更新为 completed）
+	result := s.db.Model(&model.TaskHostStatus{}).
+		Where("task_id = ? AND host_id = ? AND status IN ?", taskID, conn.AgentID,
+			[]string{model.TaskHostStatusDispatched, model.TaskHostStatusTimeout}).
+		Updates(map[string]interface{}{
+			"status":        model.TaskHostStatusCompleted,
+			"completed_at":  &now,
+			"error_message": "",
+		})
+
+	if result.Error != nil {
+		s.logger.Error("更新主机状态失败",
+			zap.String("task_id", taskID),
+			zap.String("host_id", conn.AgentID),
+			zap.Error(result.Error),
+		)
+		return nil
+	}
+
+	// 检查是否真的更新了记录
+	if result.RowsAffected == 0 {
+		s.logger.Warn("更新主机状态未影响任何记录",
+			zap.String("task_id", taskID),
+			zap.String("host_id", conn.AgentID),
+		)
+		return nil
+	}
+
+	s.logger.Info("成功更新主机状态为已完成",
+		zap.String("task_id", taskID),
+		zap.String("host_id", conn.AgentID),
+		zap.Int64("rows_affected", result.RowsAffected),
+	)
 
 	// 重新查询任务以获取最新的完成主机数
 	if err := s.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
@@ -1242,19 +1301,35 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		// 所有主机都已返回结果，标记任务为 completed
 		now := model.Now()
 		updates := map[string]interface{}{
-			"status":       model.TaskStatusCompleted,
-			"completed_at": &now,
+			"status":        model.TaskStatusCompleted,
+			"completed_at":  &now,
+			"failed_reason": "", // 清除之前超时设置的失败原因
 		}
 
 		if err := s.db.Model(&task).Updates(updates).Error; err != nil {
 			return fmt.Errorf("更新任务状态失败: %w", err)
 		}
 
-		s.logger.Info("任务所有主机都已完成，状态更新为 completed",
-			zap.String("task_id", taskID),
-			zap.Int("completed_host_count", task.CompletedHostCount),
-			zap.Int("dispatched_host_count", task.DispatchedHostCount),
-		)
+		if isRecoveryFromTimeout {
+			s.logger.Info("任务从超时状态恢复为已完成，所有主机都已返回结果",
+				zap.String("task_id", taskID),
+				zap.Int("completed_host_count", task.CompletedHostCount),
+				zap.Int("dispatched_host_count", task.DispatchedHostCount),
+			)
+		} else {
+			s.logger.Info("任务所有主机都已完成，状态更新为 completed",
+				zap.String("task_id", taskID),
+				zap.Int("completed_host_count", task.CompletedHostCount),
+				zap.Int("dispatched_host_count", task.DispatchedHostCount),
+			)
+		}
+	} else if isRecoveryFromTimeout {
+		// 部分主机完成，更新失败原因中的数量
+		remainingHosts := task.DispatchedHostCount - task.CompletedHostCount
+		if remainingHosts > 0 {
+			s.db.Model(&task).Update("failed_reason",
+				fmt.Sprintf("任务执行超时：%d 台主机未返回结果", remainingHosts))
+		}
 	}
 
 	return nil
@@ -1979,6 +2054,63 @@ func (s *Service) handleFixTaskComplete(ctx context.Context, record *grpcProto.E
 		zap.String("result_count", resultCount),
 		zap.String("completed_at", completedAt),
 	)
+
+	// 更新主机状态为 completed
+	now := model.Now()
+
+	// 先查询是否存在该记录
+	var existingStatus model.FixTaskHostStatus
+	if err := s.db.Where("task_id = ? AND host_id = ?", fixTaskID, conn.AgentID).First(&existingStatus).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			s.logger.Warn("未找到修复任务主机状态记录，无法更新",
+				zap.String("fix_task_id", fixTaskID),
+				zap.String("host_id", conn.AgentID),
+			)
+			// 继续处理，不返回错误
+		} else {
+			s.logger.Error("查询修复任务主机状态失败",
+				zap.String("fix_task_id", fixTaskID),
+				zap.String("host_id", conn.AgentID),
+				zap.Error(err),
+			)
+			// 继续处理，不返回错误
+		}
+	} else {
+		// 记录更新前的状态
+		s.logger.Debug("准备更新修复任务主机状态",
+			zap.String("fix_task_id", fixTaskID),
+			zap.String("host_id", conn.AgentID),
+			zap.String("current_status", existingStatus.Status),
+		)
+
+		// 执行更新
+		result := s.db.Model(&model.FixTaskHostStatus{}).
+			Where("task_id = ? AND host_id = ?", fixTaskID, conn.AgentID).
+			Updates(map[string]interface{}{
+				"status":       model.FixTaskHostStatusCompleted,
+				"completed_at": &now,
+			})
+
+		if result.Error != nil {
+			s.logger.Error("更新修复任务主机状态失败",
+				zap.String("fix_task_id", fixTaskID),
+				zap.String("host_id", conn.AgentID),
+				zap.Error(result.Error),
+			)
+			// 继续处理，不返回错误
+		} else if result.RowsAffected == 0 {
+			s.logger.Warn("更新修复任务主机状态未影响任何记录",
+				zap.String("fix_task_id", fixTaskID),
+				zap.String("host_id", conn.AgentID),
+			)
+		} else {
+			s.logger.Info("成功更新修复任务主机状态为已完成",
+				zap.String("fix_task_id", fixTaskID),
+				zap.String("host_id", conn.AgentID),
+				zap.Int64("rows_affected", result.RowsAffected),
+			)
+		}
+	}
 
 	// 查询任务
 	var task model.FixTask

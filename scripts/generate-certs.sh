@@ -12,8 +12,8 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # 配置
-# 默认生成到 deploy/docker-compose/certs 目录（用于Docker Compose和本地开发）
-CERT_DIR="${CERT_DIR:-deploy/docker-compose/certs}"
+# 默认生成到 deploy/dev/certs 目录（用于Docker Compose和本地开发）
+CERT_DIR="${CERT_DIR:-deploy/dev/certs}"
 CA_KEY="${CERT_DIR}/ca.key"
 CA_CERT="${CERT_DIR}/ca.crt"
 SERVER_KEY="${CERT_DIR}/server.key"

@@ -66,7 +66,7 @@ echo ""
 echo "[1/3] 构建 AgentCenter..."
 docker build \
     --build-arg VERSION="${VERSION}" \
-    -f deploy/production/Dockerfile.agentcenter \
+    -f deploy/docker/Dockerfile.agentcenter \
     -t "${PREFIX}mxsec-agentcenter:${VERSION}" \
     -t "${PREFIX}mxsec-agentcenter:latest" \
     .
@@ -76,7 +76,7 @@ echo ""
 echo "[2/3] 构建 Manager..."
 docker build \
     --build-arg VERSION="${VERSION}" \
-    -f deploy/production/Dockerfile.manager \
+    -f deploy/docker/Dockerfile.manager \
     -t "${PREFIX}mxsec-manager:${VERSION}" \
     -t "${PREFIX}mxsec-manager:latest" \
     .
@@ -86,7 +86,7 @@ echo ""
 echo "[3/3] 构建 UI..."
 docker build \
     --build-arg VERSION="${VERSION}" \
-    -f deploy/production/Dockerfile.ui \
+    -f deploy/docker/Dockerfile.ui \
     -t "${PREFIX}mxsec-ui:${VERSION}" \
     -t "${PREFIX}mxsec-ui:latest" \
     .

@@ -4,7 +4,7 @@
       <h2>基线修复</h2>
       <a-space>
         <a-button
-          v-if="selectedRowKeys.length > 0"
+          v-if="selectedRowKeys.length > 0 || selectAllFiltered"
           type="primary"
           @click="handleBatchFix"
           :loading="fixing"
@@ -12,7 +12,8 @@
           <template #icon>
             <ToolOutlined />
           </template>
-          批量修复 ({{ selectedRowKeys.length }})
+          <span v-if="selectAllFiltered">批量修复 (全部 {{ pagination.total }} 条)</span>
+          <span v-else>批量修复 ({{ selectedRowKeys.length }})</span>
         </a-button>
         <a-button @click="handleRefresh" :loading="loading">
           <template #icon>
@@ -23,9 +24,58 @@
       </a-space>
     </div>
 
+    <!-- 全选提示 -->
+    <a-alert
+      v-if="showSelectAllAlert"
+      type="info"
+      closable
+      @close="handleCloseSelectAllAlert"
+      style="margin-bottom: 16px"
+    >
+      <template #message>
+        <span>
+          已选择当前页 {{ selectedRowKeys.length }} 条记录。
+          <a @click="handleSelectAllFiltered" style="margin-left: 8px">
+            选择全部 {{ pagination.total }} 条筛选结果
+          </a>
+        </span>
+      </template>
+    </a-alert>
+
+    <!-- 全选所有筛选结果提示 -->
+    <a-alert
+      v-if="selectAllFiltered"
+      type="success"
+      closable
+      @close="handleCancelSelectAll"
+      style="margin-bottom: 16px"
+    >
+      <template #message>
+        <span>
+          已选择全部 {{ pagination.total }} 条筛选结果。
+          <a @click="handleCancelSelectAll" style="margin-left: 8px">
+            取消全选
+          </a>
+        </span>
+      </template>
+    </a-alert>
+
     <!-- 筛选条件 -->
     <a-card :bordered="false" style="margin-bottom: 16px">
       <a-form layout="inline" :model="filters">
+        <a-form-item label="业务线">
+          <a-select
+            v-model:value="filters.business_line"
+            placeholder="选择业务线"
+            style="width: 200px"
+            allow-clear
+            @change="handleBusinessLineChange"
+          >
+            <a-select-option v-for="line in businessLines" :key="line" :value="line">
+              {{ line }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="主机选择">
           <a-select
             v-model:value="filters.host_ids"
@@ -39,19 +89,6 @@
           >
             <a-select-option v-for="host in filteredHosts" :key="host.host_id" :value="host.host_id">
               {{ host.hostname }} ({{ host.ipv4[0] || host.host_id }})
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="业务线">
-          <a-select
-            v-model:value="filters.business_line"
-            placeholder="选择业务线"
-            style="width: 200px"
-            allow-clear
-            @change="handleBusinessLineChange"
-          >
-            <a-select-option v-for="line in businessLines" :key="line" :value="line">
-              {{ line }}
             </a-select-option>
           </a-select>
         </a-form-item>
@@ -338,6 +375,17 @@ const progressModalVisible = ref(false)
 const selectedItem = ref<FixableItem | null>(null)
 const fixingItems = reactive<Record<string, boolean>>({})
 
+// 全选相关
+const selectAllFiltered = ref(false) // 是否选择了所有筛选结果
+const showSelectAllAlert = computed(() => {
+  // 当选择了当前页的所有可修复项，且总数大于当前页数量时，显示提示
+  if (selectAllFiltered.value) return false
+  if (selectedRowKeys.value.length === 0) return false
+
+  const fixableCount = fixableItems.value.filter(item => item.has_fix).length
+  return selectedRowKeys.value.length === fixableCount && pagination.total > fixableCount
+})
+
 // 修复进度相关
 const fixProgress = ref(0)
 const fixTotal = ref(0)
@@ -498,9 +546,31 @@ const handleRefresh = () => {
   message.success('已刷新')
 }
 
+// 全选所有筛选结果
+const handleSelectAllFiltered = () => {
+  selectAllFiltered.value = true
+  // 清空当前页选择（因为我们要使用筛选条件而非具体ID）
+  selectedRowKeys.value = []
+}
+
+// 取消全选所有筛选结果
+const handleCancelSelectAll = () => {
+  selectAllFiltered.value = false
+  selectedRowKeys.value = []
+}
+
+// 关闭全选提示
+const handleCloseSelectAllAlert = () => {
+  // 用户关闭提示后，保持当前页选择状态
+}
+
 const handleTableChange = (pag: any) => {
   pagination.current = pag.current
   pagination.pageSize = pag.pageSize
+  // 切换页面时，如果是全选状态，保持全选
+  if (!selectAllFiltered.value) {
+    selectedRowKeys.value = []
+  }
   loadFixableItems()
 }
 
@@ -517,15 +587,14 @@ const handleSingleFix = async (record: FixableItem) => {
   fixingItems[record.result_id] = true
   try {
     const response = await fixApi.createFixTask({
-      host_ids: [record.host_id],
-      rule_ids: [record.rule_id],
+      result_ids: [record.result_id],
     })
 
     // 显示进度 Modal
     progressModalVisible.value = true
     fixing.value = true
     fixProgress.value = 0
-    // 单个修复：1 项（后端会根据实际失败记录计算）
+    // 单个修复：1 项
     fixTotal.value = 1
     fixSuccessCount.value = 0
     fixFailedCount.value = 0
@@ -546,6 +615,42 @@ const handleSingleFix = async (record: FixableItem) => {
 }
 
 const handleBatchFix = async () => {
+  // 如果选择了所有筛选结果
+  if (selectAllFiltered.value) {
+    fixing.value = true
+    try {
+      const response = await fixApi.createFixTask({
+        use_filters: true,
+        business_line: filters.business_line || undefined,
+        severities: filters.severities.length > 0 ? filters.severities : undefined,
+      })
+
+      // 显示进度 Modal
+      progressModalVisible.value = true
+      fixProgress.value = 0
+      // 使用总数作为预期修复数量
+      fixTotal.value = pagination.total
+      fixSuccessCount.value = 0
+      fixFailedCount.value = 0
+      fixResults.value = []
+
+      // 轮询任务状态
+      await pollFixTask(response.task_id)
+
+      message.success('批量修复完成')
+      selectAllFiltered.value = false
+      selectedRowKeys.value = []
+      loadFixableItems()
+    } catch (error: any) {
+      console.error('批量修复失败:', error)
+      message.error('批量修复失败: ' + (error.response?.data?.message || error.message))
+    } finally {
+      fixing.value = false
+    }
+    return
+  }
+
+  // 否则使用选中的具体项
   const selectedItems = fixableItems.value.filter(item =>
     selectedRowKeys.value.includes(item.result_id) && item.has_fix
   )
@@ -558,14 +663,13 @@ const handleBatchFix = async () => {
   fixing.value = true
   try {
     const response = await fixApi.createFixTask({
-      host_ids: [...new Set(selectedItems.map(item => item.host_id))],
-      rule_ids: [...new Set(selectedItems.map(item => item.rule_id))],
+      result_ids: selectedItems.map(item => item.result_id),
     })
 
     // 显示进度 Modal
     progressModalVisible.value = true
     fixProgress.value = 0
-    // 使用选中的可修复项数量作为总数（后端会根据实际失败记录计算）
+    // 使用选中的可修复项数量作为总数
     fixTotal.value = selectedItems.length
     fixSuccessCount.value = 0
     fixFailedCount.value = 0

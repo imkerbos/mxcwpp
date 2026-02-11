@@ -183,9 +183,19 @@ func (h *FixHandler) GetFixableItems(c *gin.Context) {
 
 // CreateFixTaskRequest 创建修复任务请求
 type CreateFixTaskRequest struct {
-	HostIDs    []string `json:"host_ids" binding:"required"`
-	RuleIDs    []string `json:"rule_ids" binding:"required"`
+	// 方式1：直接指定 result_ids（推荐，精确指定要修复的项）
+	ResultIDs []string `json:"result_ids"`
+
+	// 方式2：指定主机和规则ID（已废弃，会导致统计不准确）
+	HostIDs    []string `json:"host_ids"`
+	RuleIDs    []string `json:"rule_ids"`
 	Severities []string `json:"severities"`
+
+	// 方式3：使用筛选条件（用于全选所有筛选结果）
+	UseFilters   bool     `json:"use_filters"`   // 是否使用筛选条件
+	BusinessLine string   `json:"business_line"` // 业务线筛选
+	// 注意：当 use_filters=true 时，会忽略其他参数，
+	// 而是根据筛选条件查询所有符合条件的失败记录
 }
 
 // CreateFixTask 创建修复任务
@@ -196,37 +206,152 @@ func (h *FixHandler) CreateFixTask(c *gin.Context) {
 		return
 	}
 
-	// 验证主机和规则
-	if len(req.HostIDs) == 0 {
-		BadRequest(c, "主机列表不能为空")
-		return
-	}
-	if len(req.RuleIDs) == 0 {
-		BadRequest(c, "规则列表不能为空")
-		return
+	var hostIDs, ruleIDs []string
+	var actualCount int64
+
+	if req.UseFilters {
+		// 方式3：使用筛选条件查询所有符合条件的失败记录
+		h.logger.Info("使用筛选条件创建修复任务",
+			zap.String("business_line", req.BusinessLine),
+			zap.Strings("severities", req.Severities))
+
+		// 构建查询
+		query := h.db.Model(&model.ScanResult{}).
+			Where("scan_results.status IN ?", []string{"fail", "error"})
+
+		// 严重级别筛选
+		if len(req.Severities) > 0 {
+			query = query.Where("scan_results.severity IN ?", req.Severities)
+		}
+
+		// 业务线筛选：需要通过 JOIN hosts 表来筛选
+		if req.BusinessLine != "" {
+			query = query.Joins("JOIN hosts ON scan_results.host_id = hosts.host_id").
+				Where("hosts.business_line = ?", req.BusinessLine)
+		}
+
+		// 查询所有符合条件的记录
+		var results []model.ScanResult
+		if err := query.Find(&results).Error; err != nil {
+			h.logger.Error("查询失败记录失败", zap.Error(err))
+			InternalError(c, "查询失败")
+			return
+		}
+
+		if len(results) == 0 {
+			BadRequest(c, "没有符合条件的失败记录")
+			return
+		}
+
+		// 提取唯一的 host_ids 和 rule_ids
+		hostIDSet := make(map[string]bool)
+		ruleIDSet := make(map[string]bool)
+		for _, r := range results {
+			hostIDSet[r.HostID] = true
+			ruleIDSet[r.RuleID] = true
+		}
+
+		hostIDs = make([]string, 0, len(hostIDSet))
+		for id := range hostIDSet {
+			hostIDs = append(hostIDs, id)
+		}
+
+		ruleIDs = make([]string, 0, len(ruleIDSet))
+		for id := range ruleIDSet {
+			ruleIDs = append(ruleIDs, id)
+		}
+
+		actualCount = int64(len(results))
+
+		h.logger.Info("筛选条件查询结果",
+			zap.Int("total_records", len(results)),
+			zap.Int("unique_hosts", len(hostIDs)),
+			zap.Int("unique_rules", len(ruleIDs)))
+
+	} else if len(req.ResultIDs) > 0 {
+		// 方式1：使用 result_ids（推荐方式，精确指定要修复的项）
+		h.logger.Info("使用 result_ids 创建修复任务",
+			zap.Int("result_count", len(req.ResultIDs)))
+
+		// 查询指定的失败记录
+		var results []model.ScanResult
+		if err := h.db.Where("result_id IN ?", req.ResultIDs).
+			Where("status IN ?", []string{"fail", "error"}).
+			Find(&results).Error; err != nil {
+			h.logger.Error("查询失败记录失败", zap.Error(err))
+			InternalError(c, "查询失败")
+			return
+		}
+
+		if len(results) == 0 {
+			BadRequest(c, "没有找到符合条件的失败记录")
+			return
+		}
+
+		// 提取唯一的 host_ids 和 rule_ids
+		hostIDSet := make(map[string]bool)
+		ruleIDSet := make(map[string]bool)
+		for _, r := range results {
+			hostIDSet[r.HostID] = true
+			ruleIDSet[r.RuleID] = true
+		}
+
+		hostIDs = make([]string, 0, len(hostIDSet))
+		for id := range hostIDSet {
+			hostIDs = append(hostIDs, id)
+		}
+
+		ruleIDs = make([]string, 0, len(ruleIDSet))
+		for id := range ruleIDSet {
+			ruleIDs = append(ruleIDs, id)
+		}
+
+		actualCount = int64(len(results))
+
+		h.logger.Info("result_ids 查询结果",
+			zap.Int("total_records", len(results)),
+			zap.Int("unique_hosts", len(hostIDs)),
+			zap.Int("unique_rules", len(ruleIDs)))
+
+	} else {
+		// 方式2：直接使用指定的主机和规则ID（已废弃，会导致统计不准确）
+		if len(req.HostIDs) == 0 {
+			BadRequest(c, "主机列表不能为空")
+			return
+		}
+		if len(req.RuleIDs) == 0 {
+			BadRequest(c, "规则列表不能为空")
+			return
+		}
+
+		h.logger.Warn("使用 host_ids + rule_ids 创建修复任务（已废弃，可能导致统计不准确）",
+			zap.Int("host_count", len(req.HostIDs)),
+			zap.Int("rule_count", len(req.RuleIDs)))
+
+		hostIDs = req.HostIDs
+		ruleIDs = req.RuleIDs
+
+		// 查询实际需要修复的项数（只统计失败的记录）
+		h.db.Model(&model.ScanResult{}).
+			Where("host_id IN ?", hostIDs).
+			Where("rule_id IN ?", ruleIDs).
+			Where("status IN ?", []string{"fail", "error"}).
+			Count(&actualCount)
 	}
 
 	// 创建任务
 	taskID := uuid.New().String()
 
-	// 查询实际需要修复的项数（只统计失败的记录）
-	var actualCount int64
-	h.db.Model(&model.ScanResult{}).
-		Where("host_id IN ?", req.HostIDs).
-		Where("rule_id IN ?", req.RuleIDs).
-		Where("status IN ?", []string{"fail", "error"}).
-		Count(&actualCount)
-
 	// 如果没有查询到失败记录，使用主机数×规则数作为默认值
 	totalCount := int(actualCount)
 	if totalCount == 0 {
-		totalCount = len(req.HostIDs) * len(req.RuleIDs)
+		totalCount = len(hostIDs) * len(ruleIDs)
 	}
 
 	task := &model.FixTask{
 		TaskID:       taskID,
-		HostIDs:      req.HostIDs,
-		RuleIDs:      req.RuleIDs,
+		HostIDs:      hostIDs,
+		RuleIDs:      ruleIDs,
 		Severities:   req.Severities,
 		Status:       model.FixTaskStatusPending,
 		TotalCount:   totalCount,
@@ -248,8 +373,9 @@ func (h *FixHandler) CreateFixTask(c *gin.Context) {
 
 	h.logger.Info("创建修复任务成功",
 		zap.String("task_id", taskID),
-		zap.Int("host_count", len(req.HostIDs)),
-		zap.Int("rule_count", len(req.RuleIDs)))
+		zap.Int("host_count", len(hostIDs)),
+		zap.Int("rule_count", len(ruleIDs)),
+		zap.Int("total_count", totalCount))
 
 	Success(c, gin.H{
 		"task_id": taskID,
@@ -504,4 +630,55 @@ func (h *FixHandler) DeleteFixTask(c *gin.Context) {
 
 	h.logger.Info("删除修复任务成功", zap.String("task_id", taskID))
 	Success(c, nil)
+}
+
+// GetFixTaskHostStatus 获取修复任务主机状态列表
+func (h *FixHandler) GetFixTaskHostStatus(c *gin.Context) {
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		BadRequest(c, "任务ID不能为空")
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	status := c.Query("status")
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		pageSize = 20
+	}
+
+	query := h.db.Model(&model.FixTaskHostStatus{}).Where("task_id = ?", taskID)
+
+	// 状态筛选
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	// 查询总数
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		h.logger.Error("查询修复任务主机状态总数失败", zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
+
+	// 分页查询
+	var hostStatuses []model.FixTaskHostStatus
+	offset := (page - 1) * pageSize
+	if err := query.Offset(offset).Limit(pageSize).
+		Order("dispatched_at DESC").
+		Find(&hostStatuses).Error; err != nil {
+		h.logger.Error("查询修复任务主机状态失败", zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
+
+	Success(c, gin.H{
+		"items": hostStatuses,
+		"total": total,
+	})
 }

@@ -24,7 +24,7 @@
       },
       "fix": {
         "suggestion": "安装 SELinux 相关包",
-        "command": "dnf install libselinux libselinux-utils policycoreutils -y"
+        "command": "if command -v dnf &>/dev/null; then dnf install libselinux libselinux-utils policycoreutils -y; else yum install libselinux libselinux-utils policycoreutils -y; fi"
       }
     },
     {

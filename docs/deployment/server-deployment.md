@@ -25,7 +25,7 @@ Server 支持三种部署方式：
 
 ```bash
 # 1. 进入部署目录
-cd deploy/docker-compose
+cd deploy/dev
 
 # 2. 生成证书
 mkdir -p certs
@@ -49,7 +49,7 @@ curl http://localhost:8080/api/v1/hosts
 - **AgentCenter**: 端口 6751 (gRPC)
 - **Manager**: 端口 8080 (HTTP)
 
-详细说明请参考 `deploy/docker-compose/README.md`。
+详细说明请参考 `deploy/dev/README.md`。
 
 ---
 

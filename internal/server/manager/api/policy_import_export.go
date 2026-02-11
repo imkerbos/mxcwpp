@@ -289,7 +289,7 @@ func (h *PolicyImportExportHandler) updatePolicy(existing *model.Policy, data *P
 			"name":        data.Name,
 			"version":     data.Version,
 			"description": data.Description,
-			"os_family":   data.OSFamily,
+			"os_family":   model.StringArray(data.OSFamily), // 转换为 StringArray 类型
 			"os_version":  data.OSVersion,
 			"enabled":     data.Enabled,
 			"group_id":    groupID,

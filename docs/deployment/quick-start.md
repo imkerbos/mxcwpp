@@ -38,7 +38,7 @@ grpcurl -plaintext localhost:6751 list
 make docker-logs
 
 # 查看特定服务日志
-cd deploy/docker-compose
+cd deploy/dev
 docker-compose logs -f agentcenter
 ```
 
@@ -52,7 +52,7 @@ make dev-down
 make docker-clean
 ```
 
-详细说明请参考 [Docker Compose 部署指南](./docker-compose/README.md)。
+详细说明请参考 [Docker Compose 部署指南](../../deploy/dev/README.md)。
 
 ---
 

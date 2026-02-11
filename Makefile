@@ -6,7 +6,7 @@ SERVER_HOST ?= localhost:6751
 GOARCH ?= amd64
 GOOS ?= linux
 DISTRO ?=  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
-CERT_DIR ?= deploy/docker-compose/certs  # 证书目录
+CERT_DIR ?= deploy/dev/certs  # 证书目录
 
 # 生成 Protobuf Go 代码
 proto: generate
@@ -102,29 +102,29 @@ package-all-arch:
 # Docker 相关命令
 docker-build:
 	@echo "Building Docker images..."
-	@cd deploy/docker-compose && docker-compose build
+	@cd deploy/dev && docker-compose build
 
 docker-up:
 	@echo "Starting Docker services..."
-	@cd deploy/docker-compose && docker-compose up -d
+	@cd deploy/dev && docker-compose up -d
 
 docker-down:
 	@echo "Stopping Docker services..."
-	@cd deploy/docker-compose && docker-compose down
+	@cd deploy/dev && docker-compose down
 
 docker-logs:
-	@cd deploy/docker-compose && docker-compose logs -f
+	@cd deploy/dev && docker-compose logs -f
 
 docker-ps:
-	@cd deploy/docker-compose && docker-compose ps
+	@cd deploy/dev && docker-compose ps
 
 docker-restart:
 	@echo "Restarting Docker services..."
-	@cd deploy/docker-compose && docker-compose restart
+	@cd deploy/dev && docker-compose restart
 
 docker-clean:
 	@echo "Cleaning Docker resources..."
-	@cd deploy/docker-compose && docker-compose down -v
+	@cd deploy/dev && docker-compose down -v
 	@docker system prune -f
 
 # 生成证书
@@ -180,20 +180,20 @@ dev-docker-up:
 # Docker 开发环境启动（后台模式）
 dev-docker-up-d:
 	@echo "Starting Docker development environment in background..."
-	@cd deploy/docker-compose && docker-compose -f docker-compose.dev.yml up -d --build agentcenter manager ui agent
+	@cd deploy/dev && docker-compose -f docker-compose.dev.yml up -d --build agentcenter manager ui agent
 
 # Docker 开发环境停止
 dev-docker-down:
 	@echo "Stopping Docker development environment..."
-	@cd deploy/docker-compose && docker-compose -f docker-compose.dev.yml down
+	@cd deploy/dev && docker-compose -f docker-compose.dev.yml down
 
 # Docker 开发环境日志
 dev-docker-logs:
-	@cd deploy/docker-compose && docker-compose -f docker-compose.dev.yml logs -f
+	@cd deploy/dev && docker-compose -f docker-compose.dev.yml logs -f
 
 # Docker 开发环境重启
 dev-docker-restart:
-	@cd deploy/docker-compose && docker-compose -f docker-compose.dev.yml restart manager ui
+	@cd deploy/dev && docker-compose -f docker-compose.dev.yml restart manager ui
 
 # 本地开发启动（仅后端）- 宿主机模式
 dev-server:

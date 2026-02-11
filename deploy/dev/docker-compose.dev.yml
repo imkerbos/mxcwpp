@@ -8,7 +8,7 @@ services:
   agentcenter:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.agentcenter.dev
+      dockerfile: deploy/docker/Dockerfile.agentcenter.dev
     container_name: mxsec-agentcenter-dev
     restart: unless-stopped
     ports:
@@ -59,7 +59,7 @@ services:
   manager:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.manager.dev
+      dockerfile: deploy/docker/Dockerfile.manager.dev
     container_name: mxsec-manager-dev
     restart: unless-stopped
     # macOS Docker Desktop 不支持 host 网络模式，使用端口映射
@@ -114,7 +114,7 @@ services:
   ui:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.ui.dev
+      dockerfile: deploy/docker/Dockerfile.ui.dev
     container_name: mxsec-ui-dev
     restart: unless-stopped
     # macOS Docker Desktop 不支持 host 网络模式，使用端口映射
@@ -143,7 +143,7 @@ services:
   agent:
     build:
       context: ../..
-      dockerfile: deploy/docker-compose/Dockerfile.agent.dev
+      dockerfile: deploy/docker/Dockerfile.agent.dev
     container_name: mxsec-agent-dev
     restart: unless-stopped
     depends_on:

@@ -77,6 +77,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '基线修复' },
       },
       {
+        path: 'baseline/fix-history',
+        name: 'BaselineFixHistory',
+        component: () => import('@/views/Baseline/FixHistory.vue'),
+        meta: { title: '修复历史' },
+      },
+      {
         path: 'system/collection',
         name: 'SystemCollection',
         component: () => import('@/views/System/Collection.vue'),

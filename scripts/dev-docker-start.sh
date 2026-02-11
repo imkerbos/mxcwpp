@@ -47,7 +47,7 @@ fi
 # 检查证书
 echo ""
 echo -e "${YELLOW}[3/4] 检查mTLS证书...${NC}"
-if [ ! -f "deploy/docker-compose/certs/ca.crt" ]; then
+if [ ! -f "deploy/dev/certs/ca.crt" ]; then
     echo -e "${YELLOW}  证书文件不存在，正在生成...${NC}"
     make certs || {
         echo -e "${RED}  错误: 证书生成失败${NC}"
@@ -92,7 +92,7 @@ echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  启动Docker服务...${NC}"
 echo -e "${GREEN}========================================${NC}"
-cd deploy/docker-compose
+cd deploy/dev
 
 # 启动Manager（前台运行，可以看到日志）
 echo ""
@@ -104,7 +104,7 @@ echo -e "${GREEN}========================================${NC}"
 cleanup() {
     echo ""
     echo -e "${YELLOW}正在停止服务...${NC}"
-    cd "$PROJECT_ROOT/deploy/docker-compose"
+    cd "$PROJECT_ROOT/deploy/dev"
     docker-compose -f docker-compose.dev.yml stop agentcenter manager ui agent
     echo -e "${GREEN}服务已停止${NC}"
     exit 0

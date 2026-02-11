@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { FixTask, FixResult, FixableItem, PaginatedResponse } from './types'
+import type { FixTask, FixResult, FixTaskHostStatus, FixableItem, PaginatedResponse } from './types'
 
 export const fixApi = {
   // 获取可修复项列表
@@ -16,9 +16,15 @@ export const fixApi = {
 
   // 创建修复任务
   async createFixTask(data: {
-    host_ids: string[]
-    rule_ids: string[]
+    // 方式1：直接指定 result_ids（推荐，精确指定要修复的项）
+    result_ids?: string[]
+    // 方式2：指定主机和规则ID（已废弃，会导致统计不准确）
+    host_ids?: string[]
+    rule_ids?: string[]
     severities?: string[]
+    // 方式3：使用筛选条件（用于全选所有筛选结果）
+    use_filters?: boolean
+    business_line?: string
   }): Promise<{ task_id: string }> {
     const response = await apiClient.post<{ task_id: string }>('/fix-tasks', data)
     return response
@@ -58,5 +64,15 @@ export const fixApi = {
   // 删除修复任务
   async deleteFixTask(taskId: string): Promise<void> {
     await apiClient.delete(`/fix-tasks/${taskId}`)
+  },
+
+  // 获取修复任务主机状态
+  async getFixTaskHostStatus(taskId: string, params?: {
+    page?: number
+    page_size?: number
+    status?: string
+  }): Promise<PaginatedResponse<FixTaskHostStatus>> {
+    const response = await apiClient.get<PaginatedResponse<FixTaskHostStatus>>(`/fix-tasks/${taskId}/host-status`, { params })
+    return response
   },
 }

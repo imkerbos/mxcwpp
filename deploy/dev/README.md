@@ -29,13 +29,9 @@ make dev-down
 
 ```bash
 # 在项目根目录执行
-cd deploy/docker-compose
+cd deploy/dev
 mkdir -p certs
-cp ../../scripts/generate-certs.sh .
-bash generate-certs.sh
-
-# 将生成的证书复制到 certs 目录
-cp ../../certs/* certs/
+../../scripts/generate-certs.sh
 ```
 
 #### 2. 启动服务

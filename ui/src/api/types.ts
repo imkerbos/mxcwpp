@@ -466,6 +466,24 @@ export interface FixResult {
   fixed_at: string
 }
 
+export interface FixTaskHostStatus {
+  id: number
+  task_id: string
+  host_id: string
+  hostname: string
+  ip_address: string
+  business_line: string
+  os_family: string
+  os_version: string
+  runtime_type: string
+  status: 'dispatched' | 'completed' | 'timeout' | 'failed'
+  dispatched_at: string
+  completed_at?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
 export interface FixableItem {
   result_id: string
   host_id: string
