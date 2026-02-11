@@ -790,7 +790,7 @@ onMounted(() => {
 
 <style scoped lang="less">
 .notification-page {
-  padding: 24px;
+  width: 100%;
 }
 
 .page-header {
@@ -815,6 +815,10 @@ onMounted(() => {
   gap: 12px;
   align-items: center;
   margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
 
   .search-input {
     width: 280px;
@@ -833,11 +837,12 @@ onMounted(() => {
 
 .detail-url {
   word-break: break-all;
-  font-family: monospace;
+  font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
-  background: #f5f5f5;
-  padding: 8px;
-  border-radius: 4px;
+  background: #f5f7fa;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
 }
 
 .severity-section {

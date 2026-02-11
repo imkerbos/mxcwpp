@@ -786,26 +786,30 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .page-header h2 {
   margin: 0;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .command-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #f5f5f5;
-  padding: 8px 12px;
-  border-radius: 4px;
+  background: #f5f7fa;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
 }
 
 .command-box code {
   flex: 1;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
+  color: #595959;
 }
 
 .fix-progress {
@@ -826,10 +830,11 @@ onMounted(() => {
 }
 
 .fix-result-item {
-  padding: 12px;
+  padding: 14px;
   margin-bottom: 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid #d9d9d9;
+  transition: all 0.2s ease;
 }
 
 .fix-result-item.status-success {

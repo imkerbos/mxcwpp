@@ -10,39 +10,64 @@
     
     <!-- 统计 -->
     <div class="stats">
-      <div class="stat-card">
-        <div class="stat-value">{{ statistics.active || 0 }}</div>
-        <div class="stat-label">活跃告警</div>
+      <div class="stat-card stat-active">
+        <div class="stat-icon-bg">
+          <BellOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value">{{ statistics.active || 0 }}</div>
+          <div class="stat-label">活跃告警</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value critical">{{ statistics.critical || 0 }}</div>
-        <div class="stat-label">严重</div>
+      <div class="stat-card stat-critical">
+        <div class="stat-icon-bg">
+          <CloseCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value critical">{{ statistics.critical || 0 }}</div>
+          <div class="stat-label">严重</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value high">{{ statistics.high || 0 }}</div>
-        <div class="stat-label">高危</div>
+      <div class="stat-card stat-high">
+        <div class="stat-icon-bg">
+          <ExclamationCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value high">{{ statistics.high || 0 }}</div>
+          <div class="stat-label">高危</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value medium">{{ statistics.medium || 0 }}</div>
-        <div class="stat-label">中危</div>
+      <div class="stat-card stat-medium">
+        <div class="stat-icon-bg">
+          <WarningOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value medium">{{ statistics.medium || 0 }}</div>
+          <div class="stat-label">中危</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value low">{{ statistics.low || 0 }}</div>
-        <div class="stat-label">低危</div>
+      <div class="stat-card stat-low">
+        <div class="stat-icon-bg">
+          <InfoCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value low">{{ statistics.low || 0 }}</div>
+          <div class="stat-label">低危</div>
+        </div>
       </div>
     </div>
 
     <!-- 标签切换 -->
     <div class="tabs-header">
-      <div 
+      <div
         :class="['tab-item', { active: activeTab === 'active' }]"
-        @click="activeTab = 'active'; handleTabChange()"
+        @click="switchTab('active')"
       >
         活跃告警
       </div>
-      <div 
+      <div
         :class="['tab-item', { active: activeTab === 'history' }]"
-        @click="activeTab = 'history'; handleTabChange()"
+        @click="switchTab('history')"
       >
         历史告警
       </div>
@@ -106,14 +131,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { SettingOutlined } from '@ant-design/icons-vue'
+import {
+  SettingOutlined,
+  BellOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+  WarningOutlined,
+  InfoCircleOutlined,
+} from '@ant-design/icons-vue'
 import { alertsApi, type Alert, type AlertStatistics } from '@/api/alerts'
 import { systemConfigApi, type AlertConfig } from '@/api/system-config'
 import AlertTable from './components/AlertTable.vue'
 
-const activeTab = ref<'active' | 'history'>('active')
+const route = useRoute()
+const router = useRouter()
+
+const validTabs = ['active', 'history'] as const
+const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as 'active' | 'history') : 'active'
+const activeTab = ref<'active' | 'history'>(initTab)
 const loading = ref(false)
 const alerts = ref<Alert[]>([])
 const statistics = ref<AlertStatistics>({
@@ -204,10 +242,24 @@ const loadAlerts = async () => {
   }
 }
 
-const handleTabChange = () => {
+const switchTab = (tab: 'active' | 'history') => {
+  activeTab.value = tab
+  router.replace({ query: { ...route.query, tab } })
   pagination.value.current = 1
   loadAlerts()
 }
+
+// 监听 URL query 变化（浏览器前进/后退）
+watch(
+  () => route.query.tab,
+  (newTab) => {
+    if (newTab && validTabs.includes(newTab as any) && newTab !== activeTab.value) {
+      activeTab.value = newTab as 'active' | 'history'
+      pagination.value.current = 1
+      loadAlerts()
+    }
+  }
+)
 
 const handleTableChange = (newFilters: any) => {
   // 如果传入了 page 参数，使用传入的值（翻页操作）
@@ -283,7 +335,7 @@ onMounted(() => {
 
 <style scoped lang="less">
 .alerts-page {
-  padding: 24px;
+  padding: 0;
 }
 
 .page-header {
@@ -295,7 +347,7 @@ onMounted(() => {
 
 .page-title {
   font-size: 20px;
-  font-weight: 500;
+  font-weight: 600;
   margin: 0;
   color: #262626;
 }
@@ -315,23 +367,65 @@ onMounted(() => {
 .stat-card {
   flex: 1;
   background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 4px;
+  border: none;
+  border-radius: 8px;
   padding: 20px;
-  text-align: center;
-  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
 
   &:hover {
-    border-color: #d9d9d9;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08),
+      0 8px 24px rgba(0, 0, 0, 0.06);
   }
 }
 
+.stat-icon-bg {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.stat-active .stat-icon-bg {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+}
+
+.stat-critical .stat-icon-bg {
+  background: linear-gradient(135deg, #ff4d4f, #cf1322);
+}
+
+.stat-high .stat-icon-bg {
+  background: linear-gradient(135deg, #ff7a45, #d4380d);
+}
+
+.stat-medium .stat-icon-bg {
+  background: linear-gradient(135deg, #faad14, #d48806);
+}
+
+.stat-low .stat-icon-bg {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+}
+
+.stat-info {
+  flex: 1;
+}
+
 .stat-value {
-  font-size: 32px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   color: #262626;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   line-height: 1;
 
   &.critical {
@@ -352,7 +446,7 @@ onMounted(() => {
 }
 
 .stat-label {
-  font-size: 14px;
+  font-size: 13px;
   color: #8c8c8c;
   font-weight: 400;
 }
@@ -362,9 +456,11 @@ onMounted(() => {
   gap: 0;
   margin-bottom: 24px;
   background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 4px;
+  border: none;
+  border-radius: 8px;
   padding: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .tab-item {
@@ -372,24 +468,25 @@ onMounted(() => {
   padding: 10px 20px;
   text-align: center;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 14px;
   color: #595959;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
   font-weight: 400;
 
   &:hover {
     color: #1890ff;
-    background: #f5f5f5;
+    background: #f5f7fa;
   }
 
   &.active {
-    background: #1890ff;
+    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
     color: #fff;
     font-weight: 500;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
 
     &:hover {
-      background: #40a9ff;
+      background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
       color: #fff;
     }
   }

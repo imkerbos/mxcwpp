@@ -1,0 +1,291 @@
+/* =====================================================
+   Matrix Cloud Security Platform - Global Styles
+   ===================================================== */
+
+/* CSS Variables */
+:root {
+  /* Primary Colors */
+  --mxsec-primary: #1890ff;
+  --mxsec-primary-hover: #40a9ff;
+  --mxsec-primary-active: #096dd9;
+  --mxsec-primary-bg: #e6f7ff;
+
+  /* Semantic Colors */
+  --mxsec-success: #52c41a;
+  --mxsec-warning: #faad14;
+  --mxsec-danger: #ff4d4f;
+  --mxsec-critical: #cf1322;
+  --mxsec-info: #1890ff;
+
+  /* Layout Colors */
+  --mxsec-header-bg: #001529;
+  --mxsec-sider-bg: #001529;
+  --mxsec-body-bg: #f0f2f5;
+  --mxsec-card-bg: #ffffff;
+
+  /* Text Colors */
+  --mxsec-text-primary: rgba(0, 0, 0, 0.85);
+  --mxsec-text-secondary: rgba(0, 0, 0, 0.65);
+  --mxsec-text-tertiary: rgba(0, 0, 0, 0.45);
+  --mxsec-text-disabled: rgba(0, 0, 0, 0.25);
+
+  /* Border */
+  --mxsec-border-color: #f0f0f0;
+  --mxsec-border-color-split: #e8e8e8;
+
+  /* Spacing */
+  --mxsec-spacing-xs: 4px;
+  --mxsec-spacing-sm: 8px;
+  --mxsec-spacing-md: 16px;
+  --mxsec-spacing-lg: 24px;
+  --mxsec-spacing-xl: 32px;
+
+  /* Border Radius */
+  --mxsec-radius-sm: 4px;
+  --mxsec-radius-md: 6px;
+  --mxsec-radius-lg: 8px;
+
+  /* Shadows */
+  --mxsec-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  --mxsec-shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+  --mxsec-shadow-header: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* =====================================================
+   Global Card Styles
+   ===================================================== */
+.ant-card {
+  border-radius: var(--mxsec-radius-lg) !important;
+  box-shadow: var(--mxsec-shadow-card) !important;
+  border: none !important;
+  transition: box-shadow 0.3s ease, transform 0.3s ease !important;
+
+  &:hover {
+    box-shadow: var(--mxsec-shadow-card-hover) !important;
+  }
+
+  .ant-card-head {
+    border-bottom: 1px solid var(--mxsec-border-color);
+    padding: 0 var(--mxsec-spacing-lg);
+    min-height: 48px;
+
+    .ant-card-head-title {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--mxsec-text-primary);
+      padding: 14px 0;
+      position: relative;
+
+      &::before {
+        content: '';
+        position: absolute;
+        left: -24px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 3px;
+        height: 16px;
+        background: var(--mxsec-primary);
+        border-radius: 2px;
+      }
+    }
+  }
+}
+
+/* =====================================================
+   Global Table Styles
+   ===================================================== */
+.ant-table-wrapper {
+  .ant-table {
+    border-radius: var(--mxsec-radius-lg);
+
+    .ant-table-thead > tr > th {
+      background: #fafafa !important;
+      font-weight: 600 !important;
+      color: var(--mxsec-text-primary) !important;
+      border-bottom: 2px solid var(--mxsec-border-color) !important;
+      padding: 12px 16px !important;
+      font-size: 13px;
+    }
+
+    .ant-table-tbody > tr {
+      transition: all 0.2s ease;
+
+      > td {
+        padding: 12px 16px !important;
+        border-bottom: 1px solid #fafafa !important;
+      }
+
+      &:hover > td {
+        background: #f5f7fa !important;
+      }
+
+      /* Zebra stripes */
+      &:nth-child(even) > td {
+        background: #fafbfc;
+      }
+
+      &:nth-child(even):hover > td {
+        background: #f5f7fa !important;
+      }
+    }
+  }
+}
+
+/* =====================================================
+   Page Title
+   ===================================================== */
+.page-header {
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--mxsec-text-primary);
+    margin: 0;
+    position: relative;
+    padding-left: 12px;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 4px;
+      height: 20px;
+      background: linear-gradient(180deg, var(--mxsec-primary) 0%, var(--mxsec-primary-active) 100%);
+      border-radius: 2px;
+    }
+  }
+}
+
+/* =====================================================
+   Filter Bar
+   ===================================================== */
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: var(--mxsec-radius-md);
+  border: 1px solid var(--mxsec-border-color);
+}
+
+/* =====================================================
+   Statistics Cards
+   ===================================================== */
+.stat-card {
+  background: var(--mxsec-card-bg);
+  border-radius: var(--mxsec-radius-lg);
+  padding: 20px;
+  text-align: center;
+  box-shadow: var(--mxsec-shadow-card);
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
+
+  &:hover {
+    box-shadow: var(--mxsec-shadow-card-hover);
+    transform: translateY(-2px);
+  }
+}
+
+/* =====================================================
+   Scrollbar Beautification
+   ===================================================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+  transition: background 0.3s;
+
+  &:hover {
+    background: #bfbfbf;
+  }
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d9d9d9 transparent;
+}
+
+/* =====================================================
+   Transition Animations
+   ===================================================== */
+.ant-btn {
+  transition: all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1) !important;
+}
+
+.ant-tag {
+  border-radius: var(--mxsec-radius-sm) !important;
+}
+
+.ant-input,
+.ant-select-selector,
+.ant-picker {
+  border-radius: var(--mxsec-radius-md) !important;
+  transition: all 0.3s ease !important;
+}
+
+/* =====================================================
+   Ant Design Overrides
+   ===================================================== */
+
+/* Modal */
+.ant-modal {
+  .ant-modal-content {
+    border-radius: var(--mxsec-radius-lg);
+    overflow: hidden;
+    box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.08),
+      0 9px 28px 0 rgba(0, 0, 0, 0.05),
+      0 12px 48px 16px rgba(0, 0, 0, 0.03);
+  }
+
+  .ant-modal-header {
+    border-bottom: 1px solid var(--mxsec-border-color);
+  }
+}
+
+/* Statistic */
+.ant-statistic {
+  .ant-statistic-title {
+    color: var(--mxsec-text-secondary);
+    font-size: 13px;
+  }
+
+  .ant-statistic-content-value {
+    font-weight: 600;
+  }
+}
+
+/* Empty state */
+.ant-empty {
+  padding: 32px 0;
+}
+
+/* Dropdown */
+.ant-dropdown {
+  .ant-dropdown-menu {
+    border-radius: var(--mxsec-radius-md);
+    box-shadow: var(--mxsec-shadow-card-hover);
+  }
+}
+
+/* Tabs */
+.ant-tabs-card {
+  .ant-tabs-tab {
+    border-radius: var(--mxsec-radius-md) var(--mxsec-radius-md) 0 0 !important;
+  }
+}

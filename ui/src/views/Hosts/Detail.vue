@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
@@ -60,7 +60,8 @@ const route = useRoute()
 
 const loading = ref(false)
 const host = ref<HostDetail | null>(null)
-const activeTab = ref('overview')
+const validTabs = ['overview', 'alerts', 'vulnerabilities', 'baseline', 'runtime', 'antivirus', 'performance', 'fingerprint']
+const activeTab = ref((route.query.tab as string) && validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview')
 const hostId = ref('')
 
 const alertCount = ref(0)
@@ -97,21 +98,31 @@ const handleBack = () => {
   router.push('/hosts')
 }
 
-const handleTabChange = (_key: string) => {
-  // 可以在这里加载对应标签页的数据
+const handleTabChange = (key: string) => {
+  router.replace({ query: { ...route.query, tab: key } })
 }
 
 const handleViewDetail = (tab: string) => {
   activeTab.value = tab
+  router.replace({ query: { ...route.query, tab } })
 }
 
+// 监听 URL query 变化（如浏览器前进/后退）
+watch(
+  () => route.query.tab,
+  (newTab) => {
+    if (newTab && validTabs.includes(newTab as string)) {
+      activeTab.value = newTab as string
+    }
+  }
+)
 
 onMounted(() => {
   loadHostDetail()
 })
 </script>
 
-<style scoped>
+<style scoped lang="less">
 .host-detail-page {
   width: 100%;
 }
@@ -133,5 +144,41 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   margin: 0;
+}
+
+/* 优化 Tab 栏样式 */
+:deep(.ant-tabs) {
+  .ant-tabs-nav {
+    margin-bottom: 16px;
+
+    &::before {
+      border-bottom: 1px solid #e8e8e8;
+    }
+  }
+
+  .ant-tabs-tab {
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #595959;
+    transition: all 0.3s ease;
+    border-radius: 6px 6px 0 0;
+
+    &:hover {
+      color: #1890ff;
+    }
+
+    &.ant-tabs-tab-active {
+      .ant-tabs-tab-btn {
+        color: #1890ff;
+        font-weight: 500;
+      }
+    }
+  }
+
+  .ant-tabs-ink-bar {
+    background: linear-gradient(90deg, #1890ff, #096dd9);
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
 }
 </style>

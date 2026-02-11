@@ -1,15 +1,39 @@
 <template>
   <div class="login-container">
-    <!-- 左侧装饰区域 -->
+    <!-- 左侧安全主题区域 -->
     <div class="login-left">
-      <div class="decorative-shapes">
-        <!-- 抽象几何图形装饰 -->
-        <div class="shape shape-1"></div>
-        <div class="shape shape-2"></div>
-        <div class="shape shape-3"></div>
-        <div class="shape shape-4"></div>
-        <div class="shape shape-5"></div>
-        <div class="shape shape-6"></div>
+      <!-- 网格动画背景 -->
+      <div class="grid-background">
+        <div class="grid-line" v-for="i in 20" :key="'h'+i" :style="{ top: (i * 5) + '%' }"></div>
+        <div class="grid-line vertical" v-for="i in 20" :key="'v'+i" :style="{ left: (i * 5) + '%' }"></div>
+      </div>
+      <!-- 浮动节点 -->
+      <div class="floating-nodes">
+        <div class="node" v-for="i in 8" :key="'n'+i" :class="'node-' + i"></div>
+      </div>
+      <!-- 文案区域 -->
+      <div class="left-content">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        </div>
+        <h2 class="brand-title">Matrix Cloud Security</h2>
+        <p class="brand-desc">矩阵云安全平台</p>
+        <div class="features">
+          <div class="feature-item">
+            <div class="feature-dot"></div>
+            <span>主机基线合规检查</span>
+          </div>
+          <div class="feature-item">
+            <div class="feature-dot"></div>
+            <span>多维度安全评估</span>
+          </div>
+          <div class="feature-item">
+            <div class="feature-dot"></div>
+            <span>实时威胁监控告警</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -23,7 +47,8 @@
             alt="Logo"
             class="login-logo"
           />
-          <h1>登录 {{ siteConfigStore.siteName }}</h1>
+          <h1>{{ siteConfigStore.siteName }}</h1>
+          <p class="login-subtitle">安全管理控制台</p>
         </div>
 
         <a-form
@@ -73,7 +98,7 @@
 
       <!-- 页脚 -->
       <div class="login-footer">
-        {{ siteConfigStore.siteName }}
+        &copy; {{ new Date().getFullYear() }} {{ siteConfigStore.siteName }}
       </div>
     </div>
   </div>
@@ -133,98 +158,132 @@ const handleLogin = async () => {
   width: 100%;
 }
 
-/* 左侧装饰区域 */
+/* 左侧安全主题区域 */
 .login-left {
-  flex: 0 0 35%;
+  flex: 0 0 40%;
   position: relative;
-  background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e57c2 100%);
+  background: linear-gradient(135deg, #001529 0%, #002140 40%, #003a70 100%);
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.decorative-shapes {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.shape {
+/* 网格背景 */
+.grid-background {
   position: absolute;
+  inset: 0;
+  opacity: 0.08;
+}
+
+.grid-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, #1890ff 50%, transparent 100%);
+}
+
+.grid-line.vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  height: auto;
+  background: linear-gradient(180deg, transparent 0%, #1890ff 50%, transparent 100%);
+}
+
+/* 浮动节点 */
+.floating-nodes {
+  position: absolute;
+  inset: 0;
+}
+
+.node {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: #1890ff;
   border-radius: 50%;
-  opacity: 0.6;
-  animation: float 6s ease-in-out infinite;
+  opacity: 0.4;
+  animation: pulse 3s ease-in-out infinite;
 }
 
-.shape-1 {
-  width: 120px;
-  height: 120px;
-  background: linear-gradient(135deg, #ff6b9d 0%, #ff8fab 100%);
-  top: 15%;
-  left: 10%;
-  animation-delay: 0s;
-  border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
-}
+.node-1 { top: 15%; left: 20%; animation-delay: 0s; }
+.node-2 { top: 30%; left: 60%; animation-delay: 0.5s; }
+.node-3 { top: 50%; left: 35%; animation-delay: 1s; }
+.node-4 { top: 70%; left: 70%; animation-delay: 1.5s; }
+.node-5 { top: 25%; left: 80%; animation-delay: 2s; }
+.node-6 { top: 60%; left: 15%; animation-delay: 0.8s; }
+.node-7 { top: 80%; left: 45%; animation-delay: 1.2s; }
+.node-8 { top: 40%; left: 85%; animation-delay: 1.8s; }
 
-.shape-2 {
-  width: 80px;
-  height: 200px;
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  top: 25%;
-  right: 15%;
-  animation-delay: 1s;
-  border-radius: 50%;
-}
-
-.shape-3 {
-  width: 150px;
-  height: 150px;
-  background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-  bottom: 20%;
-  left: 20%;
-  animation-delay: 2s;
-  border-radius: 40% 60% 60% 40% / 60% 30% 70% 40%;
-}
-
-.shape-4 {
-  width: 100px;
-  height: 100px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  top: 50%;
-  right: 25%;
-  animation-delay: 1.5s;
-  border-radius: 50%;
-}
-
-.shape-5 {
-  width: 60px;
-  height: 60px;
-  background: rgba(255, 255, 255, 0.3);
-  top: 10%;
-  left: 50%;
-  animation-delay: 0.5s;
-  border-radius: 50%;
-  backdrop-filter: blur(10px);
-}
-
-.shape-6 {
-  width: 200px;
-  height: 4px;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 50%, transparent 100%);
-  top: 60%;
-  left: 5%;
-  animation-delay: 2.5s;
-  transform: rotate(45deg);
-}
-
-@keyframes float {
+@keyframes pulse {
   0%, 100% {
-    transform: translateY(0px) rotate(0deg);
+    transform: scale(1);
+    opacity: 0.4;
+    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.4);
   }
   50% {
-    transform: translateY(-20px) rotate(5deg);
+    transform: scale(1.8);
+    opacity: 0.8;
+    box-shadow: 0 0 12px 4px rgba(24, 144, 255, 0.2);
   }
+}
+
+/* 左侧文案 */
+.left-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  color: #ffffff;
+  padding: 40px;
+}
+
+.brand-icon {
+  margin-bottom: 24px;
+  color: #1890ff;
+  filter: drop-shadow(0 0 20px rgba(24, 144, 255, 0.3));
+}
+
+.brand-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0 0 8px 0;
+  letter-spacing: 1px;
+}
+
+.brand-desc {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0 0 40px 0;
+  letter-spacing: 2px;
+}
+
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+  max-width: 240px;
+  margin: 0 auto;
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.feature-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1890ff;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px rgba(24, 144, 255, 0.5);
 }
 
 /* 右侧登录表单区域 */
@@ -241,25 +300,31 @@ const handleLogin = async () => {
 
 .login-content {
   width: 100%;
-  max-width: 420px;
+  max-width: 400px;
 }
 
 .login-header {
   text-align: center;
-  margin-bottom: 48px;
+  margin-bottom: 40px;
 }
 
 .login-header h1 {
-  margin: 0;
-  font-size: 28px;
+  margin: 0 0 4px 0;
+  font-size: 26px;
   font-weight: 600;
   color: #001529;
   letter-spacing: 0.5px;
 }
 
+.login-subtitle {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  margin: 0;
+}
+
 .login-logo {
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   object-fit: contain;
   margin-bottom: 16px;
 }
@@ -270,7 +335,7 @@ const handleLogin = async () => {
 
 .login-input {
   height: 48px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .login-input :deep(.ant-input) {
@@ -284,10 +349,19 @@ const handleLogin = async () => {
 
 .login-button {
   height: 48px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 16px;
   font-weight: 500;
   margin-top: 8px;
+  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.35);
+  transition: all 0.3s ease;
+}
+
+.login-button:hover {
+  box-shadow: 0 6px 16px rgba(24, 144, 255, 0.45);
+  transform: translateY(-1px);
 }
 
 .error-message {
@@ -300,8 +374,8 @@ const handleLogin = async () => {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 14px;
-  color: #8c8c8c;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.35);
   text-align: center;
 }
 
@@ -314,6 +388,14 @@ const handleLogin = async () => {
   .login-left {
     flex: 0 0 200px;
     min-height: 200px;
+  }
+
+  .brand-title {
+    font-size: 20px;
+  }
+
+  .features {
+    display: none;
   }
 
   .login-right {

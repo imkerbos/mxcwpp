@@ -18,17 +18,34 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import LinuxInstallGuide from './components/LinuxInstallGuide.vue'
 import KubernetesInstallGuide from './components/KubernetesInstallGuide.vue'
 
-const activeTab = ref('linux')
+const route = useRoute()
+const router = useRouter()
+
+const validTabs = ['linux', 'kubernetes']
+const activeTab = ref(validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'linux')
+
+watch(activeTab, (newTab) => {
+  router.replace({ query: { ...route.query, tab: newTab } })
+})
+
+watch(
+  () => route.query.tab,
+  (newTab) => {
+    if (newTab && validTabs.includes(newTab as string) && newTab !== activeTab.value) {
+      activeTab.value = newTab as string
+    }
+  }
+)
 </script>
 
 <style scoped>
 .system-install-page {
   width: 100%;
-  padding: 24px;
 }
 
 .page-header {

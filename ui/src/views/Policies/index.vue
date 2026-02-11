@@ -1914,6 +1914,13 @@ watch(
 
 .stat-card {
   text-align: center;
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.stat-card:hover {
+  background: #f0f5ff;
 }
 
 .stat-divider {
@@ -1925,7 +1932,7 @@ watch(
 
 .stat-value {
   font-size: 32px;
-  font-weight: 600;
+  font-weight: 700;
   color: #1890ff;
   line-height: 1;
   margin-bottom: 8px;
@@ -1957,25 +1964,10 @@ watch(
   display: flex;
   gap: 8px;
   align-items: center;
-}
-
-.policies-table :deep(.ant-table) {
-  background: #fff;
-}
-
-.policies-table :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
-  font-weight: 600;
-  color: #262626;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.policies-table :deep(.ant-table-tbody > tr) {
-  transition: all 0.2s;
-}
-
-.policies-table :deep(.ant-table-tbody > tr:hover) {
-  background: #f5f5f5;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
 }
 
 /* 响应式 */
@@ -2016,25 +2008,6 @@ watch(
   display: flex;
   justify-content: flex-end;
   margin-bottom: 16px;
-}
-
-.tasks-table :deep(.ant-table) {
-  background: #fff;
-}
-
-.tasks-table :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
-  font-weight: 600;
-  color: #262626;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.tasks-table :deep(.ant-table-tbody > tr) {
-  transition: all 0.2s;
-}
-
-.tasks-table :deep(.ant-table-tbody > tr:hover) {
-  background: #f5f5f5;
 }
 
 /* 操作列样式 */

@@ -778,12 +778,19 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.legend-item:hover {
+  background: #f5f7fa;
 }
 
 .legend-color {
   width: 12px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: 3px;
   display: inline-block;
 }
 
@@ -805,18 +812,25 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid #f0f0f0;
-  border-radius: 4px;
-  background: #fafafa;
+  padding: 16px;
+  border: none;
+  border-radius: 8px;
+  background: #fafbfc;
   min-height: 70px;
+  transition: all 0.3s ease;
+}
+
+.risk-card:hover {
+  background: #f0f5ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .risk-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 2px solid;
-  border-radius: 50%;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -838,8 +852,8 @@ onMounted(() => {
 }
 
 .risk-value {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.85);
 }
 
@@ -866,5 +880,9 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
 }
 </style>

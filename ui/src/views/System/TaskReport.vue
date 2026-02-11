@@ -12,7 +12,7 @@
     </div>
 
     <!-- 任务列表 -->
-    <a-card :bordered="false" class="task-list-card" v-if="!report">
+    <div v-if="!report">
       <a-table
         :columns="taskColumns"
         :data-source="completedTasks"
@@ -49,7 +49,7 @@
           <a-empty description="暂无已完成的任务" />
         </template>
       </a-table>
-    </a-card>
+    </div>
 
     <!-- 报告详情 -->
     <div v-if="report" class="report-detail-wrapper">
@@ -748,10 +748,12 @@ onMounted(() => {
   /* 任务列表卡片 */
   .task-list-card {
     margin-bottom: 24px;
+    border-radius: 8px;
   }
 
   .task-name {
     font-weight: 500;
+    color: #262626;
   }
 
   /* 报告详情区域 */
@@ -764,10 +766,12 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
-    padding: 12px 16px;
+    padding: 14px 20px;
     background: #fff;
     border-radius: 8px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 4px 8px rgba(0, 0, 0, 0.04);
   }
 }
 

@@ -1467,7 +1467,7 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
+<style scoped lang="less">
 .host-overview {
   width: 100%;
 }
@@ -1482,6 +1482,11 @@ onMounted(() => {
 
 .host-info-card {
   margin-bottom: 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  border: none;
 }
 
 .host-info-card :deep(.ant-card-head) {
@@ -1637,12 +1642,22 @@ onMounted(() => {
 .risk-card {
   flex: 1;
   background: #fff;
-  border: 1px solid #f0f0f0;
-  border-radius: 2px;
+  border: none;
+  border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08),
+      0 8px 24px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .risk-card-header {
@@ -1651,7 +1666,7 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #f5f5f5;
 }
 
 .risk-card-title {
@@ -1724,14 +1739,16 @@ onMounted(() => {
 .risk-ring {
   width: 70px;
   height: 70px;
-  border: 3px solid #d9d9d9;
+  border: 3px solid #e8e8e8;
   border-radius: 50%;
-  background: transparent;
-  transition: border-color 0.3s;
+  background: #fafbfc;
+  transition: all 0.3s;
 }
 
 .risk-ring.has-risk {
-  border-color: #ff9800;
+  border-color: #ff7a45;
+  background: linear-gradient(135deg, #fff2e8 0%, #fff7e6 100%);
+  box-shadow: 0 0 0 4px rgba(255, 122, 69, 0.08);
 }
 
 .risk-stats {
@@ -1763,18 +1780,22 @@ onMounted(() => {
 
 .risk-stat-dot.critical {
   background-color: #ff4d4f;
+  box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
 }
 
 .risk-stat-dot.high {
-  background-color: #ff7875;
+  background-color: #ff7a45;
+  box-shadow: 0 0 0 2px rgba(255, 122, 69, 0.15);
 }
 
 .risk-stat-dot.medium {
-  background-color: #ffa940;
+  background-color: #faad14;
+  box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.15);
 }
 
 .risk-stat-dot.low {
-  background-color: #ffc53d;
+  background-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
 }
 
 .risk-stat-label {
@@ -1800,9 +1821,12 @@ onMounted(() => {
 /* 资产指纹 */
 .fingerprint-section {
   background: #fff;
-  border: 1px solid #f0f0f0;
-  border-radius: 2px;
+  border: none;
+  border-radius: 8px;
   padding: 20px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
 }
 
 .fingerprint-header {
@@ -1838,15 +1862,18 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: #fafafa;
+  background: #fafbfc;
   border: 1px solid #f0f0f0;
-  border-radius: 2px;
-  transition: background-color 0.2s;
+  border-radius: 8px;
+  transition: all 0.3s ease;
   cursor: pointer;
 }
 
 .fingerprint-item:hover {
-  background: #f5f5f5;
+  background: #e6f7ff;
+  border-color: #91d5ff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.12);
 }
 
 .fingerprint-value {
@@ -1861,6 +1888,25 @@ onMounted(() => {
   font-size: 14px;
   color: rgba(0, 0, 0, 0.65);
   text-align: center;
+}
+
+/* 磁盘/网卡/组件 Card 优化 */
+.content-section :deep(.ant-card) {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  margin-bottom: 16px;
+}
+
+.content-section :deep(.ant-card .ant-card-head) {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.content-section :deep(.ant-card .ant-card-head-title) {
+  font-size: 16px;
+  font-weight: 600;
 }
 
 /* 响应式设计 */

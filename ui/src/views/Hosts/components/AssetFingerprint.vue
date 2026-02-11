@@ -33,7 +33,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { assetsApi } from '@/api/assets'
 import ProcessList from './ProcessList.vue'
 import PortList from './PortList.vue'
@@ -44,8 +45,12 @@ const props = defineProps<{
   hostId: string
 }>()
 
+const route = useRoute()
+const router = useRouter()
+
 const loading = ref(false)
-const activeTab = ref('processes')
+const validSubTabs = ['processes', 'ports', 'users']
+const activeTab = ref((route.query.subtab as string) && validSubTabs.includes(route.query.subtab as string) ? (route.query.subtab as string) : 'processes')
 
 const fingerprintItems = ref([
   { key: 'containers', label: '容器', value: 0 },
@@ -86,15 +91,26 @@ const loadStatistics = async () => {
 
 const handleItemClick = (key: string) => {
   // 点击统计卡片时切换到对应的标签页
-  if (key === 'processes') activeTab.value = 'processes'
-  else if (key === 'ports') activeTab.value = 'ports'
-  else if (key === 'users') activeTab.value = 'users'
-  // 其他类型后续实现
+  if (validSubTabs.includes(key)) {
+    activeTab.value = key
+    router.replace({ query: { ...route.query, subtab: key } })
+  }
 }
 
 const handleTabChange = (key: string) => {
   activeTab.value = key
+  router.replace({ query: { ...route.query, subtab: key } })
 }
+
+// 监听 URL query 变化
+watch(
+  () => route.query.subtab,
+  (newTab) => {
+    if (newTab && validSubTabs.includes(newTab as string)) {
+      activeTab.value = newTab as string
+    }
+  }
+)
 
 onMounted(() => {
   loadStatistics()

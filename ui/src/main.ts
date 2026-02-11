@@ -29,6 +29,7 @@ use([
   GridComponent,
 ])
 
+import './styles/global.less'
 import App from './App.vue'
 import router from './router'
 import { useSiteConfigStore } from './stores/site-config'

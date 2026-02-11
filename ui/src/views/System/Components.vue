@@ -1166,7 +1166,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .page-header h2 {
@@ -1178,9 +1178,10 @@ onMounted(() => {
 /* 插件状态区域样式 */
 .plugin-status-section {
   margin-bottom: 20px;
-  padding: 16px;
-  background: #fafafa;
+  padding: 20px;
+  background: linear-gradient(135deg, #fafbfc 0%, #f0f5ff 100%);
   border-radius: 8px;
+  border: 1px solid #f0f0f0;
 }
 
 .section-title {
@@ -1202,15 +1203,17 @@ onMounted(() => {
   flex: 1;
   min-width: 200px;
   max-width: 300px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: #fff;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #e8e8e8;
-  transition: all 0.2s;
+  transition: all 0.3s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .plugin-status-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .plugin-status-card.status-ready {
@@ -1272,10 +1275,16 @@ onMounted(() => {
 }
 
 .upload-item {
-  padding: 12px;
-  background: #fafafa;
-  border-radius: 6px;
+  padding: 16px;
+  background: #fafbfc;
+  border-radius: 8px;
   border: 1px dashed #d9d9d9;
+  transition: all 0.2s ease;
+}
+
+.upload-item:hover {
+  border-color: #1890ff;
+  background: #f0f5ff;
 }
 
 .upload-header {

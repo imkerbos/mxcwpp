@@ -620,22 +620,32 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .page-header h2 {
   margin: 0;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .output-text {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
-  color: #666;
+  color: #595959;
+  background: #f5f7fa;
+  padding: 8px 12px;
+  border-radius: 4px;
+  display: block;
 }
 
 .error-text {
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
   color: #ff4d4f;
+  background: #fff2f0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  display: block;
 }
 </style>

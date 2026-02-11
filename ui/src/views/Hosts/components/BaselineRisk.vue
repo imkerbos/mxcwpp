@@ -1,39 +1,79 @@
 <template>
-  <a-card title="基线检查结果" :bordered="false">
+  <div class="baseline-risk">
     <!-- 统计概览 -->
     <div class="stats-row">
-      <div class="stat-item">
-        <span class="stat-label">总计</span>
-        <span class="stat-value">{{ totalCount }}</span>
+      <div class="stat-card">
+        <div class="stat-icon-bg total-bg">
+          <UnorderedListOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value">{{ totalCount }}</div>
+          <div class="stat-label">总计</div>
+        </div>
       </div>
-      <div class="stat-item pass">
-        <span class="stat-label">通过</span>
-        <span class="stat-value">{{ passCount }}</span>
+      <div class="stat-card">
+        <div class="stat-icon-bg pass-bg">
+          <CheckCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value pass">{{ passCount }}</div>
+          <div class="stat-label">通过</div>
+        </div>
       </div>
-      <div class="stat-item fail">
-        <span class="stat-label">失败</span>
-        <span class="stat-value">{{ failCount }}</span>
+      <div class="stat-card">
+        <div class="stat-icon-bg fail-bg">
+          <CloseCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value fail">{{ failCount }}</div>
+          <div class="stat-label">失败</div>
+        </div>
       </div>
-      <div class="stat-item error">
-        <span class="stat-label">错误</span>
-        <span class="stat-value">{{ errorCount }}</span>
+      <div class="stat-card">
+        <div class="stat-icon-bg error-bg">
+          <ExclamationCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value error">{{ errorCount }}</div>
+          <div class="stat-label">错误</div>
+        </div>
       </div>
       <div class="stat-divider"></div>
-      <div class="stat-item critical" @click="setSeverityFilter('critical')" :class="{ clickable: criticalCount > 0 }">
-        <span class="stat-label">严重</span>
-        <span class="stat-value">{{ criticalCount }}</span>
+      <div class="stat-card severity-card" :class="{ clickable: criticalCount > 0 }" @click="setSeverityFilter('critical')">
+        <div class="stat-icon-bg critical-bg">
+          <BugOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value critical">{{ criticalCount }}</div>
+          <div class="stat-label">严重</div>
+        </div>
       </div>
-      <div class="stat-item high" @click="setSeverityFilter('high')" :class="{ clickable: highCount > 0 }">
-        <span class="stat-label">高危</span>
-        <span class="stat-value">{{ highCount }}</span>
+      <div class="stat-card severity-card" :class="{ clickable: highCount > 0 }" @click="setSeverityFilter('high')">
+        <div class="stat-icon-bg high-bg">
+          <WarningOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value high">{{ highCount }}</div>
+          <div class="stat-label">高危</div>
+        </div>
       </div>
-      <div class="stat-item medium" @click="setSeverityFilter('medium')" :class="{ clickable: mediumCount > 0 }">
-        <span class="stat-label">中危</span>
-        <span class="stat-value">{{ mediumCount }}</span>
+      <div class="stat-card severity-card" :class="{ clickable: mediumCount > 0 }" @click="setSeverityFilter('medium')">
+        <div class="stat-icon-bg medium-bg">
+          <InfoCircleOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value medium">{{ mediumCount }}</div>
+          <div class="stat-label">中危</div>
+        </div>
       </div>
-      <div class="stat-item low" @click="setSeverityFilter('low')" :class="{ clickable: lowCount > 0 }">
-        <span class="stat-label">低危</span>
-        <span class="stat-value">{{ lowCount }}</span>
+      <div class="stat-card severity-card" :class="{ clickable: lowCount > 0 }" @click="setSeverityFilter('low')">
+        <div class="stat-icon-bg low-bg">
+          <SafetyCertificateOutlined />
+        </div>
+        <div class="stat-info">
+          <div class="stat-value low">{{ lowCount }}</div>
+          <div class="stat-label">低危</div>
+        </div>
       </div>
     </div>
 
@@ -125,13 +165,25 @@
         </template>
       </template>
     </a-table>
-  </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { DownloadOutlined, FileMarkdownOutlined, FileExcelOutlined } from '@ant-design/icons-vue'
+import {
+  DownloadOutlined,
+  FileMarkdownOutlined,
+  FileExcelOutlined,
+  UnorderedListOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+  BugOutlined,
+  WarningOutlined,
+  InfoCircleOutlined,
+  SafetyCertificateOutlined,
+} from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
 import type { ScanResult } from '@/api/types'
 
@@ -322,82 +374,131 @@ onMounted(() => {
 })
 </script>
 
-<style scoped>
-.stats-row {
-  display: flex;
-  gap: 32px;
-  margin-bottom: 16px;
-  padding: 16px;
-  background: #fafafa;
-  border-radius: 8px;
+<style scoped lang="less">
+.baseline-risk {
+  width: 100%;
 }
 
-.stat-item {
+/* 统计卡片行 */
+.stats-row {
   display: flex;
-  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: stretch;
+}
+
+.stat-card {
+  flex: 1;
+  display: flex;
   align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 4px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+}
+
+.stat-card.severity-card.clickable {
+  cursor: pointer;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08),
+      0 8px 24px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.stat-icon-bg {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.total-bg {
+  background: linear-gradient(135deg, #595959, #434343);
+}
+
+.pass-bg {
+  background: linear-gradient(135deg, #52c41a, #389e0d);
+}
+
+.fail-bg {
+  background: linear-gradient(135deg, #ff4d4f, #cf1322);
+}
+
+.error-bg {
+  background: linear-gradient(135deg, #faad14, #d48806);
+}
+
+.critical-bg {
+  background: linear-gradient(135deg, #ff4d4f, #a8071a);
+}
+
+.high-bg {
+  background: linear-gradient(135deg, #ff7a45, #d4380d);
+}
+
+.medium-bg {
+  background: linear-gradient(135deg, #faad14, #d48806);
+}
+
+.low-bg {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+}
+
+.stat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #262626;
+  line-height: 1;
+  margin-bottom: 4px;
+
+  &.pass { color: #52c41a; }
+  &.fail { color: #ff4d4f; }
+  &.error { color: #faad14; }
+  &.critical { color: #cf1322; }
+  &.high { color: #fa541c; }
+  &.medium { color: #faad14; }
+  &.low { color: #1890ff; }
 }
 
 .stat-label {
   font-size: 13px;
   color: #8c8c8c;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: #262626;
-}
-
-.stat-item.pass .stat-value {
-  color: #52c41a;
-}
-
-.stat-item.fail .stat-value {
-  color: #ff4d4f;
-}
-
-.stat-item.error .stat-value {
-  color: #faad14;
+  font-weight: 400;
 }
 
 .stat-divider {
   width: 1px;
-  background: #d9d9d9;
-  margin: 0 8px;
+  background: linear-gradient(180deg, transparent, #d9d9d9, transparent);
+  margin: 4px 4px;
+  flex-shrink: 0;
 }
 
-.stat-item.critical .stat-value {
-  color: #cf1322;
-}
-
-.stat-item.high .stat-value {
-  color: #fa541c;
-}
-
-.stat-item.medium .stat-value {
-  color: #faad14;
-}
-
-.stat-item.low .stat-value {
-  color: #1890ff;
-}
-
-.stat-item.clickable {
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.stat-item.clickable:hover {
-  transform: scale(1.05);
-}
-
+/* 筛选栏 */
 .filter-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
 }
 
 .filter-left {

@@ -11,7 +11,7 @@
     </div>
 
     <!-- 搜索栏 -->
-    <a-card :bordered="false" style="margin-bottom: 16px">
+    <div class="filter-bar">
       <a-form layout="inline" :model="searchForm">
         <a-form-item label="用户名">
           <a-input
@@ -48,7 +48,7 @@
           <a-button style="margin-left: 8px" @click="handleReset">重置</a-button>
         </a-form-item>
       </a-form>
-    </a-card>
+    </div>
 
     <!-- 用户列表 -->
     <a-card :bordered="false">
@@ -268,5 +268,13 @@ onMounted(() => {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+}
+
+.filter-bar {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
 }
 </style>

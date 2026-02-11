@@ -1,8 +1,11 @@
 <template>
   <div class="business-lines-page">
-    <a-card title="业务线管理" :bordered="false">
-      <!-- 搜索和操作区域 -->
-      <div class="filter-bar">
+    <div class="page-header">
+      <h2>业务线管理</h2>
+    </div>
+
+    <!-- 搜索和操作区域 -->
+    <div class="filter-bar">
         <a-input
           v-model:value="filters.keyword"
           placeholder="搜索业务线名称或代码"
@@ -78,7 +81,6 @@
           </template>
         </template>
       </a-table>
-    </a-card>
 
     <!-- 创建/编辑业务线对话框 -->
     <a-modal
@@ -357,9 +359,28 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.business-lines-page .filter-bar {
+.business-lines-page {
+  width: 100%;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.filter-bar {
   display: flex;
   gap: 12px;
+  align-items: center;
   margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-radius: 6px;
+  border: 1px solid #f0f0f0;
 }
 </style>

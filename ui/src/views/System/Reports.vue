@@ -21,39 +21,59 @@
     <!-- 统计概览卡片 -->
     <a-row :gutter="[16, 16]" class="stats-overview">
       <a-col :xs="24" :sm="12" :md="6" :lg="6">
-        <a-card :bordered="false" class="stat-card">
-          <a-statistic
-            title="主机总数"
-            :value="reportStats.hostStats?.total || 0"
-            :value-style="{ color: '#1890ff' }"
-          />
+        <a-card :bordered="false" class="stat-card stat-hosts">
+          <div class="stat-card-inner">
+            <div class="stat-icon-bg">
+              <DesktopOutlined />
+            </div>
+            <a-statistic
+              title="主机总数"
+              :value="reportStats.hostStats?.total || 0"
+              :value-style="{ color: '#1890ff' }"
+            />
+          </div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :md="6" :lg="6">
-        <a-card :bordered="false" class="stat-card">
-          <a-statistic
-            title="基线检查总数"
-            :value="reportStats.baselineStats?.totalChecks || 0"
-            :value-style="{ color: '#52c41a' }"
-          />
+        <a-card :bordered="false" class="stat-card stat-baseline">
+          <div class="stat-card-inner">
+            <div class="stat-icon-bg">
+              <SafetyCertificateOutlined />
+            </div>
+            <a-statistic
+              title="基线检查总数"
+              :value="reportStats.baselineStats?.totalChecks || 0"
+              :value-style="{ color: '#52c41a' }"
+            />
+          </div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :md="6" :lg="6">
-        <a-card :bordered="false" class="stat-card">
-          <a-statistic
-            title="策略总数"
-            :value="reportStats.policyStats?.total || 0"
-            :value-style="{ color: '#722ed1' }"
-          />
+        <a-card :bordered="false" class="stat-card stat-policy">
+          <div class="stat-card-inner">
+            <div class="stat-icon-bg">
+              <FileProtectOutlined />
+            </div>
+            <a-statistic
+              title="策略总数"
+              :value="reportStats.policyStats?.total || 0"
+              :value-style="{ color: '#722ed1' }"
+            />
+          </div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :md="6" :lg="6">
-        <a-card :bordered="false" class="stat-card">
-          <a-statistic
-            title="任务总数"
-            :value="reportStats.taskStats?.total || 0"
-            :value-style="{ color: '#fa8c16' }"
-          />
+        <a-card :bordered="false" class="stat-card stat-task">
+          <div class="stat-card-inner">
+            <div class="stat-icon-bg">
+              <ThunderboltOutlined />
+            </div>
+            <a-statistic
+              title="任务总数"
+              :value="reportStats.taskStats?.total || 0"
+              :value-style="{ color: '#fa8c16' }"
+            />
+          </div>
         </a-card>
       </a-col>
     </a-row>
@@ -265,7 +285,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ReloadOutlined } from '@ant-design/icons-vue'
+import {
+  ReloadOutlined,
+  DesktopOutlined,
+  SafetyCertificateOutlined,
+  FileProtectOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import {
   reportsApi,
@@ -938,7 +964,41 @@ onUnmounted(() => {
 }
 
 .stat-card {
-  text-align: center;
+  text-align: left;
+}
+
+.stat-card-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stat-icon-bg {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.stat-hosts .stat-icon-bg {
+  background: linear-gradient(135deg, #1890ff, #096dd9);
+}
+
+.stat-baseline .stat-icon-bg {
+  background: linear-gradient(135deg, #52c41a, #389e0d);
+}
+
+.stat-policy .stat-icon-bg {
+  background: linear-gradient(135deg, #722ed1, #531dab);
+}
+
+.stat-task .stat-icon-bg {
+  background: linear-gradient(135deg, #fa8c16, #d46b08);
 }
 
 .charts-row {

@@ -330,11 +330,17 @@ onMounted(() => {
 .logo-preview {
   position: relative;
   display: inline-block;
-  border: 1px solid #d9d9d9;
-  border-radius: 4px;
-  padding: 12px;
-  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fafbfc;
   margin-bottom: 8px;
+  transition: all 0.2s ease;
+}
+
+.logo-preview:hover {
+  border-color: #1890ff;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.1);
 }
 
 .logo-image {

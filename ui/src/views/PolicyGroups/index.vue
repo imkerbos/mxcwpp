@@ -954,7 +954,7 @@ watch(
 }
 
 .group-card {
-  transition: all 0.3s;
+  transition: all 0.3s ease;
 }
 
 .group-card.disabled {
@@ -962,7 +962,9 @@ watch(
 }
 
 .group-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 .card-title {
@@ -1007,8 +1009,9 @@ watch(
 .group-stats {
   margin-bottom: 16px;
   padding: 16px;
-  background: #fafafa;
+  background: linear-gradient(135deg, #fafbfc 0%, #f0f5ff 100%);
   border-radius: 8px;
+  border: 1px solid #f0f0f0;
 }
 
 .group-footer {

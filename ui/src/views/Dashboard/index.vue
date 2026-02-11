@@ -2,6 +2,7 @@
   <div class="dashboard-page">
     <div class="page-header">
       <h2>安全概览</h2>
+      <span class="page-header-hint">实时监控平台安全态势</span>
     </div>
 
     <!-- 第一行：资产概览 -->
@@ -10,16 +11,36 @@
         <a-card title="资产概览" :bordered="false" class="dashboard-card asset-overview-card">
           <a-row :gutter="[24, 16]">
             <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <a-statistic title="主机" :value="stats.hosts" :value-style="{ fontSize: '24px' }" />
+              <div class="asset-stat-item">
+                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #1890ff, #096dd9);">
+                  <DesktopOutlined />
+                </div>
+                <a-statistic title="主机" :value="stats.hosts" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
+              </div>
             </a-col>
             <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <a-statistic title="集群" :value="stats.clusters" :value-style="{ fontSize: '24px' }" />
+              <div class="asset-stat-item">
+                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #722ed1, #531dab);">
+                  <ClusterOutlined />
+                </div>
+                <a-statistic title="集群" :value="stats.clusters" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
+              </div>
             </a-col>
             <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <a-statistic title="容器" :value="stats.containers" :value-style="{ fontSize: '24px' }" />
+              <div class="asset-stat-item">
+                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #13c2c2, #08979c);">
+                  <ContainerOutlined />
+                </div>
+                <a-statistic title="容器" :value="stats.containers" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
+              </div>
             </a-col>
             <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <a-statistic title="在线Agent" :value="stats.onlineAgents" :value-style="{ fontSize: '24px' }" />
+              <div class="asset-stat-item">
+                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #52c41a, #389e0d);">
+                  <ApiOutlined />
+                </div>
+                <a-statistic title="在线Agent" :value="stats.onlineAgents" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
+              </div>
             </a-col>
           </a-row>
         </a-card>
@@ -129,7 +150,7 @@
           <a-space direction="vertical" style="width: 100%" size="middle">
             <div class="service-status-item">
               <div class="service-name">
-                <span class="status-dot" :class="getServiceStatusClass('database')"></span>
+                <span class="status-dot-animated" :class="getServiceStatusClass('database')"></span>
                 <span>数据库连接</span>
               </div>
               <a-tag :color="getServiceStatusColor(serviceStatus.database)">
@@ -138,7 +159,7 @@
             </div>
             <div class="service-status-item">
               <div class="service-name">
-                <span class="status-dot" :class="getServiceStatusClass('agentcenter')"></span>
+                <span class="status-dot-animated" :class="getServiceStatusClass('agentcenter')"></span>
                 <span>AgentCenter 服务</span>
               </div>
               <a-tag :color="getServiceStatusColor(serviceStatus.agentcenter)">
@@ -147,7 +168,7 @@
             </div>
             <div class="service-status-item">
               <div class="service-name">
-                <span class="status-dot" :class="getServiceStatusClass('manager')"></span>
+                <span class="status-dot-animated" :class="getServiceStatusClass('manager')"></span>
                 <span>Manager 服务</span>
               </div>
               <a-tag :color="getServiceStatusColor(serviceStatus.manager)">
@@ -165,6 +186,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import {
+  DesktopOutlined,
+  ClusterOutlined,
+  ContainerOutlined,
+  ApiOutlined,
+} from '@ant-design/icons-vue'
 import { dashboardApi } from '@/api/dashboard'
 import type { DashboardStats } from '@/api/dashboard'
 
@@ -321,12 +348,20 @@ onUnmounted(() => {
 
 .page-header {
   margin-bottom: 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .page-header h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+}
+
+.page-header-hint {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
 }
 
 .dashboard-row {
@@ -336,23 +371,40 @@ onUnmounted(() => {
 .dashboard-card {
   height: 100%;
   min-height: 280px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  border-radius: 4px;
 }
 
-/* 资产概览卡片 - 降低高度 */
+/* 资产概览卡片 */
 .asset-overview-card {
   min-height: auto;
   height: auto;
 }
 
-/* 资产概览 */
 .dashboard-card :deep(.ant-card-body) {
   padding: 20px;
 }
 
 .asset-overview-card :deep(.ant-card-body) {
   padding: 16px 20px;
+}
+
+/* 资产统计项 - 带图标 */
+.asset-stat-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.asset-stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 20px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .empty-state {
@@ -366,8 +418,14 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  padding: 6px 12px;
   font-size: 14px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.stat-row:hover {
+  background: #fafbfc;
 }
 
 /* 基线风险 */
@@ -379,8 +437,14 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 12px;
+  border-bottom: 1px solid #f5f5f5;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.baseline-risk-item:hover {
+  background: #fafbfc;
 }
 
 .baseline-risk-item:last-child {
@@ -420,12 +484,15 @@ onUnmounted(() => {
 
 .baseline-main-stat {
   text-align: center;
-  padding: 16px 0;
+  padding: 20px 0;
+  background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
+  border-radius: 8px;
+  margin-bottom: 4px;
 }
 
 .baseline-number {
-  font-size: 36px;
-  font-weight: bold;
+  font-size: 40px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -473,34 +540,73 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.service-status-item:hover {
+  background: #fafbfc;
 }
 
 .service-name {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 14px;
   color: #333;
 }
 
-.status-dot {
+/* 带动画的状态点 */
+.status-dot-animated {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
+  position: relative;
+}
+
+.status-dot-animated::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  animation: status-pulse 2s ease-in-out infinite;
 }
 
 .status-dot-healthy {
   background-color: #52c41a;
 }
 
+.status-dot-healthy::after {
+  border: 1px solid rgba(82, 196, 26, 0.3);
+}
+
 .status-dot-warning {
   background-color: #ff9800;
 }
 
+.status-dot-warning::after {
+  border: 1px solid rgba(255, 152, 0, 0.3);
+}
+
 .status-dot-error {
   background-color: #ff4d4f;
+}
+
+.status-dot-error::after {
+  border: 1px solid rgba(255, 77, 79, 0.3);
+}
+
+@keyframes status-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
 }
 
 /* 响应式调整 */
