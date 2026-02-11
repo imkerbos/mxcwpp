@@ -14,7 +14,8 @@ RUN go mod download
 COPY . .
 
 # 生成 Protobuf Go 代码
-RUN protoc \
+RUN mkdir -p api/proto/bridge api/proto/grpc && \
+    protoc \
     --go_out=api/proto/bridge --go_opt=paths=source_relative \
     -I=api/proto api/proto/bridge.proto && \
     protoc \
