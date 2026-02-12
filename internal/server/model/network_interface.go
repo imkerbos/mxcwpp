@@ -3,7 +3,7 @@ package model
 
 // NetInterface 网络接口资产模型
 type NetInterface struct {
-	ID            string      `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID            string      `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID        string      `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	InterfaceName string      `gorm:"column:interface_name;type:varchar(50);not null" json:"interface_name"` // eth0、ens33 等
 	MACAddress    string      `gorm:"column:mac_address;type:varchar(20)" json:"mac_address"`

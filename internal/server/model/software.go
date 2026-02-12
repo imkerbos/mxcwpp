@@ -3,7 +3,7 @@ package model
 
 // Software 软件包资产模型
 type Software struct {
-	ID           string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID           string    `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID       string    `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	Name         string    `gorm:"column:name;type:varchar(255);not null" json:"name"`
 	Version      string    `gorm:"column:version;type:varchar(100)" json:"version"`

@@ -319,17 +319,18 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 	// 更新已下发主机数
 	s.db.Model(task).Update("dispatched_host_count", successCount)
 
-	// 如果没有成功下发到任何主机，标记为失败
+	// 如果没有成功下发到任何主机，保持 pending 状态让调度器下一轮重试
+	// （可能是 Agent 正在更新重启，稍后会重新上线）
+	// 超时由 task_timeout_scheduler 统一处理
 	if successCount == 0 {
-		s.logger.Warn("任务下发失败，没有成功下发到任何主机",
+		s.logger.Warn("任务本轮下发失败，保持 pending 等待下一轮重试",
 			zap.String("task_id", task.TaskID),
 			zap.Int("matched_hosts", len(matchedHosts)),
 		)
-		s.db.Model(task).Updates(map[string]interface{}{
-			"status":        model.TaskStatusFailed,
-			"failed_reason": "没有成功下发到任何主机",
-		})
-		return fmt.Errorf("没有成功下发到任何主机")
+		// 清理本轮产生的失败记录，避免下一轮重复创建
+		s.db.Where("task_id = ? AND status = ?", task.TaskID, model.TaskHostStatusFailed).
+			Delete(&model.TaskHostStatus{})
+		return fmt.Errorf("没有成功下发到任何主机，等待重试")
 	}
 
 	s.logger.Info("任务分发完成",

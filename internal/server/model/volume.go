@@ -3,7 +3,7 @@ package model
 
 // Volume 磁盘资产模型
 type Volume struct {
-	ID            string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID            string    `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID        string    `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	Device        string    `gorm:"column:device;type:varchar(100)" json:"device"`           // /dev/sda1
 	MountPoint    string    `gorm:"column:mount_point;type:varchar(255)" json:"mount_point"` // /、/home 等

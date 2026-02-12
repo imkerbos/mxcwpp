@@ -3,7 +3,7 @@ package model
 
 // App 应用资产模型
 type App struct {
-	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID          string    `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID      string    `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	AppType     string    `gorm:"column:app_type;type:varchar(50);not null" json:"app_type"` // mysql、redis、nginx、kafka 等
 	AppName     string    `gorm:"column:app_name;type:varchar(255)" json:"app_name"`

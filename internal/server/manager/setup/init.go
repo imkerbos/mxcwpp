@@ -54,7 +54,7 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	metrics.Init(logger)
 
 	// 5. 初始化数据库
-	db, err := database.Init(cfg.Database, logger)
+	db, err := database.Init(cfg.Database, logger, cfg.Log)
 	if err != nil {
 		logger.Fatal("初始化数据库失败", zap.Error(err))
 		return nil, err

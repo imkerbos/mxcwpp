@@ -57,7 +57,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	logger.Info("AgentCenter 启动中...")
 
 	// 4. 初始化数据库
-	db, err := database.Init(cfg.Database, logger)
+	db, err := database.Init(cfg.Database, logger, cfg.Log)
 	if err != nil {
 		logger.Fatal("初始化数据库失败", zap.Error(err))
 		return nil, err

@@ -3,7 +3,7 @@ package model
 
 // AssetUser 账户资产模型（注意：与 User 用户模型区分开）
 type AssetUser struct {
-	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID          string    `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID      string    `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	Username    string    `gorm:"column:username;type:varchar(100);not null" json:"username"`
 	UID         string    `gorm:"column:uid;type:varchar(20);not null" json:"uid"`

@@ -3,7 +3,7 @@ package model
 
 // Cron 定时任务资产模型
 type Cron struct {
-	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
+	ID          string    `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
 	HostID      string    `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	User        string    `gorm:"column:user;type:varchar(100);not null" json:"user"`         // root、username
 	Schedule    string    `gorm:"column:schedule;type:varchar(100);not null" json:"schedule"` // 调度表达式（* * * * *）

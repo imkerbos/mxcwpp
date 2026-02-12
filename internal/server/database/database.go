@@ -4,6 +4,7 @@ package database
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -18,10 +19,30 @@ import (
 // DB 是全局数据库实例
 var DB *gorm.DB
 
+// mapLogLevel 将应用日志级别映射为 GORM 日志级别
+func mapLogLevel(level string) gormLogger.LogLevel {
+	switch level {
+	case "debug", "info":
+		return gormLogger.Warn // debug/info 模式下只记录慢查询和错误
+	case "warn", "warning":
+		return gormLogger.Warn
+	case "error", "dpanic", "panic", "fatal":
+		return gormLogger.Error // error 及以上只记录错误
+	default:
+		return gormLogger.Warn
+	}
+}
+
 // Init 初始化数据库连接
-func Init(cfg config.DatabaseConfig, zapLogger *zap.Logger) (*gorm.DB, error) {
+func Init(cfg config.DatabaseConfig, zapLogger *zap.Logger, logCfg ...config.LogConfig) (*gorm.DB, error) {
 	var db *gorm.DB
 	var err error
+
+	// 根据应用日志级别确定 GORM 日志级别
+	gormLogLevel := gormLogger.Warn
+	if len(logCfg) > 0 && logCfg[0].Level != "" {
+		gormLogLevel = mapLogLevel(logCfg[0].Level)
+	}
 
 	// 配置 Gorm 日志
 	var gormLog gormLogger.Interface
@@ -30,8 +51,8 @@ func Init(cfg config.DatabaseConfig, zapLogger *zap.Logger) (*gorm.DB, error) {
 		gormLog = gormLogger.New(
 			&zapWriter{logger: zapLogger},
 			gormLogger.Config{
-				SlowThreshold:             200,
-				LogLevel:                  gormLogger.Info,
+				SlowThreshold:             200 * time.Millisecond,
+				LogLevel:                  gormLogLevel,
 				IgnoreRecordNotFoundError: true,
 				Colorful:                  false,
 			},
