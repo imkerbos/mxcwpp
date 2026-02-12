@@ -51,7 +51,7 @@ func Init(cfg config.DatabaseConfig, zapLogger *zap.Logger, logCfg ...config.Log
 		gormLog = gormLogger.New(
 			&zapWriter{logger: zapLogger},
 			gormLogger.Config{
-				SlowThreshold:             200 * time.Millisecond,
+				SlowThreshold:             1 * time.Second,
 				LogLevel:                  gormLogLevel,
 				IgnoreRecordNotFoundError: true,
 				Colorful:                  false,
