@@ -132,7 +132,7 @@ func LoadDefaults() *Config {
 				Level:  "info",
 				Format: "json",
 				File:   "/var/log/mxsec-agent/agent.log", // 标准 Linux 日志目录，按天轮转
-				MaxAge: 30,                               // 保留30天
+				MaxAge: 7,                                // 保留7天
 			},
 		},
 		Remote: RemoteConfig{

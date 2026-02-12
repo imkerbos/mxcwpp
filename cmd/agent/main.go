@@ -57,12 +57,12 @@ func main() {
 		cfg.BuildVersion = buildVersion
 	}
 
-	// 3. 初始化日志（默认配置：按天轮转，保留30天）
+	// 3. 初始化日志（默认配置：按天轮转，保留7天）
 	log, err := logger.Init(logger.LogConfig{
 		Level:  "info",
 		Format: "json",
 		File:   "/var/log/mxsec-agent/agent.log",
-		MaxAge: 30, // 保留30天
+		MaxAge: 7, // 保留7天
 	})
 	if err != nil {
 		panic(err)

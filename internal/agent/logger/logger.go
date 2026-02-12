@@ -54,10 +54,10 @@ func Init(cfg LogConfig) (*zap.Logger, error) {
 
 		// 配置按天轮转的日志文件
 		// 格式：agent.log.YYYY-MM-DD
-		// 保留天数：默认30天
+		// 保留天数：默认7天
 		maxAge := time.Duration(cfg.MaxAge) * 24 * time.Hour
 		if maxAge == 0 {
-			maxAge = 30 * 24 * time.Hour // 默认30天
+			maxAge = 7 * 24 * time.Hour // 默认7天
 		}
 
 		// 创建轮转日志写入器

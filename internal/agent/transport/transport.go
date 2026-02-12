@@ -91,8 +91,8 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 	mgr.logger.Info("transport module starting, attempting to connect...")
 
 	// 指数退避重试配置
-	retryDelay := 1 * time.Second     // 初始延迟1秒
-	maxRetryDelay := 60 * time.Second // 最大延迟60秒
+	retryDelay := 1 * time.Second    // 初始延迟1秒
+	maxRetryDelay := 10 * time.Second // 最大延迟10秒
 	retryCount := 0
 
 	for {
@@ -180,14 +180,28 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 	}
 }
 
+// sendWithTimeout 带超时的发送，防止 gRPC Send 因 server 反压永久阻塞
+func (m *Manager) sendWithTimeout(stream grpc.Transfer_TransferClient, data *grpc.PackagedData, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- stream.Send(data)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("send timeout after %s", timeout)
+	}
+}
+
 // sendData 发送数据到 Server
 func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.Transfer_TransferClient) {
 	defer wg.Done()
 
 	m.logger.Info("sendData goroutine started, waiting for data to send...")
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	sendTimeout := 30 * time.Second
 
 	for {
 		select {
@@ -195,13 +209,12 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 			m.logger.Debug("sendData goroutine stopping (context canceled)")
 			return
 		case data := <-m.sendBuffer:
-			// 直接从 channel 读取数据（优先处理）
 			m.logger.Info("sending data to server",
 				zap.String("agent_id", data.AgentId),
 				zap.String("hostname", data.Hostname),
 				zap.Int("record_count", len(data.Records)),
 			)
-			if err := stream.Send(data); err != nil {
+			if err := m.sendWithTimeout(stream, data, sendTimeout); err != nil {
 				m.logger.Error("failed to send data, caching",
 					zap.Error(err),
 					zap.String("error_type", fmt.Sprintf("%T", err)),
@@ -213,41 +226,33 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 				} else {
 					m.logger.Info("data cached successfully for retry")
 				}
+				// 把 sendBuffer 中剩余数据也转入缓存，避免重连后堆积
+				m.drainSendBuffer()
 				return
 			}
 			m.logger.Info("data sent successfully",
 				zap.Int("record_count", len(data.Records)),
 				zap.String("agent_id", data.AgentId),
 			)
-		case <-ticker.C:
-			// 定期检查 sendBuffer（备用，但主要依赖直接 channel 读取）
-			select {
-			case data := <-m.sendBuffer:
-				m.logger.Info("sending data to server (from ticker)",
-					zap.String("agent_id", data.AgentId),
-					zap.String("hostname", data.Hostname),
-					zap.Int("record_count", len(data.Records)),
-				)
-				if err := stream.Send(data); err != nil {
-					m.logger.Error("failed to send data, caching",
-						zap.Error(err),
-						zap.String("error_type", fmt.Sprintf("%T", err)),
-						zap.Int("record_count", len(data.Records)),
-					)
-					if err := m.cacheMgr.Put(data); err != nil {
-						m.logger.Error("failed to cache data", zap.Error(err))
-					} else {
-						m.logger.Info("data cached successfully for retry")
-					}
-					return
-				}
-				m.logger.Info("data sent successfully",
-					zap.Int("record_count", len(data.Records)),
-					zap.String("agent_id", data.AgentId),
-				)
-			default:
-				// 没有数据，继续等待
+		}
+	}
+}
+
+// drainSendBuffer 将 sendBuffer 中的剩余数据转入磁盘缓存
+func (m *Manager) drainSendBuffer() {
+	drained := 0
+	for {
+		select {
+		case data := <-m.sendBuffer:
+			if err := m.cacheMgr.Put(data); err != nil {
+				m.logger.Error("failed to cache drained data", zap.Error(err))
 			}
+			drained++
+		default:
+			if drained > 0 {
+				m.logger.Info("drained send buffer to cache", zap.Int("count", drained))
+			}
+			return
 		}
 	}
 }

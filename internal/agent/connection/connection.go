@@ -84,8 +84,8 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		)
 	}
 
-	// 创建带超时的 context（默认 30 秒连接超时）
-	connectTimeout := 30 * time.Second
+	// 创建带超时的 context（10 秒连接超时，加快重连速度）
+	connectTimeout := 10 * time.Second
 	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 

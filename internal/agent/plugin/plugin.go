@@ -42,17 +42,18 @@ type Manager struct {
 
 // Plugin 表示一个插件实例
 type Plugin struct {
-	Config    *grpc.Config   // 插件配置
-	cmd       *exec.Cmd      // 插件进程
-	rx        *os.File       // 接收管道（Agent 从插件读取数据）
-	tx        *os.File       // 发送管道（Agent 向插件写入任务）
-	logWriter io.WriteCloser // 日志写入器（支持日志轮转）
-	workDir   string         // 插件工作目录
-	status    Status         // 插件状态
-	mu        sync.RWMutex   // 保护状态
-	startTime time.Time      // 启动时间
-	stopCh    chan struct{}  // 停止信号
-	logger    *zap.Logger
+	Config       *grpc.Config   // 插件配置
+	cmd          *exec.Cmd      // 插件进程
+	rx           *os.File       // 接收管道（Agent 从插件读取数据）
+	tx           *os.File       // 发送管道（Agent 向插件写入任务）
+	logWriter    io.WriteCloser // 日志写入器（支持日志轮转）
+	workDir      string         // 插件工作目录
+	status       Status         // 插件状态
+	mu           sync.RWMutex   // 保护状态
+	startTime    time.Time      // 启动时间
+	lastActivity time.Time      // 最后一次收到插件数据的时间（用于健康检查）
+	stopCh       chan struct{}  // 停止信号
+	logger       *zap.Logger
 }
 
 // Status 是插件状态
@@ -105,6 +106,9 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 	}
 
 	mgr.logger.Info("plugin manager started")
+
+	// 启动插件健康检查 watchdog
+	go mgr.watchPlugins()
 
 	// 监听配置更新和上下文取消
 	for {
@@ -255,9 +259,9 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		return nil, fmt.Errorf("failed to create plugin log dir: %w", err)
 	}
 
-	// 配置日志轮转（与 Agent 保持一致：按天轮转，保留30天）
+	// 配置日志轮转（与 Agent 保持一致：按天轮转，保留7天）
 	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", cfg.Name))
-	maxAge := 30 * 24 * time.Hour // 保留30天
+	maxAge := 7 * 24 * time.Hour // 保留7天
 	if m.cfg.Local.Log.MaxAge > 0 {
 		maxAge = time.Duration(m.cfg.Local.Log.MaxAge) * 24 * time.Hour
 	}
@@ -265,7 +269,7 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	logWriter, err := rotatelogs.New(
 		logFile+".%Y-%m-%d",                      // 轮转后的文件名格式：{plugin}.log.YYYY-MM-DD
 		rotatelogs.WithLinkName(logFile),         // 当前日志文件链接
-		rotatelogs.WithMaxAge(maxAge),            // 保留时间（默认30天）
+		rotatelogs.WithMaxAge(maxAge),            // 保留时间（默认7天）
 		rotatelogs.WithRotationTime(24*time.Hour), // 每24小时轮转一次
 		rotatelogs.WithRotationCount(0),          // 不限制文件数量，由 MaxAge 控制
 	)
@@ -305,16 +309,17 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 
 	// 7. 创建插件实例
 	plugin := &Plugin{
-		Config:    cfg,
-		cmd:       cmd,
-		rx:        rx_r,
-		tx:        tx_w,
-		logWriter: logWriter,
-		workDir:   workDir,
-		status:    StatusStarting,
-		startTime: time.Now(),
-		stopCh:    make(chan struct{}),
-		logger:    m.logger.With(zap.String("plugin", cfg.Name)),
+		Config:       cfg,
+		cmd:          cmd,
+		rx:           rx_r,
+		tx:           tx_w,
+		logWriter:    logWriter,
+		workDir:      workDir,
+		status:       StatusStarting,
+		startTime:    time.Now(),
+		lastActivity: time.Now(),
+		stopCh:       make(chan struct{}),
+		logger:       m.logger.With(zap.String("plugin", cfg.Name)),
 	}
 
 	// 8. 启动管理 goroutine
@@ -631,6 +636,86 @@ func (m *Manager) restartPlugin(oldPlugin *Plugin) {
 		zap.String("plugin", oldPlugin.Config.Name))
 }
 
+// watchPlugins 定期检查插件健康状态
+// 检查策略：
+// 1. 进程是否还存活（发送 signal 0 检测）
+// 2. 如果有数据交互，检查是否超时（假死检测）
+func (m *Manager) watchPlugins() {
+	const checkInterval = 60 * time.Second  // 每 60 秒检查一次
+	const silentThreshold = 5 * time.Minute // 有过数据交互的插件，超过 5 分钟无活动视为假死
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.RLock()
+			for name, plugin := range m.plugins {
+				plugin.mu.RLock()
+				status := plugin.status
+				lastAct := plugin.lastActivity
+				startTime := plugin.startTime
+				plugin.mu.RUnlock()
+
+				if status != StatusRunning {
+					continue
+				}
+
+				// 检查进程是否还存活（signal 0 不会杀进程，只检测是否存在）
+				if plugin.cmd != nil && plugin.cmd.Process != nil {
+					if err := plugin.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+						m.logger.Warn("plugin process not alive, will be cleaned up by waitProcess",
+							zap.String("plugin", name),
+							zap.Error(err),
+						)
+						continue
+					}
+				}
+
+				// 插件刚启动不到 silentThreshold，跳过
+				if time.Since(startTime) < silentThreshold {
+					continue
+				}
+
+				// 只有插件曾经有过数据交互（lastActivity != startTime），才做假死检测
+				// 如果插件从未发过数据（空闲状态），只靠进程存活检测
+				if lastAct.After(startTime) && time.Since(lastAct) > silentThreshold {
+					m.logger.Warn("plugin appears unresponsive, force restarting",
+						zap.String("plugin", name),
+						zap.Duration("silent_duration", time.Since(lastAct)),
+						zap.Time("last_activity", lastAct),
+					)
+					go m.forceRestartPlugin(name)
+				}
+			}
+			m.mu.RUnlock()
+		}
+	}
+}
+
+// forceRestartPlugin 强制重启指定插件
+func (m *Manager) forceRestartPlugin(name string) {
+	m.mu.RLock()
+	plugin, exists := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	// 先停止
+	m.stopPlugin(plugin)
+
+	// 等待进程完全退出
+	time.Sleep(2 * time.Second)
+
+	// 重启
+	m.restartPlugin(plugin)
+}
+
 // receiveData 接收插件数据（从 Pipe 读取）
 func (m *Manager) receiveData(plugin *Plugin) {
 	reader := bufio.NewReader(plugin.rx)
@@ -675,6 +760,11 @@ func (m *Manager) receiveData(plugin *Plugin) {
 				plugin.logger.Error("failed to unmarshal record", zap.Error(err))
 				continue
 			}
+
+			// 更新最后活动时间（用于健康检查）
+			plugin.mu.Lock()
+			plugin.lastActivity = time.Now()
+			plugin.mu.Unlock()
 
 			// 检查是否是任务完成信号（DataType 8001 或 8004）
 			if m.taskTracker != nil && (record.DataType == 8001 || record.DataType == 8004) {
