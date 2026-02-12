@@ -301,10 +301,8 @@ func (s *AgentUpdateScheduler) processPushRecord(ctx context.Context, pushRecord
 }
 
 // autoCheckAndPushUpdates 自动检查并推送 Agent 更新（原有逻辑）
+// 注意：调用方 checkAndPushUpdates 已持有 s.mu 锁，此处不可重复加锁
 func (s *AgentUpdateScheduler) autoCheckAndPushUpdates(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// 查找 agent 组件的最新版本
 	var agentComponent model.Component
 	if err := s.db.Where("name = ? AND category = ?", "agent", model.ComponentCategoryAgent).First(&agentComponent).Error; err != nil {
