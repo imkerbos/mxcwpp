@@ -21,7 +21,158 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 )
 
-// Manager 是更新管理器
+// --- 公共函数（供 gRPC push 和 CLI selfupdate 共用） ---
+
+// DownloadFile 下载文件到指定路径
+func DownloadFile(ctx context.Context, url string, destPath string) (int64, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Minute,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %w", err)
+	}
+	defer out.Close()
+
+	written, err := io.Copy(out, resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return written, nil
+}
+
+// CalculateSHA256 计算文件的 SHA256 哈希值
+func CalculateSHA256(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// InstallPackage 使用系统包管理器安装包
+func InstallPackage(pkgType string, pkgPath string) (string, error) {
+	if _, err := os.Stat(pkgPath); err != nil {
+		return "", fmt.Errorf("package file not accessible: %w", err)
+	}
+
+	// 检查 root 权限
+	if os.Getuid() != 0 {
+		return "", fmt.Errorf("root privileges required for package installation (current uid: %d)", os.Getuid())
+	}
+
+	var cmd *exec.Cmd
+	switch pkgType {
+	case "rpm":
+		cmd = exec.Command("rpm", "-Uvh", "--force", pkgPath)
+	case "deb":
+		cmd = exec.Command("dpkg", "-i", pkgPath)
+	default:
+		return "", fmt.Errorf("unsupported package type: %s", pkgType)
+	}
+
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+
+	if err != nil {
+		if strings.Contains(outputStr, "is already installed") {
+			return outputStr, nil
+		}
+		return outputStr, fmt.Errorf("installation failed: %s, output: %s", err, outputStr)
+	}
+
+	return outputStr, nil
+}
+
+// RestartAgent 重启 Agent 服务（延迟执行，给调用方时间完成清理）
+func RestartAgent() {
+	go func() {
+		time.Sleep(2 * time.Second)
+
+		cmd := exec.Command("systemctl", "restart", "mxsec-agent")
+		if err := cmd.Start(); err != nil {
+			// systemctl 失败，直接退出让 systemd 自动重启
+			os.Exit(0)
+		}
+	}()
+}
+
+// DetectPkgType 检测本机包管理器类型
+func DetectPkgType() string {
+	// 优先检查 rpm
+	if _, err := exec.LookPath("rpm"); err == nil {
+		return "rpm"
+	}
+	// 其次检查 dpkg
+	if _, err := exec.LookPath("dpkg"); err == nil {
+		return "deb"
+	}
+	return ""
+}
+
+// IsDowngrade 检查是否为版本降级
+func IsDowngrade(currentVer, targetVer string) bool {
+	currentVer = strings.TrimPrefix(currentVer, "v")
+	targetVer = strings.TrimPrefix(targetVer, "v")
+
+	currentParts := strings.Split(currentVer, ".")
+	targetParts := strings.Split(targetVer, ".")
+
+	maxLen := len(currentParts)
+	if len(targetParts) > maxLen {
+		maxLen = len(targetParts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var current, target int
+		if i < len(currentParts) {
+			fmt.Sscanf(currentParts[i], "%d", &current)
+		}
+		if i < len(targetParts) {
+			fmt.Sscanf(targetParts[i], "%d", &target)
+		}
+		if target < current {
+			return true
+		} else if target > current {
+			return false
+		}
+	}
+
+	return false
+}
+
+// GetCurrentArch 获取当前系统架构
+func GetCurrentArch() string {
+	return runtime.GOARCH
+}
+
+// --- Manager: gRPC push 更新（原有逻辑，内部调用公共函数） ---
+
+// Manager 是更新管理器（处理 Server 推送的更新命令）
 type Manager struct {
 	logger         *zap.Logger
 	updateCh       <-chan *grpc.AgentUpdate
@@ -106,28 +257,20 @@ func (m *Manager) handleUpdate(ctx context.Context, update *grpc.AgentUpdate) {
 	}
 
 	// 检查是否为版本降级
-	if m.isDowngrade(m.currentVersion, update.Version) {
+	if IsDowngrade(m.currentVersion, update.Version) {
 		m.logger.Warn("detected version downgrade (rollback)",
 			zap.String("current_version", m.currentVersion),
 			zap.String("target_version", update.Version),
 			zap.Bool("force", update.Force),
 		)
-		// 如果不是强制更新，记录警告但继续（允许回退）
 		if !update.Force {
 			m.logger.Info("allowing downgrade without force flag")
 		}
 	}
 
 	// 验证架构匹配
-	currentArch := runtime.GOARCH
-	if currentArch == "amd64" && update.Arch != "amd64" {
-		m.logger.Error("architecture mismatch",
-			zap.String("current_arch", currentArch),
-			zap.String("update_arch", update.Arch),
-		)
-		return
-	}
-	if currentArch == "arm64" && update.Arch != "arm64" {
+	currentArch := GetCurrentArch()
+	if currentArch != update.Arch {
 		m.logger.Error("architecture mismatch",
 			zap.String("current_arch", currentArch),
 			zap.String("update_arch", update.Arch),
@@ -157,10 +300,11 @@ func (m *Manager) handleUpdate(ctx context.Context, update *grpc.AgentUpdate) {
 	)
 
 	// 重启 Agent
-	m.restartAgent()
+	m.logger.Info("restarting mxsec-agent service...")
+	RestartAgent()
 }
 
-// doUpdate 执行更新流程
+// doUpdate 执行更新流程（下载 → 校验 → 安装）
 func (m *Manager) doUpdate(ctx context.Context, update *grpc.AgentUpdate) error {
 	// 1. 创建临时目录
 	tmpDir := filepath.Join(m.workDir, "update_tmp")
@@ -179,16 +323,18 @@ func (m *Manager) doUpdate(ctx context.Context, update *grpc.AgentUpdate) error 
 		zap.String("dest", pkgPath),
 	)
 
-	if err := m.downloadFile(ctx, update.DownloadUrl, pkgPath); err != nil {
+	written, err := DownloadFile(ctx, update.DownloadUrl, pkgPath)
+	if err != nil {
 		return fmt.Errorf("failed to download package: %w", err)
 	}
+	m.logger.Debug("file downloaded", zap.String("path", pkgPath), zap.Int64("bytes", written))
 
 	// 4. 验证 SHA256
 	m.logger.Info("verifying package checksum",
 		zap.String("expected_sha256", update.Sha256),
 	)
 
-	actualSHA256, err := m.calculateSHA256(pkgPath)
+	actualSHA256, err := CalculateSHA256(pkgPath)
 	if err != nil {
 		return fmt.Errorf("failed to calculate SHA256: %w", err)
 	}
@@ -199,154 +345,30 @@ func (m *Manager) doUpdate(ctx context.Context, update *grpc.AgentUpdate) error 
 
 	m.logger.Info("checksum verified successfully")
 
-	// 5. 安装包
+	// 5. 诊断系统环境
+	m.diagnoseSystemEnv(update.PkgType)
+
+	// 6. 安装包
 	m.logger.Info("installing update package",
 		zap.String("pkg_type", update.PkgType),
 		zap.String("pkg_path", pkgPath),
 	)
 
-	if err := m.installPackage(update.PkgType, pkgPath); err != nil {
-		return fmt.Errorf("failed to install package: %w", err)
-	}
-
-	return nil
-}
-
-// downloadFile 下载文件
-func (m *Manager) downloadFile(ctx context.Context, url string, destPath string) error {
-	// 创建带超时的 HTTP 客户端
-	client := &http.Client{
-		Timeout: 10 * time.Minute, // 下载超时 10 分钟
-	}
-
-	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// 执行请求
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to download: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download failed with status: %d", resp.StatusCode)
-	}
-
-	// 创建目标文件
-	out, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer out.Close()
-
-	// 写入文件
-	written, err := io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	m.logger.Debug("file downloaded",
-		zap.String("path", destPath),
-		zap.Int64("bytes", written),
-	)
-
-	return nil
-}
-
-// calculateSHA256 计算文件的 SHA256 哈希值
-func (m *Manager) calculateSHA256(filePath string) (string, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// installPackage 安装包
-func (m *Manager) installPackage(pkgType string, pkgPath string) error {
-	// 预检查：验证包文件存在并可读
-	if _, err := os.Stat(pkgPath); err != nil {
-		return fmt.Errorf("package file not accessible: %w", err)
-	}
-
-	// 预检查：诊断系统环境
-	m.diagnoseSystemEnv(pkgType)
-
-	var cmd *exec.Cmd
-
-	switch pkgType {
-	case "rpm":
-		// 参考 Elkeid 设计：直接使用 rpm -Uvh 升级
-		// RPM 的 lifecycle 脚本会处理：
-		// - preremove: 升级时 ($1==1) 不停止服务，只有卸载时 ($1==0) 才停止
-		// - postinstall: 升级时 ($1==2) 只 reload daemon，不启动服务
-		// 这样升级过程中 Agent 进程保持运行，避免 systemd Restart=always 竞态
-		// 使用 --force 选项避免 "already installed" 错误
-		cmd = exec.Command("rpm", "-Uvh", "--force", pkgPath)
-
-		m.logger.Info("executing RPM upgrade command",
-			zap.String("command", fmt.Sprintf("rpm -Uvh --force %s", pkgPath)),
-			zap.Int("uid", os.Getuid()),
-			zap.Int("gid", os.Getgid()),
-		)
-	case "deb":
-		// 使用 dpkg -i 安装 deb 包
-		cmd = exec.Command("dpkg", "-i", pkgPath)
-
-		m.logger.Info("executing DEB install command",
-			zap.String("command", fmt.Sprintf("dpkg -i %s", pkgPath)),
-			zap.Int("uid", os.Getuid()),
-			zap.Int("gid", os.Getgid()),
-		)
-	default:
-		return fmt.Errorf("unsupported package type: %s", pkgType)
-	}
-
-	// 执行安装命令
-	output, err := cmd.CombinedOutput()
-
-	// 记录详细的输出，无论成功失败
+	output, err := InstallPackage(update.PkgType, pkgPath)
 	m.logger.Info("package installation output",
-		zap.String("output", string(output)),
+		zap.String("output", output),
 		zap.Bool("success", err == nil),
 	)
-
 	if err != nil {
-		// 检查是否是 "already installed" 错误（RPM exit status 3）
-		outputStr := string(output)
-		if strings.Contains(outputStr, "is already installed") {
-			m.logger.Info("package is already installed, treating as success",
-				zap.String("output", outputStr),
-			)
-			return nil
-		}
-
-		m.logger.Error("package installation failed",
-			zap.String("command", cmd.String()),
-			zap.String("output", outputStr),
-			zap.Error(err),
-		)
-		return fmt.Errorf("installation failed: %s, output: %s", err, outputStr)
+		return err
 	}
 
 	m.logger.Info("package installed successfully")
 	return nil
 }
 
-// diagnoseSystemEnv 诊断系统环境
+// diagnoseSystemEnv 诊断系统环境（仅日志记录，供 gRPC push 模式使用）
 func (m *Manager) diagnoseSystemEnv(pkgType string) {
-	// 检查当前用户权限
 	uid := os.Getuid()
 	gid := os.Getgid()
 
@@ -363,7 +385,6 @@ func (m *Manager) diagnoseSystemEnv(pkgType string) {
 		)
 	}
 
-	// 检查 RPM 数据库
 	if pkgType == "rpm" {
 		rpmDbPath := "/var/lib/rpm"
 		if stat, err := os.Stat(rpmDbPath); err != nil {
@@ -379,78 +400,16 @@ func (m *Manager) diagnoseSystemEnv(pkgType string) {
 			)
 		}
 
-		// 检查文件系统只读状态
-		if _, err := os.CreateTemp(rpmDbPath, "test-write-*"); err != nil {
+		if tmpFile, err := os.CreateTemp(rpmDbPath, "test-write-*"); err != nil {
 			m.logger.Error("rpm database directory is not writable",
 				zap.String("path", rpmDbPath),
 				zap.Error(err),
 				zap.String("hint", "check filesystem mount options with 'mount | grep /var'"),
 			)
 		} else {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
 			m.logger.Debug("rpm database directory is writable")
 		}
 	}
-}
-
-// restartAgent 重启 Agent 服务
-func (m *Manager) restartAgent() {
-	m.logger.Info("restarting mxsec-agent service...")
-
-	// 使用 systemctl 重启服务
-	// 注意：这会导致当前进程被终止，因此使用 go routine 并稍微延迟执行
-	go func() {
-		// 延迟 2 秒以确保日志被写入
-		time.Sleep(2 * time.Second)
-
-		cmd := exec.Command("systemctl", "restart", "mxsec-agent")
-		if err := cmd.Start(); err != nil {
-			m.logger.Error("failed to restart service",
-				zap.Error(err),
-			)
-			// 如果 systemctl 失败，尝试直接退出让 systemd 自动重启
-			m.logger.Info("attempting to exit for systemd auto-restart")
-			os.Exit(0)
-		}
-	}()
-}
-
-// isDowngrade 检查是否为版本降级
-// 简单的版本比较：假设版本格式为 major.minor.patch
-func (m *Manager) isDowngrade(currentVer, targetVer string) bool {
-	// 移除 'v' 前缀（如果有）
-	currentVer = strings.TrimPrefix(currentVer, "v")
-	targetVer = strings.TrimPrefix(targetVer, "v")
-
-	// 分割版本号
-	currentParts := strings.Split(currentVer, ".")
-	targetParts := strings.Split(targetVer, ".")
-
-	// 逐段比较
-	maxLen := len(currentParts)
-	if len(targetParts) > maxLen {
-		maxLen = len(targetParts)
-	}
-
-	for i := 0; i < maxLen; i++ {
-		var current, target int
-
-		// 解析当前版本的段
-		if i < len(currentParts) {
-			fmt.Sscanf(currentParts[i], "%d", &current)
-		}
-
-		// 解析目标版本的段
-		if i < len(targetParts) {
-			fmt.Sscanf(targetParts[i], "%d", &target)
-		}
-
-		if target < current {
-			return true // 目标版本更小，是降级
-		} else if target > current {
-			return false // 目标版本更大，是升级
-		}
-		// 相等则继续比较下一段
-	}
-
-	return false // 版本相同，不是降级
 }

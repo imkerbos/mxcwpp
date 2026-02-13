@@ -24,7 +24,11 @@ import (
 )
 
 var (
-	version = flag.Bool("version", false, "显示版本信息")
+	version      = flag.Bool("version", false, "显示版本信息")
+	update       = flag.Bool("update", false, "检查并执行自更新")
+	updateForce  = flag.Bool("force", false, "强制更新（即使版本相同，需配合 --update 使用）")
+	updateFile   = flag.String("file", "", "使用本地包文件更新（离线模式，需配合 --update 使用）")
+	updateServer = flag.String("server", "", "指定 Server HTTP 地址（如 http://10.0.0.1:8080，需配合 --update 使用）")
 )
 
 // 构建时嵌入的变量（通过 -ldflags 设置）
@@ -41,6 +45,27 @@ func main() {
 
 	if *version {
 		printVersion()
+		return
+	}
+
+	// 自更新模式：独立执行路径，不启动 Agent 服务
+	if *update {
+		currentVer := buildVersion
+		if currentVer == "" {
+			currentVer = "dev"
+		}
+		opts := updater.SelfUpdateOptions{
+			ServerHost:     serverHost,
+			ServerHTTP:     *updateServer,
+			CurrentVersion: currentVer,
+			WorkDir:        "/var/lib/mxsec-agent",
+			Force:          *updateForce,
+			LocalFile:      *updateFile,
+		}
+		if err := updater.RunSelfUpdate(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

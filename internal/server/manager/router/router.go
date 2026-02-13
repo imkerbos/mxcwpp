@@ -51,6 +51,9 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// Agent 安装包下载路由（不需要认证，安装脚本直接下载）
 	router.GET("/api/v1/agent/download/:pkg_type/:arch", componentsHandler.DownloadAgentPackage)
 
+	// Agent 更新检查路由（不需要认证，Agent CLI 直接调用）
+	router.GET("/api/v1/agent/update-check", componentsHandler.CheckAgentUpdate)
+
 	// 静态文件服务（用于访问上传的 Logo 等文件）
 	router.Static("/uploads", "./uploads")
 

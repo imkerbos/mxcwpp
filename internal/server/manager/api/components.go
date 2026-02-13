@@ -1070,6 +1070,72 @@ func (h *ComponentsHandler) DownloadAgentPackage(c *gin.Context) {
 	)
 }
 
+// CheckAgentUpdate 检查 Agent 是否有可用更新 (无需认证，供 Agent CLI 调用)
+// GET /api/v1/agent/update-check?arch=amd64&current_version=1.0.0&pkg_type=rpm
+func (h *ComponentsHandler) CheckAgentUpdate(c *gin.Context) {
+	arch := c.DefaultQuery("arch", "amd64")
+	currentVersion := c.DefaultQuery("current_version", "")
+	pkgType := c.DefaultQuery("pkg_type", "rpm")
+
+	// 验证参数
+	if arch != "amd64" && arch != "arm64" {
+		BadRequest(c, "无效的架构，支持: amd64, arm64")
+		return
+	}
+	if pkgType != "rpm" && pkgType != "deb" {
+		BadRequest(c, "无效的包类型，支持: rpm, deb")
+		return
+	}
+
+	// 查找 agent 组件
+	var component model.Component
+	if err := h.db.Where("name = ?", "agent").First(&component).Error; err != nil {
+		NotFound(c, "Agent 组件不存在")
+		return
+	}
+
+	// 查找最新版本
+	var latestVersion model.ComponentVersion
+	if err := h.db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&latestVersion).Error; err != nil {
+		if err := h.db.Where("component_id = ?", component.ID).
+			Order("created_at DESC").First(&latestVersion).Error; err != nil {
+			NotFound(c, "未找到 Agent 版本")
+			return
+		}
+	}
+
+	// 查找对应的包
+	var pkg model.ComponentPackage
+	if err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
+		latestVersion.ID, pkgType, arch, true).First(&pkg).Error; err != nil {
+		NotFound(c, fmt.Sprintf("未找到 Agent %s 包 (%s)", pkgType, arch))
+		return
+	}
+
+	// 判断是否有更新
+	hasUpdate := currentVersion == "" || currentVersion != latestVersion.Version
+
+	Success(c, gin.H{
+		"has_update":      hasUpdate,
+		"latest_version":  latestVersion.Version,
+		"current_version": currentVersion,
+		"download_url":    fmt.Sprintf("/api/v1/agent/download/%s/%s", pkgType, arch),
+		"sha256":          pkg.SHA256,
+		"pkg_type":        pkgType,
+		"arch":            arch,
+		"file_size":       pkg.FileSize,
+	})
+
+	h.logger.Info("Agent 更新检查",
+		zap.String("current_version", currentVersion),
+		zap.String("latest_version", latestVersion.Version),
+		zap.Bool("has_update", hasUpdate),
+		zap.String("arch", arch),
+		zap.String("pkg_type", pkgType),
+		zap.String("client_ip", c.ClientIP()),
+	)
+}
+
 // DownloadPluginPackage 下载插件包 (供 Agent 调用)
 // GET /api/v1/plugins/download/:name
 func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
