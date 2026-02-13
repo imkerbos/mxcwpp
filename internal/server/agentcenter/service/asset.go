@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
@@ -32,8 +33,9 @@ func shortHash(parts ...string) string {
 
 // AssetService 资产数据处理服务
 type AssetService struct {
-	db     *gorm.DB
-	logger *zap.Logger
+	db        *gorm.DB
+	logger    *zap.Logger
+	hostLocks sync.Map // per-host 互斥锁，避免同一主机并发写入导致 MySQL 锁竞争
 }
 
 // NewAssetService 创建资产服务
@@ -44,8 +46,19 @@ func NewAssetService(db *gorm.DB, logger *zap.Logger) *AssetService {
 	}
 }
 
+// getHostLock 获取指定主机的互斥锁
+func (s *AssetService) getHostLock(hostID string) *sync.Mutex {
+	lock, _ := s.hostLocks.LoadOrStore(hostID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 // HandleAssetData 处理资产数据
 func (s *AssetService) HandleAssetData(hostID string, dataType int32, data []byte) error {
+	// per-host 加锁，保证同一主机的资产数据串行处理，避免 DELETE+INSERT 事务间的间隙锁冲突
+	mu := s.getHostLock(hostID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	// 解析 bridge.Record
 	bridgeRecord := &bridge.Record{}
 	if err := proto.Unmarshal(data, bridgeRecord); err != nil {

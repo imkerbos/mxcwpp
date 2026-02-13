@@ -215,18 +215,12 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 				zap.Int("record_count", len(data.Records)),
 			)
 			if err := m.sendWithTimeout(stream, data, sendTimeout); err != nil {
-				m.logger.Error("failed to send data, caching",
+				m.logger.Error("failed to send data, dropping stale buffer data",
 					zap.Error(err),
 					zap.String("error_type", fmt.Sprintf("%T", err)),
 					zap.Int("record_count", len(data.Records)),
 				)
-				// 发送失败，写入缓存
-				if err := m.cacheMgr.Put(data); err != nil {
-					m.logger.Error("failed to cache data", zap.Error(err))
-				} else {
-					m.logger.Info("data cached successfully for retry")
-				}
-				// 把 sendBuffer 中剩余数据也转入缓存，避免重连后堆积
+				// 发送失败，丢弃 buffer 中的旧数据（状态快照类数据重连后会发最新的）
 				m.drainSendBuffer()
 				return
 			}
@@ -238,19 +232,16 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 	}
 }
 
-// drainSendBuffer 将 sendBuffer 中的剩余数据转入磁盘缓存
+// drainSendBuffer 清空 sendBuffer 中的剩余数据（状态快照类数据无需缓存，重连后会发最新的）
 func (m *Manager) drainSendBuffer() {
 	drained := 0
 	for {
 		select {
-		case data := <-m.sendBuffer:
-			if err := m.cacheMgr.Put(data); err != nil {
-				m.logger.Error("failed to cache drained data", zap.Error(err))
-			}
+		case <-m.sendBuffer:
 			drained++
 		default:
 			if drained > 0 {
-				m.logger.Info("drained send buffer to cache", zap.Int("count", drained))
+				m.logger.Info("drained stale data from send buffer", zap.Int("count", drained))
 			}
 			return
 		}
@@ -407,15 +398,8 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 func (m *Manager) SendHeartbeat(data *grpc.PackagedData) error {
 	// 检查连接状态
 	if !m.IsConnected() {
-		// 连接未建立，先缓存数据
-		m.logger.Debug("connection not established, caching heartbeat data",
-			zap.String("agent_id", data.AgentId),
-			zap.Int("record_count", len(data.Records)),
-		)
-		if err := m.cacheMgr.Put(data); err != nil {
-			return fmt.Errorf("failed to cache heartbeat data: %w", err)
-		}
-		m.logger.Info("heartbeat data cached (will send after connection established)",
+		// 连接未建立，直接丢弃（心跳是状态快照，旧数据无价值，重连后会发最新的）
+		m.logger.Debug("connection not established, dropping heartbeat (will send fresh data after reconnect)",
 			zap.String("agent_id", data.AgentId),
 		)
 		return nil
@@ -426,14 +410,24 @@ func (m *Manager) SendHeartbeat(data *grpc.PackagedData) error {
 	case m.sendBuffer <- data:
 		return nil
 	default:
-		// 缓冲区满，尝试写入缓存
-		m.logger.Warn("send buffer full, caching heartbeat data",
-			zap.String("agent_id", data.AgentId),
-		)
-		if err := m.cacheMgr.Put(data); err != nil {
-			return fmt.Errorf("send buffer full and cache failed: %w", err)
+		// 缓冲区满，丢弃最旧的一条，保留最新心跳（心跳时效性强，新的比旧的有价值）
+		select {
+		case <-m.sendBuffer:
+			m.logger.Warn("send buffer full, dropped oldest data to make room for new heartbeat",
+				zap.String("agent_id", data.AgentId),
+			)
+		default:
 		}
-		return fmt.Errorf("send buffer full, data cached")
+		// 再次尝试放入
+		select {
+		case m.sendBuffer <- data:
+			return nil
+		default:
+			m.logger.Warn("send buffer still full after drop, discarding heartbeat",
+				zap.String("agent_id", data.AgentId),
+			)
+			return fmt.Errorf("send buffer full, heartbeat discarded")
+		}
 	}
 }
 
@@ -472,72 +466,42 @@ func (m *Manager) SendPluginData(pluginName string, record *bridge.Record) error
 	case m.sendBuffer <- packagedData:
 		return nil
 	default:
-		// 缓冲区满，尝试写入缓存
-		if err := m.cacheMgr.Put(packagedData); err != nil {
-			return fmt.Errorf("send buffer full and cache failed: %w", err)
-		}
-		m.logger.Debug("plugin data cached due to buffer full", zap.String("plugin", pluginName))
-		return nil // 已缓存，不返回错误
+		// 缓冲区满，丢弃（资产数据是状态快照，下次采集会重新上报）
+		m.logger.Warn("send buffer full, dropping plugin data (will re-collect next cycle)", zap.String("plugin", pluginName))
+		return nil
 	}
 }
 
-// sendCachedData 连接建立后立即发送缓存的数据
+// sendCachedData 连接建立后清空旧缓存（心跳和资产数据都是状态快照，旧数据无价值，重放会导致旧版本号覆盖 DB）
 func (m *Manager) sendCachedData(ctx context.Context, stream grpc.Transfer_TransferClient) error {
-	m.logger.Info("sending cached data after connection established")
-
-	// 尝试发送缓存的数据（最多每次发送20条，避免阻塞）
-	sentCount := 0
-	maxSend := 20
-
-	for i := 0; i < maxSend; i++ {
-		data, filePath, err := m.cacheMgr.Get()
+	purgedCount := 0
+	for {
+		_, filePath, err := m.cacheMgr.Get()
 		if err != nil {
-			m.logger.Error("failed to get cached data", zap.Error(err))
+			m.logger.Error("failed to get cached data during purge", zap.Error(err))
 			break
 		}
-		if data == nil {
-			break // 没有缓存数据
+		if filePath == "" {
+			break // 没有缓存数据了
 		}
-
-		// 直接发送到流
-		m.logger.Info("sending cached data to server",
-			zap.String("agent_id", data.AgentId),
-			zap.Int("record_count", len(data.Records)),
-			zap.String("cache_file", filePath),
-		)
-
-		if err := stream.Send(data); err != nil {
-			m.logger.Error("failed to send cached data, keeping in cache",
-				zap.Error(err),
-				zap.String("cache_file", filePath),
-			)
-			// 发送失败，数据仍在缓存中，下次重试时会再次尝试
-			break
-		}
-
-		// 发送成功，删除缓存文件
 		if err := m.cacheMgr.Remove(filePath); err != nil {
-			m.logger.Warn("failed to remove cached file", zap.String("file", filePath), zap.Error(err))
-		} else {
-			m.logger.Info("cached data sent successfully and removed",
-				zap.String("file", filePath),
-			)
+			m.logger.Warn("failed to remove cached file during purge", zap.String("file", filePath), zap.Error(err))
 		}
-		sentCount++
+		purgedCount++
 	}
 
-	if sentCount > 0 {
-		m.logger.Info("sent cached data after connection established",
-			zap.Int("count", sentCount),
+	if purgedCount > 0 {
+		m.logger.Info("purged stale cached data after reconnect (will send fresh heartbeat instead)",
+			zap.Int("purged_count", purgedCount),
 		)
 	}
 
 	return nil
 }
 
-// retryCachedData 定期重试发送缓存的数据
+// retryCachedData 定期清理残留缓存（正常情况下 sendCachedData 已清空，这里做兜底）
 func (m *Manager) retryCachedData(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -545,35 +509,27 @@ func (m *Manager) retryCachedData(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// 只有在连接时才尝试发送缓存的数据
 			if !m.IsConnected() {
 				continue
 			}
 
-			// 尝试发送缓存的数据（最多每次发送10条）
-			for i := 0; i < 10; i++ {
-				data, filePath, err := m.cacheMgr.Get()
+			// 清理残留缓存文件
+			purgedCount := 0
+			for i := 0; i < 50; i++ {
+				_, filePath, err := m.cacheMgr.Get()
 				if err != nil {
-					m.logger.Error("failed to get cached data", zap.Error(err))
 					break
 				}
-				if data == nil {
-					break // 没有缓存数据
+				if filePath == "" {
+					break
 				}
-
-				// 尝试发送
-				select {
-				case m.sendBuffer <- data:
-					// 发送成功，删除缓存文件
-					if err := m.cacheMgr.Remove(filePath); err != nil {
-						m.logger.Warn("failed to remove cached file", zap.String("file", filePath), zap.Error(err))
-					} else {
-						m.logger.Debug("cached data sent successfully", zap.String("file", filePath))
-					}
-				default:
-					// 缓冲区满，放回缓存（下次再试）
-					return
+				if err := m.cacheMgr.Remove(filePath); err != nil {
+					m.logger.Warn("failed to remove stale cached file", zap.String("file", filePath), zap.Error(err))
 				}
+				purgedCount++
+			}
+			if purgedCount > 0 {
+				m.logger.Info("purged stale cached data in retry loop", zap.Int("purged_count", purgedCount))
 			}
 		}
 	}
