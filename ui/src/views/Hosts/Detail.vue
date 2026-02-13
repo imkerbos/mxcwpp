@@ -10,10 +10,42 @@
       </div>
     </div>
 
-    <!-- 标签页 -->
-    <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
+    <!-- 全页加载状态 -->
+    <div v-if="loading" class="page-loading">
+      <a-spin size="large" tip="正在加载主机信息..." />
+    </div>
+
+    <!-- 加载失败状态 -->
+    <div v-else-if="loadError" class="page-empty">
+      <a-result
+        status="error"
+        title="加载失败"
+        :sub-title="loadError"
+      >
+        <template #extra>
+          <a-button type="primary" @click="loadHostDetail">重新加载</a-button>
+          <a-button @click="handleBack">返回列表</a-button>
+        </template>
+      </a-result>
+    </div>
+
+    <!-- 数据为空状态 -->
+    <div v-else-if="!host" class="page-empty">
+      <a-result
+        status="warning"
+        title="未找到主机信息"
+        sub-title="该主机可能已被删除或尚未上报数据"
+      >
+        <template #extra>
+          <a-button type="primary" @click="handleBack">返回列表</a-button>
+        </template>
+      </a-result>
+    </div>
+
+    <!-- 正常内容 -->
+    <a-tabs v-else v-model:activeKey="activeTab" @change="handleTabChange">
       <a-tab-pane key="overview" tab="主机概览">
-        <HostOverview :host="host" :loading="loading" :score-data="scoreData" @update:host="host = $event" @view-detail="handleViewDetail" />
+        <HostOverview :host="host" :loading="false" :score-data="scoreData" @update:host="host = $event" @view-detail="handleViewDetail" />
       </a-tab-pane>
       <a-tab-pane key="alerts" :tab="`安全告警(${alertCount})`">
         <SecurityAlerts :host-id="hostId" />
@@ -59,6 +91,7 @@ const router = useRouter()
 const route = useRoute()
 
 const loading = ref(false)
+const loadError = ref('')
 const host = ref<HostDetail | null>(null)
 const scoreData = ref<BaselineScore | null>(null)
 const validTabs = ['overview', 'alerts', 'vulnerabilities', 'baseline', 'runtime', 'antivirus', 'performance', 'fingerprint']
@@ -75,6 +108,7 @@ const loadHostDetail = async () => {
 
   hostId.value = id
   loading.value = true
+  loadError.value = ''
   try {
     const [hostData, scoreResult] = await Promise.all([
       hostsApi.get(id),
@@ -89,8 +123,9 @@ const loadHostDetail = async () => {
     }
 
     // TODO: 加载告警和漏洞数量
-  } catch (error) {
+  } catch (error: any) {
     console.error('加载主机详情失败:', error)
+    loadError.value = error?.response?.data?.message || error?.message || '网络请求失败，请检查网络连接'
   } finally {
     loading.value = false
   }
@@ -151,6 +186,20 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   margin: 0;
+}
+
+.page-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+}
+
+.page-empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
 }
 
 /* 优化 Tab 栏样式 */

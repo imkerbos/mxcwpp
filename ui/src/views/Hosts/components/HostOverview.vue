@@ -1,5 +1,5 @@
 <template>
-  <a-spin :spinning="loading">
+  <a-spin :spinning="loading" :style="loading ? { minHeight: '300px', display: 'flex', justifyContent: 'center', alignItems: 'center' } : {}">
     <div v-if="host" class="host-overview">
       <!-- 主内容区域 -->
       <div class="main-content">
@@ -881,6 +881,9 @@
           </div>
         </div>
       </a-modal>
+    </div>
+    <div v-else-if="!loading" class="host-overview-empty">
+      <a-empty description="暂无主机数据" />
     </div>
   </a-spin>
 </template>
@@ -2028,5 +2031,12 @@ onMounted(() => {
   .risk-stats {
     width: 100%;
   }
+}
+
+.host-overview-empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 300px;
 }
 </style>
