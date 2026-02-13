@@ -83,6 +83,7 @@
               <a-menu-item key="system-notification" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-notification')">通知管理</a-menu-item>
               <a-menu-item key="system-reports" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-reports')">报告管理</a-menu-item>
               <a-menu-item key="system-task-report" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-task-report')">任务报告</a-menu-item>
+              <a-menu-item key="inspection" @click.native="(e: MouseEvent) => handleNavClick(e, 'inspection')">运维巡检</a-menu-item>
             </a-sub-menu>
           </a-menu>
         </div>
@@ -291,6 +292,9 @@ watch(
     } else if (name === 'SystemTaskReport') {
       selectedKeys.value = ['system-task-report']
       openKeys.value = ['system-menu']
+    } else if (name === 'Inspection') {
+      selectedKeys.value = ['inspection']
+      openKeys.value = ['system-menu']
     } else if (name === 'Alerts') {
       selectedKeys.value = ['alerts']
       openKeys.value = []
@@ -317,6 +321,7 @@ const routeMap: Record<string, string> = {
   'system-install': '/system/install',
   'system-reports': '/system/reports',
   'system-task-report': '/system/task-report',
+  'inspection': '/system/inspection',
   'alerts': '/alerts',
 }
 

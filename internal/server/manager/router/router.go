@@ -105,6 +105,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupAlertsAPI(router, db, logger)
 	setupComponentsAPI(router, db, logger, cfg)
 	setupPolicyImportExportAPI(router, db, logger)
+	setupInspectionAPI(router, db, logger)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -337,4 +338,10 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 // setupPolicyImportExportAPI 设置策略导入导出 API 路由
 func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	api.RegisterPolicyImportExportRoutes(router, db, logger)
+}
+
+// setupInspectionAPI 设置运维巡检 API 路由
+func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewInspectionHandler(db, logger)
+	router.GET("/inspection/overview", handler.GetOverview)
 }

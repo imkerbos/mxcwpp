@@ -142,6 +142,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Alerts/Detail.vue'),
         meta: { title: '告警详情' },
       },
+      {
+        path: 'system/inspection',
+        name: 'Inspection',
+        component: () => import('@/views/Inspection/index.vue'),
+        meta: { title: '运维巡检' },
+      },
     ],
   },
   // 404 错误页面
