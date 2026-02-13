@@ -1456,6 +1456,18 @@ func (s *Service) sendLoop(conn *Connection) {
 func (s *Service) registerConnection(agentID string, conn *Connection) {
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
+
+	// 如果同一 Agent 已有旧连接，取消旧连接的 context 使其 goroutine 立即退出
+	// 避免旧连接的心跳数据覆盖新连接上报的版本等字段
+	if oldConn, exists := s.connections[agentID]; exists && oldConn != conn {
+		s.logger.Info("Agent 重连，取消旧连接",
+			zap.String("agent_id", agentID),
+			zap.String("old_version", oldConn.Version),
+			zap.String("new_version", conn.Version),
+		)
+		oldConn.cancel()
+	}
+
 	s.connections[agentID] = conn
 }
 
