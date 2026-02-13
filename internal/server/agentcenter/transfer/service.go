@@ -1503,6 +1503,9 @@ func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Conn
 		zap.Duration("offline_duration", time.Since(lastHeartbeat)),
 	)
 
+	// 自动解决离线告警
+	s.resolveAgentOfflineAlert(agentID)
+
 	// 获取主机 IP
 	hostIP := ""
 	if len(conn.IPv4) > 0 {
@@ -1596,7 +1599,75 @@ func (s *Service) unregisterConnection(agentID string, connToRemove *Connection)
 	// 更新主机状态为离线
 	s.db.Model(&model.Host{}).Where("host_id = ?", agentID).Update("status", model.HostStatusOffline)
 
+	// 创建 Agent 离线告警
+	s.createAgentOfflineAlert(agentID)
+
 	s.logger.Info("Agent 连接已注销", zap.String("agent_id", agentID))
+}
+
+// createAgentOfflineAlert 创建 Agent 离线告警
+func (s *Service) createAgentOfflineAlert(agentID string) {
+	// 查询主机信息
+	var host model.Host
+	if err := s.db.First(&host, "host_id = ?", agentID).Error; err != nil {
+		return
+	}
+
+	now := model.Now()
+	resultID := fmt.Sprintf("offline-%s", agentID)
+
+	// 检查是否已存在未解决的离线告警
+	var existing model.Alert
+	err := s.db.Where("result_id = ? AND status = ?", resultID, model.AlertStatusActive).First(&existing).Error
+	if err == nil {
+		// 已存在，更新 last_seen_at
+		s.db.Model(&existing).Update("last_seen_at", now)
+		return
+	}
+
+	ip := ""
+	if len(host.IPv4) > 0 {
+		ip = host.IPv4[0]
+	}
+
+	alert := &model.Alert{
+		ResultID:    resultID,
+		HostID:      agentID,
+		RuleID:      "agent_offline",
+		Severity:    "high",
+		Category:    "agent_offline",
+		Title:       fmt.Sprintf("Agent 离线: %s (%s)", host.Hostname, ip),
+		Description: fmt.Sprintf("主机 %s 的 Agent 已断开连接", host.Hostname),
+		Status:      model.AlertStatusActive,
+		FirstSeenAt: now,
+		LastSeenAt:  now,
+	}
+
+	if err := s.db.Create(alert).Error; err != nil {
+		s.logger.Warn("创建 Agent 离线告警失败", zap.String("agent_id", agentID), zap.Error(err))
+		return
+	}
+
+	s.logger.Info("已创建 Agent 离线告警", zap.String("agent_id", agentID), zap.Uint("alert_id", alert.ID))
+}
+
+// resolveAgentOfflineAlert 解决 Agent 离线告警（Agent 上线时调用）
+func (s *Service) resolveAgentOfflineAlert(agentID string) {
+	now := model.Now()
+	resultID := fmt.Sprintf("offline-%s", agentID)
+
+	result := s.db.Model(&model.Alert{}).
+		Where("result_id = ? AND status = ?", resultID, model.AlertStatusActive).
+		Updates(map[string]any{
+			"status":         model.AlertStatusResolved,
+			"resolved_at":    &now,
+			"resolved_by":    "system",
+			"resolve_reason": "Agent 已恢复上线",
+		})
+
+	if result.RowsAffected > 0 {
+		s.logger.Info("已自动解决 Agent 离线告警", zap.String("agent_id", agentID))
+	}
 }
 
 // sendCertificateBundleIfNeeded 检查并下发证书包（如果Agent首次连接）

@@ -52,6 +52,7 @@ export interface ListAlertsParams {
   host_id?: string
   rule_id?: string
   category?: string
+  alert_type?: 'baseline' | 'agent_offline'
   keyword?: string
   result_id?: string
 }

@@ -31,15 +31,16 @@ func NewAlertsHandler(db *gorm.DB, logger *zap.Logger) *AlertsHandler {
 
 // ListAlertsRequest 获取告警列表请求
 type ListAlertsRequest struct {
-	Page     int    `form:"page" binding:"omitempty,min=1"`
-	PageSize int    `form:"page_size" binding:"omitempty,min=1,max=100"`
-	Status   string `form:"status"`   // active, resolved, ignored
-	Severity string `form:"severity"` // critical, high, medium, low
-	HostID   string `form:"host_id"`
-	RuleID   string `form:"rule_id"`
-	Category string `form:"category"`
-	Keyword  string `form:"keyword"`   // 搜索标题或描述
-	ResultID string `form:"result_id"` // 根据 result_id 查询
+	Page      int    `form:"page" binding:"omitempty,min=1"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Status    string `form:"status"`     // active, resolved, ignored
+	Severity  string `form:"severity"`   // critical, high, medium, low
+	HostID    string `form:"host_id"`
+	RuleID    string `form:"rule_id"`
+	Category  string `form:"category"`
+	AlertType string `form:"alert_type"` // baseline, agent_offline
+	Keyword   string `form:"keyword"`    // 搜索标题或描述
+	ResultID  string `form:"result_id"`  // 根据 result_id 查询
 }
 
 // ListAlerts 获取告警列表
@@ -85,6 +86,13 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	}
 	if req.Category != "" {
 		query = query.Where("category = ?", req.Category)
+	}
+	if req.AlertType != "" {
+		if req.AlertType == "agent_offline" {
+			query = query.Where("category = ?", "agent_offline")
+		} else if req.AlertType == "baseline" {
+			query = query.Where("category != ?", "agent_offline")
+		}
 	}
 	if req.ResultID != "" {
 		query = query.Where("result_id = ?", req.ResultID)
