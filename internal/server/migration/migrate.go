@@ -32,6 +32,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Info("模型迁移成功", zap.String("model", fmt.Sprintf("%T", m)))
 	}
 
+	// 执行数据迁移：扩展资产表 ID 列（GORM AutoMigrate 不一定会自动扩展已有列的长度）
+	if err := migrateAssetTableIDColumns(db, logger); err != nil {
+		logger.Warn("资产表ID列扩展处理", zap.Error(err))
+	}
+
 	// 执行数据迁移：为现有数据设置默认的运行时类型
 	if err := migrateRuntimeTypes(db, logger); err != nil {
 		logger.Warn("运行时类型迁移处理", zap.Error(err))
@@ -157,6 +162,57 @@ func migrateRuntimeTypes(db *gorm.DB, logger *zap.Logger) error {
 	} else if result.RowsAffected > 0 {
 		logger.Info("已清空规则的 runtime_types（规则将继承策略的设置）",
 			zap.Int64("count", result.RowsAffected))
+	}
+
+	return nil
+}
+
+// migrateAssetTableIDColumns 扩展资产表的 ID 列从 varchar(64) 到 varchar(128)
+// GORM AutoMigrate 不保证会扩展已有列的长度，需要显式 ALTER TABLE
+func migrateAssetTableIDColumns(db *gorm.DB, logger *zap.Logger) error {
+	// 所有需要扩展 id 列的资产表（ID 格式为 "{host_id}-{xxx}"，host_id 是 64 字符 SHA256）
+	tables := []string{
+		"processes", "ports", "asset_users", "software",
+		"containers", "apps", "net_interfaces", "volumes",
+		"kmods", "services", "crons",
+	}
+
+	for _, table := range tables {
+		// 先检查表是否存在
+		var exists bool
+		if err := db.Raw(
+			"SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
+			table,
+		).Scan(&exists).Error; err != nil {
+			logger.Warn("检查表是否存在失败", zap.String("table", table), zap.Error(err))
+			continue
+		}
+		if !exists {
+			continue
+		}
+
+		// 检查当前列长度
+		var columnType string
+		if err := db.Raw(
+			"SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'id'",
+			table,
+		).Scan(&columnType).Error; err != nil {
+			logger.Warn("查询列类型失败", zap.String("table", table), zap.Error(err))
+			continue
+		}
+
+		// 如果已经是 varchar(128) 或更大则跳过
+		if columnType == "varchar(128)" {
+			continue
+		}
+
+		// 执行 ALTER TABLE
+		sql := fmt.Sprintf("ALTER TABLE `%s` MODIFY COLUMN `id` varchar(128) NOT NULL", table)
+		if err := db.Exec(sql).Error; err != nil {
+			logger.Error("扩展资产表ID列失败", zap.String("table", table), zap.String("old_type", columnType), zap.Error(err))
+		} else {
+			logger.Info("扩展资产表ID列成功", zap.String("table", table), zap.String("old_type", columnType), zap.String("new_type", "varchar(128)"))
+		}
 	}
 
 	return nil

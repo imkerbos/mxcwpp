@@ -142,7 +142,7 @@ func processNotificationAlerts(db *gorm.DB, logger *zap.Logger, notification *mo
 
 	query := db.Model(&model.Alert{}).
 		Where("status = ?", model.AlertStatusActive).
-		Where("severity IN ?", notification.Severities).
+		Where("severity IN (?)", []string(notification.Severities)).
 		Where("(last_notified_at IS NULL OR last_notified_at < ?)", cutoffTime) // 支持从未通知过的告警
 
 	// 查询需要通知的告警
