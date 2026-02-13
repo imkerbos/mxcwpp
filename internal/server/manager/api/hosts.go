@@ -245,25 +245,30 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		return
 	}
 
-	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果，过滤已删除的规则）
-	// 使用 ROW_NUMBER() 窗口函数（MySQL 8.0+）代替子查询+双JOIN，性能更优
+	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果，仅保留有效规则）
 	var results []model.ScanResult
-	h.db.Raw(`
-		SELECT ranked.* FROM (
-			SELECT sr.*, ROW_NUMBER() OVER (PARTITION BY sr.rule_id ORDER BY sr.checked_at DESC) AS rn
-			FROM scan_results sr
-			INNER JOIN rules ON sr.rule_id = rules.rule_id AND rules.deleted_at IS NULL
-			WHERE sr.host_id = ?
-		) ranked WHERE ranked.rn = 1
-		ORDER BY ranked.checked_at DESC
-	`, hostID).Scan(&results)
+	if err := h.db.Raw(`
+		SELECT sr.* FROM scan_results sr
+		INNER JOIN rules ON sr.rule_id = rules.rule_id
+		WHERE sr.host_id = ?
+		AND sr.checked_at = (
+			SELECT MAX(sr2.checked_at) FROM scan_results sr2
+			WHERE sr2.host_id = sr.host_id AND sr2.rule_id = sr.rule_id
+		)
+		ORDER BY sr.checked_at DESC
+	`, hostID).Scan(&results).Error; err != nil {
+		h.logger.Error("查询基线结果失败", zap.Error(err))
+	}
 
-	// 查询最新监控数据
+	// 查询最新监控数据（只取需要的字段，避免 SELECT * 回表开销）
 	var latestMetric model.HostMetric
-	h.db.Where("host_id = ?", hostID).
+	if err := h.db.Select("id, cpu_usage, mem_usage").
+		Where("host_id = ?", hostID).
 		Order("collected_at DESC").
 		Limit(1).
-		First(&latestMetric)
+		First(&latestMetric).Error; err != nil && err != gorm.ErrRecordNotFound {
+		h.logger.Error("查询主机监控数据失败", zap.Error(err))
+	}
 
 	// 构建响应数据（扁平化结构，符合前端 HostDetail 接口）
 	responseData := gin.H{
