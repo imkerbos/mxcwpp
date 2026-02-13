@@ -1,12 +1,15 @@
+# syntax=docker/dockerfile:1
 # UI 生产镜像
 FROM --platform=linux/amd64 node:18-alpine AS builder
 
 WORKDIR /app
 COPY ui/package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 COPY ui/ .
-RUN npm run build
+RUN --mount=type=cache,target=/root/.npm \
+    npm run build
 
 FROM --platform=linux/amd64 nginx:alpine
 

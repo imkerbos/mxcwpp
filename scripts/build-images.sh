@@ -13,6 +13,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# 启用 BuildKit（缓存挂载需要）
+export DOCKER_BUILDKIT=1
+
 # 默认值
 VERSION="${VERSION:-v1.0.0}"
 REGISTRY="${REGISTRY:-}"
