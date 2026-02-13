@@ -641,9 +641,15 @@ func (m *Manager) restartPlugin(oldPlugin *Plugin) {
 // 检查策略：
 // 1. 进程是否还存活（发送 signal 0 检测）
 // 2. 如果有数据交互，检查是否超时（假死检测）
+// 注意：任务驱动型插件（如 baseline）空闲时无数据交互是正常的，不做假死检测
 func (m *Manager) watchPlugins() {
-	const checkInterval = 60 * time.Second  // 每 60 秒检查一次
-	const silentThreshold = 5 * time.Minute // 有过数据交互的插件，超过 5 分钟无活动视为假死
+	const checkInterval = 60 * time.Second   // 每 60 秒检查一次
+	const silentThreshold = 10 * time.Minute // 有过数据交互的插件，超过 10 分钟无活动视为假死
+
+	// 任务驱动型插件列表：这些插件只在收到任务时才有数据交互，空闲是正常的
+	taskDrivenPlugins := map[string]bool{
+		"baseline": true,
+	}
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -678,6 +684,12 @@ func (m *Manager) watchPlugins() {
 
 				// 插件刚启动不到 silentThreshold，跳过
 				if time.Since(startTime) < silentThreshold {
+					continue
+				}
+
+				// 任务驱动型插件（如 baseline）空闲时无数据交互是正常的，跳过假死检测
+				// 只对持续采集型插件（如 collector）做假死检测
+				if taskDrivenPlugins[name] {
 					continue
 				}
 
@@ -804,7 +816,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 	// 插件停止时注销任务通道
 	defer m.transport.UnregisterTaskChannel(plugin.Config.Name)
 
-	plugin.logger.Info("task channel registered for plugin",
+	plugin.logger.Debug("task channel registered for plugin",
 		zap.String("plugin_name", plugin.Config.Name))
 
 	for {
@@ -988,7 +1000,7 @@ func (m *Manager) retryPendingTasks(plugin *Plugin) {
 	// 获取该插件的未完成任务
 	pendingTasks := m.taskTracker.GetPendingTasks(plugin.Config.Name)
 	if len(pendingTasks) == 0 {
-		plugin.logger.Info("no pending tasks to retry")
+		plugin.logger.Debug("no pending tasks to retry")
 		return
 	}
 

@@ -209,6 +209,14 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 					)
 					return nil
 				}
+				// context canceled / transport closing 是 Agent 重连的正常现象，降为 Debug
+				if ctx.Err() != nil || status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
+					s.logger.Debug("Agent 连接已关闭",
+						zap.String("agent_id", agentID),
+						zap.String("reason", err.Error()),
+					)
+					return nil
+				}
 				s.logger.Error("接收数据失败",
 					zap.Error(err),
 					zap.String("agent_id", agentID),
@@ -1438,13 +1446,21 @@ func (s *Service) sendLoop(conn *Connection) {
 			)
 
 			if err := conn.stream.Send(cmd); err != nil {
-				s.logger.Error("发送命令失败",
-					zap.Error(err),
-					zap.String("agent_id", conn.AgentID),
-					zap.String("error_type", fmt.Sprintf("%T", err)),
-					zap.Bool("has_certificate_bundle", hasCertBundle),
-					zap.Bool("has_agent_config", hasAgentConfig),
-				)
+				// 连接关闭导致的发送失败是正常现象，降为 Debug
+				if conn.ctx.Err() != nil || status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
+					s.logger.Debug("Agent 连接已关闭，发送中止",
+						zap.String("agent_id", conn.AgentID),
+						zap.String("reason", err.Error()),
+					)
+				} else {
+					s.logger.Error("发送命令失败",
+						zap.Error(err),
+						zap.String("agent_id", conn.AgentID),
+						zap.String("error_type", fmt.Sprintf("%T", err)),
+						zap.Bool("has_certificate_bundle", hasCertBundle),
+						zap.Bool("has_agent_config", hasAgentConfig),
+					)
+				}
 				return
 			}
 

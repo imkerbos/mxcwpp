@@ -199,7 +199,7 @@ func (m *Manager) sendWithTimeout(stream grpc.Transfer_TransferClient, data *grp
 func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.Transfer_TransferClient) {
 	defer wg.Done()
 
-	m.logger.Info("sendData goroutine started, waiting for data to send...")
+	m.logger.Debug("sendData goroutine started, waiting for data to send...")
 
 	sendTimeout := 30 * time.Second
 
@@ -209,7 +209,7 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 			m.logger.Debug("sendData goroutine stopping (context canceled)")
 			return
 		case data := <-m.sendBuffer:
-			m.logger.Info("sending data to server",
+			m.logger.Debug("sending data to server",
 				zap.String("agent_id", data.AgentId),
 				zap.String("hostname", data.Hostname),
 				zap.Int("record_count", len(data.Records)),
@@ -224,7 +224,7 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 				m.drainSendBuffer()
 				return
 			}
-			m.logger.Info("data sent successfully",
+			m.logger.Debug("data sent successfully",
 				zap.Int("record_count", len(data.Records)),
 				zap.String("agent_id", data.AgentId),
 			)
@@ -241,7 +241,7 @@ func (m *Manager) drainSendBuffer() {
 			drained++
 		default:
 			if drained > 0 {
-				m.logger.Info("drained stale data from send buffer", zap.Int("count", drained))
+				m.logger.Debug("drained stale data from send buffer", zap.Int("count", drained))
 			}
 			return
 		}
@@ -491,7 +491,7 @@ func (m *Manager) sendCachedData(ctx context.Context, stream grpc.Transfer_Trans
 	}
 
 	if purgedCount > 0 {
-		m.logger.Info("purged stale cached data after reconnect (will send fresh heartbeat instead)",
+		m.logger.Debug("purged stale cached data after reconnect (will send fresh heartbeat instead)",
 			zap.Int("purged_count", purgedCount),
 		)
 	}
@@ -529,7 +529,7 @@ func (m *Manager) retryCachedData(ctx context.Context) {
 				purgedCount++
 			}
 			if purgedCount > 0 {
-				m.logger.Info("purged stale cached data in retry loop", zap.Int("purged_count", purgedCount))
+				m.logger.Debug("purged stale cached data in retry loop", zap.Int("purged_count", purgedCount))
 			}
 		}
 	}
@@ -562,7 +562,7 @@ func (m *Manager) RegisterTaskChannel(pluginName string) <-chan *grpc.Task {
 
 	ch := make(chan *grpc.Task, 100)
 	m.taskChannels[pluginName] = ch
-	m.logger.Info("registered task channel for plugin", zap.String("plugin_name", pluginName))
+	m.logger.Debug("registered task channel for plugin", zap.String("plugin_name", pluginName))
 	return ch
 }
 
@@ -574,7 +574,7 @@ func (m *Manager) UnregisterTaskChannel(pluginName string) {
 
 	if _, ok := m.taskChannels[pluginName]; ok {
 		delete(m.taskChannels, pluginName)
-		m.logger.Info("unregistered task channel for plugin", zap.String("plugin_name", pluginName))
+		m.logger.Debug("unregistered task channel for plugin", zap.String("plugin_name", pluginName))
 	}
 }
 
