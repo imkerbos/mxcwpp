@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -54,6 +55,9 @@ type Service struct {
 	// 连接管理
 	connections map[string]*Connection
 	connMu      sync.RWMutex
+
+	// 优雅关闭标志：Server 自身重启时跳过离线通知，避免假告警
+	shutdownFlag atomic.Bool
 }
 
 // NewService 创建 Transfer 服务实例
@@ -1548,6 +1552,12 @@ func (s *Service) unregisterConnection(agentID string, connToRemove *Connection)
 		return
 	}
 
+	// Server 正在优雅关闭时，跳过离线通知（Agent 会在 Server 重启后自动重连）
+	if s.shutdownFlag.Load() {
+		s.logger.Info("服务关闭中，跳过离线通知", zap.String("agent_id", agentID))
+		return
+	}
+
 	// 查询主机信息用于发送离线通知
 	var host model.Host
 	if err := s.db.First(&host, "host_id = ?", agentID).Error; err != nil {
@@ -1901,6 +1911,12 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 		zap.Int("failed_count", len(failedAgents)))
 
 	return successCount, failedAgents, nil
+}
+
+// GracefulShutdown 标记服务正在关闭，后续连接断开不再发送离线通知
+func (s *Service) GracefulShutdown() {
+	s.shutdownFlag.Store(true)
+	s.logger.Info("Transfer 服务进入优雅关闭，后续断连不发送离线通知")
 }
 
 // GetOnlineAgentCount 获取在线 Agent 数量

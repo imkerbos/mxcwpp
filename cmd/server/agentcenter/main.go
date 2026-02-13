@@ -56,8 +56,9 @@ func main() {
 	sig := <-signalCh
 	services.Logger.Info("收到关闭信号", zap.String("signal", sig.String()))
 
-	// 优雅关闭
+	// 优雅关闭：先标记关闭状态（跳过离线通知），再停止 gRPC
 	services.Logger.Info("正在关闭 AgentCenter...")
+	services.TransferService.GracefulShutdown()
 	services.GRPCServer.GracefulStop()
 
 	services.Logger.Info("AgentCenter 已关闭")
