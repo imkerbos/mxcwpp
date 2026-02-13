@@ -109,6 +109,7 @@
               </a-button>
               <template #overlay>
                 <a-menu>
+                  <a-menu-item @click="handleBatchRestartAgent">重启 Agent</a-menu-item>
                   <a-menu-item @click="handleBatchBindBusinessLine">批量绑定业务线</a-menu-item>
                   <a-menu-item>批量导入标签</a-menu-item>
                   <a-menu-item>清理离线数据</a-menu-item>
@@ -253,8 +254,18 @@
           </div>
         </template>
         <template v-else-if="column.key === 'action'">
-          <a-space>
-            <router-link :to="`/hosts/${record.host_id}`" class="host-link">查看详情</router-link>
+          <div class="action-cell">
+            <a-button type="link" size="small" class="action-link" @click="$router.push(`/hosts/${record.host_id}`)">详情</a-button>
+            <a-divider type="vertical" />
+            <a-popconfirm
+              title="确定重启此主机的 Agent？"
+              ok-text="确定"
+              cancel-text="取消"
+              @confirm="handleRestartSingleAgent(record)"
+            >
+              <a-button type="link" size="small" class="action-link" :disabled="record.status !== 'online'">重启</a-button>
+            </a-popconfirm>
+            <a-divider type="vertical" />
             <a-popconfirm
               title="确定要删除这台主机吗？"
               description="删除后将同时删除该主机的所有扫描结果、告警和相关数据，此操作不可恢复。"
@@ -262,9 +273,9 @@
               cancel-text="取消"
               @confirm="handleDeleteHost(record)"
             >
-              <a-button type="link" danger>删除</a-button>
+              <a-button type="link" size="small" class="action-link action-link-danger">删除</a-button>
             </a-popconfirm>
-          </a-space>
+          </div>
         </template>
       </template>
       <template #emptyText>
@@ -330,7 +341,7 @@ import { hostsApi, type HostStatusDistribution, type HostRiskDistribution } from
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 import type { Host } from '@/api/types'
 import ScoreDisplay from './components/ScoreDisplay.vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { formatDateTime } from '@/utils/date'
 import { OS_OPTIONS } from '@/constants/os'
 
@@ -529,7 +540,7 @@ const columns = [
   {
     title: '操作',
     key: 'action',
-    width: 100,
+    width: 160,
     fixed: 'right' as const,
   },
 ]
@@ -644,6 +655,48 @@ const handleDeleteHost = async (record: Host) => {
   } catch (error: any) {
     console.error('删除主机失败:', error)
     message.error(error?.message || '删除主机失败，请重试')
+  }
+}
+
+// 重启单台主机 Agent
+const handleRestartSingleAgent = async (record: Host) => {
+  await doRestartAgent([record.host_id])
+}
+
+// 批量重启 Agent
+const handleBatchRestartAgent = () => {
+  if (selectedRowKeys.value.length === 0) {
+    // 无选择 → 确认重启全部在线主机
+    Modal.confirm({
+      title: '重启全部在线 Agent',
+      content: '确定要重启所有在线主机的 Agent 吗？Agent 会短暂离线后自动恢复。',
+      okText: '确定重启',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => doRestartAgent([]),
+    })
+  } else {
+    // 有选择 → 确认重启选中的主机
+    Modal.confirm({
+      title: '重启选中主机的 Agent',
+      content: `确定要重启选中的 ${selectedRowKeys.value.length} 台主机的 Agent 吗？`,
+      okText: '确定重启',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => doRestartAgent(selectedRowKeys.value),
+    })
+  }
+}
+
+// 执行重启
+const doRestartAgent = async (hostIds: string[]) => {
+  try {
+    await hostsApi.restartAgent(hostIds.length > 0 ? hostIds : undefined)
+    message.success('重启命令已提交，Agent 将在数秒后重启')
+    selectedRowKeys.value = []
+  } catch (error: any) {
+    console.error('重启 Agent 失败:', error)
+    message.error(error?.message || '重启 Agent 失败，请重试')
   }
 }
 
@@ -896,5 +949,25 @@ onMounted(() => {
 .host-link:hover {
   color: #40a9ff;
   text-decoration: underline;
+}
+
+.action-cell {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.action-link {
+  padding: 0 2px;
+  height: auto;
+  line-height: 1;
+}
+
+.action-link-danger {
+  color: #ff4d4f;
+}
+
+.action-link-danger:hover {
+  color: #ff7875;
 }
 </style>

@@ -111,6 +111,8 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 func setupHostsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService) {
 	handler := api.NewHostsHandler(db, logger, scoreCache, metricsService)
 	router.GET("/hosts", handler.ListHosts)
+	router.POST("/hosts/restart-agent", handler.RestartAgent)
+	router.GET("/hosts/restart-records", handler.GetRestartRecords)
 	router.GET("/hosts/:host_id", handler.GetHost)
 	router.GET("/hosts/:host_id/metrics", handler.GetHostMetrics)
 	router.GET("/hosts/:host_id/risk-statistics", handler.GetHostRiskStatistics)

@@ -43,6 +43,7 @@ message Command {
   AgentConfig agent_config = 4;          // Agent 配置（Server 下发）
   CertificateBundle certificate_bundle = 5;  // 证书包（首次连接时下发）
   AgentUpdate agent_update = 6;          // Agent 更新命令（新版本推送）
+  bool agent_restart = 7;               // Agent 重启命令
 }
 
 // AgentUpdate 是 Agent 更新命令

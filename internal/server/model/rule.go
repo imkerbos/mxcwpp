@@ -20,8 +20,9 @@ type CheckRule struct {
 
 // FixConfig 修复配置（JSON 格式）
 type FixConfig struct {
-	Suggestion string `json:"suggestion"`
-	Command    string `json:"command,omitempty"`
+	Suggestion      string   `json:"suggestion"`
+	Command         string   `json:"command,omitempty"`
+	RestartServices []string `json:"restart_services,omitempty"` // 修复后需重启的服务
 }
 
 // Value 实现 driver.Valuer 接口

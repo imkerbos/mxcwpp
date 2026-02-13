@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
@@ -102,37 +103,41 @@ func (s *AssetService) handleProcessData(hostID, jsonData string) error {
 		assets = []engine.ProcessAsset{asset}
 	}
 
-	// 批量插入数据库（使用 ON DUPLICATE KEY UPDATE 或先删除再插入）
-	// 策略：删除该主机的旧数据，插入新数据（全量替换）
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Process{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old process data: %w", err)
-	}
-
-	// 转换为数据库模型并插入
-	for _, asset := range assets {
-		process := &model.Process{
-			ID:          fmt.Sprintf("%s-%s", hostID, asset.PID),
-			HostID:      hostID,
-			PID:         asset.PID,
-			PPID:        asset.PPID,
-			Cmdline:     asset.Cmdline,
-			Exe:         asset.Exe,
-			ExeHash:     asset.ExeHash,
-			ContainerID: asset.ContainerID,
-			UID:         asset.UID,
-			GID:         asset.GID,
-			Username:    asset.Username,
-			Groupname:   asset.Groupname,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Process{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old process data: %w", err)
 		}
 
-		if err := s.db.Create(process).Error; err != nil {
-			s.logger.Error("failed to create process",
-				zap.String("host_id", hostID),
-				zap.String("pid", asset.PID),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			process := &model.Process{
+				ID:          shortHash(hostID, asset.PID),
+				HostID:      hostID,
+				PID:         asset.PID,
+				PPID:        asset.PPID,
+				Cmdline:     asset.Cmdline,
+				Exe:         asset.Exe,
+				ExeHash:     asset.ExeHash,
+				ContainerID: asset.ContainerID,
+				UID:         asset.UID,
+				GID:         asset.GID,
+				Username:    asset.Username,
+				Groupname:   asset.Groupname,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(process).Error; err != nil {
+				s.logger.Error("failed to create process",
+					zap.String("host_id", hostID),
+					zap.String("pid", asset.PID),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed process data",
@@ -155,33 +160,38 @@ func (s *AssetService) handlePortData(hostID, jsonData string) error {
 		assets = []engine.PortAsset{asset}
 	}
 
-	// 删除旧数据
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Port{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old port data: %w", err)
-	}
-
-	// 转换为数据库模型并插入
-	for _, asset := range assets {
-		port := &model.Port{
-			ID:          fmt.Sprintf("%s-%s-%d", hostID, asset.Protocol, asset.Port),
-			HostID:      hostID,
-			Protocol:    asset.Protocol,
-			Port:        asset.Port,
-			State:       asset.State,
-			PID:         asset.PID,
-			ProcessName: asset.ProcessName,
-			ContainerID: asset.ContainerID,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Port{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old port data: %w", err)
 		}
 
-		if err := s.db.Create(port).Error; err != nil {
-			s.logger.Warn("failed to create port",
-				zap.String("host_id", hostID),
-				zap.String("protocol", asset.Protocol),
-				zap.Int("port", asset.Port),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			port := &model.Port{
+				ID:          shortHash(hostID, asset.Protocol, fmt.Sprintf("%d", asset.Port)),
+				HostID:      hostID,
+				Protocol:    asset.Protocol,
+				Port:        asset.Port,
+				State:       asset.State,
+				PID:         asset.PID,
+				ProcessName: asset.ProcessName,
+				ContainerID: asset.ContainerID,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(port).Error; err != nil {
+				s.logger.Warn("failed to create port",
+					zap.String("host_id", hostID),
+					zap.String("protocol", asset.Protocol),
+					zap.Int("port", asset.Port),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed port data",
@@ -204,34 +214,39 @@ func (s *AssetService) handleUserData(hostID, jsonData string) error {
 		assets = []engine.UserAsset{asset}
 	}
 
-	// 删除旧数据
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.AssetUser{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old user data: %w", err)
-	}
-
-	// 转换为数据库模型并插入
-	for _, asset := range assets {
-		user := &model.AssetUser{
-			ID:          fmt.Sprintf("%s-%s", hostID, asset.Username),
-			HostID:      hostID,
-			Username:    asset.Username,
-			UID:         asset.UID,
-			GID:         asset.GID,
-			Groupname:   asset.Groupname,
-			HomeDir:     asset.HomeDir,
-			Shell:       asset.Shell,
-			Comment:     asset.Comment,
-			HasPassword: asset.HasPassword,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.AssetUser{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old user data: %w", err)
 		}
 
-		if err := s.db.Create(user).Error; err != nil {
-			s.logger.Error("failed to create user",
-				zap.String("host_id", hostID),
-				zap.String("username", asset.Username),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			user := &model.AssetUser{
+				ID:          shortHash(hostID, asset.Username),
+				HostID:      hostID,
+				Username:    asset.Username,
+				UID:         asset.UID,
+				GID:         asset.GID,
+				Groupname:   asset.Groupname,
+				HomeDir:     asset.HomeDir,
+				Shell:       asset.Shell,
+				Comment:     asset.Comment,
+				HasPassword: asset.HasPassword,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(user).Error; err != nil {
+				s.logger.Error("failed to create user",
+					zap.String("host_id", hostID),
+					zap.String("username", asset.Username),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed user data",
@@ -252,30 +267,37 @@ func (s *AssetService) handleSoftwareData(hostID, jsonData string) error {
 		assets = []engine.SoftwareAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Software{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old software data: %w", err)
-	}
-
-	for _, asset := range assets {
-		software := &model.Software{
-			ID:           fmt.Sprintf("%s-%s-%s", hostID, asset.PackageType, asset.Name),
-			HostID:       hostID,
-			Name:         asset.Name,
-			Version:      asset.Version,
-			Architecture: asset.Architecture,
-			PackageType:  asset.PackageType,
-			Vendor:       asset.Vendor,
-			InstallTime:  asset.InstallTime,
-			CollectedAt:  model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Software{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old software data: %w", err)
 		}
 
-		if err := s.db.Create(software).Error; err != nil {
-			s.logger.Error("failed to create software",
-				zap.String("host_id", hostID),
-				zap.String("name", asset.Name),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			software := &model.Software{
+				ID:           shortHash(hostID, asset.PackageType, asset.Name),
+				HostID:       hostID,
+				Name:         asset.Name,
+				Version:      asset.Version,
+				Architecture: asset.Architecture,
+				PackageType:  asset.PackageType,
+				Vendor:       asset.Vendor,
+				InstallTime:  asset.InstallTime,
+				CollectedAt:  model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(software).Error; err != nil {
+				s.logger.Error("failed to create software",
+					zap.String("host_id", hostID),
+					zap.String("name", asset.Name),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed software data",
@@ -296,31 +318,38 @@ func (s *AssetService) handleContainerData(hostID, jsonData string) error {
 		assets = []engine.ContainerAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Container{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old container data: %w", err)
-	}
-
-	for _, asset := range assets {
-		container := &model.Container{
-			ID:            fmt.Sprintf("%s-%s", hostID, asset.ContainerID),
-			HostID:        hostID,
-			ContainerID:   asset.ContainerID,
-			ContainerName: asset.ContainerName,
-			Image:         asset.Image,
-			ImageID:       asset.ImageID,
-			Runtime:       asset.Runtime,
-			Status:        asset.Status,
-			CreatedAt:     asset.CreatedAt,
-			CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Container{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old container data: %w", err)
 		}
 
-		if err := s.db.Create(container).Error; err != nil {
-			s.logger.Error("failed to create container",
-				zap.String("host_id", hostID),
-				zap.String("container_id", asset.ContainerID),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			container := &model.Container{
+				ID:            shortHash(hostID, asset.ContainerID),
+				HostID:        hostID,
+				ContainerID:   asset.ContainerID,
+				ContainerName: asset.ContainerName,
+				Image:         asset.Image,
+				ImageID:       asset.ImageID,
+				Runtime:       asset.Runtime,
+				Status:        asset.Status,
+				CreatedAt:     asset.CreatedAt,
+				CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(container).Error; err != nil {
+				s.logger.Error("failed to create container",
+					zap.String("host_id", hostID),
+					zap.String("container_id", asset.ContainerID),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed container data",
@@ -341,32 +370,39 @@ func (s *AssetService) handleAppData(hostID, jsonData string) error {
 		assets = []engine.AppAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.App{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old app data: %w", err)
-	}
-
-	for _, asset := range assets {
-		app := &model.App{
-			ID:          fmt.Sprintf("%s-%s-%s", hostID, asset.AppType, asset.AppName),
-			HostID:      hostID,
-			AppType:     asset.AppType,
-			AppName:     asset.AppName,
-			Version:     asset.Version,
-			Port:        asset.Port,
-			ProcessID:   asset.ProcessID,
-			ConfigPath:  asset.ConfigPath,
-			DataPath:    asset.DataPath,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.App{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old app data: %w", err)
 		}
 
-		if err := s.db.Create(app).Error; err != nil {
-			s.logger.Error("failed to create app",
-				zap.String("host_id", hostID),
-				zap.String("app_type", asset.AppType),
-				zap.String("app_name", asset.AppName),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			app := &model.App{
+				ID:          shortHash(hostID, asset.AppType, asset.AppName),
+				HostID:      hostID,
+				AppType:     asset.AppType,
+				AppName:     asset.AppName,
+				Version:     asset.Version,
+				Port:        asset.Port,
+				ProcessID:   asset.ProcessID,
+				ConfigPath:  asset.ConfigPath,
+				DataPath:    asset.DataPath,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(app).Error; err != nil {
+				s.logger.Error("failed to create app",
+					zap.String("host_id", hostID),
+					zap.String("app_type", asset.AppType),
+					zap.String("app_name", asset.AppName),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed app data",
@@ -387,30 +423,37 @@ func (s *AssetService) handleNetInterfaceData(hostID, jsonData string) error {
 		assets = []engine.NetInterfaceAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.NetInterface{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old network interface data: %w", err)
-	}
-
-	for _, asset := range assets {
-		netInterface := &model.NetInterface{
-			ID:            fmt.Sprintf("%s-%s", hostID, asset.InterfaceName),
-			HostID:        hostID,
-			InterfaceName: asset.InterfaceName,
-			MACAddress:    asset.MACAddress,
-			IPv4Addresses: model.StringArray(asset.IPv4Addresses),
-			IPv6Addresses: model.StringArray(asset.IPv6Addresses),
-			MTU:           asset.MTU,
-			State:         asset.State,
-			CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.NetInterface{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old network interface data: %w", err)
 		}
 
-		if err := s.db.Create(netInterface).Error; err != nil {
-			s.logger.Error("failed to create network interface",
-				zap.String("host_id", hostID),
-				zap.String("interface_name", asset.InterfaceName),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			netInterface := &model.NetInterface{
+				ID:            shortHash(hostID, asset.InterfaceName),
+				HostID:        hostID,
+				InterfaceName: asset.InterfaceName,
+				MACAddress:    asset.MACAddress,
+				IPv4Addresses: model.StringArray(asset.IPv4Addresses),
+				IPv6Addresses: model.StringArray(asset.IPv6Addresses),
+				MTU:           asset.MTU,
+				State:         asset.State,
+				CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(netInterface).Error; err != nil {
+				s.logger.Error("failed to create network interface",
+					zap.String("host_id", hostID),
+					zap.String("interface_name", asset.InterfaceName),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed network interface data",
@@ -431,31 +474,38 @@ func (s *AssetService) handleVolumeData(hostID, jsonData string) error {
 		assets = []engine.VolumeAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Volume{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old volume data: %w", err)
-	}
-
-	for _, asset := range assets {
-		volume := &model.Volume{
-			ID:            fmt.Sprintf("%s-%s", hostID, asset.MountPoint),
-			HostID:        hostID,
-			Device:        asset.Device,
-			MountPoint:    asset.MountPoint,
-			FileSystem:    asset.FileSystem,
-			TotalSize:     asset.TotalSize,
-			UsedSize:      asset.UsedSize,
-			AvailableSize: asset.AvailableSize,
-			UsagePercent:  asset.UsagePercent,
-			CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Volume{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old volume data: %w", err)
 		}
 
-		if err := s.db.Create(volume).Error; err != nil {
-			s.logger.Error("failed to create volume",
-				zap.String("host_id", hostID),
-				zap.String("mount_point", asset.MountPoint),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			volume := &model.Volume{
+				ID:            shortHash(hostID, asset.MountPoint),
+				HostID:        hostID,
+				Device:        asset.Device,
+				MountPoint:    asset.MountPoint,
+				FileSystem:    asset.FileSystem,
+				TotalSize:     asset.TotalSize,
+				UsedSize:      asset.UsedSize,
+				AvailableSize: asset.AvailableSize,
+				UsagePercent:  asset.UsagePercent,
+				CollectedAt:   model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(volume).Error; err != nil {
+				s.logger.Error("failed to create volume",
+					zap.String("host_id", hostID),
+					zap.String("mount_point", asset.MountPoint),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed volume data",
@@ -476,28 +526,35 @@ func (s *AssetService) handleKmodData(hostID, jsonData string) error {
 		assets = []engine.KmodAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Kmod{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old kernel module data: %w", err)
-	}
-
-	for _, asset := range assets {
-		kmod := &model.Kmod{
-			ID:          fmt.Sprintf("%s-%s", hostID, asset.ModuleName),
-			HostID:      hostID,
-			ModuleName:  asset.ModuleName,
-			Size:        asset.Size,
-			UsedBy:      asset.UsedBy,
-			State:       asset.State,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Kmod{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old kernel module data: %w", err)
 		}
 
-		if err := s.db.Create(kmod).Error; err != nil {
-			s.logger.Error("failed to create kernel module",
-				zap.String("host_id", hostID),
-				zap.String("module_name", asset.ModuleName),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			kmod := &model.Kmod{
+				ID:          shortHash(hostID, asset.ModuleName),
+				HostID:      hostID,
+				ModuleName:  asset.ModuleName,
+				Size:        asset.Size,
+				UsedBy:      asset.UsedBy,
+				State:       asset.State,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(kmod).Error; err != nil {
+				s.logger.Error("failed to create kernel module",
+					zap.String("host_id", hostID),
+					zap.String("module_name", asset.ModuleName),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed kernel module data",
@@ -536,7 +593,7 @@ func (s *AssetService) handleServiceData(hostID, jsonData string) error {
 				CollectedAt: model.ToLocalTime(asset.CollectedAt),
 			}
 
-			if err := tx.Create(svc).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(svc).Error; err != nil {
 				s.logger.Error("failed to create service",
 					zap.String("host_id", hostID),
 					zap.String("service_name", asset.ServiceName),
@@ -587,7 +644,7 @@ func (s *AssetService) handleCronData(hostID, jsonData string) error {
 				CollectedAt: model.ToLocalTime(asset.CollectedAt),
 			}
 
-			if err := tx.Create(cron).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(cron).Error; err != nil {
 				s.logger.Error("failed to create cron",
 					zap.String("host_id", hostID),
 					zap.String("user", asset.User),

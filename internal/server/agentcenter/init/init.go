@@ -84,6 +84,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	// 9. 创建网络监听器
 	listener, err := net.Listen("tcp", cfg.Server.GRPC.Address())
 	if err != nil {
+		cancel()
 		logger.Fatal("监听端口失败", zap.Error(err), zap.String("address", cfg.Server.GRPC.Address()))
 		return nil, err
 	}

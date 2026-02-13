@@ -28,7 +28,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 PermitRootLogin no，然后重启 sshd 服务",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -52,7 +53,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 PermitEmptyPasswords no，然后重启 sshd 服务",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && (grep -q '^#*PermitEmptyPasswords' /etc/ssh/sshd_config && sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config) && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && (grep -q '^#*PermitEmptyPasswords' /etc/ssh/sshd_config && sed -i 's/^#*PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config) && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -75,8 +77,9 @@
         ]
       },
       "fix": {
-        "suggestion": "确保 /etc/ssh/sshd_config 中没有设置 Protocol 1，或明确设置 Protocol 2",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^Protocol/d' /etc/ssh/sshd_config && echo 'Protocol 2' >> /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "suggestion": "确保 /etc/ssh/sshd_config 中没有设置 Protocol 1（OpenSSH 7.6+ 已移除 Protocol 指令，默认仅支持 SSH-2）",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^[[:space:]]*Protocol[[:space:]]*1/d' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -100,7 +103,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 MaxAuthTries 4",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 4/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxAuthTries.*/MaxAuthTries 4/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -124,7 +128,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 LoginGraceTime 60",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 60/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*LoginGraceTime.*/LoginGraceTime 60/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -148,7 +153,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 ClientAliveInterval 300",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -172,7 +178,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 ClientAliveCountMax 3",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 3/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*ClientAliveCountMax.*/ClientAliveCountMax 3/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -196,7 +203,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 HostbasedAuthentication no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*HostbasedAuthentication.*/HostbasedAuthentication no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*HostbasedAuthentication.*/HostbasedAuthentication no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -220,7 +228,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 IgnoreRhosts yes",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*IgnoreRhosts.*/IgnoreRhosts yes/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*IgnoreRhosts.*/IgnoreRhosts yes/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -244,7 +253,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 X11Forwarding no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -268,7 +278,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 Banner /etc/issue.net",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*Banner.*/Banner \\/etc\\/issue.net/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*Banner.*/Banner \\/etc\\/issue.net/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -292,7 +303,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 MaxSessions 10",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxSessions.*/MaxSessions 10/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxSessions.*/MaxSessions 10/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -316,7 +328,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 MaxStartups 10:30:60",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxStartups.*/MaxStartups 10:30:60/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*MaxStartups.*/MaxStartups 10:30:60/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -340,7 +353,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 StrictModes yes",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*StrictModes.*/StrictModes yes/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*StrictModes.*/StrictModes yes/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -364,7 +378,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 AllowTcpForwarding no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -388,7 +403,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 LogLevel INFO",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*LogLevel.*/LogLevel INFO/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*LogLevel.*/LogLevel INFO/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -412,7 +428,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，配置强加密算法",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^Ciphers/d' /etc/ssh/sshd_config && echo 'Ciphers aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr' >> /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^Ciphers/d' /etc/ssh/sshd_config && echo 'Ciphers aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr' >> /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -436,7 +453,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，配置强 MAC 算法",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^MACs/d' /etc/ssh/sshd_config && echo 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256' >> /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^MACs/d' /etc/ssh/sshd_config && echo 'MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256' >> /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -460,7 +478,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，配置强密钥交换算法",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^KexAlgorithms/d' /etc/ssh/sshd_config && echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512' >> /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i '/^KexAlgorithms/d' /etc/ssh/sshd_config && echo 'KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512' >> /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -484,7 +503,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 PermitUserEnvironment no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*PermitUserEnvironment.*/PermitUserEnvironment no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*PermitUserEnvironment.*/PermitUserEnvironment no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -508,7 +528,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 GSSAPIAuthentication no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*GSSAPIAuthentication.*/GSSAPIAuthentication no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*GSSAPIAuthentication.*/GSSAPIAuthentication no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {
@@ -532,7 +553,8 @@
       },
       "fix": {
         "suggestion": "修改 /etc/ssh/sshd_config，设置 UseDNS no",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*UseDNS.*/UseDNS no/' /etc/ssh/sshd_config && if sshd -t; then systemctl reload sshd || systemctl restart sshd; else echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi"
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak && sed -i 's/^#*UseDNS.*/UseDNS no/' /etc/ssh/sshd_config && if ! sshd -t; then echo \"SSH 配置验证失败，回滚配置\" >&2; mv /etc/ssh/sshd_config.bak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": ["sshd"]
       }
     },
     {

@@ -4,6 +4,8 @@ package transport
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -348,6 +350,19 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 				default:
 					m.logger.Warn("agent update channel full, dropping update command")
 				}
+			}
+
+			// 处理 Agent 重启命令
+			if cmd.AgentRestart {
+				m.logger.Info("received agent restart command from server")
+				go func() {
+					time.Sleep(2 * time.Second)
+					restartCmd := exec.Command("systemctl", "restart", "mxsec-agent")
+					if err := restartCmd.Start(); err != nil {
+						m.logger.Error("failed to restart agent", zap.Error(err))
+						os.Exit(0)
+					}
+				}()
 			}
 
 			// 处理任务（按插件名称分发到对应通道）

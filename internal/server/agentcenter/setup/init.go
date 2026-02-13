@@ -22,18 +22,19 @@ import (
 
 // AgentCenterServices 包含 AgentCenter 服务所需的所有组件
 type AgentCenterServices struct {
-	Config                *config.Config
-	Logger                *zap.Logger
-	DB                    *gorm.DB
-	GRPCServer            *grpc.Server
-	TransferService       *transfer.Service
-	TaskService           *service.TaskService
-	TaskStatusUpdater     *service.TaskStatusUpdater
-	PluginUpdateScheduler *scheduler.PluginUpdateScheduler
-	AgentUpdateScheduler  *scheduler.AgentUpdateScheduler
-	StatusCtx             context.Context
-	StatusCancel          context.CancelFunc
-	Listener              net.Listener
+	Config                 *config.Config
+	Logger                 *zap.Logger
+	DB                     *gorm.DB
+	GRPCServer             *grpc.Server
+	TransferService        *transfer.Service
+	TaskService            *service.TaskService
+	TaskStatusUpdater      *service.TaskStatusUpdater
+	PluginUpdateScheduler  *scheduler.PluginUpdateScheduler
+	AgentUpdateScheduler   *scheduler.AgentUpdateScheduler
+	AgentRestartScheduler  *scheduler.AgentRestartScheduler
+	StatusCtx              context.Context
+	StatusCancel           context.CancelFunc
+	Listener               net.Listener
 }
 
 // Initialize 初始化 AgentCenter 服务的所有组件
@@ -89,7 +90,10 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	// 10. 创建 Agent 更新调度器
 	agentUpdateScheduler := scheduler.NewAgentUpdateScheduler(db, transferService, cfg, logger)
 
-	// 11. 创建网络监听器
+	// 11. 创建 Agent 重启调度器
+	agentRestartScheduler := scheduler.NewAgentRestartScheduler(db, transferService, logger)
+
+	// 12. 创建网络监听器
 	listener, err := net.Listen("tcp", cfg.Server.GRPC.Address())
 	if err != nil {
 		cancel() // 确保在错误时取消 context
@@ -106,7 +110,8 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		TaskService:           taskService,
 		TaskStatusUpdater:     taskStatusUpdater,
 		PluginUpdateScheduler: pluginUpdateScheduler,
-		AgentUpdateScheduler:  agentUpdateScheduler,
+		AgentUpdateScheduler:   agentUpdateScheduler,
+		AgentRestartScheduler: agentRestartScheduler,
 		StatusCtx:             ctx,
 		StatusCancel:          cancel,
 		Listener:              listener,
@@ -132,6 +137,9 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 
 	// 启动 Agent 更新调度器（检查 Agent 版本更新并推送）
 	go s.AgentUpdateScheduler.Start(s.StatusCtx)
+
+	// 启动 Agent 重启调度器（检查重启记录并下发命令）
+	go s.AgentRestartScheduler.Start(s.StatusCtx)
 }
 
 // Cleanup 清理资源

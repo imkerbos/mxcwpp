@@ -174,5 +174,6 @@ var (
 		&ComponentPackage{},
 		&HostPlugin{},
 		&ComponentPushRecord{},
+		&AgentRestartRecord{},
 	}
 )

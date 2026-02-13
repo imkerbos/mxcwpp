@@ -827,3 +827,79 @@ func (h *HostsHandler) DeleteHost(c *gin.Context) {
 	h.logger.Info("主机已删除", zap.String("host_id", hostID), zap.String("hostname", host.Hostname))
 	SuccessMessage(c, "主机删除成功")
 }
+
+// RestartAgentRequest Agent 重启请求
+type RestartAgentRequest struct {
+	HostIDs []string `json:"host_ids"` // 为空表示全部在线主机
+}
+
+// RestartAgent 重启 Agent
+// POST /api/v1/hosts/restart-agent
+func (h *HostsHandler) RestartAgent(c *gin.Context) {
+	var req RestartAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 查询目标在线主机数量
+	query := h.db.Model(&model.Host{}).Where("status = ?", model.HostStatusOnline)
+	if len(req.HostIDs) > 0 {
+		query = query.Where("host_id IN ?", req.HostIDs)
+	}
+
+	var totalCount int64
+	if err := query.Count(&totalCount).Error; err != nil {
+		h.logger.Error("查询在线主机数量失败", zap.Error(err))
+		InternalError(c, "查询在线主机数量失败")
+		return
+	}
+
+	if totalCount == 0 {
+		BadRequest(c, "没有在线的目标主机")
+		return
+	}
+
+	// 确定 target_type
+	targetType := "all"
+	if len(req.HostIDs) > 0 {
+		targetType = "selected"
+	}
+
+	// 创建重启记录
+	record := model.AgentRestartRecord{
+		TargetType:  targetType,
+		TargetHosts: model.StringArray(req.HostIDs),
+		Status:      model.AgentRestartStatusPending,
+		TotalCount:  int(totalCount),
+	}
+	if err := h.db.Create(&record).Error; err != nil {
+		h.logger.Error("创建重启记录失败", zap.Error(err))
+		InternalError(c, "创建重启记录失败")
+		return
+	}
+
+	h.logger.Info("创建 Agent 重启记录",
+		zap.Uint("record_id", record.ID),
+		zap.String("target_type", targetType),
+		zap.Int64("total_count", totalCount),
+	)
+
+	SuccessWithMessage(c, "重启命令已提交", gin.H{
+		"record_id":   record.ID,
+		"total_count": totalCount,
+	})
+}
+
+// GetRestartRecords 获取 Agent 重启记录
+// GET /api/v1/hosts/restart-records
+func (h *HostsHandler) GetRestartRecords(c *gin.Context) {
+	var records []model.AgentRestartRecord
+	if err := h.db.Order("created_at DESC").Limit(20).Find(&records).Error; err != nil {
+		h.logger.Error("查询重启记录失败", zap.Error(err))
+		InternalError(c, "查询重启记录失败")
+		return
+	}
+
+	Success(c, records)
+}

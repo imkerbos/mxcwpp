@@ -212,8 +212,9 @@ func savePolicyToDB(db *gorm.DB, policy *engine.Policy, groupID string, logger *
 
 		// 转换 Fix 配置
 		fixConfig := model.FixConfig{
-			Suggestion: rule.Fix.Suggestion,
-			Command:    rule.Fix.Command,
+			Suggestion:      rule.Fix.Suggestion,
+			Command:         rule.Fix.Command,
+			RestartServices: rule.Fix.RestartServices,
 		}
 
 		dbRule := &model.Rule{

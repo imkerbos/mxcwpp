@@ -127,6 +127,16 @@ export const hostsApi = {
     return apiClient.delete(`/hosts/${hostId}`)
   },
 
+  // 重启 Agent
+  restartAgent: (hostIds?: string[]) => {
+    return apiClient.post('/hosts/restart-agent', { host_ids: hostIds || [] })
+  },
+
+  // 获取 Agent 重启记录
+  getRestartRecords: () => {
+    return apiClient.get('/hosts/restart-records')
+  },
+
   // 导出主机基线检查结果
   exportBaselineResults: async (hostId: string, format: 'markdown' | 'excel') => {
     const token = localStorage.getItem('mxcsec_token')
