@@ -39,7 +39,7 @@
             :inline-collapsed="collapsed"
             @click="handleMenuClick"
           >
-            <a-menu-item key="dashboard">
+            <a-menu-item key="dashboard" @click.native="(e: MouseEvent) => handleNavClick(e, 'dashboard')">
               <template #icon>
                 <DashboardOutlined />
               </template>
@@ -50,21 +50,21 @@
                 <DatabaseOutlined />
               </template>
               <template #title>资产中心</template>
-              <a-menu-item key="hosts">主机列表</a-menu-item>
-              <a-menu-item key="business-lines">业务线管理</a-menu-item>
+              <a-menu-item key="hosts" @click.native="(e: MouseEvent) => handleNavClick(e, 'hosts')">主机列表</a-menu-item>
+              <a-menu-item key="business-lines" @click.native="(e: MouseEvent) => handleNavClick(e, 'business-lines')">业务线管理</a-menu-item>
             </a-sub-menu>
             <a-sub-menu key="baseline-menu">
               <template #icon>
                 <SafetyOutlined />
               </template>
               <template #title>基线安全</template>
-              <a-menu-item key="policy-groups">策略组管理</a-menu-item>
-              <a-menu-item key="policies">基线检查</a-menu-item>
-              <a-menu-item key="tasks">任务执行</a-menu-item>
-              <a-menu-item key="baseline-fix">基线修复</a-menu-item>
-              <a-menu-item key="baseline-fix-history">修复历史</a-menu-item>
+              <a-menu-item key="policy-groups" @click.native="(e: MouseEvent) => handleNavClick(e, 'policy-groups')">策略组管理</a-menu-item>
+              <a-menu-item key="policies" @click.native="(e: MouseEvent) => handleNavClick(e, 'policies')">基线检查</a-menu-item>
+              <a-menu-item key="tasks" @click.native="(e: MouseEvent) => handleNavClick(e, 'tasks')">任务执行</a-menu-item>
+              <a-menu-item key="baseline-fix" @click.native="(e: MouseEvent) => handleNavClick(e, 'baseline-fix')">基线修复</a-menu-item>
+              <a-menu-item key="baseline-fix-history" @click.native="(e: MouseEvent) => handleNavClick(e, 'baseline-fix-history')">修复历史</a-menu-item>
             </a-sub-menu>
-            <a-menu-item key="alerts">
+            <a-menu-item key="alerts" @click.native="(e: MouseEvent) => handleNavClick(e, 'alerts')">
               <template #icon>
                 <BellOutlined />
               </template>
@@ -75,14 +75,14 @@
                 <SettingOutlined />
               </template>
               <template #title>系统管理</template>
-              <a-menu-item key="system-collection">平台授权</a-menu-item>
-              <a-menu-item key="system-components">组件列表</a-menu-item>
-              <a-menu-item key="system-install">安装配置</a-menu-item>
-              <a-menu-item key="users">用户管理</a-menu-item>
-              <a-menu-item key="system-settings">基本设置</a-menu-item>
-              <a-menu-item key="system-notification">通知管理</a-menu-item>
-              <a-menu-item key="system-reports">报告管理</a-menu-item>
-              <a-menu-item key="system-task-report">任务报告</a-menu-item>
+              <a-menu-item key="system-collection" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-collection')">平台授权</a-menu-item>
+              <a-menu-item key="system-components" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-components')">组件列表</a-menu-item>
+              <a-menu-item key="system-install" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-install')">安装配置</a-menu-item>
+              <a-menu-item key="users" @click.native="(e: MouseEvent) => handleNavClick(e, 'users')">用户管理</a-menu-item>
+              <a-menu-item key="system-settings" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-settings')">基本设置</a-menu-item>
+              <a-menu-item key="system-notification" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-notification')">通知管理</a-menu-item>
+              <a-menu-item key="system-reports" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-reports')">报告管理</a-menu-item>
+              <a-menu-item key="system-task-report" @click.native="(e: MouseEvent) => handleNavClick(e, 'system-task-report')">任务报告</a-menu-item>
             </a-sub-menu>
           </a-menu>
         </div>
@@ -320,7 +320,32 @@ const routeMap: Record<string, string> = {
   'alerts': '/alerts',
 }
 
+// 记录是否是 Ctrl/Cmd+Click，用于阻止 handleMenuClick 的路由跳转
+let isNewTabClick = false
+
+// Ctrl+Click / Cmd+Click 新开标签页，当前页面保持不动
+const handleNavClick = (e: MouseEvent, key: string) => {
+  const path = routeMap[key]
+  if (!path) return
+
+  if (e.ctrlKey || e.metaKey) {
+    isNewTabClick = true
+    e.preventDefault()
+    e.stopPropagation()
+    window.open(router.resolve(path).href, '_blank')
+    // 恢复当前选中状态
+    const currentKey = Object.entries(routeMap).find(([, v]) => v === route.path)?.[0]
+    if (currentKey) {
+      selectedKeys.value = [currentKey]
+    }
+  }
+}
+
 const handleMenuClick = ({ key }: { key: string }) => {
+  if (isNewTabClick) {
+    isNewTabClick = false
+    return
+  }
   const path = routeMap[key]
   if (path) {
     router.push(path)
