@@ -2,6 +2,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -13,6 +15,19 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 	"github.com/imkerbos/mxsec-platform/plugins/collector/engine"
 )
+
+// shortHash 生成短哈希 ID（取 SHA256 前 16 字节 = 32 hex），确保不超过 varchar(128)
+func shortHash(parts ...string) string {
+	h := sha256.New()
+	for i, p := range parts {
+		if i > 0 {
+			h.Write([]byte("-"))
+		}
+		h.Write([]byte(p))
+	}
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum[:16]) // 32 hex chars
+}
 
 // AssetService 资产数据处理服务
 type AssetService struct {
@@ -503,29 +518,36 @@ func (s *AssetService) handleServiceData(hostID, jsonData string) error {
 		assets = []engine.ServiceAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Service{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old service data: %w", err)
-	}
-
-	for _, asset := range assets {
-		service := &model.Service{
-			ID:          fmt.Sprintf("%s-%s", hostID, asset.ServiceName),
-			HostID:      hostID,
-			ServiceName: asset.ServiceName,
-			ServiceType: asset.ServiceType,
-			Status:      asset.Status,
-			Enabled:     asset.Enabled,
-			Description: asset.Description,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Service{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old service data: %w", err)
 		}
 
-		if err := s.db.Create(service).Error; err != nil {
-			s.logger.Error("failed to create service",
-				zap.String("host_id", hostID),
-				zap.String("service_name", asset.ServiceName),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			svc := &model.Service{
+				ID:          shortHash(hostID, asset.ServiceName),
+				HostID:      hostID,
+				ServiceName: asset.ServiceName,
+				ServiceType: asset.ServiceType,
+				Status:      asset.Status,
+				Enabled:     asset.Enabled,
+				Description: asset.Description,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Create(svc).Error; err != nil {
+				s.logger.Error("failed to create service",
+					zap.String("host_id", hostID),
+					zap.String("service_name", asset.ServiceName),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed service data",
@@ -546,30 +568,38 @@ func (s *AssetService) handleCronData(hostID, jsonData string) error {
 		assets = []engine.CronAsset{asset}
 	}
 
-	if err := s.db.Where("host_id = ?", hostID).Delete(&model.Cron{}).Error; err != nil {
-		return fmt.Errorf("failed to delete old cron data: %w", err)
-	}
-
-	for _, asset := range assets {
-		cron := &model.Cron{
-			ID:          fmt.Sprintf("%s-%s-%s", hostID, asset.User, asset.Schedule),
-			HostID:      hostID,
-			User:        asset.User,
-			Schedule:    asset.Schedule,
-			Command:     asset.Command,
-			CronType:    asset.CronType,
-			Enabled:     asset.Enabled,
-			CollectedAt: model.ToLocalTime(asset.CollectedAt),
+	// 使用事务保证 delete+insert 原子性，防止并发重复写入导致数据丢失
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.Cron{}).Error; err != nil {
+			return fmt.Errorf("failed to delete old cron data: %w", err)
 		}
 
-		if err := s.db.Create(cron).Error; err != nil {
-			s.logger.Error("failed to create cron",
-				zap.String("host_id", hostID),
-				zap.String("user", asset.User),
-				zap.String("schedule", asset.Schedule),
-				zap.Error(err))
-			continue
+		for _, asset := range assets {
+			cron := &model.Cron{
+				// 使用哈希 ID 避免 {hostID}-{user}-{schedule} 超过 varchar(128)
+				ID:          shortHash(hostID, asset.User, asset.Schedule),
+				HostID:      hostID,
+				User:        asset.User,
+				Schedule:    asset.Schedule,
+				Command:     asset.Command,
+				CronType:    asset.CronType,
+				Enabled:     asset.Enabled,
+				CollectedAt: model.ToLocalTime(asset.CollectedAt),
+			}
+
+			if err := tx.Create(cron).Error; err != nil {
+				s.logger.Error("failed to create cron",
+					zap.String("host_id", hostID),
+					zap.String("user", asset.User),
+					zap.String("schedule", asset.Schedule),
+					zap.Error(err))
+				continue
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	s.logger.Info("processed cron data",

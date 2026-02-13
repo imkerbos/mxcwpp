@@ -24,6 +24,9 @@ const (
 	TaskStatusFailed     TaskStatus = "failed"     // Task failed
 )
 
+// MaxRetryCount 是任务最大重试次数
+const MaxRetryCount = 3
+
 // TrackedTask represents a task with tracking information
 type TrackedTask struct {
 	Task         *grpc.Task `json:"task"`
@@ -141,7 +144,7 @@ func (t *TaskTracker) MarkCompleted(token string) error {
 	return nil
 }
 
-// MarkFailed marks a task as failed
+// MarkFailed marks a task as failed, keeping it for retry if under MaxRetryCount
 func (t *TaskTracker) MarkFailed(token string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -151,35 +154,53 @@ func (t *TaskTracker) MarkFailed(token string) error {
 		return fmt.Errorf("task not found: %s", token)
 	}
 
-	tracked.Status = TaskStatusFailed
+	tracked.RetryCount++
 	tracked.CompletedAt = time.Now()
 
-	// Remove from memory
-	delete(t.tasks, token)
-
-	// Remove from disk
-	if err := t.removeTask(token); err != nil {
-		t.logger.Warn("failed to remove failed task file", zap.String("token", token), zap.Error(err))
+	// 超出最大重试次数，彻底删除
+	if tracked.RetryCount > MaxRetryCount {
+		delete(t.tasks, token)
+		if err := t.removeTask(token); err != nil {
+			t.logger.Warn("failed to remove exhausted task file", zap.String("token", token), zap.Error(err))
+		}
+		t.logger.Warn("task exceeded max retry count, removed",
+			zap.String("token", token),
+			zap.Int("retry_count", tracked.RetryCount))
+		return nil
 	}
 
-	t.logger.Info("task marked as failed", zap.String("token", token))
+	// 标记为 failed，保留在内存和磁盘中等待重试
+	tracked.Status = TaskStatusFailed
+	if err := t.saveTask(tracked); err != nil {
+		t.logger.Warn("failed to save failed task", zap.String("token", token), zap.Error(err))
+	}
+
+	t.logger.Info("task marked as failed, will retry",
+		zap.String("token", token),
+		zap.Int("retry_count", tracked.RetryCount),
+		zap.Int("max_retry", MaxRetryCount))
 	return nil
 }
 
-// GetPendingTasks returns tasks that need to be retried (received or dispatched but not completed)
+// GetPendingTasks returns tasks that need to be retried (received, dispatched, or failed but under max retry)
 func (t *TaskTracker) GetPendingTasks(pluginName string) []*grpc.Task {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	var pending []*grpc.Task
 	for _, tracked := range t.tasks {
-		if tracked.PluginName == pluginName &&
-			(tracked.Status == TaskStatusReceived || tracked.Status == TaskStatusDispatched) {
+		if tracked.PluginName != pluginName {
+			continue
+		}
+		if tracked.Status == TaskStatusReceived ||
+			tracked.Status == TaskStatusDispatched ||
+			tracked.Status == TaskStatusFailed {
 			pending = append(pending, tracked.Task)
 			t.logger.Info("found pending task for retry",
 				zap.String("token", tracked.Task.Token),
 				zap.String("plugin", pluginName),
 				zap.String("status", string(tracked.Status)),
+				zap.Int("retry_count", tracked.RetryCount),
 				zap.Time("received_at", tracked.ReceivedAt))
 		}
 	}
@@ -237,17 +258,21 @@ func (t *TaskTracker) loadTasks() error {
 			continue
 		}
 
-		// Only load tasks that are not completed
-		if tracked.Status != TaskStatusCompleted && tracked.Status != TaskStatusFailed {
+		// Load tasks that are not completed (including failed tasks for retry)
+		if tracked.Status == TaskStatusCompleted {
+			// Clean up completed task files
+			os.Remove(filePath)
+		} else if tracked.Status == TaskStatusFailed && tracked.RetryCount > MaxRetryCount {
+			// Clean up exhausted failed task files
+			os.Remove(filePath)
+		} else {
 			t.tasks[tracked.Task.Token] = &tracked
 			loadedCount++
 			t.logger.Info("loaded pending task from disk",
 				zap.String("token", tracked.Task.Token),
 				zap.String("plugin", tracked.PluginName),
-				zap.String("status", string(tracked.Status)))
-		} else {
-			// Clean up completed/failed task files
-			os.Remove(filePath)
+				zap.String("status", string(tracked.Status)),
+				zap.Int("retry_count", tracked.RetryCount))
 		}
 	}
 

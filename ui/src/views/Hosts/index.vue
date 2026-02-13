@@ -221,9 +221,9 @@
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'hostname'">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <a-button type="link" @click="(e: MouseEvent) => handleViewDetail(record, e)" @mousedown="(e: MouseEvent) => handleLinkMouseDown(record.host_id, e)">
+            <router-link :to="`/hosts/${record.host_id}`" class="host-link">
               {{ record.hostname }}
-            </a-button>
+            </router-link>
             <a-tag v-if="record.runtime_type === 'docker'" color="blue" style="margin: 0;">
               Docker
             </a-tag>
@@ -254,7 +254,7 @@
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
-            <a-button type="link" @click="(e: MouseEvent) => handleViewDetail(record, e)" @mousedown="(e: MouseEvent) => handleLinkMouseDown(record.host_id, e)">查看详情</a-button>
+            <router-link :to="`/hosts/${record.host_id}`" class="host-link">查看详情</router-link>
             <a-popconfirm
               title="确定要删除这台主机吗？"
               description="删除后将同时删除该主机的所有扫描结果、告警和相关数据，此操作不可恢复。"
@@ -310,7 +310,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   ReloadOutlined,
   SearchOutlined,
@@ -338,6 +338,7 @@ import { OS_OPTIONS } from '@/constants/os'
 use([CanvasRenderer, PieChart, TitleComponent, TooltipComponent, LegendComponent])
 
 const router = useRouter()
+const route = useRoute()
 const osOptions = OS_OPTIONS
 
 const loading = ref(false)
@@ -533,8 +534,22 @@ const columns = [
   },
 ]
 
+// 同步筛选条件到 URL 查询参数
+const syncFiltersToURL = () => {
+  const query: Record<string, string> = {}
+  if (pagination.current !== 1) query.page = String(pagination.current)
+  if (pagination.pageSize !== 20) query.page_size = String(pagination.pageSize)
+  if (filters.search) query.search = filters.search
+  if (filters.business_line) query.business_line = filters.business_line
+  if (filters.os_family) query.os_family = filters.os_family
+  if (filters.status) query.status = filters.status
+  if (filters.runtime_type) query.runtime_type = filters.runtime_type
+  router.replace({ query })
+}
+
 const loadHosts = async () => {
   loading.value = true
+  syncFiltersToURL()
   try {
     const params: any = {
       page: pagination.current,
@@ -616,23 +631,6 @@ const handleTableChange = (pag: any) => {
   loadHosts()
 }
 
-const handleViewDetail = (record: Host, e?: MouseEvent) => {
-  // 如果按下 Ctrl/Cmd 键，不执行默认导航（由 mousedown 处理）
-  if (e && (e.ctrlKey || e.metaKey)) {
-    return
-  }
-  router.push(`/hosts/${record.host_id}`)
-}
-
-// 处理链接鼠标按下事件（支持 Ctrl/Cmd+Click 新标签打开）
-const handleLinkMouseDown = (hostId: string, e: MouseEvent) => {
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault()
-    const url = `${window.location.origin}/hosts/${hostId}`
-    window.open(url, '_blank')
-  }
-}
-
 // 删除主机
 const handleDeleteHost = async (record: Host) => {
   try {
@@ -698,12 +696,16 @@ const handleCancelBatchBindBusinessLine = () => {
 }
 
 onMounted(() => {
-  // 从 URL 查询参数读取业务线筛选
-  const route = router.currentRoute.value
-  if (route.query.business_line) {
-    filters.business_line = route.query.business_line as string
-  }
-  
+  // 从 URL 查询参数恢复筛选条件和分页
+  const q = route.query
+  if (q.page) pagination.current = Number(q.page) || 1
+  if (q.page_size) pagination.pageSize = Number(q.page_size) || 20
+  if (q.search) filters.search = q.search as string
+  if (q.business_line) filters.business_line = q.business_line as string
+  if (q.os_family) filters.os_family = q.os_family as string
+  if (q.status) filters.status = q.status as string
+  if (q.runtime_type) filters.runtime_type = q.runtime_type as string
+
   loadBusinessLines()
   loadHosts()
   loadStatusDistribution()
@@ -884,5 +886,15 @@ onMounted(() => {
   background: #fafbfc;
   border-radius: 6px;
   border: 1px solid #f0f0f0;
+}
+
+.host-link {
+  color: #1890ff;
+  text-decoration: none;
+}
+
+.host-link:hover {
+  color: #40a9ff;
+  text-decoration: underline;
 }
 </style>

@@ -246,19 +246,17 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 	}
 
 	// 查询基线结果（按 rule_id 去重，只返回每个规则的最新结果，过滤已删除的规则）
+	// 使用 ROW_NUMBER() 窗口函数（MySQL 8.0+）代替子查询+双JOIN，性能更优
 	var results []model.ScanResult
-	subQuery := h.db.Model(&model.ScanResult{}).
-		Select("rule_id, MAX(checked_at) as max_checked_at").
-		Where("host_id = ?", hostID).
-		Group("rule_id")
-
-	resultQuery := h.db.Table("scan_results").
-		Select("scan_results.*").
-		Joins("INNER JOIN (?) AS latest ON scan_results.rule_id = latest.rule_id AND scan_results.checked_at = latest.max_checked_at", subQuery).
-		Joins("INNER JOIN rules ON scan_results.rule_id = rules.rule_id").
-		Where("scan_results.host_id = ?", hostID).
-		Order("scan_results.checked_at DESC")
-	resultQuery.Find(&results)
+	h.db.Raw(`
+		SELECT ranked.* FROM (
+			SELECT sr.*, ROW_NUMBER() OVER (PARTITION BY sr.rule_id ORDER BY sr.checked_at DESC) AS rn
+			FROM scan_results sr
+			INNER JOIN rules ON sr.rule_id = rules.rule_id AND rules.deleted_at IS NULL
+			WHERE sr.host_id = ?
+		) ranked WHERE ranked.rn = 1
+		ORDER BY ranked.checked_at DESC
+	`, hostID).Scan(&results)
 
 	// 查询最新监控数据
 	var latestMetric model.HostMetric

@@ -308,6 +308,7 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	rx_w.Close()
 
 	// 7. 创建插件实例
+	now := time.Now()
 	plugin := &Plugin{
 		Config:       cfg,
 		cmd:          cmd,
@@ -316,8 +317,8 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		logWriter:    logWriter,
 		workDir:      workDir,
 		status:       StatusStarting,
-		startTime:    time.Now(),
-		lastActivity: time.Now(),
+		startTime:    now,
+		lastActivity: now, // 与 startTime 完全相等，After() 返回 false
 		stopCh:       make(chan struct{}),
 		logger:       m.logger.With(zap.String("plugin", cfg.Name)),
 	}
@@ -706,13 +707,13 @@ func (m *Manager) forceRestartPlugin(name string) {
 		return
 	}
 
-	// 先停止
+	// 先停止（等待 waitProcess 完成全部清理）
 	m.stopPlugin(plugin)
 
-	// 等待进程完全退出
-	time.Sleep(2 * time.Second)
+	// 显式确保任务通道已清理（防止旧 sendTask defer 延迟执行的竞争）
+	m.transport.UnregisterTaskChannel(name)
 
-	// 重启
+	// 重启（不再需要 sleep，stopPlugin 已等待完整清理）
 	m.restartPlugin(plugin)
 }
 
@@ -886,6 +887,8 @@ func (m *Manager) sendTask(plugin *Plugin) {
 }
 
 // stopPlugin 停止插件
+// 注意：不直接调用 cmd.Wait()，而是等待 waitProcess 通过 stopCh 通知完成，
+// 避免与 waitProcess 的 Wait() 调用产生竞争。
 func (m *Manager) stopPlugin(plugin *Plugin) error {
 	plugin.mu.Lock()
 	if plugin.status != StatusRunning && plugin.status != StatusStarting {
@@ -904,19 +907,21 @@ func (m *Manager) stopPlugin(plugin *Plugin) error {
 		}
 	}
 
-	// 等待进程退出（最多等待 5 秒）
-	done := make(chan error, 1)
-	go func() {
-		done <- plugin.cmd.Wait()
-	}()
-
+	// 等待 waitProcess 完成清理（通过 stopCh 通知）
 	select {
-	case <-done:
+	case <-plugin.stopCh:
 		plugin.logger.Info("plugin stopped")
 	case <-time.After(5 * time.Second):
 		plugin.logger.Warn("plugin did not stop gracefully, killing")
 		if plugin.cmd.Process != nil {
 			plugin.cmd.Process.Kill()
+		}
+		// Kill 后再等 waitProcess 完成
+		select {
+		case <-plugin.stopCh:
+			plugin.logger.Info("plugin stopped after kill")
+		case <-time.After(3 * time.Second):
+			plugin.logger.Error("plugin failed to stop even after kill")
 		}
 	}
 

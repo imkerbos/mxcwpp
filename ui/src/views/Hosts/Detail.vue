@@ -13,7 +13,7 @@
     <!-- 标签页 -->
     <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
       <a-tab-pane key="overview" tab="主机概览">
-        <HostOverview :host="host" :loading="loading" @update:host="host = $event" @view-detail="handleViewDetail" />
+        <HostOverview :host="host" :loading="loading" :score-data="scoreData" @update:host="host = $event" @view-detail="handleViewDetail" />
       </a-tab-pane>
       <a-tab-pane key="alerts" :tab="`安全告警(${alertCount})`">
         <SecurityAlerts :host-id="hostId" />
@@ -45,7 +45,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
-import type { HostDetail } from '@/api/types'
+import type { HostDetail, BaselineScore } from '@/api/types'
 import HostOverview from './components/HostOverview.vue'
 import SecurityAlerts from './components/SecurityAlerts.vue'
 import VulnerabilityRisk from './components/VulnerabilityRisk.vue'
@@ -60,6 +60,7 @@ const route = useRoute()
 
 const loading = ref(false)
 const host = ref<HostDetail | null>(null)
+const scoreData = ref<BaselineScore | null>(null)
 const validTabs = ['overview', 'alerts', 'vulnerabilities', 'baseline', 'runtime', 'antivirus', 'performance', 'fingerprint']
 const activeTab = ref((route.query.tab as string) && validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview')
 const hostId = ref('')
@@ -75,15 +76,16 @@ const loadHostDetail = async () => {
   hostId.value = id
   loading.value = true
   try {
-    const [hostData, scoreData] = await Promise.all([
+    const [hostData, scoreResult] = await Promise.all([
       hostsApi.get(id),
       hostsApi.getScore(id).catch(() => null),
     ])
     host.value = hostData
+    scoreData.value = scoreResult
 
     // 计算基线风险数量
-    if (scoreData) {
-      baselineCount.value = scoreData.fail_count
+    if (scoreResult) {
+      baselineCount.value = scoreResult.fail_count
     }
 
     // TODO: 加载告警和漏洞数量
@@ -95,7 +97,12 @@ const loadHostDetail = async () => {
 }
 
 const handleBack = () => {
-  router.push('/hosts')
+  // 使用 router.back() 以保留列表页的 URL 查询参数（筛选条件、分页）
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/hosts')
+  }
 }
 
 const handleTabChange = (key: string) => {

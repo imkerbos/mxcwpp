@@ -24,7 +24,6 @@ type Manager struct {
 	connMgr        *connection.Manager
 	agentID        string
 	sendBuffer     chan *grpc.PackagedData
-	recvBuffer     chan *grpc.Command
 	pluginConfigCh chan []*grpc.Config                              // 插件配置通道
 	agentUpdateCh  chan *grpc.AgentUpdate                           // Agent 更新通道
 	taskCh         chan *grpc.Task                                  // 任务通道（兼容旧代码）
@@ -52,7 +51,6 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 		connMgr:        connMgr,
 		agentID:        agentID,
 		sendBuffer:     make(chan *grpc.PackagedData, 100),
-		recvBuffer:     make(chan *grpc.Command, 100),
 		pluginConfigCh: make(chan []*grpc.Config, 10),
 		agentUpdateCh:  make(chan *grpc.AgentUpdate, 10),
 		taskCh:         make(chan *grpc.Task, 100),
@@ -386,12 +384,6 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 				}
 			}
 
-			// 将命令放入接收缓冲区（用于其他用途）
-			select {
-			case m.recvBuffer <- cmd:
-			default:
-				m.logger.Warn("receive buffer full, dropping command")
-			}
 		}
 	}
 }
@@ -427,16 +419,6 @@ func (m *Manager) SendHeartbeat(data *grpc.PackagedData) error {
 			return fmt.Errorf("send buffer full and cache failed: %w", err)
 		}
 		return fmt.Errorf("send buffer full, data cached")
-	}
-}
-
-// ReceiveCommand 接收命令（非阻塞）
-func (m *Manager) ReceiveCommand() (*grpc.Command, error) {
-	select {
-	case cmd := <-m.recvBuffer:
-		return cmd, nil
-	default:
-		return nil, nil
 	}
 }
 
@@ -602,16 +584,11 @@ func (m *Manager) GetTaskChannel() <-chan *grpc.Task {
 }
 
 // RegisterTaskChannel 为指定插件注册专用任务通道
+// 总是创建新 channel，避免旧 sendTask 的 defer UnregisterTaskChannel close 到新 channel
 func (m *Manager) RegisterTaskChannel(pluginName string) <-chan *grpc.Task {
 	m.taskChMu.Lock()
 	defer m.taskChMu.Unlock()
 
-	// 如果已存在，直接返回
-	if ch, ok := m.taskChannels[pluginName]; ok {
-		return ch
-	}
-
-	// 创建新的任务通道
 	ch := make(chan *grpc.Task, 100)
 	m.taskChannels[pluginName] = ch
 	m.logger.Info("registered task channel for plugin", zap.String("plugin_name", pluginName))
@@ -619,12 +596,12 @@ func (m *Manager) RegisterTaskChannel(pluginName string) <-chan *grpc.Task {
 }
 
 // UnregisterTaskChannel 注销插件的任务通道
+// 仅从 map 中删除，不 close channel（让 GC 回收），避免 close 到新 channel 的风险
 func (m *Manager) UnregisterTaskChannel(pluginName string) {
 	m.taskChMu.Lock()
 	defer m.taskChMu.Unlock()
 
-	if ch, ok := m.taskChannels[pluginName]; ok {
-		close(ch)
+	if _, ok := m.taskChannels[pluginName]; ok {
 		delete(m.taskChannels, pluginName)
 		m.logger.Info("unregistered task channel for plugin", zap.String("plugin_name", pluginName))
 	}

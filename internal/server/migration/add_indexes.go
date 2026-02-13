@@ -52,6 +52,18 @@ func AddPerformanceIndexes(db *gorm.DB, logger *zap.Logger) error {
 	}
 	logger.Info("索引创建成功", zap.String("index", "idx_scan_tasks_status_created"))
 
+	// 4. scan_results 表：添加复合索引 (host_id, status, severity)
+	// 用于优化主机风险统计查询（GetHostRiskStatistics）
+	indexSQL4 := `
+		CREATE INDEX IF NOT EXISTS idx_scan_results_host_status_severity
+		ON scan_results(host_id, status, severity)
+	`
+	if err := db.Exec(indexSQL4).Error; err != nil {
+		logger.Error("创建索引失败", zap.Error(err), zap.String("index", "idx_scan_results_host_status_severity"))
+		return fmt.Errorf("创建索引失败: %w", err)
+	}
+	logger.Info("索引创建成功", zap.String("index", "idx_scan_results_host_status_severity"))
+
 	logger.Info("性能优化索引添加完成")
 	return nil
 }

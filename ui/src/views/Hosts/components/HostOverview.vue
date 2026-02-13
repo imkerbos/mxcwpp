@@ -897,6 +897,7 @@ import { formatDateTime } from '@/utils/date'
 const props = defineProps<{
   host: HostDetail | null
   loading: boolean
+  scoreData?: BaselineScore | null
 }>()
 
 const emit = defineEmits<{
@@ -1123,11 +1124,17 @@ const loadOverviewData = async () => {
   if (!props.host) return
 
   try {
-    // 加载基线得分
-    const scoreData = await hostsApi.getScore(props.host.host_id).catch(() => null)
-    if (scoreData) {
-      score.value = scoreData
-      baselineCount.value = scoreData.fail_count
+    // 使用父组件传入的 scoreData（避免重复 API 调用）
+    if (props.scoreData) {
+      score.value = props.scoreData
+      baselineCount.value = props.scoreData.fail_count
+    } else {
+      // 兜底：如果父组件没有传入，自行加载
+      const fetchedScore = await hostsApi.getScore(props.host.host_id).catch(() => null)
+      if (fetchedScore) {
+        score.value = fetchedScore
+        baselineCount.value = fetchedScore.fail_count
+      }
     }
 
     // 加载风险统计数据
