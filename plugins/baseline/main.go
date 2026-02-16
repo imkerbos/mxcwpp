@@ -342,35 +342,31 @@ func handleFixTask(ctx context.Context, taskData map[string]interface{}, fixer *
 		zap.Int("policy_count", len(policies)),
 		zap.Int("rule_count", len(ruleIDs)))
 
-	// 执行修复
-	results := fixer.FixBatch(ctx, policies, ruleIDs, osFamily, osVersion)
-
-	// 上报结果
-	for _, result := range results {
+	// 执行修复（通过回调实时上报每条结果）
+	results := fixer.FixBatch(ctx, policies, ruleIDs, osFamily, osVersion, func(result *engine.FixResult) {
 		record := &bridge.Record{
 			DataType:  8003, // 基线修复结果
 			Timestamp: time.Now().UnixNano(),
 			Data: &bridge.Payload{
 				Fields: map[string]string{
-					"task_id":      taskID,
-					"fix_task_id":  fixTaskID,
-					"rule_id":      result.RuleID,
-					"policy_id":    result.PolicyID,
-					"status":       string(result.Status),
-					"command":      result.Command,
-					"output":       result.Output,
-					"error_msg":    result.ErrorMsg,
-					"message":      result.Message,
-					"fixed_at":     result.FixedAt.Format(time.RFC3339),
+					"task_id":     taskID,
+					"fix_task_id": fixTaskID,
+					"rule_id":     result.RuleID,
+					"policy_id":   result.PolicyID,
+					"status":      string(result.Status),
+					"command":     result.Command,
+					"output":      result.Output,
+					"error_msg":   result.ErrorMsg,
+					"message":     result.Message,
+					"fixed_at":    result.FixedAt.Format(time.RFC3339),
 				},
 			},
 		}
 
 		if err := client.SendRecord(record); err != nil {
 			logger.Error("failed to send fix result", zap.Error(err))
-			continue
 		}
-	}
+	})
 
 	// 发送任务完成信号
 	completeRecord := &bridge.Record{

@@ -310,25 +310,22 @@
           <span>成功: {{ fixSuccessCount }}</span>
           <span>失败: {{ fixFailedCount }}</span>
         </div>
-        <a-divider />
-        <div class="fix-results">
+
+        <!-- 实时日志面板 -->
+        <div class="live-log-panel" ref="logPanelRef">
           <div
-            v-for="(result, index) in fixResults"
+            v-for="(log, index) in fixLogs"
             :key="index"
-            :class="['fix-result-item', `status-${result.status}`]"
+            :class="['live-log-line', `log-level-${log.level}`]"
           >
-            <div class="result-header">
-              <span class="result-icon">
-                <CheckCircleOutlined v-if="result.status === 'success'" />
-                <CloseCircleOutlined v-else-if="result.status === 'failed'" />
-                <SyncOutlined v-else spin />
-              </span>
-              <span class="result-title">{{ result.title }}</span>
-              <span class="result-host">{{ result.hostname }}</span>
-            </div>
-            <div class="result-message" v-if="result.message">
-              {{ result.message }}
-            </div>
+            <span class="log-time">{{ log.time }}</span>
+            <span class="log-text">{{ log.text }}</span>
+          </div>
+          <div v-if="fixing" class="live-log-line log-level-info log-cursor">
+            <span class="log-time">
+              <SyncOutlined spin />
+            </span>
+            <span class="log-text">等待中...</span>
           </div>
         </div>
       </div>
@@ -342,7 +339,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import {
@@ -360,7 +357,7 @@ import {
 } from '@ant-design/icons-vue'
 import { fixApi } from '@/api/fix'
 import { hostsApi } from '@/api/hosts'
-import type { FixableItem, Host, FixResult } from '@/api/types'
+import type { FixableItem, Host, FixResult, FixTaskHostStatus } from '@/api/types'
 
 const router = useRouter()
 
@@ -393,6 +390,31 @@ const fixSuccessCount = ref(0)
 const fixFailedCount = ref(0)
 const fixSuccess = ref(false)
 const fixResults = ref<FixResult[]>([])
+const fixHostStatuses = ref<FixTaskHostStatus[]>([])
+
+// 实时日志面板
+const logPanelRef = ref<HTMLElement | null>(null)
+
+interface LogEntry {
+  time: string
+  level: 'info' | 'success' | 'error' | 'warn' | 'cmd'
+  text: string
+}
+const fixLogs = ref<LogEntry[]>([])
+const appendLog = (level: LogEntry['level'], text: string) => {
+  const now = new Date()
+  const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  fixLogs.value.push({ time, level, text })
+}
+
+// 日志自动滚到底部
+watch(() => fixLogs.value.length, () => {
+  nextTick(() => {
+    if (logPanelRef.value) {
+      logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight
+    }
+  })
+})
 
 const filters = reactive({
   host_ids: [] as string[],
@@ -599,11 +621,20 @@ const handleSingleFix = async (record: FixableItem) => {
     fixSuccessCount.value = 0
     fixFailedCount.value = 0
     fixResults.value = []
+    fixHostStatuses.value = []
+    fixLogs.value = []
+    appendLog('info', `修复任务已创建，待修复 1 项，等待调度...`)
 
     // 轮询任务状态
-    await pollFixTask(response.task_id)
+    const status = await pollFixTask(response.task_id)
 
-    message.success('修复完成')
+    if (status === 'completed' && fixFailedCount.value === 0) {
+      message.success('修复完成')
+    } else if (status === 'completed') {
+      message.warning(`修复完成，${fixSuccessCount.value} 项成功，${fixFailedCount.value} 项失败`)
+    } else if (status === 'failed') {
+      message.error('修复任务失败，请检查主机是否在线')
+    }
     detailModalVisible.value = false
     loadFixableItems()
   } catch (error: any) {
@@ -633,11 +664,20 @@ const handleBatchFix = async () => {
       fixSuccessCount.value = 0
       fixFailedCount.value = 0
       fixResults.value = []
+      fixHostStatuses.value = []
+      fixLogs.value = []
+      appendLog('info', `批量修复任务已创建，待修复 ${pagination.total} 项，等待调度...`)
 
       // 轮询任务状态
-      await pollFixTask(response.task_id)
+      const status = await pollFixTask(response.task_id)
 
-      message.success('批量修复完成')
+      if (status === 'completed' && fixFailedCount.value === 0) {
+        message.success('批量修复完成')
+      } else if (status === 'completed') {
+        message.warning(`批量修复完成，${fixSuccessCount.value} 项成功，${fixFailedCount.value} 项失败`)
+      } else if (status === 'failed') {
+        message.error('修复任务失败，请检查主机是否在线')
+      }
       selectAllFiltered.value = false
       selectedRowKeys.value = []
       loadFixableItems()
@@ -674,11 +714,20 @@ const handleBatchFix = async () => {
     fixSuccessCount.value = 0
     fixFailedCount.value = 0
     fixResults.value = []
+    fixHostStatuses.value = []
+    fixLogs.value = []
+    appendLog('info', `批量修复任务已创建，待修复 ${selectedItems.length} 项，等待调度...`)
 
     // 轮询任务状态
-    await pollFixTask(response.task_id)
+    const status = await pollFixTask(response.task_id)
 
-    message.success('批量修复完成')
+    if (status === 'completed' && fixFailedCount.value === 0) {
+      message.success('批量修复完成')
+    } else if (status === 'completed') {
+      message.warning(`批量修复完成，${fixSuccessCount.value} 项成功，${fixFailedCount.value} 项失败`)
+    } else if (status === 'failed') {
+      message.error('修复任务失败，请检查主机是否在线')
+    }
     selectedRowKeys.value = []
     loadFixableItems()
   } catch (error: any) {
@@ -689,49 +738,123 @@ const handleBatchFix = async () => {
   }
 }
 
-const pollFixTask = async (taskId: string) => {
-  const maxAttempts = 60 // 最多轮询 60 次（5 分钟）
-  let attempts = 0
+const pollFixTask = async (taskId: string): Promise<'completed' | 'failed' | 'timeout'> => {
+  const pollInterval = 3000 // 3 秒轮询间隔
+  const maxDuration = 30 * 60 * 1000 // 30 分钟安全上限
+  const startTime = Date.now()
 
-  while (attempts < maxAttempts) {
+  // 用于增量检测新结果和新主机状态
+  let prevResultCount = 0
+  let prevHostStatusCount = 0
+  let prevTaskStatus = ''
+
+  while (Date.now() - startTime < maxDuration) {
     try {
       const task = await fixApi.getFixTask(taskId)
       fixProgress.value = task.progress
       fixSuccessCount.value = task.success_count
       fixFailedCount.value = task.failed_count
 
-      // 获取修复结果
-      const resultsResponse = await fixApi.getFixResults(taskId, { page_size: 1000 })
-      fixResults.value = resultsResponse.items || []
-
-      if (task.status === 'completed') {
-        fixing.value = false
-        fixSuccess.value = task.failed_count === 0
-        break
-      } else if (task.status === 'failed') {
-        fixing.value = false
-        fixSuccess.value = false
-        break
+      // 从服务端同步总数
+      if (task.total_count > 0) {
+        fixTotal.value = task.total_count
       }
 
-      // 等待 5 秒后继续轮询
-      await new Promise(resolve => setTimeout(resolve, 5000))
-      attempts++
+      // 状态变化日志
+      if (task.status !== prevTaskStatus) {
+        if (task.status === 'running' && prevTaskStatus !== 'running') {
+          appendLog('info', '任务开始执行，正在下发到目标主机...')
+        }
+        prevTaskStatus = task.status
+      }
+
+      // 并行获取修复结果和主机状态
+      const [resultsResponse, hostStatusResponse] = await Promise.all([
+        fixApi.getFixResults(taskId, { page_size: 1000 }),
+        fixApi.getFixTaskHostStatus(taskId, { page_size: 1000 }),
+      ])
+
+      const newResults = resultsResponse.items || []
+      const newHostStatuses = hostStatusResponse.items || []
+
+      // 增量输出主机状态日志
+      if (newHostStatuses.length > prevHostStatusCount) {
+        for (let i = prevHostStatusCount; i < newHostStatuses.length; i++) {
+          const hs = newHostStatuses[i]
+          if (hs.status === 'dispatched') {
+            appendLog('info', `主机 ${hs.hostname} (${hs.ip_address}) 任务已下发`)
+          } else if (hs.status === 'completed') {
+            appendLog('success', `主机 ${hs.hostname} (${hs.ip_address}) 执行完成`)
+          } else if (hs.status === 'failed') {
+            appendLog('error', `主机 ${hs.hostname} (${hs.ip_address}) 执行失败${hs.error_message ? ': ' + hs.error_message : ''}`)
+          } else if (hs.status === 'timeout') {
+            appendLog('warn', `主机 ${hs.hostname} (${hs.ip_address}) 执行超时`)
+          }
+        }
+        prevHostStatusCount = newHostStatuses.length
+      }
+
+      // 增量输出修复结果日志
+      if (newResults.length > prevResultCount) {
+        for (let i = prevResultCount; i < newResults.length; i++) {
+          const r = newResults[i]
+          if (r.command) {
+            appendLog('cmd', `[${r.hostname}] $ ${r.command}`)
+          }
+          if (r.output) {
+            appendLog('info', `[${r.hostname}] ${r.output.trim()}`)
+          }
+          if (r.status === 'success') {
+            appendLog('success', `[${r.hostname}] ${r.title} — 修复成功`)
+          } else if (r.status === 'failed') {
+            appendLog('error', `[${r.hostname}] ${r.title} — 修复失败${r.error_msg ? ': ' + r.error_msg : ''}`)
+          } else if (r.status === 'skipped') {
+            appendLog('warn', `[${r.hostname}] ${r.title} — 跳过（无自动修复方案）`)
+          }
+        }
+        prevResultCount = newResults.length
+      }
+
+      fixResults.value = newResults
+      fixHostStatuses.value = newHostStatuses
+
+      if (task.status === 'completed') {
+        appendLog('success', `任务完成 — 成功 ${task.success_count}，失败 ${task.failed_count}`)
+        fixing.value = false
+        fixSuccess.value = task.failed_count === 0
+        return 'completed'
+      } else if (task.status === 'failed') {
+        if (newResults.length === 0 && newHostStatuses.length === 0) {
+          appendLog('error', '任务失败 — 所有目标主机离线，无法下发修复指令')
+        } else {
+          appendLog('error', '任务失败')
+        }
+        fixing.value = false
+        fixSuccess.value = false
+        return 'failed'
+      }
+
+      // 等待后继续轮询
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
     } catch (error) {
       console.error('轮询任务状态失败:', error)
-      break
+      appendLog('warn', '网络异常，正在重试...')
+      // 网络错误不中断轮询，等待后重试
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
     }
   }
 
-  if (attempts >= maxAttempts) {
-    message.warning('任务执行超时，请稍后查看结果')
-    fixing.value = false
-  }
+  appendLog('warn', '轮询超时（30 分钟），请稍后查看结果')
+  message.warning('任务执行超过 30 分钟，请稍后查看结果')
+  fixing.value = false
+  return 'timeout'
 }
 
 const handleCloseProgress = () => {
   progressModalVisible.value = false
   fixResults.value = []
+  fixHostStatuses.value = []
+  fixLogs.value = []
 }
 
 const copyCommand = (command: string) => {
@@ -824,71 +947,56 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.fix-results {
-  max-height: 400px;
+.live-log-panel {
+  margin-top: 16px;
+  max-height: 420px;
   overflow-y: auto;
-}
-
-.fix-result-item {
-  padding: 14px;
-  margin-bottom: 8px;
+  background: #1e1e1e;
   border-radius: 6px;
-  border: 1px solid #d9d9d9;
-  transition: all 0.2s ease;
+  padding: 12px 16px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.fix-result-item.status-success {
-  background: #f6ffed;
-  border-color: #b7eb8f;
-}
-
-.fix-result-item.status-failed {
-  background: #fff2f0;
-  border-color: #ffccc7;
-}
-
-.fix-result-item.status-running {
-  background: #e6f7ff;
-  border-color: #91d5ff;
-}
-
-.result-header {
+.live-log-line {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 10px;
+  align-items: baseline;
 }
 
-.result-icon {
-  font-size: 16px;
+.log-time {
+  color: #6a6a6a;
+  flex-shrink: 0;
+  user-select: none;
 }
 
-.status-success .result-icon {
-  color: #52c41a;
+.log-text {
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 
-.status-failed .result-icon {
+.log-level-info .log-text {
+  color: #d4d4d4;
+}
+
+.log-level-success .log-text {
+  color: #73d13d;
+}
+
+.log-level-error .log-text {
   color: #ff4d4f;
 }
 
-.status-running .result-icon {
-  color: #1890ff;
+.log-level-warn .log-text {
+  color: #faad14;
 }
 
-.result-title {
-  flex: 1;
-  font-weight: 500;
+.log-level-cmd .log-text {
+  color: #69c0ff;
 }
 
-.result-host {
-  color: #8c8c8c;
-  font-size: 12px;
-}
-
-.result-message {
-  margin-top: 4px;
-  padding-left: 24px;
-  color: #666;
-  font-size: 12px;
+.log-cursor .log-text {
+  color: #6a6a6a;
 }
 </style>

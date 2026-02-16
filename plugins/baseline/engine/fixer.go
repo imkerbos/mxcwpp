@@ -154,7 +154,8 @@ func (f *Fixer) restartServices(ctx context.Context, services []string) []string
 }
 
 // FixBatch 批量执行修复（合并服务重启，提高效率）
-func (f *Fixer) FixBatch(ctx context.Context, policies []*Policy, ruleIDs []string, osFamily, osVersion string) []*FixResult {
+// onResult 回调在每条规则修复完成后立即调用，用于实时上报结果
+func (f *Fixer) FixBatch(ctx context.Context, policies []*Policy, ruleIDs []string, osFamily, osVersion string, onResult func(*FixResult)) []*FixResult {
 	var results []*FixResult
 
 	// 收集所有需要重启的服务（去重）
@@ -198,6 +199,11 @@ func (f *Fixer) FixBatch(ctx context.Context, policies []*Policy, ruleIDs []stri
 			if result != nil {
 				results = append(results, result)
 
+				// 实时回调上报结果
+				if onResult != nil {
+					onResult(result)
+				}
+
 				// 收集成功修复项需要重启的服务
 				if result.Status == FixStatusSuccess && rule.Fix != nil {
 					for _, svc := range rule.Fix.RestartServices {
@@ -237,6 +243,9 @@ func (f *Fixer) FixBatch(ctx context.Context, policies []*Policy, ruleIDs []stri
 				RestartedServices: services,
 			}
 			results = append(results, restartResult)
+			if onResult != nil {
+				onResult(restartResult)
+			}
 		} else {
 			// 记录服务重启成功
 			restartResult := &FixResult{
@@ -248,6 +257,9 @@ func (f *Fixer) FixBatch(ctx context.Context, policies []*Policy, ruleIDs []stri
 				RestartedServices: services,
 			}
 			results = append(results, restartResult)
+			if onResult != nil {
+				onResult(restartResult)
+			}
 		}
 	}
 
