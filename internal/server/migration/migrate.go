@@ -37,6 +37,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("资产表ID列扩展处理", zap.Error(err))
 	}
 
+	// 执行数据迁移：扩展 alerts 表 result_id 列
+	if err := migrateAlertResultIDColumn(db, logger); err != nil {
+		logger.Warn("告警表result_id列扩展处理", zap.Error(err))
+	}
+
 	// 执行数据迁移：为现有数据设置默认的运行时类型
 	if err := migrateRuntimeTypes(db, logger); err != nil {
 		logger.Warn("运行时类型迁移处理", zap.Error(err))
@@ -214,6 +219,43 @@ func migrateAssetTableIDColumns(db *gorm.DB, logger *zap.Logger) error {
 			logger.Info("扩展资产表ID列成功", zap.String("table", table), zap.String("old_type", columnType), zap.String("new_type", "varchar(128)"))
 		}
 	}
+
+	return nil
+}
+
+// migrateAlertResultIDColumn 扩展 alerts 表的 result_id 列从 varchar(64) 到 varchar(128)
+// 离线告警 ID 格式为 "offline-{64位hash}"，总长度 72 字符，超过 varchar(64)
+func migrateAlertResultIDColumn(db *gorm.DB, logger *zap.Logger) error {
+	// 检查表是否存在
+	var exists bool
+	if err := db.Raw(
+		"SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'alerts'",
+	).Scan(&exists).Error; err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	// 检查当前列长度
+	var columnType string
+	if err := db.Raw(
+		"SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'alerts' AND column_name = 'result_id'",
+	).Scan(&columnType).Error; err != nil {
+		return err
+	}
+
+	// 如果已经是 varchar(128) 或更大则跳过
+	if columnType == "varchar(128)" {
+		return nil
+	}
+
+	// 执行 ALTER TABLE
+	if err := db.Exec("ALTER TABLE `alerts` MODIFY COLUMN `result_id` varchar(128) NOT NULL").Error; err != nil {
+		logger.Error("扩展告警表result_id列失败", zap.String("old_type", columnType), zap.Error(err))
+		return err
+	}
+	logger.Info("扩展告警表result_id列成功", zap.String("old_type", columnType), zap.String("new_type", "varchar(128)"))
 
 	return nil
 }

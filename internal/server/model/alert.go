@@ -13,7 +13,7 @@ const (
 // Alert 告警模型
 type Alert struct {
 	ID             uint        `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	ResultID       string      `gorm:"column:result_id;type:varchar(64);not null;uniqueIndex" json:"result_id"` // 关联 scan_results.result_id
+	ResultID       string      `gorm:"column:result_id;type:varchar(128);not null;uniqueIndex" json:"result_id"` // 关联 scan_results.result_id
 	HostID         string      `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	RuleID         string      `gorm:"column:rule_id;type:varchar(64);not null;index" json:"rule_id"`
 	PolicyID       string      `gorm:"column:policy_id;type:varchar(64);index" json:"policy_id"`

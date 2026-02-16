@@ -29,17 +29,18 @@ import (
 
 // Connection 表示一个 Agent 连接
 type Connection struct {
-	AgentID  string
-	Hostname string
-	IPv4     []string
-	IPv6     []string
-	Version  string
-	LastSeen time.Time
-	stream   grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
-	ctx      context.Context
-	cancel   context.CancelFunc
-	sendCh   chan *grpcProto.Command
-	mu       sync.RWMutex
+	AgentID   string
+	Hostname  string
+	IPv4      []string
+	IPv6      []string
+	Version   string
+	LastSeen  time.Time
+	stream    grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
+	ctx       context.Context
+	cancel    context.CancelFunc
+	sendCh    chan *grpcProto.Command
+	workerSem chan struct{} // 限制异步 record 处理的并发数
+	mu        sync.RWMutex
 }
 
 // Service 是 Transfer 服务实现
@@ -155,16 +156,17 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 
 	// 创建连接对象
 	conn := &Connection{
-		AgentID:  agentID,
-		Hostname: firstData.Hostname,
-		IPv4:     append(firstData.IntranetIpv4, firstData.ExtranetIpv4...),
-		IPv6:     append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
-		Version:  firstData.Version,
-		LastSeen: time.Now(),
-		stream:   stream,
-		ctx:      ctx,
-		cancel:   cancel,
-		sendCh:   make(chan *grpcProto.Command, 10),
+		AgentID:   agentID,
+		Hostname:  firstData.Hostname,
+		IPv4:      append(firstData.IntranetIpv4, firstData.ExtranetIpv4...),
+		IPv6:      append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
+		Version:   firstData.Version,
+		LastSeen:  time.Now(),
+		stream:    stream,
+		ctx:       ctx,
+		cancel:    cancel,
+		sendCh:    make(chan *grpcProto.Command, 10),
+		workerSem: make(chan struct{}, 10),
 	}
 
 	// 注册连接
@@ -233,12 +235,18 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 				zap.Int("record_count", len(data.Records)),
 			)
 
-			// 更新连接信息
+			// 更新连接信息（仅更新非空字段，避免插件数据覆盖心跳数据）
 			conn.mu.Lock()
 			conn.LastSeen = time.Now()
-			conn.Hostname = data.Hostname
-			conn.IPv4 = append(data.IntranetIpv4, data.ExtranetIpv4...)
-			conn.IPv6 = append(data.IntranetIpv6, data.ExtranetIpv6...)
+			if data.Hostname != "" {
+				conn.Hostname = data.Hostname
+			}
+			if len(data.IntranetIpv4) > 0 || len(data.ExtranetIpv4) > 0 {
+				conn.IPv4 = append(data.IntranetIpv4, data.ExtranetIpv4...)
+			}
+			if len(data.IntranetIpv6) > 0 || len(data.ExtranetIpv6) > 0 {
+				conn.IPv6 = append(data.IntranetIpv6, data.ExtranetIpv6...)
+			}
 			conn.mu.Unlock()
 
 			// 处理数据包
@@ -257,15 +265,22 @@ func (s *Service) handlePackagedData(ctx context.Context, data *grpcProto.Packag
 		s.logger.Error("处理心跳失败", zap.Error(err), zap.String("agent_id", conn.AgentID))
 	}
 
-	// 处理 EncodedRecord 列表
+	// 异步处理 EncodedRecord 列表（避免重 DB 操作阻塞 Recv 循环导致 agent 超时断连）
 	for _, record := range data.Records {
-		if err := s.handleEncodedRecord(ctx, record, conn); err != nil {
-			s.logger.Error("处理记录失败",
-				zap.Error(err),
-				zap.String("agent_id", conn.AgentID),
-				zap.Int32("data_type", record.DataType),
-			)
-			// 继续处理下一个记录
+		select {
+		case conn.workerSem <- struct{}{}:
+			go func() {
+				defer func() { <-conn.workerSem }()
+				if err := s.handleEncodedRecord(ctx, record, conn); err != nil {
+					s.logger.Error("处理记录失败",
+						zap.Error(err),
+						zap.String("agent_id", conn.AgentID),
+						zap.Int32("data_type", record.DataType),
+					)
+				}
+			}()
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 
@@ -452,22 +467,29 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		}
 	}
 
-	// 版本诊断日志
-	if agentVersion == "" {
-		s.logger.Warn("Agent 版本为空",
-			zap.String("agent_id", conn.AgentID),
-			zap.String("hostname", data.Hostname),
-			zap.String("product", data.Product),
-			zap.String("hint", "请检查 Agent 构建时是否正确嵌入了版本信息（-ldflags \"-X main.buildVersion=VERSION\"）"),
-		)
-	} else {
-		s.logger.Debug("Agent 版本信息",
-			zap.String("agent_id", conn.AgentID),
-			zap.String("hostname", data.Hostname),
-			zap.String("version", agentVersion),
-			zap.String("source", versionSource),
-			zap.String("product", data.Product),
-		)
+	// 版本诊断日志（仅在心跳数据时输出，插件数据不含版本信息）
+	if hasHeartbeatData {
+		if agentVersion == "" {
+			s.logger.Warn("Agent 版本为空",
+				zap.String("agent_id", conn.AgentID),
+				zap.String("hostname", data.Hostname),
+				zap.String("product", data.Product),
+				zap.String("hint", "请检查 Agent 构建时是否正确嵌入了版本信息（-ldflags \"-X main.buildVersion=VERSION\"）"),
+			)
+		} else {
+			s.logger.Debug("Agent 版本信息",
+				zap.String("agent_id", conn.AgentID),
+				zap.String("hostname", data.Hostname),
+				zap.String("version", agentVersion),
+				zap.String("source", versionSource),
+				zap.String("product", data.Product),
+			)
+		}
+	}
+
+	// 非心跳数据（如插件数据）不需要更新主机记录，提前返回
+	if !hasHeartbeatData && data.Hostname == "" {
+		return nil
 	}
 
 	// 更新或创建主机记录
