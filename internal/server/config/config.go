@@ -127,10 +127,11 @@ type MTLSConfig struct {
 
 // LogConfig 是日志配置
 type LogConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"`
-	File   string `mapstructure:"file"`
-	MaxAge int    `mapstructure:"max_age"`
+	Level     string `mapstructure:"level"`
+	Format    string `mapstructure:"format"`
+	File      string `mapstructure:"file"`
+	ErrorFile string `mapstructure:"error_file"`
+	MaxAge    int    `mapstructure:"max_age"`
 }
 
 // AgentConfig 是 Agent 配置（下发到 Agent）
@@ -373,5 +374,6 @@ func (c *Config) LogInfo(logger *zap.Logger) {
 		zap.String("log_level", c.Log.Level),
 		zap.String("log_format", c.Log.Format),
 		zap.String("log_file", c.Log.File),
+		zap.String("log_error_file", c.Log.ErrorFile),
 	)
 }

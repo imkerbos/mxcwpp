@@ -958,7 +958,7 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		if err := s.db.Create(scanResult).Error; err != nil {
 			return fmt.Errorf("保存检测结果失败: %w", err)
 		}
-		s.logger.Info("检测结果已保存",
+		s.logger.Debug("检测结果已保存",
 			zap.String("agent_id", conn.AgentID),
 			zap.String("result_id", resultID),
 			zap.String("rule_id", ruleID),
@@ -1047,7 +1047,7 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 		// 发送告警通知
 		s.sendAlertNotification(alert, conn)
 
-		s.logger.Info("告警已创建",
+		s.logger.Debug("告警已创建",
 			zap.Uint("alert_id", alert.ID),
 			zap.String("result_id", scanResult.ResultID),
 		)
@@ -1102,7 +1102,7 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 		return fmt.Errorf("更新告警状态失败: %w", err)
 	}
 
-	s.logger.Info("告警已自动解决",
+	s.logger.Debug("告警已自动解决",
 		zap.Uint("alert_id", existingAlert.ID),
 		zap.String("result_id", scanResult.ResultID),
 	)
@@ -2096,7 +2096,7 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 		return fmt.Errorf("保存修复结果失败: %w", err)
 	}
 
-	s.logger.Info("修复结果已保存",
+	s.logger.Debug("修复结果已保存",
 		zap.String("agent_id", conn.AgentID),
 		zap.String("result_id", resultID),
 		zap.String("fix_task_id", fixTaskID),

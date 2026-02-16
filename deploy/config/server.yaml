@@ -34,6 +34,7 @@ log:
   level: "__LOG_LEVEL__"
   format: "__LOG_FORMAT__"
   file: "/var/log/mxsec-platform/server.log"
+  error_file: "/var/log/mxsec-platform/error.log"
   max_age: __LOG_MAX_AGE__
 
 agent:
