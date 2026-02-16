@@ -147,6 +147,10 @@ func (s *AgentCenterServices) Cleanup() {
 	if s.StatusCancel != nil {
 		s.StatusCancel()
 	}
+	// 标记服务正在关闭，避免 unregisterConnection 将所有主机标记为离线
+	if s.TransferService != nil {
+		s.TransferService.GracefulShutdown()
+	}
 	if s.Listener != nil {
 		s.Listener.Close()
 	}
