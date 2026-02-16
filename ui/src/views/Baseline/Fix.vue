@@ -352,7 +352,6 @@ import {
   CheckCircleOutlined,
   InfoCircleOutlined,
   CopyOutlined,
-  CloseCircleOutlined,
   SyncOutlined,
 } from '@ant-design/icons-vue'
 import { fixApi } from '@/api/fix'
