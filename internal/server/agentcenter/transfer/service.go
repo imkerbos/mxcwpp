@@ -2104,6 +2104,19 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 		zap.String("status", string(resultStatus)),
 	)
 
+	// 修复成功时，更新原始扫描结果为 pass（防止重复修复）
+	if resultStatus == model.FixResultStatusSuccess {
+		if err := s.db.Model(&model.ScanResult{}).
+			Where("host_id = ? AND rule_id = ? AND status IN ?", hostID, ruleID, []string{"fail", "error"}).
+			Update("status", model.ResultStatusPass).Error; err != nil {
+			s.logger.Warn("更新扫描结果状态失败",
+				zap.String("host_id", hostID),
+				zap.String("rule_id", ruleID),
+				zap.Error(err),
+			)
+		}
+	}
+
 	// 更新任务统计
 	var task model.FixTask
 	if err := s.db.Where("task_id = ?", fixTaskID).First(&task).Error; err == nil {
