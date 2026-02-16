@@ -252,13 +252,11 @@ init_config() {
 
     log_step "生成配置文件..."
 
-    # 备份模板（首次部署时保存，后续升级可从模板恢复）
+    # 从模板生成配置（server.yaml.tpl 由 git 跟踪，server.yaml 已 gitignore）
     if [ ! -f "$SCRIPT_DIR/config/server.yaml.tpl" ]; then
-        cp "$SCRIPT_DIR/config/server.yaml" "$SCRIPT_DIR/config/server.yaml.tpl"
-        log_info "已备份配置模板: server.yaml.tpl"
+        log_error "配置模板不存在: $SCRIPT_DIR/config/server.yaml.tpl"
+        exit 1
     fi
-
-    # 从模板生成配置（每次都从模板重新生成，所有配置项来自 .env）
     cp "$SCRIPT_DIR/config/server.yaml.tpl" "$SCRIPT_DIR/config/server.yaml"
 
     # 替换所有占位符

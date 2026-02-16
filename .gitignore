@@ -170,6 +170,7 @@ configs/server.yaml
 configs/agent.yaml
 configs/*.secret.yaml
 configs/*.secret.yml
+deploy/config/server.yaml
 deploy/dev/configs/server.yaml
 deploy/dev/configs/server.dev.yaml
 deploy/dev/configs/*.secret.yaml
