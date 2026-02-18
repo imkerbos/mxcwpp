@@ -611,6 +611,9 @@ const handleSingleFix = async (record: FixableItem) => {
       result_ids: [record.result_id],
     })
 
+    // 先关闭详情 Modal，再显示进度 Modal（避免详情 Modal 遮挡进度条）
+    detailModalVisible.value = false
+
     // 显示进度 Modal
     progressModalVisible.value = true
     fixing.value = true
@@ -634,7 +637,6 @@ const handleSingleFix = async (record: FixableItem) => {
     } else if (status === 'failed') {
       message.error('修复任务失败，请检查主机是否在线')
     }
-    detailModalVisible.value = false
     loadFixableItems()
   } catch (error: any) {
     console.error('修复失败:', error)

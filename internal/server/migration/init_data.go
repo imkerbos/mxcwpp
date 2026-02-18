@@ -20,6 +20,7 @@ import (
 const DefaultPolicyGroupID = "system-baseline"
 
 // InitDefaultData 初始化默认数据（策略和规则）
+// 首次启动时创建默认策略组和策略数据，后续启动不再重建用户已删除的数据
 func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsCfg *config.PluginsConfig) error {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -27,14 +28,9 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 
 	logger.Info("开始初始化默认数据", zap.String("policy_dir", policyDir))
 
-	// 初始化默认用户（优先执行，确保admin用户始终存在）
+	// 初始化默认用户（始终执行，确保admin用户存在）
 	if err := initDefaultUsers(db, logger); err != nil {
 		return fmt.Errorf("初始化默认用户失败: %w", err)
-	}
-
-	// 初始化默认策略组（始终执行，确保策略组存在）
-	if err := initDefaultPolicyGroup(db, logger); err != nil {
-		return fmt.Errorf("初始化默认策略组失败: %w", err)
 	}
 
 	// 初始化默认插件配置（始终执行，确保插件配置存在）
@@ -42,45 +38,63 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		return fmt.Errorf("初始化默认插件配置失败: %w", err)
 	}
 
-	// 检查默认策略组是否已有策略数据
-	var count int64
-	if err := db.Model(&model.Policy{}).Where("group_id = ?", DefaultPolicyGroupID).Count(&count).Error; err != nil {
-		return fmt.Errorf("检查现有数据失败: %w", err)
+	// 检查是否已完成首次数据初始化
+	if isDataInitialized(db) {
+		logger.Info("默认数据已初始化过，跳过策略组和策略重建")
+		return nil
 	}
 
-	if count > 0 {
-		logger.Info("默认策略组已存在策略数据，跳过策略初始化", zap.Int64("count", count))
+	// 首次初始化：创建默认策略组
+	if err := initDefaultPolicyGroup(db, logger); err != nil {
+		return fmt.Errorf("初始化默认策略组失败: %w", err)
+	}
+
+	// 首次初始化：加载策略数据
+	if policyDir == "" {
+		if _, err := os.Stat("/opt/mxsec-platform/policies"); err == nil {
+			policyDir = "/opt/mxsec-platform/policies"
+		} else {
+			policyDir = "plugins/baseline/config/examples"
+		}
+	}
+
+	policies, err := loadPoliciesFromDir(policyDir, logger)
+	if err != nil {
+		logger.Warn("加载策略文件失败，跳过策略初始化", zap.Error(err), zap.String("policy_dir", policyDir))
 	} else {
-
-		// 从示例策略文件加载
-		if policyDir == "" {
-			// 优先使用生产环境路径，回退到开发环境路径
-			if _, err := os.Stat("/opt/mxsec-platform/policies"); err == nil {
-				policyDir = "/opt/mxsec-platform/policies"
-			} else {
-				policyDir = "plugins/baseline/config/examples"
-			}
-		}
-
-		policies, err := loadPoliciesFromDir(policyDir, logger)
-		if err != nil {
-			// 策略文件加载失败不阻止启动，只记录警告
-			logger.Warn("加载策略文件失败，跳过策略初始化", zap.Error(err), zap.String("policy_dir", policyDir))
-			return nil
-		}
-
-		// 保存到数据库（关联到默认策略组）
 		for _, policy := range policies {
 			if err := savePolicyToDB(db, policy, DefaultPolicyGroupID, logger); err != nil {
 				return fmt.Errorf("保存策略 %s 失败: %w", policy.ID, err)
 			}
 			logger.Info("策略初始化成功", zap.String("policy_id", policy.ID), zap.String("name", policy.Name))
 		}
-
 		logger.Info("默认数据初始化完成", zap.Int("policy_count", len(policies)))
 	}
 
+	// 标记数据已初始化
+	markDataInitialized(db, logger)
+
 	return nil
+}
+
+// isDataInitialized 检查默认数据是否已完成首次初始化
+func isDataInitialized(db *gorm.DB) bool {
+	var cfg model.SystemConfig
+	err := db.Where("key = ? AND category = ?", "data_initialized", "system").First(&cfg).Error
+	return err == nil && cfg.Value == "true"
+}
+
+// markDataInitialized 标记默认数据已完成首次初始化
+func markDataInitialized(db *gorm.DB, logger *zap.Logger) {
+	cfg := model.SystemConfig{
+		Key:         "data_initialized",
+		Value:       "true",
+		Category:    "system",
+		Description: "默认数据是否已完成首次初始化（策略组、策略等）",
+	}
+	if err := db.Create(&cfg).Error; err != nil {
+		logger.Warn("标记数据初始化状态失败", zap.Error(err))
+	}
 }
 
 // initDefaultUsers 初始化默认用户

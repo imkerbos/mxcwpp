@@ -30,11 +30,14 @@ func StartTaskTimeoutScheduler(db *gorm.DB, logger *zap.Logger) {
 
 // checkTimeoutTasks 检查超时任务
 func checkTimeoutTasks(db *gorm.DB, logger *zap.Logger) {
-	// 检查 pending 状态的任务超时
+	// 检查 pending 状态的检查任务超时
 	checkPendingTasksTimeout(db, logger)
 
-	// 检查 running 状态的任务超时
+	// 检查 running 状态的检查任务超时
 	checkRunningTasksTimeout(db, logger)
+
+	// 检查修复任务超时
+	checkFixTasksTimeout(db, logger)
 }
 
 // checkPendingTasksTimeout 检查 pending 状态的任务是否超时
@@ -182,5 +185,68 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			"status":       model.TaskStatusCompleted,
 			"completed_at": &completedAt,
 		})
+	}
+}
+
+// fixTaskTimeoutMinutes 修复任务超时时间（分钟）
+const fixTaskTimeoutMinutes = 15
+
+// checkFixTasksTimeout 检查修复任务超时
+// 如果修复任务在 running 状态超过 15 分钟，根据已有结果决定最终状态
+func checkFixTasksTimeout(db *gorm.DB, logger *zap.Logger) {
+	var tasks []model.FixTask
+	if err := db.Where("status IN ?", []string{
+		string(model.FixTaskStatusPending),
+		string(model.FixTaskStatusRunning),
+	}).Find(&tasks).Error; err != nil {
+		logger.Error("查询修复任务失败", zap.Error(err))
+		return
+	}
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	now := time.Now()
+	deadline := now.Add(-time.Duration(fixTaskTimeoutMinutes) * time.Minute)
+
+	for _, task := range tasks {
+		if task.CreatedAt.Time().After(deadline) {
+			continue // 未超时
+		}
+
+		completedAt := model.Now()
+
+		if task.SuccessCount+task.FailedCount > 0 {
+			// 有结果，标记为完成
+			logger.Warn("修复任务超时，已有部分结果，标记为完成",
+				zap.String("task_id", task.TaskID),
+				zap.Int("success_count", task.SuccessCount),
+				zap.Int("failed_count", task.FailedCount),
+			)
+			db.Model(&task).Updates(map[string]interface{}{
+				"status":       model.FixTaskStatusCompleted,
+				"completed_at": &completedAt,
+				"progress":     100,
+			})
+		} else {
+			// 无结果，标记为失败
+			logger.Warn("修复任务超时，无任何结果，标记为失败",
+				zap.String("task_id", task.TaskID),
+			)
+			db.Model(&task).Updates(map[string]interface{}{
+				"status":       model.FixTaskStatusFailed,
+				"completed_at": &completedAt,
+			})
+		}
+
+		// 标记超时主机
+		db.Model(&model.FixTaskHostStatus{}).
+			Where("task_id = ? AND status = ?", task.TaskID, model.FixTaskHostStatusDispatched).
+			Updates(map[string]interface{}{
+				"status":        model.FixTaskHostStatusTimeout,
+				"completed_at":  &completedAt,
+				"error_message": "修复任务执行超时",
+			})
 	}
 }

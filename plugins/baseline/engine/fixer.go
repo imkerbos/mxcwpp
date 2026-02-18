@@ -75,8 +75,8 @@ func (f *Fixer) fixInternal(ctx context.Context, policy *Policy, rule *Rule, res
 		zap.String("rule_id", rule.RuleID),
 		zap.String("command", rule.Fix.Command))
 
-	// 创建带超时的上下文（默认 5 分钟，部分修复命令如 aide --init 需要较长时间）
-	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// 创建带超时的上下文（10 分钟，aide --init 等命令可能需要较长时间）
+	cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	// 执行命令（使用 bash -c 执行，支持管道和复杂命令）

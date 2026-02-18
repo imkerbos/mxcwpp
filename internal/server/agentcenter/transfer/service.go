@@ -2139,7 +2139,15 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 		}
 	}
 
-	// 更新任务统计
+	// 更新任务统计（跳过 _SERVICE_RESTART 等内部结果，不计入修复统计）
+	if strings.HasPrefix(ruleID, "_") {
+		s.logger.Debug("跳过内部结果的任务统计",
+			zap.String("rule_id", ruleID),
+			zap.String("fix_task_id", fixTaskID),
+		)
+		return nil
+	}
+
 	var task model.FixTask
 	if err := s.db.Where("task_id = ?", fixTaskID).First(&task).Error; err == nil {
 		// 更新成功/失败计数
