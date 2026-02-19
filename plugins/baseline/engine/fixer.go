@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -45,6 +46,19 @@ func NewFixer(logger *zap.Logger) *Fixer {
 	}
 }
 
+// execCommand 执行外部命令，使用进程组确保超时时能杀掉整棵进程树
+// 解决 exec.CommandContext 只杀直接子进程导致 CombinedOutput 永远阻塞的问题
+func (f *Fixer) execCommand(ctx context.Context, command string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// 超时时发送 SIGKILL 到整个进程组（负 PID = 进程组）
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second // Cancel 后最多等 5 秒管道关闭
+	return cmd.CombinedOutput()
+}
+
 // Fix 执行单条规则的修复（包含服务重启）
 func (f *Fixer) Fix(ctx context.Context, policy *Policy, rule *Rule) *FixResult {
 	return f.fixInternal(ctx, policy, rule, true)
@@ -79,9 +93,8 @@ func (f *Fixer) fixInternal(ctx context.Context, policy *Policy, rule *Rule, res
 	cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	// 执行命令（使用 bash -c 执行，支持管道和复杂命令）
-	cmd := exec.CommandContext(cmdCtx, "bash", "-c", rule.Fix.Command)
-	output, err := cmd.CombinedOutput()
+	// 执行命令（使用进程组，确保超时时能杀掉所有子进程）
+	output, err := f.execCommand(cmdCtx, rule.Fix.Command)
 
 	result.Output = string(output)
 
@@ -134,8 +147,7 @@ func (f *Fixer) restartServices(ctx context.Context, services []string) []string
 		if service == "auditd" {
 			f.logger.Info("loading audit rules before restarting auditd")
 			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
-			loadCmd := exec.CommandContext(loadCtx, "bash", "-c", "augenrules --load")
-			loadOutput, loadErr := loadCmd.CombinedOutput()
+			loadOutput, loadErr := f.execCommand(loadCtx, "augenrules --load")
 			loadCancel()
 			if loadErr != nil {
 				f.logger.Warn("augenrules --load failed, will try service restart anyway",
@@ -150,9 +162,8 @@ func (f *Fixer) restartServices(ctx context.Context, services []string) []string
 		cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 
 		// 优先使用 systemctl，降级到 service 命令
-		cmd := exec.CommandContext(cmdCtx, "bash", "-c",
+		output, err := f.execCommand(cmdCtx,
 			fmt.Sprintf("systemctl restart %s 2>/dev/null || service %s restart", service, service))
-		output, err := cmd.CombinedOutput()
 		cancel()
 
 		if err != nil {

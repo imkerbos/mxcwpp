@@ -24,7 +24,7 @@
       },
       "fix": {
         "suggestion": "安装 AIDE 包",
-        "command": "if command -v dnf &>/dev/null; then dnf install aide -y; elif command -v yum &>/dev/null; then yum install aide -y; elif command -v apt-get &>/dev/null; then apt-get update && apt-get install aide -y; else echo 'Unsupported package manager' >&2; exit 1; fi"
+        "command": "if command -v dnf &>/dev/null; then dnf install aide -y; elif command -v yum &>/dev/null; then if ! timeout 10 yum repolist -q &>/dev/null && grep -q 'mirror.centos.org' /etc/yum.repos.d/CentOS-*.repo 2>/dev/null; then sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo && sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo && yum clean all; fi; yum install aide -y; elif command -v apt-get &>/dev/null; then apt-get update && apt-get install aide -y; else echo 'Unsupported package manager' >&2; exit 1; fi"
       }
     },
     {
