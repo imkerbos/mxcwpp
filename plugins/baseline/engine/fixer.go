@@ -129,6 +129,23 @@ func (f *Fixer) restartServices(ctx context.Context, services []string) []string
 	for _, service := range services {
 		f.logger.Info("restarting service", zap.String("service", service))
 
+		// auditd 重启前需要先加载规则文件到内核
+		// 批量修复时各规则只写文件不加载，统一在此处加载一次，避免 -e 2（不可变标志）导致后续加载失败
+		if service == "auditd" {
+			f.logger.Info("loading audit rules before restarting auditd")
+			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
+			loadCmd := exec.CommandContext(loadCtx, "bash", "-c", "augenrules --load")
+			loadOutput, loadErr := loadCmd.CombinedOutput()
+			loadCancel()
+			if loadErr != nil {
+				f.logger.Warn("augenrules --load failed, will try service restart anyway",
+					zap.Error(loadErr),
+					zap.String("output", strings.TrimSpace(string(loadOutput))))
+			} else {
+				f.logger.Info("audit rules loaded successfully")
+			}
+		}
+
 		// 创建带超时的上下文（服务重启最多等待 30 秒）
 		cmdCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 

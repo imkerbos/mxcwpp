@@ -176,7 +176,7 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /var/log/lastlog -p wa -k logins，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/var\\/log\\/lastlog.*-k logins/d' /etc/audit/rules.d/audit.rules && echo '-w /var/log/lastlog -p wa -k logins' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/var\\/log\\/lastlog.*-k logins/d' /etc/audit/rules.d/audit.rules && echo '-w /var/log/lastlog -p wa -k logins' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -201,7 +201,7 @@
       },
       "fix": {
         "suggestion": "添加审计规则监控时间修改，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/adjtimex.*time-change/d; /settimeofday.*time-change/d; /clock_settime.*time-change/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/adjtimex.*time-change/d; /settimeofday.*time-change/d; /clock_settime.*time-change/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b32 -S adjtimex,settimeofday,clock_settime -k time-change' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -226,7 +226,7 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/passwd -p wa -k identity，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/passwd.*-k identity/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/passwd -p wa -k identity' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/passwd.*-k identity/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/passwd -p wa -k identity' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -251,7 +251,7 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/hosts -p wa -k system-locale，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/hosts.*-k system-locale/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/hosts -p wa -k system-locale' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/hosts.*-k system-locale/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/hosts -p wa -k system-locale' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -276,7 +276,7 @@
       },
       "fix": {
         "suggestion": "添加审计规则：-w /etc/sudoers -p wa -k scope，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/sudoers.*-k scope/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/sudoers -p wa -k scope' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/sudoers.*-k scope/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/sudoers -p wa -k scope' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -367,7 +367,7 @@
       },
       "fix": {
         "suggestion": "添加 chmod 审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S chmod,fchmod,fchmodat.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S chmod,fchmod,fchmodat.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -392,7 +392,7 @@
       },
       "fix": {
         "suggestion": "添加 chown 审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S chown,fchown,fchownat,lchown.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S chown,fchown,fchownat,lchown.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -417,7 +417,7 @@
       },
       "fix": {
         "suggestion": "添加 setxattr 审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S setxattr,lsetxattr,fsetxattr.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-S setxattr,lsetxattr,fsetxattr.*perm_mod/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=4294967295 -k perm_mod' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -442,7 +442,7 @@
       },
       "fix": {
         "suggestion": "添加失败文件访问审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-F exit=-EACCES.*-k access/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-F exit=-EACCES.*-k access/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F arch=b64 -S creat,open,openat,truncate,ftruncate -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k access' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -467,7 +467,7 @@
       },
       "fix": {
         "suggestion": "为常用特权命令添加审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-F path=\\/usr\\/bin\\/sudo.*-k privileged/d; /-F path=\\/usr\\/bin\\/su .*-k privileged/d; /-F path=\\/usr\\/bin\\/passwd.*-k privileged/d; /-F path=\\/usr\\/bin\\/chsh.*-k privileged/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/chsh -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-F path=\\/usr\\/bin\\/sudo.*-k privileged/d; /-F path=\\/usr\\/bin\\/su .*-k privileged/d; /-F path=\\/usr\\/bin\\/passwd.*-k privileged/d; /-F path=\\/usr\\/bin\\/chsh.*-k privileged/d' /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules && echo '-a always,exit -F path=/usr/bin/chsh -F perm=x -F auid>=1000 -F auid!=4294967295 -k privileged' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -492,7 +492,7 @@
       },
       "fix": {
         "suggestion": "添加内核模块审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/sbin\\/insmod.*-k modules/d; /-w \\/sbin\\/rmmod.*-k modules/d; /-w \\/sbin\\/modprobe.*-k modules/d' /etc/audit/rules.d/audit.rules && echo '-w /sbin/insmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/rmmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/modprobe -p x -k modules' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/sbin\\/insmod.*-k modules/d; /-w \\/sbin\\/rmmod.*-k modules/d; /-w \\/sbin\\/modprobe.*-k modules/d' /etc/audit/rules.d/audit.rules && echo '-w /sbin/insmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/rmmod -p x -k modules' >> /etc/audit/rules.d/audit.rules && echo '-w /sbin/modprobe -p x -k modules' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -517,7 +517,7 @@
       },
       "fix": {
         "suggestion": "添加 MAC 策略审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/selinux.*-k MAC-policy/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/selinux/ -p wa -k MAC-policy' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/etc\\/selinux.*-k MAC-policy/d' /etc/audit/rules.d/audit.rules && echo '-w /etc/selinux/ -p wa -k MAC-policy' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -542,7 +542,7 @@
       },
       "fix": {
         "suggestion": "将 -e 2 从 audit.rules 移除，并添加到 99-finalize.rules（确保最后加载）",
-        "command": "mkdir -p /etc/audit/rules.d && sed -i '/^-e 2$/d' /etc/audit/rules.d/audit.rules 2>/dev/null; sed -i '/^-e 2$/d' /etc/audit/rules.d/99-finalize.rules 2>/dev/null; echo '-e 2' > /etc/audit/rules.d/99-finalize.rules; augenrules --load 2>/dev/null; true",
+        "command": "mkdir -p /etc/audit/rules.d && sed -i '/^-e 2$/d' /etc/audit/rules.d/audit.rules 2>/dev/null; sed -i '/^-e 2$/d' /etc/audit/rules.d/99-finalize.rules 2>/dev/null; echo '-e 2' > /etc/audit/rules.d/99-finalize.rules",
         "restart_services": ["auditd"]
       }
     },
@@ -567,7 +567,7 @@
       },
       "fix": {
         "suggestion": "添加会话审计规则，并加载到内核",
-        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/var\\/run\\/utmp.*-k session/d; /-w \\/var\\/log\\/wtmp.*-k session/d; /-w \\/var\\/log\\/btmp.*-k session/d' /etc/audit/rules.d/audit.rules && echo '-w /var/run/utmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/wtmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/btmp -p wa -k session' >> /etc/audit/rules.d/audit.rules; augenrules --load 2>/dev/null; true",
+        "command": "touch /etc/audit/rules.d/audit.rules && sed -i '/-w \\/var\\/run\\/utmp.*-k session/d; /-w \\/var\\/log\\/wtmp.*-k session/d; /-w \\/var\\/log\\/btmp.*-k session/d' /etc/audit/rules.d/audit.rules && echo '-w /var/run/utmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/wtmp -p wa -k session' >> /etc/audit/rules.d/audit.rules && echo '-w /var/log/btmp -p wa -k session' >> /etc/audit/rules.d/audit.rules",
         "restart_services": ["auditd"]
       }
     },
