@@ -85,6 +85,10 @@
         "condition": "any",
         "rules": [
           {
+            "type": "command_exec",
+            "param": ["! test -f /boot/grub2/grub.cfg && echo skip", "skip"]
+          },
+          {
             "type": "file_permission",
             "param": ["/boot/grub2/grub.cfg", "0600"]
           },
@@ -96,7 +100,7 @@
       },
       "fix": {
         "suggestion": "设置 GRUB 配置文件权限为 600",
-        "command": "chmod 600 /boot/grub2/grub.cfg"
+        "command": "test -f /boot/grub2/grub.cfg && chmod 600 /boot/grub2/grub.cfg || true"
       }
     },
     {
@@ -106,8 +110,12 @@
       "description": "GRUB 配置文件应属于 root:root",
       "severity": "medium",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
+          {
+            "type": "command_exec",
+            "param": ["! test -f /boot/grub2/grub.cfg && echo skip", "skip"]
+          },
           {
             "type": "file_owner",
             "param": ["/boot/grub2/grub.cfg", "root:root"]
@@ -116,7 +124,7 @@
       },
       "fix": {
         "suggestion": "设置 GRUB 配置文件属主为 root:root",
-        "command": "chown root:root /boot/grub2/grub.cfg"
+        "command": "test -f /boot/grub2/grub.cfg && chown root:root /boot/grub2/grub.cfg || true"
       }
     },
     {

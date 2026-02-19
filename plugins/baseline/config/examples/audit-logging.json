@@ -106,7 +106,7 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/audit/auditd.conf", "^\\s*max_log_file_action\\s*=\\s*keep_logs", "match"]
+            "param": ["/etc/audit/auditd.conf", "(?i)^\\s*max_log_file_action\\s*=\\s*keep_logs", "match"]
           }
         ]
       },
@@ -126,7 +126,7 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/audit/auditd.conf", "^\\s*space_left_action\\s*=\\s*(email|exec|syslog|halt)", "match"]
+            "param": ["/etc/audit/auditd.conf", "(?i)^\\s*space_left_action\\s*=\\s*(email|exec|syslog|halt)", "match"]
           }
         ]
       },
@@ -146,7 +146,7 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/audit/auditd.conf", "^\\s*admin_space_left_action\\s*=\\s*(single|halt|suspend)", "match"]
+            "param": ["/etc/audit/auditd.conf", "(?i)^\\s*admin_space_left_action\\s*=\\s*(single|halt|suspend)", "match"]
           }
         ]
       },

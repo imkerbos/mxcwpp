@@ -281,6 +281,10 @@
         "condition": "any",
         "rules": [
           {
+            "type": "command_exec",
+            "param": ["! test -f /boot/grub2/grub.cfg && ! test -f /boot/grub/grub.cfg && echo skip", "skip"]
+          },
+          {
             "type": "file_permission",
             "param": ["/boot/grub2/grub.cfg", "600"]
           },
@@ -292,7 +296,7 @@
       },
       "fix": {
         "suggestion": "执行 chmod 600 /boot/grub2/grub.cfg",
-        "command": "chmod 600 /boot/grub2/grub.cfg 2>/dev/null || chmod 600 /boot/grub/grub.cfg"
+        "command": "test -f /boot/grub2/grub.cfg && chmod 600 /boot/grub2/grub.cfg || { test -f /boot/grub/grub.cfg && chmod 600 /boot/grub/grub.cfg; }"
       }
     },
     {
