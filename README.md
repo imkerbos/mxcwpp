@@ -12,6 +12,7 @@
 |---------|------|
 | **基线检查** | 9 种检查器，13 个规则文件，覆盖 SSH、密码策略、文件权限、服务状态等 |
 | **基线修复** | 支持单机/批量自动修复，配置化服务重启 |
+| **文件完整性监控** | 基于 AIDE 的 FIM 检查，5 套默认策略，支持变更分类和严重级别评估（仅 VM） |
 | **资产采集** | 10 种采集器：进程、端口、用户、软件、容器、应用、网卡、磁盘、内核模块、服务 |
 | **多 OS 支持** | Rocky Linux 9、CentOS 7/8、Oracle Linux 7/8/9、Debian 10/11/12、Ubuntu 等 |
 | **Web 控制台** | 主机管理、策略管理、任务调度、告警管理、报表统计 |
@@ -93,6 +94,19 @@
     - `VolumeHandler`：磁盘信息
     - `KmodHandler`：内核模块信息
     - `ServiceHandler` / `CronHandler`：系统服务与定时任务
+  - 技术栈：Golang，通过 Pipe + Protobuf 与 Agent 通信。
+
+- **FIM Plugin（文件完整性监控插件）**
+  - 作为 Agent 的子进程运行，负责：
+    - 基于 AIDE（Advanced Intrusion Detection Environment）检测文件变更
+    - 支持文件新增、删除、修改检测，自动分类严重级别
+  - **仅适用于 VM（物理机/虚拟机）**，容器环境不支持
+  - **核心模块**：
+    - `engine`：AIDE 配置渲染、报告解析（兼容 AIDE 0.15/0.19）、变更分类器
+    - `config_renderer`：策略 JSON → `/etc/aide-mxsec.conf` 渲染（独立配置，不覆盖系统 AIDE）
+    - `classifier`：基于文件路径自动分类（binary/auth/ssh/config/other × critical/high/medium/low）
+    - `parser`：状态机解析 AIDE 输出，兼容 CentOS 7 和 Rocky 9
+  - **5 套默认策略**：通用系统、数据库服务器、Web 服务器、容器宿主机、中间件
   - 技术栈：Golang，通过 Pipe + Protobuf 与 Agent 通信。
 
 - **mxsec-server（后端）**
@@ -186,6 +200,7 @@
 - **插件类型**：
   - **Baseline Plugin**：基线检查
   - **Collector Plugin**：资产采集
+  - **FIM Plugin**：文件完整性监控（基于 AIDE，仅 VM）
   - 后续可扩展更多插件类型
 
 ---
@@ -303,6 +318,9 @@ mxcsec-platform/
 │   │   ├── main.go         # 插件入口
 │   │   ├── engine/         # 采集引擎
 │   │   └── ...             # 各类采集器
+│   ├── fim/                # 文件完整性监控插件
+│   │   ├── main.go         # 插件入口
+│   │   └── engine/         # FIM 引擎（AIDE 配置渲染、报告解析、变更分类）
 │   └── lib/                # 插件 SDK（Go/Rust）
 │       ├── go/             # Go 插件 SDK
 │       └── rust/           # Rust 插件 SDK（可选）
@@ -427,6 +445,7 @@ mxcsec-platform/
 - [x] 多 OS 适配（Rocky 9、CentOS 7/8、Oracle Linux、Debian、Ubuntu）
 - [x] Docker Compose 和 Systemd 两种部署方式
 - [x] 完善的部署文档与操作手册
+- [x] FIM 文件完整性监控插件（基于 AIDE，5 套默认策略，仅 VM）
 
 ### v1.1 – 架构区分与告警对接（规划中）
 
@@ -497,6 +516,7 @@ mxcsec-platform/
 | 数据模型 | 30+ 个数据表 |
 | Baseline Plugin | 9 种检查器，13 个规则文件 |
 | Collector Plugin | 10 种采集器 |
+| FIM Plugin | 基于 AIDE 的文件完整性监控，5 套默认策略 |
 | 前端 UI | 45+ 个 Vue 组件 |
 | HTTP 端点 | 100+ 个 |
 | 单元测试 | 15 个测试文件 |
