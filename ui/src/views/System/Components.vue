@@ -184,6 +184,7 @@
             <a-select-option value="agent">Agent (主程序)</a-select-option>
             <a-select-option value="baseline">Baseline (基线检查插件)</a-select-option>
             <a-select-option value="collector">Collector (资产采集插件)</a-select-option>
+            <a-select-option value="fim">FIM (文件完整性监控插件)</a-select-option>
           </a-select>
         </a-form-item>
 
@@ -1022,6 +1023,7 @@ const getNameColor = (name: string): string => {
     agent: 'blue',
     baseline: 'green',
     collector: 'purple',
+    fim: 'orange',
   }
   return colors[name] || 'default'
 }

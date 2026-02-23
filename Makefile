@@ -1,4 +1,4 @@
-.PHONY: proto generate test clean help build-server package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch docker-build docker-up docker-down
+.PHONY: proto generate test clean help build-server package-agent package-agent-all package-plugins package-plugins-all package-fim package-all package-all-arch docker-build docker-up docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -82,6 +82,10 @@ package-baseline:
 # 构建 Collector 插件（单架构）- 输出二进制文件
 package-collector:
 	@./scripts/build.sh collector --arch=$(GOARCH) --version=$(VERSION)
+
+# 构建 FIM 插件（单架构）- 输出二进制文件
+package-fim:
+	@./scripts/build.sh fim --arch=$(GOARCH) --version=$(VERSION)
 
 # 构建所有插件（单架构）- 输出二进制文件
 package-plugins:
@@ -234,6 +238,7 @@ help:
 	@echo "  插件 (输出二进制文件，由 Agent 动态管理):"
 	@echo "    make package-baseline    - 构建 Baseline 插件 (单架构)"
 	@echo "    make package-collector   - 构建 Collector 插件 (单架构)"
+	@echo "    make package-fim         - 构建 FIM 插件 (单架构)"
 	@echo "    make package-plugins     - 构建所有插件 (单架构)"
 	@echo "    make package-plugins-all - 构建所有插件 (amd64 + arm64)"
 	@echo ""

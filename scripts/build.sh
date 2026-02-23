@@ -6,6 +6,7 @@
 #   agent           打包 agent
 #   baseline        打包 baseline 插件
 #   collector       打包 collector 插件
+#   fim             打包 fim 插件
 #   plugins         打包所有插件
 #   all             打包所有 (agent + plugins)
 #
@@ -215,10 +216,14 @@ case "$TARGET" in
     collector)
         for arch in $(get_archs); do build_plugin collector $arch; done
         ;;
+    fim)
+        for arch in $(get_archs); do build_plugin fim $arch; done
+        ;;
     plugins)
         for arch in $(get_archs); do
             build_plugin baseline $arch
             build_plugin collector $arch
+            build_plugin fim $arch
         done
         ;;
     all)
@@ -226,6 +231,7 @@ case "$TARGET" in
             package_agent $arch
             build_plugin baseline $arch
             build_plugin collector $arch
+            build_plugin fim $arch
         done
         ;;
     *)
