@@ -29,7 +29,7 @@ func StartTaskScheduler(taskService *service.TaskService, transferService *trans
 	}
 }
 
-// dispatchAllPendingTasks 分发所有待执行任务（检查任务和修复任务）
+// dispatchAllPendingTasks 分发所有待执行任务（检查任务、修复任务、FIM 任务）
 func dispatchAllPendingTasks(taskService *service.TaskService, transferService *transfer.Service, logger *zap.Logger) {
 	// 分发基线检查任务
 	if err := taskService.DispatchPendingTasks(transferService); err != nil {
@@ -39,5 +39,10 @@ func dispatchAllPendingTasks(taskService *service.TaskService, transferService *
 	// 分发基线修复任务
 	if err := taskService.DispatchPendingFixTasks(transferService); err != nil {
 		logger.Error("分发修复任务失败", zap.Error(err))
+	}
+
+	// 分发 FIM 检查任务
+	if err := taskService.DispatchPendingFIMTasks(transferService); err != nil {
+		logger.Error("分发 FIM 任务失败", zap.Error(err))
 	}
 }

@@ -38,6 +38,11 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		return fmt.Errorf("初始化默认插件配置失败: %w", err)
 	}
 
+	// 初始化默认 FIM 策略（始终执行，仅在表为空时插入）
+	if err := initDefaultFIMPolicies(db, logger); err != nil {
+		return fmt.Errorf("初始化默认 FIM 策略失败: %w", err)
+	}
+
 	// 检查是否已完成首次数据初始化
 	if isDataInitialized(db) {
 		logger.Info("默认数据已初始化过，跳过策略组和策略重建")
@@ -316,11 +321,12 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 	// 构建插件下载 URL
 	// 如果配置了 base_url，使用 HTTP 下载
 	// 否则使用 file:// 协议（仅限开发环境）
-	var baselineURL, collectorURL string
+	var baselineURL, collectorURL, fimURL string
 	if pluginsCfg != nil && pluginsCfg.BaseURL != "" {
 		// 生产环境：使用 HTTP URL
 		baselineURL = pluginsCfg.BaseURL + "/baseline"
 		collectorURL = pluginsCfg.BaseURL + "/collector"
+		fimURL = pluginsCfg.BaseURL + "/fim"
 		logger.Info("使用 HTTP 插件下载 URL",
 			zap.String("base_url", pluginsCfg.BaseURL),
 		)
@@ -332,6 +338,7 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 		}
 		baselineURL = "file://" + pluginDir + "/baseline"
 		collectorURL = "file://" + pluginDir + "/collector"
+		fimURL = "file://" + pluginDir + "/fim"
 		logger.Info("使用 file:// 插件下载 URL（开发环境）",
 			zap.String("plugin_dir", pluginDir),
 		)
@@ -363,6 +370,18 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			Enabled:     true,
 			Description: "资产采集插件，采集主机进程、端口、用户等信息",
 		},
+		{
+			Name:    "fim",
+			Type:    model.PluginTypeFIM,
+			Version: "1.0.0",
+			SHA256:  "",
+			DownloadURLs: model.StringArray{
+				fimURL,
+			},
+			Detail:      `{"check_timeout_minutes": 30}`,
+			Enabled:     true,
+			Description: "文件完整性监控插件，基于 AIDE 检测文件变更",
+		},
 	}
 
 	for _, plugin := range defaultPlugins {
@@ -392,6 +411,165 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			zap.String("name", plugin.Name),
 			zap.String("type", string(plugin.Type)),
 			zap.String("version", plugin.Version),
+		)
+	}
+
+	return nil
+}
+
+// initDefaultFIMPolicies 初始化默认 FIM 策略
+// 仅在 fim_policies 表为空时插入，避免重复创建
+func initDefaultFIMPolicies(db *gorm.DB, logger *zap.Logger) error {
+	var count int64
+	if err := db.Model(&model.FIMPolicy{}).Count(&count).Error; err != nil {
+		// 表可能不存在（首次启动 AutoMigrate 之前），静默跳过
+		logger.Debug("FIM 策略表查询失败，跳过初始化", zap.Error(err))
+		return nil
+	}
+
+	if count > 0 {
+		logger.Debug("FIM 策略已存在，跳过默认策略初始化", zap.Int64("count", count))
+		return nil
+	}
+
+	defaultPolicies := []model.FIMPolicy{
+		{
+			PolicyID:    "fim-default-general",
+			Name:        "通用文件完整性策略",
+			Description: "监控关键系统二进制文件、认证配置文件和SSH配置等，适用于所有主机",
+			WatchPaths: model.WatchPaths{
+				{Path: "/bin", Level: "NORMAL", Comment: "系统命令"},
+				{Path: "/sbin", Level: "NORMAL", Comment: "系统管理命令"},
+				{Path: "/usr/bin", Level: "NORMAL", Comment: "用户态命令"},
+				{Path: "/usr/sbin", Level: "NORMAL", Comment: "用户态管理命令"},
+				{Path: "/etc/passwd", Level: "NORMAL", Comment: "用户文件"},
+				{Path: "/etc/shadow", Level: "NORMAL", Comment: "密码文件"},
+				{Path: "/etc/group", Level: "NORMAL", Comment: "组文件"},
+				{Path: "/etc/gshadow", Level: "NORMAL", Comment: "组密码文件"},
+				{Path: "/etc/sudoers", Level: "NORMAL", Comment: "提权配置"},
+				{Path: "/etc/ssh/sshd_config", Level: "NORMAL", Comment: "SSH 服务配置"},
+				{Path: "/etc/ssh/ssh_config", Level: "NORMAL", Comment: "SSH 客户端配置"},
+				{Path: "/etc/crontab", Level: "NORMAL", Comment: "定时任务"},
+				{Path: "/etc/pam.d", Level: "NORMAL", Comment: "PAM 认证配置"},
+			},
+			ExcludePaths: model.StringArray{
+				"/usr/src",
+				"/usr/tmp",
+				"/var/log",
+				"/tmp",
+				"/boot/grub2/grubenv",
+			},
+			CheckIntervalHours: 24,
+			TargetType:         "all",
+			Enabled:            true,
+		},
+		{
+			PolicyID:    "fim-default-database",
+			Name:        "数据库服务器策略",
+			Description: "监控 MySQL/MariaDB、Redis、PostgreSQL 的配置文件和认证文件，防止数据库配置被篡改",
+			WatchPaths: model.WatchPaths{
+				{Path: "/etc/my.cnf", Level: "NORMAL", Comment: "MySQL 主配置"},
+				{Path: "/etc/my.cnf.d", Level: "NORMAL", Comment: "MySQL 配置目录"},
+				{Path: "/etc/mysql", Level: "NORMAL", Comment: "MySQL/MariaDB 配置目录"},
+				{Path: "/etc/redis.conf", Level: "NORMAL", Comment: "Redis 主配置"},
+				{Path: "/etc/redis", Level: "NORMAL", Comment: "Redis 配置目录"},
+				{Path: "/etc/redis-sentinel.conf", Level: "NORMAL", Comment: "Redis Sentinel 配置"},
+				{Path: "/var/lib/pgsql/data/pg_hba.conf", Level: "NORMAL", Comment: "PostgreSQL 认证配置"},
+				{Path: "/var/lib/pgsql/data/postgresql.conf", Level: "NORMAL", Comment: "PostgreSQL 主配置"},
+			},
+			ExcludePaths: model.StringArray{
+				"/var/lib/mysql",
+				"/var/lib/redis",
+				"/var/lib/pgsql/data/base",
+				"/var/lib/pgsql/data/pg_wal",
+			},
+			CheckIntervalHours: 24,
+			TargetType:         "all",
+			Enabled:            false,
+		},
+		{
+			PolicyID:    "fim-default-webserver",
+			Name:        "Web 服务器策略",
+			Description: "监控 Nginx/Apache/OpenResty 的配置文件和 SSL 证书，防止 Web 配置和证书被篡改",
+			WatchPaths: model.WatchPaths{
+				{Path: "/etc/nginx", Level: "NORMAL", Comment: "Nginx 配置目录"},
+				{Path: "/usr/local/nginx/conf", Level: "NORMAL", Comment: "Nginx 自编译配置"},
+				{Path: "/usr/local/openresty/nginx/conf", Level: "NORMAL", Comment: "OpenResty 配置"},
+				{Path: "/etc/httpd/conf", Level: "NORMAL", Comment: "Apache 主配置"},
+				{Path: "/etc/httpd/conf.d", Level: "NORMAL", Comment: "Apache 扩展配置"},
+				{Path: "/etc/pki/tls/certs", Level: "NORMAL", Comment: "TLS 证书"},
+				{Path: "/etc/pki/tls/private", Level: "NORMAL", Comment: "TLS 私钥"},
+				{Path: "/etc/ssl/certs", Level: "NORMAL", Comment: "SSL 证书"},
+				{Path: "/etc/ssl/private", Level: "NORMAL", Comment: "SSL 私钥"},
+			},
+			ExcludePaths: model.StringArray{
+				"/usr/local/openresty/nginx/logs",
+				"/usr/local/nginx/logs",
+				"/var/log/nginx",
+				"/var/log/httpd",
+			},
+			CheckIntervalHours: 24,
+			TargetType:         "all",
+			Enabled:            false,
+		},
+		{
+			PolicyID:    "fim-default-container",
+			Name:        "容器宿主机策略",
+			Description: "监控 Docker/containerd 守护进程配置和运行时关键文件，防止容器运行环境被篡改",
+			WatchPaths: model.WatchPaths{
+				{Path: "/etc/docker/daemon.json", Level: "NORMAL", Comment: "Docker 守护进程配置"},
+				{Path: "/etc/containerd", Level: "NORMAL", Comment: "containerd 配置目录"},
+				{Path: "/usr/lib/systemd/system/docker.service", Level: "NORMAL", Comment: "Docker 服务单元"},
+				{Path: "/usr/lib/systemd/system/containerd.service", Level: "NORMAL", Comment: "containerd 服务单元"},
+				{Path: "/etc/crictl.yaml", Level: "NORMAL", Comment: "CRI 工具配置"},
+			},
+			ExcludePaths: model.StringArray{
+				"/var/lib/docker",
+				"/var/lib/containerd",
+			},
+			CheckIntervalHours: 24,
+			TargetType:         "all",
+			Enabled:            false,
+		},
+		{
+			PolicyID:    "fim-default-middleware",
+			Name:        "中间件与应用服务器策略",
+			Description: "监控 Tomcat、Kafka、Zookeeper 等中间件的配置文件和启动脚本",
+			WatchPaths: model.WatchPaths{
+				{Path: "/etc/tomcat", Level: "NORMAL", Comment: "Tomcat 配置目录"},
+				{Path: "/etc/kafka", Level: "NORMAL", Comment: "Kafka 配置目录"},
+				{Path: "/etc/zookeeper", Level: "NORMAL", Comment: "Zookeeper 配置目录"},
+				{Path: "/etc/elasticsearch", Level: "NORMAL", Comment: "Elasticsearch 配置目录"},
+				{Path: "/usr/lib/systemd/system", Level: "NORMAL", Comment: "systemd 服务单元"},
+				{Path: "/etc/init.d", Level: "NORMAL", Comment: "SysV 启动脚本"},
+				{Path: "/etc/systemd/system", Level: "NORMAL", Comment: "自定义 systemd 服务"},
+				{Path: "/etc/ld.so.conf", Level: "NORMAL", Comment: "动态链接库配置"},
+				{Path: "/etc/ld.so.conf.d", Level: "NORMAL", Comment: "动态链接库配置目录"},
+			},
+			ExcludePaths: model.StringArray{
+				"/var/log",
+				"/var/lib/elasticsearch",
+				"/var/lib/kafka-logs",
+			},
+			CheckIntervalHours: 24,
+			TargetType:         "all",
+			Enabled:            false,
+		},
+	}
+
+	for _, policy := range defaultPolicies {
+		wantEnabled := policy.Enabled
+		if err := db.Create(&policy).Error; err != nil {
+			return fmt.Errorf("创建默认 FIM 策略 %s 失败: %w", policy.PolicyID, err)
+		}
+		// GORM 对 bool 零值（false）会跳过并走 DB default(1)，需要显式更新
+		if !wantEnabled {
+			db.Model(&model.FIMPolicy{}).Where("policy_id = ?", policy.PolicyID).Update("enabled", false)
+		}
+		logger.Info("默认 FIM 策略初始化成功",
+			zap.String("policy_id", policy.PolicyID),
+			zap.String("name", policy.Name),
+			zap.Bool("enabled", wantEnabled),
 		)
 	}
 

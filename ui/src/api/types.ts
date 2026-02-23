@@ -484,6 +484,111 @@ export interface FixTaskHostStatus {
   updated_at: string
 }
 
+// FIM（文件完整性监控）相关类型
+export interface FIMWatchPath {
+  path: string
+  level: string // NORMAL, CONTENT, PERMS
+  comment: string
+}
+
+export interface FIMPolicy {
+  policy_id: string
+  name: string
+  description: string
+  watch_paths: FIMWatchPath[]
+  exclude_paths: string[]
+  check_interval_hours: number
+  target_type: string // all/host_ids/business_line
+  target_config: {
+    host_ids?: string[]
+    os_family?: string[]
+  }
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface FIMChangeDetail {
+  size_before?: string
+  size_after?: string
+  hash_changed: boolean
+  permission_changed: boolean
+  owner_changed: boolean
+  attributes?: string
+}
+
+export interface FIMEvent {
+  event_id: string
+  host_id: string
+  hostname: string
+  task_id: string
+  file_path: string
+  change_type: 'added' | 'removed' | 'changed'
+  change_detail: FIMChangeDetail
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  category: string // binary/config/auth/log/other
+  detected_at: string
+  created_at: string
+}
+
+export interface FIMTask {
+  task_id: string
+  policy_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  target_type: string
+  target_config: {
+    host_ids?: string[]
+    os_family?: string[]
+  }
+  dispatched_host_count: number
+  completed_host_count: number
+  total_events: number
+  created_at: string
+  executed_at?: string
+  completed_at?: string
+}
+
+export interface FIMTaskHostStatus {
+  id: number
+  task_id: string
+  host_id: string
+  hostname: string
+  status: 'dispatched' | 'completed' | 'timeout' | 'failed'
+  total_entries: number
+  added_count: number
+  removed_count: number
+  changed_count: number
+  run_time_sec: number
+  error_message?: string
+  dispatched_at?: string
+  completed_at?: string
+}
+
+export interface FIMHostEventCount {
+  host_id: string
+  hostname: string
+  count: number
+}
+
+export interface FIMEventTrendPoint {
+  date: string
+  count: number
+}
+
+export interface FIMEventStats {
+  total: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  added: number
+  removed: number
+  changed: number
+  by_category: Record<string, number>
+  top_hosts: FIMHostEventCount[]
+  trend: FIMEventTrendPoint[]
+}
+
 export interface FixableItem {
   result_id: string
   host_id: string

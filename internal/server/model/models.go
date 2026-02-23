@@ -175,5 +175,9 @@ var (
 		&HostPlugin{},
 		&ComponentPushRecord{},
 		&AgentRestartRecord{},
+		&FIMPolicy{},
+		&FIMEvent{},
+		&FIMTask{},
+		&FIMTaskHostStatus{},
 	}
 )

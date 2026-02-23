@@ -109,6 +109,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupComponentsAPI(router, db, logger, cfg)
 	setupPolicyImportExportAPI(router, db, logger)
 	setupInspectionAPI(router, db, logger)
+	setupFIMAPI(router, db, logger)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -347,4 +348,28 @@ func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *za
 func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewInspectionHandler(db, logger)
 	router.GET("/inspection/overview", handler.GetOverview)
+}
+
+// setupFIMAPI 设置 FIM（文件完整性监控）API 路由
+func setupFIMAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	// 策略管理
+	policiesHandler := api.NewFIMPoliciesHandler(db, logger)
+	router.GET("/fim/policies", policiesHandler.ListFIMPolicies)
+	router.POST("/fim/policies", policiesHandler.CreateFIMPolicy)
+	router.GET("/fim/policies/:id", policiesHandler.GetFIMPolicy)
+	router.PUT("/fim/policies/:id", policiesHandler.UpdateFIMPolicy)
+	router.DELETE("/fim/policies/:id", policiesHandler.DeleteFIMPolicy)
+
+	// 任务管理
+	tasksHandler := api.NewFIMTasksHandler(db, logger)
+	router.GET("/fim/tasks", tasksHandler.ListFIMTasks)
+	router.POST("/fim/tasks", tasksHandler.CreateFIMTask)
+	router.GET("/fim/tasks/:id", tasksHandler.GetFIMTask)
+	router.POST("/fim/tasks/:id/run", tasksHandler.RunFIMTask)
+
+	// 事件查询
+	eventsHandler := api.NewFIMEventsHandler(db, logger)
+	router.GET("/fim/events", eventsHandler.ListFIMEvents)
+	router.GET("/fim/events/stats", eventsHandler.GetFIMEventStats)
+	router.GET("/fim/events/:id", eventsHandler.GetFIMEvent)
 }

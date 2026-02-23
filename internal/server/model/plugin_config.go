@@ -11,6 +11,7 @@ type PluginType string
 const (
 	PluginTypeBaseline  PluginType = "baseline"  // 基线检查插件
 	PluginTypeCollector PluginType = "collector" // 资产采集插件
+	PluginTypeFIM       PluginType = "fim"       // 文件完整性监控插件
 )
 
 // PluginConfig 插件配置表

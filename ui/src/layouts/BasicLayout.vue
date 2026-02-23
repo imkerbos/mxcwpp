@@ -64,6 +64,16 @@
               <a-menu-item key="baseline-fix" @click.native="(e: MouseEvent) => handleNavClick(e, 'baseline-fix')">基线修复</a-menu-item>
               <a-menu-item key="baseline-fix-history" @click.native="(e: MouseEvent) => handleNavClick(e, 'baseline-fix-history')">修复历史</a-menu-item>
             </a-sub-menu>
+            <a-sub-menu key="fim-menu">
+              <template #icon>
+                <FileSearchOutlined />
+              </template>
+              <template #title>文件完整性</template>
+              <a-menu-item key="fim-dashboard" @click.native="(e: MouseEvent) => handleNavClick(e, 'fim-dashboard')">FIM 概览</a-menu-item>
+              <a-menu-item key="fim-policies" @click.native="(e: MouseEvent) => handleNavClick(e, 'fim-policies')">FIM 策略</a-menu-item>
+              <a-menu-item key="fim-events" @click.native="(e: MouseEvent) => handleNavClick(e, 'fim-events')">FIM 事件</a-menu-item>
+              <a-menu-item key="fim-tasks" @click.native="(e: MouseEvent) => handleNavClick(e, 'fim-tasks')">FIM 任务</a-menu-item>
+            </a-sub-menu>
             <a-menu-item key="alerts" @click.native="(e: MouseEvent) => handleNavClick(e, 'alerts')">
               <template #icon>
                 <BellOutlined />
@@ -175,6 +185,7 @@ import {
   LogoutOutlined,
   KeyOutlined,
   BellOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteConfigStore } from '@/stores/site-config'
@@ -295,6 +306,18 @@ watch(
     } else if (name === 'Inspection') {
       selectedKeys.value = ['inspection']
       openKeys.value = ['system-menu']
+    } else if (name === 'FIMDashboard') {
+      selectedKeys.value = ['fim-dashboard']
+      openKeys.value = ['fim-menu']
+    } else if (name === 'FIMPolicies') {
+      selectedKeys.value = ['fim-policies']
+      openKeys.value = ['fim-menu']
+    } else if (name === 'FIMEvents') {
+      selectedKeys.value = ['fim-events']
+      openKeys.value = ['fim-menu']
+    } else if (name === 'FIMTasks') {
+      selectedKeys.value = ['fim-tasks']
+      openKeys.value = ['fim-menu']
     } else if (name === 'Alerts') {
       selectedKeys.value = ['alerts']
       openKeys.value = []
@@ -323,6 +346,10 @@ const routeMap: Record<string, string> = {
   'system-task-report': '/system/task-report',
   'inspection': '/system/inspection',
   'alerts': '/alerts',
+  'fim-dashboard': '/fim/dashboard',
+  'fim-policies': '/fim/policies',
+  'fim-events': '/fim/events',
+  'fim-tasks': '/fim/tasks',
 }
 
 // 记录是否是 Ctrl/Cmd+Click，用于阻止 handleMenuClick 的路由跳转

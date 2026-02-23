@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -871,6 +872,12 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 
 	case 8004: // 修复任务完成信号
 		return s.handleFixTaskComplete(ctx, record, conn)
+
+	case 6001: // FIM 事件
+		return s.handleFIMEvent(ctx, record, conn)
+
+	case 6002: // FIM 任务完成信号
+		return s.handleFIMTaskCompletion(ctx, record, conn)
 
 	case 5050, 5051, 5052, 5053, 5054, 5055, 5056, 5057, 5058, 5059, 5060:
 		// 资产数据
@@ -2320,6 +2327,180 @@ func (s *Service) handleFixTaskComplete(ctx context.Context, record *grpcProto.E
 			zap.String("fix_task_id", fixTaskID),
 			zap.Int64("completed_hosts", completedHosts),
 			zap.Int("total_hosts", len(task.HostIDs)),
+		)
+	}
+
+	return nil
+}
+
+// handleFIMEvent 处理 FIM 事件（DataType 6001）
+func (s *Service) handleFIMEvent(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 FIM 事件失败: %w", err)
+	}
+
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("FIM 事件 Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	eventID := fields["event_id"]
+	taskID := fields["task_id"]
+	filePath := fields["file_path"]
+	changeType := fields["change_type"]
+	severity := fields["severity"]
+	category := fields["category"]
+	changeDetailStr := fields["change_detail"]
+	detectedAtStr := fields["detected_at"]
+
+	if eventID == "" || taskID == "" {
+		s.logger.Warn("FIM 事件缺少必要字段",
+			zap.String("agent_id", conn.AgentID),
+			zap.String("event_id", eventID),
+			zap.String("task_id", taskID),
+		)
+		return nil
+	}
+
+	// 解析 change_detail JSON
+	var changeDetail model.ChangeDetail
+	if changeDetailStr != "" {
+		_ = json.Unmarshal([]byte(changeDetailStr), &changeDetail)
+	}
+
+	// 解析检测时间
+	detectedAt := model.Now()
+	if detectedAtStr != "" {
+		if t, err := time.Parse(time.RFC3339, detectedAtStr); err == nil {
+			detectedAt = model.ToLocalTime(t)
+		}
+	}
+
+	fimEvent := &model.FIMEvent{
+		EventID:      eventID,
+		HostID:       conn.AgentID,
+		Hostname:     conn.Hostname,
+		TaskID:       taskID,
+		FilePath:     filePath,
+		ChangeType:   changeType,
+		ChangeDetail: changeDetail,
+		Severity:     severity,
+		Category:     category,
+		DetectedAt:   detectedAt,
+	}
+
+	if err := s.db.Create(fimEvent).Error; err != nil {
+		return fmt.Errorf("保存 FIM 事件失败: %w", err)
+	}
+
+	// 递增任务的 total_events 计数
+	s.db.Model(&model.FIMTask{}).
+		Where("task_id = ?", taskID).
+		Update("total_events", gorm.Expr("total_events + 1"))
+
+	s.logger.Debug("FIM 事件已保存",
+		zap.String("event_id", eventID),
+		zap.String("host_id", conn.AgentID),
+		zap.String("file_path", filePath),
+		zap.String("change_type", changeType),
+		zap.String("severity", severity),
+	)
+
+	return nil
+}
+
+// handleFIMTaskCompletion 处理 FIM 任务完成信号（DataType 6002）
+func (s *Service) handleFIMTaskCompletion(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 FIM 任务完成信号失败: %w", err)
+	}
+
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("FIM 完成信号 Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	taskID := fields["task_id"]
+	taskStatus := fields["status"]
+	errorMessage := fields["error_message"]
+	completedAtStr := fields["completed_at"]
+	totalEntries, _ := strconv.Atoi(fields["total_entries"])
+	addedCount, _ := strconv.Atoi(fields["added_count"])
+	removedCount, _ := strconv.Atoi(fields["removed_count"])
+	changedCount, _ := strconv.Atoi(fields["changed_count"])
+	runTimeSec, _ := strconv.Atoi(fields["run_time_sec"])
+
+	if taskID == "" {
+		s.logger.Warn("FIM 完成信号缺少 task_id",
+			zap.String("agent_id", conn.AgentID))
+		return nil
+	}
+
+	s.logger.Info("收到 FIM 任务完成信号",
+		zap.String("agent_id", conn.AgentID),
+		zap.String("task_id", taskID),
+		zap.String("status", taskStatus),
+		zap.Int("total_entries", totalEntries),
+		zap.Int("changed_count", changedCount),
+	)
+
+	// 更新主机状态
+	now := model.Now()
+	hostStatus := "completed"
+	if taskStatus == "failed" {
+		hostStatus = "failed"
+	}
+
+	hostUpdates := map[string]interface{}{
+		"status":        hostStatus,
+		"total_entries":  totalEntries,
+		"added_count":   addedCount,
+		"removed_count": removedCount,
+		"changed_count": changedCount,
+		"run_time_sec":  runTimeSec,
+		"error_message": errorMessage,
+		"completed_at":  &now,
+	}
+
+	result := s.db.Model(&model.FIMTaskHostStatus{}).
+		Where("task_id = ? AND host_id = ? AND status = ?",
+			taskID, conn.AgentID, "dispatched").
+		Updates(hostUpdates)
+
+	if result.Error != nil {
+		s.logger.Error("更新 FIM 主机状态失败",
+			zap.String("task_id", taskID),
+			zap.String("host_id", conn.AgentID),
+			zap.Error(result.Error))
+	}
+
+	// 递增已完成主机数
+	s.db.Model(&model.FIMTask{}).
+		Where("task_id = ?", taskID).
+		Update("completed_host_count",
+			gorm.Expr("completed_host_count + 1"))
+
+	// 检查是否所有主机都已完成
+	var task model.FIMTask
+	if err := s.db.Where("task_id = ?", taskID).
+		First(&task).Error; err != nil {
+		return fmt.Errorf("查询 FIM 任务失败: %w", err)
+	}
+
+	if task.CompletedHostCount >= task.DispatchedHostCount &&
+		task.DispatchedHostCount > 0 {
+		completedAt := model.Now()
+		_ = completedAtStr // 使用服务端时间
+		s.db.Model(&task).Updates(map[string]interface{}{
+			"status":       "completed",
+			"completed_at": &completedAt,
+		})
+		s.logger.Info("FIM 任务所有主机已完成",
+			zap.String("task_id", taskID),
+			zap.Int("completed", task.CompletedHostCount),
+			zap.Int("dispatched", task.DispatchedHostCount),
 		)
 	}
 

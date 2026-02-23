@@ -938,3 +938,180 @@ func getHostIPAddress(host *model.Host) string {
 	}
 	return ""
 }
+
+// DispatchPendingFIMTasks 分发待执行的 FIM 任务
+func (s *TaskService) DispatchPendingFIMTasks(transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	var tasks []model.FIMTask
+	if err := s.db.Where("status = ?", "pending").Find(&tasks).Error; err != nil {
+		return fmt.Errorf("查询待执行 FIM 任务失败: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	s.logger.Info("发现待执行 FIM 任务", zap.Int("count", len(tasks)))
+
+	for _, task := range tasks {
+		if err := s.dispatchFIMTask(&task, transferService); err != nil {
+			s.logger.Error("分发 FIM 任务失败",
+				zap.String("task_id", task.TaskID),
+				zap.Error(err),
+			)
+			continue
+		}
+	}
+
+	return nil
+}
+
+// dispatchFIMTask 分发单个 FIM 任务
+func (s *TaskService) dispatchFIMTask(task *model.FIMTask, transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	// 查询关联的 FIM 策略
+	var policy model.FIMPolicy
+	if err := s.db.Where("policy_id = ?", task.PolicyID).First(&policy).Error; err != nil {
+		s.db.Model(task).Update("status", "failed")
+		return fmt.Errorf("查询 FIM 策略失败: %w", err)
+	}
+
+	if !policy.Enabled {
+		s.logger.Warn("FIM 策略已禁用，跳过",
+			zap.String("task_id", task.TaskID),
+			zap.String("policy_id", task.PolicyID),
+		)
+		return nil
+	}
+
+	// 根据 target_type 匹配在线主机
+	hosts, err := s.matchFIMTargetHosts(task)
+	if err != nil {
+		return err
+	}
+
+	if len(hosts) == 0 {
+		s.logger.Warn("没有匹配的在线主机，FIM 任务保持 pending",
+			zap.String("task_id", task.TaskID),
+		)
+		return nil
+	}
+
+	// 构建策略数据
+	policyData := map[string]interface{}{
+		"task_id":       task.TaskID,
+		"policy_id":     policy.PolicyID,
+		"watch_paths":   policy.WatchPaths,
+		"exclude_paths": policy.ExcludePaths,
+	}
+	policyJSON, err := json.Marshal(policyData)
+	if err != nil {
+		return fmt.Errorf("序列化策略数据失败: %w", err)
+	}
+
+	// 更新任务状态为 running
+	now := model.Now()
+	s.db.Model(task).Updates(map[string]interface{}{
+		"status":      "running",
+		"executed_at": &now,
+	})
+
+	// 为每个主机下发任务并记录状态
+	successCount := s.sendFIMToHosts(task, hosts, policyJSON, transferService)
+
+	// 更新已下发主机数
+	s.db.Model(task).Update("dispatched_host_count", successCount)
+
+	if successCount == 0 {
+		s.db.Model(task).Update("status", "pending")
+		return fmt.Errorf("FIM 任务没有成功下发到任何主机")
+	}
+
+	s.logger.Info("FIM 任务分发完成",
+		zap.String("task_id", task.TaskID),
+		zap.Int("host_count", len(hosts)),
+		zap.Int("success_count", successCount),
+	)
+	return nil
+}
+
+// matchFIMTargetHosts 根据 target_type 匹配在线主机
+func (s *TaskService) matchFIMTargetHosts(task *model.FIMTask) ([]model.Host, error) {
+	var hosts []model.Host
+	// FIM 仅适用于 VM（物理机/虚拟机），容器环境不支持 AIDE
+	baseQuery := s.db.Where("status = ? AND runtime_type = ?", model.HostStatusOnline, model.RuntimeTypeVM)
+
+	switch task.TargetType {
+	case "all":
+		if err := baseQuery.Find(&hosts).Error; err != nil {
+			return nil, fmt.Errorf("查询主机失败: %w", err)
+		}
+	case "host_ids":
+		if len(task.TargetConfig.HostIDs) == 0 {
+			return nil, fmt.Errorf("target_config.host_ids 为空")
+		}
+		if err := baseQuery.Where("host_id IN ?", task.TargetConfig.HostIDs).Find(&hosts).Error; err != nil {
+			return nil, fmt.Errorf("查询主机失败: %w", err)
+		}
+	case "os_family":
+		if len(task.TargetConfig.OSFamily) == 0 {
+			return nil, fmt.Errorf("target_config.os_family 为空")
+		}
+		if err := baseQuery.Where("os_family IN ?", task.TargetConfig.OSFamily).Find(&hosts).Error; err != nil {
+			return nil, fmt.Errorf("查询主机失败: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("未知的 target_type: %s", task.TargetType)
+	}
+
+	return hosts, nil
+}
+
+// sendFIMToHosts 向主机列表下发 FIM 任务
+func (s *TaskService) sendFIMToHosts(task *model.FIMTask, hosts []model.Host, policyJSON []byte, transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) int {
+	now := model.Now()
+	successCount := 0
+
+	for _, host := range hosts {
+		grpcTask := &grpcProto.Task{
+			DataType:   6000,
+			ObjectName: "fim",
+			Data:       string(policyJSON),
+			Token:      task.TaskID,
+		}
+		cmd := &grpcProto.Command{
+			Tasks: []*grpcProto.Task{grpcTask},
+		}
+
+		if err := transferService.SendCommand(host.HostID, cmd); err != nil {
+			s.logger.Error("下发 FIM 任务到主机失败",
+				zap.String("task_id", task.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		hostStatus := &model.FIMTaskHostStatus{
+			TaskID:       task.TaskID,
+			HostID:       host.HostID,
+			Hostname:     host.Hostname,
+			Status:       "dispatched",
+			DispatchedAt: &now,
+		}
+		if dbErr := s.db.Create(hostStatus).Error; dbErr != nil {
+			s.logger.Error("记录 FIM 主机状态失败",
+				zap.String("task_id", task.TaskID),
+				zap.String("host_id", host.HostID),
+				zap.Error(dbErr),
+			)
+		}
+		successCount++
+	}
+
+	return successCount
+}

@@ -148,6 +148,31 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Inspection/index.vue'),
         meta: { title: '运维巡检' },
       },
+      // FIM（文件完整性监控）
+      {
+        path: 'fim/dashboard',
+        name: 'FIMDashboard',
+        component: () => import('@/views/FIM/Dashboard/index.vue'),
+        meta: { title: 'FIM 概览' },
+      },
+      {
+        path: 'fim/policies',
+        name: 'FIMPolicies',
+        component: () => import('@/views/FIM/Policies/index.vue'),
+        meta: { title: 'FIM 策略' },
+      },
+      {
+        path: 'fim/events',
+        name: 'FIMEvents',
+        component: () => import('@/views/FIM/Events/index.vue'),
+        meta: { title: 'FIM 事件' },
+      },
+      {
+        path: 'fim/tasks',
+        name: 'FIMTasks',
+        component: () => import('@/views/FIM/Tasks/index.vue'),
+        meta: { title: 'FIM 任务' },
+      },
     ],
   },
   // 404 错误页面
