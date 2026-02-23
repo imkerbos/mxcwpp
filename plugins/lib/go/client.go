@@ -97,43 +97,62 @@ func (c *Client) SendRecordWithRetry(rec *bridge.Record, maxRetries int, retryDe
 	return fmt.Errorf("failed to send record after %d retries: %w", maxRetries, lastErr)
 }
 
+// 心跳 DataType 常量
+const (
+	dataTypeHeartbeatPing int32 = 9000
+	dataTypeHeartbeatPong int32 = 9001
+)
+
 // ReceiveTask 从 Agent 接收任务
 // 协议格式：4 字节长度（小端序） + protobuf 序列化的 Task
+// 自动拦截心跳 ping（DataType=9000）并回复 pong，对业务调用方透明
 func (c *Client) ReceiveTask() (*bridge.Task, error) {
-	c.rmu.Lock()
-	defer c.rmu.Unlock()
+	for {
+		c.rmu.Lock()
 
-	// 读取长度（4 字节，小端序）
-	var len uint32
-	if err := binary.Read(c.reader, binary.LittleEndian, &len); err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
+		// 读取长度（4 字节，小端序）
+		var len uint32
+		if err := binary.Read(c.reader, binary.LittleEndian, &len); err != nil {
+			c.rmu.Unlock()
+			if err == io.EOF {
+				return nil, io.EOF
+			}
+			return nil, fmt.Errorf("failed to read task size: %w", err)
 		}
-		return nil, fmt.Errorf("failed to read task size: %w", err)
-	}
 
-	// 限制最大消息大小（防止恶意数据）
-	const maxMessageSize = 10 * 1024 * 1024 // 10MB
-	if len > maxMessageSize {
-		return nil, fmt.Errorf("task size %d exceeds maximum %d", len, maxMessageSize)
-	}
-
-	// 读取数据
-	buf := make([]byte, len)
-	if _, err := io.ReadFull(c.reader, buf); err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
+		// 限制最大消息大小（防止恶意数据）
+		const maxMessageSize = 10 * 1024 * 1024 // 10MB
+		if len > maxMessageSize {
+			c.rmu.Unlock()
+			return nil, fmt.Errorf("task size %d exceeds maximum %d", len, maxMessageSize)
 		}
-		return nil, fmt.Errorf("failed to read task data: %w", err)
-	}
 
-	// 反序列化 Task
-	task := &bridge.Task{}
-	if err := proto.Unmarshal(buf, task); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal task: %w", err)
-	}
+		// 读取数据
+		buf := make([]byte, len)
+		if _, err := io.ReadFull(c.reader, buf); err != nil {
+			c.rmu.Unlock()
+			if err == io.EOF {
+				return nil, io.EOF
+			}
+			return nil, fmt.Errorf("failed to read task data: %w", err)
+		}
 
-	return task, nil
+		c.rmu.Unlock()
+
+		// 反序列化 Task
+		task := &bridge.Task{}
+		if err := proto.Unmarshal(buf, task); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal task: %w", err)
+		}
+
+		// 拦截心跳 ping：自动回复 pong，不返回给业务调用方
+		if task.DataType == dataTypeHeartbeatPing {
+			c.SendRecord(&bridge.Record{DataType: dataTypeHeartbeatPong})
+			continue
+		}
+
+		return task, nil
+	}
 }
 
 // ReceiveTaskWithTimeout 从 Agent 接收任务，带超时机制

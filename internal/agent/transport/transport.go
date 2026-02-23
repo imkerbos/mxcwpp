@@ -52,7 +52,7 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 		logger:         logger,
 		connMgr:        connMgr,
 		agentID:        agentID,
-		sendBuffer:     make(chan *grpc.PackagedData, 100),
+		sendBuffer:     make(chan *grpc.PackagedData, 2048),
 		pluginConfigCh: make(chan []*grpc.Config, 10),
 		agentUpdateCh:  make(chan *grpc.AgentUpdate, 10),
 		taskCh:         make(chan *grpc.Task, 100),

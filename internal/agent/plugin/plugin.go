@@ -48,12 +48,13 @@ type Plugin struct {
 	tx           *os.File       // 发送管道（Agent 向插件写入任务）
 	logWriter    io.WriteCloser // 日志写入器（支持日志轮转）
 	workDir      string         // 插件工作目录
-	status       Status         // 插件状态
-	mu           sync.RWMutex   // 保护状态
-	startTime    time.Time      // 启动时间
-	lastActivity time.Time      // 最后一次收到插件数据的时间（用于健康检查）
-	stopCh       chan struct{}  // 停止信号
-	logger       *zap.Logger
+	status    Status         // 插件状态
+	mu        sync.RWMutex   // 保护状态
+	startTime time.Time      // 启动时间
+	lastPong  time.Time      // 最后一次收到插件 pong 的时间（用于健康检查）
+	pingCh    chan struct{}   // 通知 sendTask 发送 ping
+	stopCh    chan struct{}   // 停止信号
+	logger    *zap.Logger
 }
 
 // Status 是插件状态
@@ -65,6 +66,12 @@ const (
 	StatusRunning  Status = "running"
 	StatusStopping Status = "stopping"
 	StatusError    Status = "error"
+)
+
+// 心跳 DataType 常量
+const (
+	DataTypeHeartbeatPing int32 = 9000
+	DataTypeHeartbeatPong int32 = 9001
 )
 
 // NewManager 创建新的插件管理器
@@ -310,17 +317,18 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	// 7. 创建插件实例
 	now := time.Now()
 	plugin := &Plugin{
-		Config:       cfg,
-		cmd:          cmd,
-		rx:           rx_r,
-		tx:           tx_w,
-		logWriter:    logWriter,
-		workDir:      workDir,
-		status:       StatusStarting,
-		startTime:    now,
-		lastActivity: now, // 与 startTime 完全相等，After() 返回 false
-		stopCh:       make(chan struct{}),
-		logger:       m.logger.With(zap.String("plugin", cfg.Name)),
+		Config:    cfg,
+		cmd:       cmd,
+		rx:        rx_r,
+		tx:        tx_w,
+		logWriter: logWriter,
+		workDir:   workDir,
+		status:    StatusStarting,
+		startTime: now,
+		lastPong:  now, // 初始化为启动时间，避免立即判定超时
+		pingCh:    make(chan struct{}, 1),
+		stopCh:    make(chan struct{}),
+		logger:    m.logger.With(zap.String("plugin", cfg.Name)),
 	}
 
 	// 8. 启动管理 goroutine
@@ -640,16 +648,11 @@ func (m *Manager) restartPlugin(oldPlugin *Plugin) {
 // watchPlugins 定期检查插件健康状态
 // 检查策略：
 // 1. 进程是否还存活（发送 signal 0 检测）
-// 2. 如果有数据交互，检查是否超时（假死检测）
-// 注意：任务驱动型插件（如 baseline）空闲时无数据交互是正常的，不做假死检测
+// 2. 发送 IPC ping，检查插件是否在 pongTimeout 内回复 pong（精准假死检测）
+// 所有插件统一心跳检测，不再区分任务驱动型/持续采集型
 func (m *Manager) watchPlugins() {
-	const checkInterval = 60 * time.Second   // 每 60 秒检查一次
-	const silentThreshold = 10 * time.Minute // 有过数据交互的插件，超过 10 分钟无活动视为假死
-
-	// 任务驱动型插件列表：这些插件只在收到任务时才有数据交互，空闲是正常的
-	taskDrivenPlugins := map[string]bool{
-		"baseline": true,
-	}
+	const checkInterval = 60 * time.Second // 每 60 秒检查一次
+	const pongTimeout = 3 * time.Minute    // 容忍 3 次 ping 未回复
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -663,8 +666,7 @@ func (m *Manager) watchPlugins() {
 			for name, plugin := range m.plugins {
 				plugin.mu.RLock()
 				status := plugin.status
-				lastAct := plugin.lastActivity
-				startTime := plugin.startTime
+				lastPong := plugin.lastPong
 				plugin.mu.RUnlock()
 
 				if status != StatusRunning {
@@ -682,24 +684,19 @@ func (m *Manager) watchPlugins() {
 					}
 				}
 
-				// 插件刚启动不到 silentThreshold，跳过
-				if time.Since(startTime) < silentThreshold {
-					continue
+				// 发送 ping（非阻塞写入 pingCh，最多缓存 1 次）
+				select {
+				case plugin.pingCh <- struct{}{}:
+				default:
+					// pingCh 已满，说明上次 ping 还没被 sendTask 消费，跳过
 				}
 
-				// 任务驱动型插件（如 baseline）空闲时无数据交互是正常的，跳过假死检测
-				// 只对持续采集型插件（如 collector）做假死检测
-				if taskDrivenPlugins[name] {
-					continue
-				}
-
-				// 只有插件曾经有过数据交互（lastActivity != startTime），才做假死检测
-				// 如果插件从未发过数据（空闲状态），只靠进程存活检测
-				if lastAct.After(startTime) && time.Since(lastAct) > silentThreshold {
-					m.logger.Warn("plugin appears unresponsive, force restarting",
+				// 检查 pong 超时
+				if time.Since(lastPong) > pongTimeout {
+					m.logger.Warn("plugin heartbeat pong timeout, force restarting",
 						zap.String("plugin", name),
-						zap.Duration("silent_duration", time.Since(lastAct)),
-						zap.Time("last_activity", lastAct),
+						zap.Duration("since_last_pong", time.Since(lastPong)),
+						zap.Time("last_pong", lastPong),
 					)
 					go m.forceRestartPlugin(name)
 				}
@@ -774,10 +771,13 @@ func (m *Manager) receiveData(plugin *Plugin) {
 				continue
 			}
 
-			// 更新最后活动时间（用于健康检查）
-			plugin.mu.Lock()
-			plugin.lastActivity = time.Now()
-			plugin.mu.Unlock()
+			// 心跳 pong —— 更新时间戳，不透传到 server
+			if record.DataType == DataTypeHeartbeatPong {
+				plugin.mu.Lock()
+				plugin.lastPong = time.Now()
+				plugin.mu.Unlock()
+				continue
+			}
 
 			// 检查是否是任务完成信号（DataType 8001 或 8004）
 			if m.taskTracker != nil && (record.DataType == 8001 || record.DataType == 8004) {
@@ -825,6 +825,27 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			return
 		case <-m.ctx.Done():
 			return
+		case <-plugin.pingCh:
+			// 发送心跳 ping 到插件（轻量 Task，无 token，不经过 taskTracker）
+			pingTask := &bridge.Task{DataType: DataTypeHeartbeatPing}
+			pingData, err := proto.Marshal(pingTask)
+			if err != nil {
+				plugin.logger.Error("failed to marshal ping task", zap.Error(err))
+				continue
+			}
+			pingLen := uint32(len(pingData))
+			if err := binary.Write(writer, binary.LittleEndian, pingLen); err != nil {
+				plugin.logger.Error("failed to write ping size", zap.Error(err))
+				continue
+			}
+			if _, err := writer.Write(pingData); err != nil {
+				plugin.logger.Error("failed to write ping data", zap.Error(err))
+				continue
+			}
+			if err := writer.Flush(); err != nil {
+				plugin.logger.Error("failed to flush ping data", zap.Error(err))
+				continue
+			}
 		case task, ok := <-taskCh:
 			if !ok {
 				// 通道已关闭
