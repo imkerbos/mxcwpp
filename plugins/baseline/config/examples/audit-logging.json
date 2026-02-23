@@ -162,7 +162,7 @@
       "description": "应审计用户登录和登出事件（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -187,7 +187,7 @@
       "description": "应审计系统时间修改事件（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -212,7 +212,7 @@
       "description": "应审计用户和组的修改（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -237,7 +237,7 @@
       "description": "应审计网络配置的修改（配置持久化且已加载到内核）",
       "severity": "medium",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -262,7 +262,7 @@
       "description": "应审计 sudoers 文件的修改（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -353,7 +353,7 @@
       "description": "应审计文件权限修改系统调用（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -378,7 +378,7 @@
       "description": "应审计文件属主修改系统调用（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -403,7 +403,7 @@
       "description": "应审计扩展文件属性修改系统调用（配置持久化且已加载到内核）",
       "severity": "medium",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -428,7 +428,7 @@
       "description": "应审计失败的文件访问尝试 (EACCES/EPERM)（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -453,7 +453,7 @@
       "description": "应审计 SUID/SGID 特权命令的执行（配置持久化且已加载到内核）",
       "severity": "critical",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -478,7 +478,7 @@
       "description": "应审计内核模块加载和卸载操作 (insmod/rmmod)（配置持久化且已加载到内核）",
       "severity": "critical",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -503,7 +503,7 @@
       "description": "应审计 SELinux/AppArmor 策略的修改（配置持久化且已加载到内核）",
       "severity": "high",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",
@@ -553,7 +553,7 @@
       "description": "应审计会话初始化文件 (utmp/wtmp/btmp)（配置持久化且已加载到内核）",
       "severity": "medium",
       "check": {
-        "condition": "all",
+        "condition": "any",
         "rules": [
           {
             "type": "command_exec",

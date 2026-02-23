@@ -31,8 +31,8 @@
         ]
       },
       "fix": {
-        "suggestion": "设置 GRUB 引导密码：grub2-setpassword",
-        "command": "grub2-setpassword"
+        "suggestion": "设置 GRUB 引导密码：运行 grub2-setpassword 或手动修改 /boot/grub2/user.cfg（默认密码 MxSec@Grub2024，请及时修改）",
+        "command": "HASH=$(echo -e 'MxSec@Grub2024\\nMxSec@Grub2024' | grub2-mkpasswd-pbkdf2 2>/dev/null | awk '/grub.pbkdf2/{print $NF}') && test -n \"$HASH\" && echo \"GRUB2_PASSWORD=$HASH\" > /boot/grub2/user.cfg"
       }
     },
     {
@@ -46,7 +46,7 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/usr/lib/systemd/system/rescue.service", "ExecStart=-/usr/lib/systemd/systemd-sulogin-shell rescue", "match"]
+            "param": ["/usr/lib/systemd/system/rescue.service", "ExecStart=.*sulogin", "match"]
           }
         ]
       },
@@ -66,7 +66,7 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["systemctl is-enabled ctrl-alt-del.target 2>/dev/null || echo masked", "^(masked|disabled)$"]
+            "param": ["systemctl is-enabled ctrl-alt-del.target 2>/dev/null || echo masked", "(?m)^(masked|disabled)$"]
           }
         ]
       },
