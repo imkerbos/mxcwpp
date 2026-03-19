@@ -141,6 +141,15 @@ init_env() {
     read -p "Manager API 端口 [8080]: " MANAGER_PORT
     MANAGER_PORT="${MANAGER_PORT:-8080}"
 
+    # Redis 密码
+    read -sp "Redis 密码 (回车留空，无密码): " REDIS_PASSWORD
+    echo
+    REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+
+    # JWT 密钥
+    JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    log_info "已自动生成 JWT 密钥"
+
     # 日志保留天数
     read -p "日志保留天数 [7]: " LOG_RETENTION_DAYS
     LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
@@ -155,6 +164,11 @@ init_env() {
 # 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
 # 修改后运行 ./deploy.sh restart 生效
 
+# ============ General ============
+COMPOSE_PROFILES=
+VERSION=$VERSION
+TZ=Asia/Shanghai
+
 # ============ 数据库 ============
 MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
 MYSQL_PASSWORD=$MYSQL_PASSWORD
@@ -167,6 +181,24 @@ MYSQL_PORT=3306
 DB_MAX_IDLE_CONNS=20
 DB_MAX_OPEN_CONNS=200
 DB_CONN_MAX_LIFETIME=1h
+
+# ============ Redis ============
+REDIS_ADDR=redis:6379
+REDIS_PASSWORD=$REDIS_PASSWORD
+REDIS_DB=0
+REDIS_POOL_SIZE=100
+
+# ============ Kafka (需设置 COMPOSE_PROFILES=full) ============
+KAFKA_ENABLED=false
+KAFKA_BROKERS=kafka:9092
+KAFKA_TOPIC_PREFIX=
+
+# ============ ClickHouse (需设置 COMPOSE_PROFILES=full) ============
+CLICKHOUSE_ENABLED=false
+CLICKHOUSE_ADDR=clickhouse:9000
+CLICKHOUSE_DATABASE=mxsec
+CLICKHOUSE_USER=default
+CLICKHOUSE_PASSWORD=
 
 # ============ 数据目录 ============
 DATA_DIR=$DATA_DIR
@@ -187,9 +219,12 @@ LOG_RETENTION_DAYS=$LOG_RETENTION_DAYS
 # ============ Agent ============
 HEARTBEAT_INTERVAL=60
 
-# ============ 版本 ============
-VERSION=$VERSION
-TZ=Asia/Shanghai
+# ============ Plugins ============
+PLUGINS_DIR=/opt/mxsec-platform/plugins
+PLUGINS_BASE_URL=
+
+# ============ JWT ============
+JWT_SECRET=$JWT_SECRET
 EOF
 
     chmod 600 "$ENV_FILE"
@@ -203,7 +238,9 @@ init_dirs() {
     source "$ENV_FILE"
 
     log_step "创建数据目录..."
-    sudo mkdir -p "$DATA_DIR"/{mysql,logs/{agentcenter,manager,nginx,mysql},plugins,uploads}
+    sudo mkdir -p "$DATA_DIR"/{mysql,redis,logs/{agentcenter,manager,nginx,mysql},plugins,uploads}
+    # 可选服务目录（即使不启用也创建，避免挂载失败）
+    sudo mkdir -p "$DATA_DIR"/{zookeeper,kafka,clickhouse}
     sudo chown -R $(id -u):$(id -g) "$DATA_DIR" 2>/dev/null || true
     # MySQL 日志目录需要 mysql 用户可写（容器内 uid=999）
     sudo chmod 777 "$DATA_DIR/logs/mysql" 2>/dev/null || true
@@ -260,7 +297,7 @@ init_config() {
     cp "$SCRIPT_DIR/config/server.yaml.tpl" "$SCRIPT_DIR/config/server.yaml"
 
     # 替换所有占位符
-    local PLUGINS_URL="http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download"
+    local PLUGINS_URL="${PLUGINS_BASE_URL:-http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download}"
 
     sed -i.bak \
         -e "s|__MYSQL_HOST__|${MYSQL_HOST:-mysql}|g" \
@@ -271,11 +308,25 @@ init_config() {
         -e "s|__DB_MAX_IDLE_CONNS__|${DB_MAX_IDLE_CONNS:-20}|g" \
         -e "s|__DB_MAX_OPEN_CONNS__|${DB_MAX_OPEN_CONNS:-200}|g" \
         -e "s|__DB_CONN_MAX_LIFETIME__|${DB_CONN_MAX_LIFETIME:-1h}|g" \
+        -e "s|__REDIS_ADDR__|${REDIS_ADDR:-redis:6379}|g" \
+        -e "s|__REDIS_PASSWORD__|${REDIS_PASSWORD:-}|g" \
+        -e "s|__REDIS_DB__|${REDIS_DB:-0}|g" \
+        -e "s|__REDIS_POOL_SIZE__|${REDIS_POOL_SIZE:-100}|g" \
+        -e "s|__KAFKA_ENABLED__|${KAFKA_ENABLED:-false}|g" \
+        -e "s|__KAFKA_BROKERS__|${KAFKA_BROKERS:-kafka:9092}|g" \
+        -e "s|__KAFKA_TOPIC_PREFIX__|${KAFKA_TOPIC_PREFIX:-}|g" \
+        -e "s|__CLICKHOUSE_ENABLED__|${CLICKHOUSE_ENABLED:-false}|g" \
+        -e "s|__CLICKHOUSE_ADDR__|${CLICKHOUSE_ADDR:-clickhouse:9000}|g" \
+        -e "s|__CLICKHOUSE_DATABASE__|${CLICKHOUSE_DATABASE:-mxsec}|g" \
+        -e "s|__CLICKHOUSE_USER__|${CLICKHOUSE_USER:-default}|g" \
+        -e "s|__CLICKHOUSE_PASSWORD__|${CLICKHOUSE_PASSWORD:-}|g" \
         -e "s|__LOG_LEVEL__|${LOG_LEVEL:-info}|g" \
         -e "s|__LOG_FORMAT__|${LOG_FORMAT:-json}|g" \
         -e "s|__LOG_MAX_AGE__|${LOG_MAX_AGE:-7}|g" \
         -e "s|__HEARTBEAT_INTERVAL__|${HEARTBEAT_INTERVAL:-60}|g" \
+        -e "s|__PLUGINS_DIR__|${PLUGINS_DIR:-/opt/mxsec-platform/plugins}|g" \
         -e "s|__PLUGINS_BASE_URL__|${PLUGINS_URL}|g" \
+        -e "s|__JWT_SECRET__|${JWT_SECRET:-change-me-in-production}|g" \
         "$SCRIPT_DIR/config/server.yaml"
 
     rm -f "$SCRIPT_DIR/config/server.yaml.bak"
@@ -288,7 +339,8 @@ init_config() {
 # ============================================================
 dc() {
     cd "$SCRIPT_DIR"
-    $COMPOSE_CMD --env-file "$ENV_FILE" "$@"
+    # 显式指定 -f docker-compose.yml，避免自动合并 docker-compose.override.yml（dev 热重载层）
+    $COMPOSE_CMD -f docker-compose.yml --env-file "$ENV_FILE" "$@"
 }
 
 build() {

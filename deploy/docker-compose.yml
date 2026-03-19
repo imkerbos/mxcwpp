@@ -1,6 +1,11 @@
-version: '3.8'
+name: mxsec-platform
+
+# Base compose: MySQL + Redis + App services
+# Dev: docker compose up (自动合并 docker-compose.override.yml)
+# Prod: docker compose -f docker-compose.yml up -d (跳过 override)
 
 services:
+  # ==================== 基础设施 ====================
   mysql:
     image: mysql:8.0
     container_name: mxsec-mysql
@@ -11,11 +16,13 @@ services:
       MYSQL_USER: ${MYSQL_USER:-mxsec_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${MYSQL_HOST_PORT:-13306}:3306"
     volumes:
-      - ${DATA_DIR}/mysql:/var/lib/mysql
+      - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./config/mysql.cnf:/etc/mysql/conf.d/custom.cnf:ro
-      - ${DATA_DIR}/logs/mysql:/var/log/mysql
+      - ${DATA_DIR:-./data}/logs/mysql:/var/log/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -29,6 +36,85 @@ services:
         limits:
           memory: 4G
 
+  redis:
+    image: redis:7-alpine
+    container_name: mxsec-redis
+    restart: always
+    command: >
+      sh -c '
+        if [ -n "$REDIS_PASSWORD" ]; then
+          redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"
+        else
+          redis-server --appendonly yes
+        fi
+      '
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "16379:6379"
+    volumes:
+      - ${DATA_DIR:-./data}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mxsec-net
+
+  # ==================== 可选服务 (COMPOSE_PROFILES) ====================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: mxsec-zookeeper
+    restart: always
+    profiles: ["full", "kafka"]
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - ${DATA_DIR:-./data}/zookeeper:/var/lib/zookeeper/data
+    networks:
+      - mxsec-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: mxsec-kafka
+    restart: always
+    profiles: ["full", "kafka"]
+    depends_on:
+      zookeeper:
+        condition: service_started
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - ${DATA_DIR:-./data}/kafka:/var/lib/kafka/data
+    networks:
+      - mxsec-net
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: mxsec-clickhouse
+    restart: always
+    profiles: ["full", "clickhouse"]
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-mxsec}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - ${DATA_DIR:-./data}/clickhouse:/var/lib/clickhouse
+    networks:
+      - mxsec-net
+
+  # ==================== 应用服务 ====================
   agentcenter:
     build:
       context: ..
@@ -41,13 +127,15 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${GRPC_PORT:-6751}:6751"
     volumes:
       - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - ./certs:/etc/mxsec-platform/certs:ro
-      - ${DATA_DIR}/logs/agentcenter:/var/log/mxsec-platform
-      - ${DATA_DIR}/plugins:/opt/mxsec-platform/plugins
+      - ${DATA_DIR:-./data}/logs/agentcenter:/var/log/mxsec-platform
+      - ${DATA_DIR:-./data}/plugins:/opt/mxsec-platform/plugins
     environment:
       TZ: ${TZ:-Asia/Shanghai}
     healthcheck:
@@ -75,6 +163,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       agentcenter:
         condition: service_healthy
     ports:
@@ -82,9 +172,9 @@ services:
     volumes:
       - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - ./certs:/etc/mxsec-platform/certs:ro
-      - ${DATA_DIR}/logs/manager:/var/log/mxsec-platform
-      - ${DATA_DIR}/plugins:/opt/mxsec-platform/plugins:ro
-      - ${DATA_DIR}/uploads:/opt/mxsec-platform/uploads
+      - ${DATA_DIR:-./data}/logs/manager:/var/log/mxsec-platform
+      - ${DATA_DIR:-./data}/plugins:/opt/mxsec-platform/plugins:ro
+      - ${DATA_DIR:-./data}/uploads:/opt/mxsec-platform/uploads
     environment:
       TZ: ${TZ:-Asia/Shanghai}
     healthcheck:
@@ -116,7 +206,7 @@ services:
     volumes:
       - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs/ssl:/etc/nginx/ssl:ro
-      - ${DATA_DIR}/logs/nginx:/var/log/nginx
+      - ${DATA_DIR:-./data}/logs/nginx:/var/log/nginx
     environment:
       TZ: ${TZ:-Asia/Shanghai}
     healthcheck:

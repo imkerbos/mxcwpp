@@ -1,0 +1,154 @@
+# Dev 热重载层 - docker compose up 自动合并此文件
+# 生产部署: docker compose -f docker-compose.yml up -d (跳过此文件)
+
+services:
+  agentcenter:
+    build:
+      dockerfile: deploy/docker/Dockerfile.agentcenter.dev
+    container_name: mxsec-agentcenter-dev
+    restart: unless-stopped
+    volumes:
+      - ../:/workspace:rw
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "
+        cd /workspace &&
+        mkdir -p tmp &&
+        go mod tidy &&
+        if command -v air > /dev/null 2>&1 && [ -f .air.agentcenter.toml ]; then
+          echo '使用 Air 热重载模式（AgentCenter）...';
+          air -c .air.agentcenter.toml
+        else
+          echo '使用 go run 模式...';
+          go run ./cmd/server/agentcenter -config /etc/mxsec-platform/server.yaml
+        fi
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    deploy: {}
+
+  manager:
+    build:
+      dockerfile: deploy/docker/Dockerfile.manager.dev
+    container_name: mxsec-manager-dev
+    restart: unless-stopped
+    volumes:
+      - ../:/workspace:rw
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - ./certs:/etc/mxsec-platform/certs:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "
+        cd /workspace &&
+        mkdir -p tmp &&
+        go mod tidy &&
+        if command -v air > /dev/null 2>&1 && [ -f .air.toml ]; then
+          echo '使用 Air 热重载模式...';
+          air -c .air.toml
+        else
+          echo '使用 go run 模式...';
+          go run ./cmd/server/manager -config /etc/mxsec-platform/server.yaml
+        fi
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    deploy: {}
+
+  ui:
+    build:
+      dockerfile: deploy/docker/Dockerfile.ui.dev
+    container_name: mxsec-ui-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../ui:/app:rw
+      - /app/node_modules
+    working_dir: /app
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      NODE_ENV: development
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://0.0.0.0:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  agent:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.agent.dev
+    image: mxsec-agent:dev
+    container_name: mxsec-agent-dev
+    restart: unless-stopped
+    depends_on:
+      agentcenter:
+        condition: service_healthy
+    volumes:
+      - ../:/workspace:rw
+      - agent_data:/var/lib/mxsec-agent
+      - agent_logs:/var/log/mxsec-agent
+      - ./certs:/var/lib/mxsec-agent/certs:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+      SERVER_HOST: agentcenter:6751
+    command: >
+      sh -c "
+        cd /workspace &&
+        mkdir -p tmp &&
+        go mod tidy &&
+        if command -v air > /dev/null 2>&1 && [ -f .air.agent.toml ]; then
+          echo '使用 Air 热重载模式（Agent）...';
+          air -c .air.agent.toml
+        else
+          echo '使用 go run 模式...';
+          go run -ldflags \"-X main.serverHost=$${SERVER_HOST:-agentcenter:6751} -X main.buildVersion=$${VERSION:-dev} -X main.buildTime=$$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" ./cmd/agent
+        fi
+      "
+    networks:
+      - mxsec-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  go_mod_cache:
+    driver: local
+  go_build_cache:
+    driver: local
+  agent_data:
+    driver: local
+  agent_logs:
+    driver: local

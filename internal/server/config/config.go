@@ -14,13 +14,16 @@ import (
 
 // Config 是 Server 配置结构
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	MTLS     MTLSConfig     `mapstructure:"mtls"`
-	Log      LogConfig      `mapstructure:"log"`
-	Agent    AgentConfig    `mapstructure:"agent"`
-	Metrics  MetricsConfig  `mapstructure:"metrics"`
-	Plugins  PluginsConfig  `mapstructure:"plugins"`
+	Server     ServerConfig     `mapstructure:"server"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Redis      RedisConfig      `mapstructure:"redis"`
+	Kafka      KafkaConfig      `mapstructure:"kafka"`
+	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
+	MTLS       MTLSConfig       `mapstructure:"mtls"`
+	Log        LogConfig        `mapstructure:"log"`
+	Agent      AgentConfig      `mapstructure:"agent"`
+	Metrics    MetricsConfig    `mapstructure:"metrics"`
+	Plugins    PluginsConfig    `mapstructure:"plugins"`
 }
 
 // PluginsConfig 是插件配置
@@ -94,7 +97,7 @@ func (c MySQLConfig) DSN() string {
 	// 使用 url.QueryEscape 编码 loc 参数
 	locEncoded := url.QueryEscape(loc)
 
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%v&loc=%s",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%v&loc=%s&allowNativePasswords=true&allowCleartextPasswords=true",
 		c.User, c.Password, c.Host, c.Port, c.Database, c.Charset, c.ParseTime, locEncoded)
 }
 
@@ -116,6 +119,61 @@ type PostgresConfig struct {
 func (c PostgresConfig) DSN() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
 		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode, c.Timezone)
+}
+
+// RedisConfig 是 Redis 配置
+type RedisConfig struct {
+	// 单节点模式
+	Addr     string `mapstructure:"addr"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
+	// 集群模式（生产）
+	Cluster      bool     `mapstructure:"cluster"`
+	ClusterAddrs []string `mapstructure:"cluster_addrs"`
+	// 连接池
+	PoolSize     int           `mapstructure:"pool_size"`
+	MinIdleConns int           `mapstructure:"min_idle_conns"`
+	DialTimeout  time.Duration `mapstructure:"dial_timeout"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+}
+
+// KafkaConfig 是 Kafka 配置
+type KafkaConfig struct {
+	Enabled bool     `mapstructure:"enabled"`
+	Brokers []string `mapstructure:"brokers"`
+	// 生产者
+	Producer KafkaProducerConfig `mapstructure:"producer"`
+	// Topic 前缀（用于多环境隔离，如 dev. / prod.）
+	TopicPrefix string `mapstructure:"topic_prefix"`
+}
+
+// KafkaProducerConfig 是 Kafka 生产者配置
+type KafkaProducerConfig struct {
+	RequiredAcks    int           `mapstructure:"required_acks"`    // 0=NoResponse,1=WaitForLocal,-1=WaitForAll
+	MaxMessageBytes int           `mapstructure:"max_message_bytes"` // 默认 1MB
+	FlushMessages   int           `mapstructure:"flush_messages"`
+	FlushFrequency  time.Duration `mapstructure:"flush_frequency"`
+	RetryMax        int           `mapstructure:"retry_max"`
+}
+
+// ClickHouseConfig 是 ClickHouse 配置
+type ClickHouseConfig struct {
+	Enabled  bool     `mapstructure:"enabled"`
+	Addrs    []string `mapstructure:"addrs"`
+	Database string   `mapstructure:"database"`
+	Username string   `mapstructure:"username"`
+	Password string   `mapstructure:"password"`
+	// 连接池
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
+	DialTimeout     time.Duration `mapstructure:"dial_timeout"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
+	// 批量写入
+	BatchSize    int           `mapstructure:"batch_size"`
+	FlushTimeout time.Duration `mapstructure:"flush_timeout"`
 }
 
 // MTLSConfig 是 mTLS 配置
@@ -310,9 +368,84 @@ func setDefaults(cfg *Config, logFileSet bool) {
 		}
 	}
 
+	// Redis 默认配置
+	if cfg.Redis.Addr == "" {
+		cfg.Redis.Addr = "redis:6379"
+	}
+	if cfg.Redis.PoolSize == 0 {
+		cfg.Redis.PoolSize = 100
+	}
+	if cfg.Redis.MinIdleConns == 0 {
+		cfg.Redis.MinIdleConns = 10
+	}
+	if cfg.Redis.DialTimeout == 0 {
+		cfg.Redis.DialTimeout = 5 * time.Second
+	}
+	if cfg.Redis.ReadTimeout == 0 {
+		cfg.Redis.ReadTimeout = 3 * time.Second
+	}
+	if cfg.Redis.WriteTimeout == 0 {
+		cfg.Redis.WriteTimeout = 3 * time.Second
+	}
+
+	// Kafka 默认配置
+	if len(cfg.Kafka.Brokers) == 0 {
+		cfg.Kafka.Brokers = []string{"kafka:9092"}
+	}
+	if cfg.Kafka.Producer.RequiredAcks == 0 {
+		cfg.Kafka.Producer.RequiredAcks = 1
+	}
+	if cfg.Kafka.Producer.MaxMessageBytes == 0 {
+		cfg.Kafka.Producer.MaxMessageBytes = 1 * 1024 * 1024
+	}
+	if cfg.Kafka.Producer.FlushMessages == 0 {
+		cfg.Kafka.Producer.FlushMessages = 500
+	}
+	if cfg.Kafka.Producer.FlushFrequency == 0 {
+		cfg.Kafka.Producer.FlushFrequency = 500 * time.Millisecond
+	}
+	if cfg.Kafka.Producer.RetryMax == 0 {
+		cfg.Kafka.Producer.RetryMax = 3
+	}
+
+	// ClickHouse 默认配置
+	if len(cfg.ClickHouse.Addrs) == 0 {
+		cfg.ClickHouse.Addrs = []string{"clickhouse:9000"}
+	}
+	if cfg.ClickHouse.Database == "" {
+		cfg.ClickHouse.Database = "mxsec"
+	}
+	if cfg.ClickHouse.Username == "" {
+		cfg.ClickHouse.Username = "default"
+	}
+	if cfg.ClickHouse.MaxOpenConns == 0 {
+		cfg.ClickHouse.MaxOpenConns = 20
+	}
+	if cfg.ClickHouse.MaxIdleConns == 0 {
+		cfg.ClickHouse.MaxIdleConns = 5
+	}
+	if cfg.ClickHouse.ConnMaxLifetime == 0 {
+		cfg.ClickHouse.ConnMaxLifetime = time.Hour
+	}
+	if cfg.ClickHouse.DialTimeout == 0 {
+		cfg.ClickHouse.DialTimeout = 10 * time.Second
+	}
+	if cfg.ClickHouse.ReadTimeout == 0 {
+		cfg.ClickHouse.ReadTimeout = 30 * time.Second
+	}
+	if cfg.ClickHouse.WriteTimeout == 0 {
+		cfg.ClickHouse.WriteTimeout = 30 * time.Second
+	}
+	if cfg.ClickHouse.BatchSize == 0 {
+		cfg.ClickHouse.BatchSize = 10000
+	}
+	if cfg.ClickHouse.FlushTimeout == 0 {
+		cfg.ClickHouse.FlushTimeout = 5 * time.Second
+	}
+
 	// Plugins 默认配置
 	if cfg.Plugins.Dir == "" {
-		cfg.Plugins.Dir = "/workspace/dist/plugins" // Docker 开发环境默认路径
+		cfg.Plugins.Dir = "/opt/mxsec-platform/plugins"
 	}
 	// BaseURL 为空时，表示使用 file:// 协议（开发环境）
 }

@@ -6,7 +6,7 @@ SERVER_HOST ?= localhost:6751
 GOARCH ?= amd64
 GOOS ?= linux
 DISTRO ?=  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
-CERT_DIR ?= deploy/dev/certs  # 证书目录
+CERT_DIR ?= deploy/certs  # 证书目录
 
 # 生成 Protobuf Go 代码
 proto: generate
@@ -45,10 +45,11 @@ lint:
 		echo "golangci-lint not found, skipping lint"; \
 	fi
 
-# 清理生成的文件
+# 清理构建产物
 clean:
 	find . -name "*.pb.go" -delete
-	rm -rf dist/
+	rm -rf dist/ bin/ tmp/
+	rm -f agent agentcenter manager baseline collector baseline-plugin collector-plugin
 
 # 下载依赖
 deps:
@@ -106,29 +107,29 @@ package-all-arch:
 # Docker 相关命令
 docker-build:
 	@echo "Building Docker images..."
-	@cd deploy/dev && docker-compose build
+	@cd deploy && docker compose build
 
 docker-up:
 	@echo "Starting Docker services..."
-	@cd deploy/dev && docker-compose up -d
+	@cd deploy && docker compose up -d
 
 docker-down:
 	@echo "Stopping Docker services..."
-	@cd deploy/dev && docker-compose down
+	@cd deploy && docker compose down
 
 docker-logs:
-	@cd deploy/dev && docker-compose logs -f
+	@cd deploy && docker compose logs -f
 
 docker-ps:
-	@cd deploy/dev && docker-compose ps
+	@cd deploy && docker compose ps
 
 docker-restart:
 	@echo "Restarting Docker services..."
-	@cd deploy/dev && docker-compose restart
+	@cd deploy && docker compose restart
 
 docker-clean:
 	@echo "Cleaning Docker resources..."
-	@cd deploy/dev && docker-compose down -v
+	@cd deploy && docker compose down -v
 	@docker system prune -f
 
 # 生成证书
@@ -184,20 +185,57 @@ dev-docker-up:
 # Docker 开发环境启动（后台模式）
 dev-docker-up-d:
 	@echo "Starting Docker development environment in background..."
-	@cd deploy/dev && docker-compose -f docker-compose.dev.yml up -d --build agentcenter manager ui agent
+	@cd deploy && docker compose up -d --build
 
 # Docker 开发环境停止
 dev-docker-down:
 	@echo "Stopping Docker development environment..."
-	@cd deploy/dev && docker-compose -f docker-compose.dev.yml down
+	@cd deploy && docker compose down
 
 # Docker 开发环境日志
 dev-docker-logs:
-	@cd deploy/dev && docker-compose -f docker-compose.dev.yml logs -f
+	@cd deploy && docker compose logs -f
 
 # Docker 开发环境重启
 dev-docker-restart:
-	@cd deploy/dev && docker-compose -f docker-compose.dev.yml restart manager ui
+	@cd deploy && docker compose restart manager ui
+
+# 从模板生成 server.yaml（开发环境）
+dev-config:
+	@echo "Generating server.yaml from template..."
+	@cd deploy && if [ ! -f .env ]; then cp .env.example .env; fi && \
+		. .env && cp config/server.yaml.tpl config/server.yaml && \
+		sed -i.bak \
+			-e "s|__MYSQL_HOST__|$${MYSQL_HOST:-mysql}|g" \
+			-e "s|__MYSQL_PORT__|$${MYSQL_PORT:-3306}|g" \
+			-e "s|__MYSQL_USER__|$${MYSQL_USER:-mxsec_user}|g" \
+			-e "s|__MYSQL_PASSWORD__|$${MYSQL_PASSWORD:-123456}|g" \
+			-e "s|__MYSQL_DATABASE__|$${MYSQL_DATABASE:-mxsec}|g" \
+			-e "s|__DB_MAX_IDLE_CONNS__|$${DB_MAX_IDLE_CONNS:-20}|g" \
+			-e "s|__DB_MAX_OPEN_CONNS__|$${DB_MAX_OPEN_CONNS:-200}|g" \
+			-e "s|__DB_CONN_MAX_LIFETIME__|$${DB_CONN_MAX_LIFETIME:-1h}|g" \
+			-e "s|__REDIS_ADDR__|$${REDIS_ADDR:-redis:6379}|g" \
+			-e "s|__REDIS_PASSWORD__|$${REDIS_PASSWORD:-}|g" \
+			-e "s|__REDIS_DB__|$${REDIS_DB:-0}|g" \
+			-e "s|__REDIS_POOL_SIZE__|$${REDIS_POOL_SIZE:-100}|g" \
+			-e "s|__KAFKA_ENABLED__|$${KAFKA_ENABLED:-false}|g" \
+			-e "s|__KAFKA_BROKERS__|$${KAFKA_BROKERS:-kafka:9092}|g" \
+			-e "s|__KAFKA_TOPIC_PREFIX__|$${KAFKA_TOPIC_PREFIX:-}|g" \
+			-e "s|__CLICKHOUSE_ENABLED__|$${CLICKHOUSE_ENABLED:-false}|g" \
+			-e "s|__CLICKHOUSE_ADDR__|$${CLICKHOUSE_ADDR:-clickhouse:9000}|g" \
+			-e "s|__CLICKHOUSE_DATABASE__|$${CLICKHOUSE_DATABASE:-mxsec}|g" \
+			-e "s|__CLICKHOUSE_USER__|$${CLICKHOUSE_USER:-default}|g" \
+			-e "s|__CLICKHOUSE_PASSWORD__|$${CLICKHOUSE_PASSWORD:-}|g" \
+			-e "s|__LOG_LEVEL__|$${LOG_LEVEL:-debug}|g" \
+			-e "s|__LOG_FORMAT__|$${LOG_FORMAT:-console}|g" \
+			-e "s|__LOG_MAX_AGE__|$${LOG_MAX_AGE:-7}|g" \
+			-e "s|__HEARTBEAT_INTERVAL__|$${HEARTBEAT_INTERVAL:-60}|g" \
+			-e "s|__PLUGINS_DIR__|$${PLUGINS_DIR:-/opt/mxsec-platform/plugins}|g" \
+			-e "s|__PLUGINS_BASE_URL__|$${PLUGINS_BASE_URL:-}|g" \
+			-e "s|__JWT_SECRET__|$${JWT_SECRET:-dev-secret-change-in-production}|g" \
+			config/server.yaml && \
+		rm -f config/server.yaml.bak
+	@echo "server.yaml generated"
 
 # 本地开发启动（仅后端）- 宿主机模式
 dev-server:
@@ -253,7 +291,8 @@ help:
 	@echo "  make docker-up      - Start Docker services"
 	@echo "  make docker-down    - Stop Docker services"
 	@echo "  make docker-logs    - Show Docker logs"
-	@echo "  make dev-docker-up  - Start Docker dev environment"
+	@echo "  make dev-docker-up  - Start Docker dev environment (hot reload)"
+	@echo "  make dev-config     - Generate server.yaml from template"
 	@echo ""
 	@echo "测试与质量:"
 	@echo "  make test           - Run tests"

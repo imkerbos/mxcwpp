@@ -1,156 +1,111 @@
-# ============================================
-# Matrix Cloud Security Platform - .gitignore
-# ============================================
-# 忽略规则：除了业务代码和文档，其他都忽略
-
-# ============================================
-# Go 相关
-# ============================================
-
-# 编译产物（二进制文件）
+# ======================
+# Build artifacts
+# ======================
+bin/
+dist/
+build/
+target/
+out/
+tmp/
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
-bin/
-dist/
+*.o
+*.a
+
+# Top-level binaries
 /agent
 /agentcenter
 /manager
-/baseline-plugin
 /baseline
+/baseline-plugin
 /collector-plugin
 
-# 测试相关
+# ======================
+# Go
+# ======================
+vendor/
+go.work
+go.work.sum
 *.test
 *.out
 coverage/
 *.coverprofile
 *.coverage
+coverage.html
+coverage.xml
 
-# Go 依赖
-vendor/
-go.work
-go.work.sum
-
-# 生成的 Protobuf 文件（通过 make proto 生成）
-api/proto/*.pb.go
-api/proto/*_grpc.pb.go
+# Generated protobuf
 *.pb.go
 *_grpc.pb.go
 
-# ============================================
-# Node.js / Vue / 前端相关
-# ============================================
+# Profiling
+*.prof
+*.pprof
 
-# Node 依赖
+# ======================
+# Node / Frontend
+# ======================
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-# package-lock.json 应该提交到仓库（锁定依赖版本）
-
-# 前端构建产物
 ui/dist/
 ui/dist-ssr/
 ui/build/
 ui/.vite/
 ui/.output/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# 前端临时文件
-*.local
-ui/.env.local
-ui/.env.*.local
-
-# ============================================
-# IDE 和编辑器
-# ============================================
-
-# IntelliJ IDEA / WebStorm
+# ======================
+# IDE / Editor
+# ======================
 .idea/
+.vscode/
+.cursor/
+.claude/
 *.iml
 *.iws
 *.ipr
-out/
-
-# VS Code
-.vscode/
-!.vscode/extensions.json
-!.vscode/settings.json
 *.code-workspace
-
-# Vim
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
-*~
 *.swn
 *.swm
-
-# Emacs
 *~
 \#*\#
 .\#*
 
-# Cursor（保留 rules 目录，忽略其他）
-.cursor/
-!.cursor/rules/
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
-
-# ============================================
-# 操作系统文件
-# ============================================
-
-# macOS
+# ======================
+# OS files
+# ======================
 .DS_Store
 .AppleDouble
 .LSOverride
 ._*
-
-# Windows
 Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
 Desktop.ini
 $RECYCLE.BIN/
-
-# Linux
-*~
 .directory
 .Trash-*
 
-# ============================================
-# 日志文件
-# ============================================
-
+# ======================
+# Logs
+# ======================
 *.log
 *.log.*
 logs/
-build-errors.log
-test-results.log
 
-# 开发日志（不提交到仓库）
-.dev-log.md
-
-# ============================================
-# 配置文件和敏感信息
-# ============================================
-
-# 环境变量文件
+# ======================
+# Secrets / Configs
+# ======================
 .env
-.env.local
-.env.*.local
-.env.production
-.env.development
-*.env
-
-# 密钥和证书文件
+.env.*
+!.env.example
+*.local
 *.pem
 *.key
 *.crt
@@ -159,184 +114,50 @@ test-results.log
 *.pfx
 *.jks
 *.keystore
-*.secret.yaml
-*.secret.yml
-*.secret.json
-*.secret.toml
+*.secret.*
 
-# 配置文件（保留示例文件，忽略实际配置文件）
-# 注意：示例文件（.example.*）会被保留规则保留
+# Actual config files (keep examples)
 configs/server.yaml
 configs/agent.yaml
-configs/*.secret.yaml
-configs/*.secret.yml
 deploy/config/server.yaml
-deploy/dev/configs/server.yaml
-deploy/dev/configs/server.dev.yaml
-deploy/dev/configs/*.secret.yaml
+deploy/.env
 
-# ============================================
-# 数据库文件
-# ============================================
-
-*.db
-*.sqlite
-*.sqlite3
-*.db-shm
-*.db-wal
-*.db-journal
-
-# ============================================
-# 构建和临时文件
-# ============================================
-
-# Air (Go hot reload)
-tmp/
-.air.toml.bak
-# Air 配置文件（开发环境配置，不提交）
-.air.toml
-.air.agent.toml
-.air.agentcenter.toml
-
-# 构建目录
-build/
-target/
-out/
+# ======================
+# Data volumes
+# ======================
+deploy/data/
 uploads/
-*.o
-*.a
 
-# 临时文件
+# ======================
+# Packages
+# ======================
+*.deb
+*.rpm
+*.tar.gz
+*.tgz
+*.tar
+*.zip
+*.rar
+*.7z
+
+# ======================
+# Misc
+# ======================
+Elkeid/
+.air.toml
+.air.*.toml
 *.tmp
 *.temp
 *.bak
 *.backup
-*.swp
-*.swo
-
-# ============================================
-# 测试相关
-# ============================================
-
-# 测试覆盖率
-coverage/
-*.coverprofile
-*.coverage
-coverage.html
-coverage.xml
-
-# 测试输出
-test-results/
-test-output/
-*.test.out
-
-# ============================================
-# Docker 相关
-# ============================================
-
-# Docker 构建缓存（可选，根据需要）
-# .dockerignore 应该单独管理
-
-# ============================================
-# 其他
-# ============================================
-
-# Elkeid 参考代码目录（不提交到仓库）
-Elkeid/
-
-# 压缩文件（通常不需要提交）
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-
-# 备份文件
-*.bak
-*.backup
 *.old
-
-# 系统临时文件
 *.pid
 *.lock
 *.sock
 
-# 性能分析文件
-*.prof
-*.pprof
-cpu.prof
-mem.prof
-
-# 文档生成（如果使用工具生成）
-docs/_build/
-docs/.doctrees/
-
-# ============================================
-# 保留的文件（明确不忽略）
-# ============================================
-# 注意：Git 的忽略规则是"先匹配先生效"，所以保留规则要放在最后
-
-# 保留示例配置文件（即使前面有忽略规则）
-!*.example.*
-!*.sample.*
-!configs/*.example.*
-!deploy/**/*.example.*
-
-# 保留文档（所有 Markdown 文件）
-!docs/
-!docs/**/*
-!*.md
-!README*
-!CHANGELOG*
-!LICENSE*
-!DEVELOPMENT.md
-
-# 保留项目配置文件
-!go.mod
-!go.sum
-!package.json
-!package-lock.json
-!tsconfig.json
-!tsconfig.*.json
-!vite.config.ts
-!Makefile
-
-# 保留脚本文件
-!scripts/
-!scripts/**/*.sh
-!scripts/**/*.py
-
-# 保留部署配置（示例和模板）
-!deploy/
-!deploy/**/*.service
-!deploy/**/*.example.*
-!deploy/**/Dockerfile*
-!deploy/**/docker-compose*.yml
-!deploy/**/docker-compose*.yaml
-!deploy/**/*.conf
-!deploy/**/*.sql
-!deploy/**/README*.md
-
-# 保留 Dockerfile 和 docker-compose 文件
-!**/Dockerfile*
-!**/docker-compose*.yml
-!**/docker-compose*.yaml
-
-# 保留 Protobuf 定义文件（.proto）
-!api/proto/*.proto
-!api/proto/README.md
-
-# 忽略 AI / IDE 配置目录
-.cursor/
+# ======================
+# ai
+# ======================
+CLAUDE.md
 .claude/
 .vscode/
-.idea/
-
-# Debian / RPM packages
-*.deb
-*.rpm
-
-# 上传的文件目录（包含组件包等）
-uploads/
-

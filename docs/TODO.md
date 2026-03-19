@@ -218,7 +218,7 @@
 - [ ] Baseline Plugin 打包脚本 - 可选，后续实现
 - [ ] Collector Plugin 打包脚本（可选，Phase 2）
 - [x] systemd service 文件 - 已完成：`deploy/systemd/`（Agent、AgentCenter、Manager）
-- [x] Server Docker Compose 配置 - 已完成：`deploy/dev/`
+- [x] Server Docker Compose 配置 - 已完成：`deploy/`
 - [x] 证书生成脚本（mTLS）- Server 端实现（`scripts/generate-certs.sh`）
 
 #### 测试

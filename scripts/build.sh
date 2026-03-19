@@ -113,7 +113,7 @@ package_agent() {
     cp deploy/systemd/mxsec-agent.service "$pkg_tmp/etc/systemd/system/"
 
     # 证书（如果存在）
-    local cert_dir="deploy/dev/certs"
+    local cert_dir="deploy/certs"
     if [ -f "$cert_dir/ca.crt" ] && [ -f "$cert_dir/client.crt" ] && [ -f "$cert_dir/client.key" ]; then
         cp "$cert_dir/ca.crt" "$cert_dir/client.crt" "$cert_dir/client.key" "$pkg_tmp/var/lib/mxsec-agent/certs/"
     fi
