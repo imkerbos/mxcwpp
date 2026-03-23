@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     volumes:
       - ../:/workspace:rw
+      - /workspace/deploy/data  # 屏蔽宿主机 ClickHouse/Kafka 数据目录（避免权限问题）
       - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - ./certs:/etc/mxsec-platform/certs:ro
       - go_mod_cache:/go/pkg/mod
@@ -24,9 +25,9 @@ services:
         cd /workspace &&
         mkdir -p tmp &&
         go mod tidy &&
-        if command -v air > /dev/null 2>&1 && [ -f .air.agentcenter.toml ]; then
+        if command -v air > /dev/null 2>&1 && [ -f configs/air/agentcenter.toml ]; then
           echo '使用 Air 热重载模式（AgentCenter）...';
-          air -c .air.agentcenter.toml
+          air -c configs/air/agentcenter.toml
         else
           echo '使用 go run 模式...';
           go run ./cmd/server/agentcenter -config /etc/mxsec-platform/server.yaml
@@ -47,6 +48,7 @@ services:
     restart: unless-stopped
     volumes:
       - ../:/workspace:rw
+      - /workspace/deploy/data  # 屏蔽宿主机 ClickHouse/Kafka 数据目录（避免权限问题）
       - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - ./certs:/etc/mxsec-platform/certs:ro
       - go_mod_cache:/go/pkg/mod
@@ -62,9 +64,9 @@ services:
         cd /workspace &&
         mkdir -p tmp &&
         go mod tidy &&
-        if command -v air > /dev/null 2>&1 && [ -f .air.toml ]; then
-          echo '使用 Air 热重载模式...';
-          air -c .air.toml
+        if command -v air > /dev/null 2>&1 && [ -f configs/air/manager.toml ]; then
+          echo '使用 Air 热重载模式（Manager）...';
+          air -c configs/air/manager.toml
         else
           echo '使用 go run 模式...';
           go run ./cmd/server/manager -config /etc/mxsec-platform/server.yaml
@@ -112,6 +114,7 @@ services:
         condition: service_healthy
     volumes:
       - ../:/workspace:rw
+      - /workspace/deploy/data  # 屏蔽宿主机 ClickHouse/Kafka 数据目录（避免权限问题）
       - agent_data:/var/lib/mxsec-agent
       - agent_logs:/var/log/mxsec-agent
       - ./certs:/var/lib/mxsec-agent/certs:ro
@@ -127,9 +130,9 @@ services:
         cd /workspace &&
         mkdir -p tmp &&
         go mod tidy &&
-        if command -v air > /dev/null 2>&1 && [ -f .air.agent.toml ]; then
+        if command -v air > /dev/null 2>&1 && [ -f configs/air/agent.toml ]; then
           echo '使用 Air 热重载模式（Agent）...';
-          air -c .air.agent.toml
+          air -c configs/air/agent.toml
         else
           echo '使用 go run 模式...';
           go run -ldflags \"-X main.serverHost=$${SERVER_HOST:-agentcenter:6751} -X main.buildVersion=$${VERSION:-dev} -X main.buildTime=$$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" ./cmd/agent

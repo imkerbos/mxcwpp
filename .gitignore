@@ -144,8 +144,6 @@ uploads/
 # Misc
 # ======================
 Elkeid/
-.air.toml
-.air.*.toml
 *.tmp
 *.temp
 *.bak
