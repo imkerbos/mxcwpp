@@ -55,6 +55,29 @@ export interface ListAlertsParams {
   alert_type?: 'baseline' | 'agent_offline'
   keyword?: string
   result_id?: string
+  runtime_type?: string
+}
+
+export interface AlertWhitelist {
+  id: number
+  name: string
+  rule_id: string
+  host_id: string
+  category: string
+  severity: string
+  reason: string
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateWhitelistParams {
+  name: string
+  rule_id?: string
+  host_id?: string
+  category?: string
+  severity?: string
+  reason?: string
 }
 
 export const alertsApi = {
@@ -96,5 +119,23 @@ export const alertsApi = {
   // 批量删除告警
   batchDelete: (ids: number[]) => {
     return apiClient.post('/alerts/batch/delete', { ids })
+  },
+}
+
+export const alertWhitelistApi = {
+  list: (params?: { page?: number; page_size?: number; keyword?: string }) => {
+    return apiClient.get<{ items: AlertWhitelist[]; total: number }>('/alerts/whitelist', { params })
+  },
+
+  create: (data: CreateWhitelistParams) => {
+    return apiClient.post<AlertWhitelist>('/alerts/whitelist', data)
+  },
+
+  update: (id: number, data: CreateWhitelistParams) => {
+    return apiClient.put<AlertWhitelist>(`/alerts/whitelist/${id}`, data)
+  },
+
+  delete: (id: number) => {
+    return apiClient.delete(`/alerts/whitelist/${id}`)
   },
 }

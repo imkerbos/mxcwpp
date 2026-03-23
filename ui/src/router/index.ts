@@ -3,6 +3,9 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/BasicLayout.vue'
 import { useAuthStore } from '@/stores/auth'
 
+// 开发中页面组件
+const DevInProgress = () => import('@/views/Error/DevInProgress.vue')
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -172,6 +175,150 @@ const routes: RouteRecordRaw[] = [
         name: 'FIMTasks',
         component: () => import('@/views/FIM/Tasks/index.vue'),
         meta: { title: 'FIM 任务' },
+      },
+      // === 以下功能开发中，暂用占位页 ===
+      // 资产指纹 (全局维度)
+      {
+        path: 'asset-fingerprint',
+        name: 'AssetFingerprint',
+        component: DevInProgress,
+        meta: { title: '资产指纹' },
+      },
+      // 白名单
+      {
+        path: 'whitelist',
+        name: 'Whitelist',
+        component: () => import('@/views/Whitelist/index.vue'),
+        meta: { title: '白名单' },
+      },
+      // 漏洞列表
+      {
+        path: 'vuln-list',
+        name: 'VulnList',
+        component: DevInProgress,
+        meta: { title: '漏洞列表' },
+      },
+      // 病毒查杀
+      {
+        path: 'virus/scan',
+        name: 'VirusScan',
+        component: DevInProgress,
+        meta: { title: '病毒扫描' },
+      },
+      {
+        path: 'virus/quarantine',
+        name: 'VirusQuarantine',
+        component: DevInProgress,
+        meta: { title: '文件隔离箱' },
+      },
+      // 系统管理 — 组件策略
+      {
+        path: 'system/comp-policy',
+        name: 'CompPolicy',
+        component: DevInProgress,
+        meta: { title: '组件策略' },
+      },
+      // 系统管理 — 配置备份
+      {
+        path: 'system/backup',
+        name: 'SystemBackup',
+        component: DevInProgress,
+        meta: { title: '配置备份' },
+      },
+      // 系统管理 — 日志查询
+      {
+        path: 'system/log-query',
+        name: 'LogQuery',
+        component: DevInProgress,
+        meta: { title: '日志查询' },
+      },
+      // 系统监控
+      {
+        path: 'system/host-monitor',
+        name: 'HostMonitor',
+        component: DevInProgress,
+        meta: { title: '后端监控' },
+      },
+      {
+        path: 'system/service-monitor',
+        name: 'ServiceMonitor',
+        component: DevInProgress,
+        meta: { title: '后端服务' },
+      },
+      {
+        path: 'system/service-alert',
+        name: 'ServiceAlert',
+        component: DevInProgress,
+        meta: { title: '服务告警' },
+      },
+      // 审计日志
+      {
+        path: 'audit-log',
+        name: 'AuditLog',
+        component: () => import('@/views/AuditLog/index.vue'),
+        meta: { title: '审计日志' },
+      },
+      // 容器集群
+      {
+        path: 'kube/clusters',
+        name: 'KubeClusters',
+        component: () => import('@/views/Kube/ClusterList.vue'),
+        meta: { title: '集群管理' },
+      },
+      {
+        path: 'kube/clusters/:id',
+        name: 'KubeClusterDetail',
+        component: () => import('@/views/Kube/ClusterDetail.vue'),
+        meta: { title: '集群详情' },
+      },
+      {
+        path: 'kube/alarms',
+        name: 'KubeAlarms',
+        component: () => import('@/views/Kube/Alarms.vue'),
+        meta: { title: '容器告警' },
+      },
+      {
+        path: 'kube/events',
+        name: 'KubeEvents',
+        component: () => import('@/views/Kube/Events.vue'),
+        meta: { title: '安全事件' },
+      },
+      {
+        path: 'kube/baseline',
+        name: 'KubeBaseline',
+        component: () => import('@/views/Kube/Baseline.vue'),
+        meta: { title: '容器基线' },
+      },
+      {
+        path: 'kube/whitelist',
+        name: 'KubeWhitelist',
+        component: () => import('@/views/Kube/Whitelist.vue'),
+        meta: { title: '容器白名单' },
+      },
+      // RASP 应用防护
+      {
+        path: 'rasp/apps',
+        name: 'RaspApps',
+        component: DevInProgress,
+        meta: { title: '应用列表' },
+      },
+      {
+        path: 'rasp/config',
+        name: 'RaspConfig',
+        component: DevInProgress,
+        meta: { title: 'RASP 配置' },
+      },
+      {
+        path: 'rasp/alarms',
+        name: 'RaspAlarms',
+        component: DevInProgress,
+        meta: { title: 'RASP 告警' },
+      },
+      {
+        path: 'rasp/vulns',
+        name: 'RaspVulns',
+        component: DevInProgress,
+        meta: { title: '运行时漏洞' },
       },
     ],
   },
