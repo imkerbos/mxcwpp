@@ -354,9 +354,10 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			DownloadURLs: model.StringArray{
 				baselineURL,
 			},
-			Detail:      `{"check_interval": 3600}`,
-			Enabled:     true,
-			Description: "Linux 基线安全检查插件，执行操作系统安全配置检查",
+			RuntimeTypes: model.StringArray{"vm"},
+			Detail:       `{"check_interval": 3600}`,
+			Enabled:      true,
+			Description:  "Linux 基线安全检查插件，执行操作系统安全配置检查",
 		},
 		{
 			Name:    "collector",
@@ -366,9 +367,10 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			DownloadURLs: model.StringArray{
 				collectorURL,
 			},
-			Detail:      `{"collect_interval": 300}`,
-			Enabled:     true,
-			Description: "资产采集插件，采集主机进程、端口、用户等信息",
+			RuntimeTypes: model.StringArray{"vm", "docker", "k8s"},
+			Detail:       `{"collect_interval": 300}`,
+			Enabled:      true,
+			Description:  "资产采集插件，采集主机进程、端口、用户等信息",
 		},
 		{
 			Name:    "fim",
@@ -378,9 +380,10 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			DownloadURLs: model.StringArray{
 				fimURL,
 			},
-			Detail:      `{"check_timeout_minutes": 30}`,
-			Enabled:     true,
-			Description: "文件完整性监控插件，基于 AIDE 检测文件变更",
+			RuntimeTypes: model.StringArray{"vm"},
+			Detail:       `{"check_timeout_minutes": 30}`,
+			Enabled:      true,
+			Description:  "文件完整性监控插件，基于 AIDE 检测文件变更",
 		},
 	}
 

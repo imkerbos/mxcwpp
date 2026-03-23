@@ -25,6 +25,7 @@ type PluginConfig struct {
 	Signature    string         `gorm:"size:256" json:"signature"`                              // 签名
 	DownloadURLs StringArray    `gorm:"type:json" json:"download_urls"`                         // 下载地址列表 (JSON 数组)
 	Detail       string         `gorm:"type:text" json:"detail"`                                // 配置详情 (JSON 字符串)
+	RuntimeTypes StringArray    `gorm:"type:json;column:runtime_types" json:"runtime_types"`    // 适用运行时类型 (vm/docker/k8s)，空=全平台
 	Enabled      bool           `gorm:"default:true" json:"enabled"`                            // 是否启用
 	Description  string         `gorm:"size:256" json:"description"`                            // 描述
 	CreatedAt    LocalTime      `json:"created_at"`                                             // 创建时间

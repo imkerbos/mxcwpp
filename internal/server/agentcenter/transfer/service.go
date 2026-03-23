@@ -184,7 +184,8 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	}
 
 	// 下发插件配置（首次连接时）
-	if err := s.sendPluginConfigsIfNeeded(ctx, conn); err != nil {
+	runtimeType := s.getAgentRuntimeType(agentID)
+	if err := s.sendPluginConfigsIfNeeded(ctx, conn, runtimeType); err != nil {
 		s.logger.Error("下发插件配置失败", zap.Error(err), zap.String("agent_id", agentID))
 		// 插件配置下发失败不影响连接，继续处理
 	}
@@ -1051,6 +1052,16 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 	now := model.Now()
 
 	if err == gorm.ErrRecordNotFound {
+		// 白名单检查：命中则跳过告警创建
+		if s.isAlertWhitelisted(scanResult.RuleID, scanResult.HostID, scanResult.Category, scanResult.Severity) {
+			s.logger.Debug("告警命中白名单，跳过创建",
+				zap.String("result_id", scanResult.ResultID),
+				zap.String("rule_id", scanResult.RuleID),
+				zap.String("host_id", scanResult.HostID),
+			)
+			return nil
+		}
+
 		// 创建新告警
 		alert := &model.Alert{
 			ResultID:      scanResult.ResultID,
@@ -1661,39 +1672,46 @@ func (s *Service) createAgentOfflineAlert(agentID string) {
 	now := model.Now()
 	resultID := fmt.Sprintf("offline-%s", agentID)
 
-	// 检查是否已存在未解决的离线告警
-	var existing model.Alert
-	err := s.db.Where("result_id = ? AND status = ?", resultID, model.AlertStatusActive).First(&existing).Error
-	if err == nil {
-		// 已存在，更新 last_seen_at
-		s.db.Model(&existing).Update("last_seen_at", now)
-		return
-	}
-
 	ip := ""
 	if len(host.IPv4) > 0 {
 		ip = host.IPv4[0]
 	}
+	title := fmt.Sprintf("Agent 离线: %s (%s)", host.Hostname, ip)
+	description := fmt.Sprintf("主机 %s 的 Agent 已断开连接", host.Hostname)
 
-	alert := &model.Alert{
-		ResultID:    resultID,
-		HostID:      agentID,
-		RuleID:      "agent_offline",
-		Severity:    "high",
-		Category:    "agent_offline",
-		Title:       fmt.Sprintf("Agent 离线: %s (%s)", host.Hostname, ip),
-		Description: fmt.Sprintf("主机 %s 的 Agent 已断开连接", host.Hostname),
-		Status:      model.AlertStatusActive,
-		FirstSeenAt: now,
-		LastSeenAt:  now,
+	// 查找已有记录（包括已解决的）
+	var existing model.Alert
+	err := s.db.Where("result_id = ?", resultID).First(&existing).Error
+	if err == nil {
+		// 已有记录：重新激活（处理重复离线场景）
+		s.db.Model(&existing).Updates(map[string]any{
+			"status":       model.AlertStatusActive,
+			"title":        title,
+			"description":  description,
+			"last_seen_at": now,
+			"resolved_at":  nil,
+			"resolved_by":  "",
+		})
+		s.logger.Info("已重新激活 Agent 离线告警", zap.String("agent_id", agentID), zap.Uint("alert_id", existing.ID))
+	} else {
+		alert := &model.Alert{
+			ResultID:    resultID,
+			HostID:      agentID,
+			RuleID:      "agent_offline",
+			Severity:    "high",
+			Category:    "agent_offline",
+			Title:       title,
+			Description: description,
+			Status:      model.AlertStatusActive,
+			FirstSeenAt: now,
+			LastSeenAt:  now,
+		}
+		if err := s.db.Create(alert).Error; err != nil {
+			s.logger.Warn("创建 Agent 离线告警失败", zap.String("agent_id", agentID), zap.Error(err))
+			return
+		}
+		s.logger.Info("已创建 Agent 离线告警", zap.String("agent_id", agentID), zap.Uint("alert_id", alert.ID))
 	}
-
-	if err := s.db.Create(alert).Error; err != nil {
-		s.logger.Warn("创建 Agent 离线告警失败", zap.String("agent_id", agentID), zap.Error(err))
-		return
-	}
-
-	s.logger.Info("已创建 Agent 离线告警", zap.String("agent_id", agentID), zap.Uint("alert_id", alert.ID))
 }
 
 // resolveAgentOfflineAlert 解决 Agent 离线告警（Agent 上线时调用）
@@ -1870,7 +1888,7 @@ func (s *Service) buildPluginDownloadURLs(originalURLs []string, pluginName stri
 }
 
 // sendPluginConfigsIfNeeded 下发插件配置给 Agent
-func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connection) error {
+func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connection, runtimeType model.RuntimeType) error {
 	// 从数据库查询启用的插件配置
 	var pluginConfigs []model.PluginConfig
 	if err := s.db.Where("enabled = ?", true).Find(&pluginConfigs).Error; err != nil {
@@ -1885,6 +1903,16 @@ func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connectio
 	// 转换为 gRPC Config 格式，并处理相对URL
 	var configs []*grpcProto.Config
 	for _, pc := range pluginConfigs {
+		// RuntimeTypes 为空 = 兼容旧数据，全平台发
+		if len(pc.RuntimeTypes) > 0 && !containsString([]string(pc.RuntimeTypes), string(runtimeType)) {
+			s.logger.Debug("插件不适用于当前运行时，跳过",
+				zap.String("plugin", pc.Name),
+				zap.String("runtime_type", string(runtimeType)),
+				zap.Strings("plugin_runtime_types", []string(pc.RuntimeTypes)),
+			)
+			continue
+		}
+
 		// 使用辅助函数构建下载URL
 		downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
 
@@ -1961,29 +1989,6 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 		return 0, nil, nil
 	}
 
-	// 转换为 gRPC Config 格式，并处理相对URL
-	var configs []*grpcProto.Config
-	for _, pc := range pluginConfigs {
-		// 使用辅助函数构建下载URL
-		downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
-
-		config := &grpcProto.Config{
-			Name:         pc.Name,
-			Type:         string(pc.Type),
-			Version:      pc.Version,
-			Sha256:       pc.SHA256,
-			Signature:    pc.Signature,
-			DownloadUrls: downloadURLs,
-			Detail:       pc.Detail,
-		}
-		configs = append(configs, config)
-	}
-
-	// 构建命令
-	cmd := &grpcProto.Command{
-		Configs: configs,
-	}
-
 	// 获取所有在线连接
 	s.connMu.RLock()
 	connections := make([]*Connection, 0, len(s.connections))
@@ -1999,18 +2004,58 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 
 	s.logger.Info("开始广播插件配置到所有在线 Agent",
 		zap.Int("agent_count", len(connections)),
-		zap.Int("plugin_count", len(configs)))
+		zap.Int("plugin_count", len(pluginConfigs)))
 
-	// 向每个连接发送配置
+	// 向每个连接发送配置（根据其 runtime_type 过滤）
 	successCount := 0
 	var failedAgents []string
 
 	for _, conn := range connections {
+		// 获取该 Agent 的 runtime_type
+		runtimeType := s.getAgentRuntimeType(conn.AgentID)
+
+		// 为该 Agent 过滤插件配置
+		var configs []*grpcProto.Config
+		for _, pc := range pluginConfigs {
+			// RuntimeTypes 为空 = 兼容旧数据，全平台发
+			if len(pc.RuntimeTypes) > 0 && !containsString([]string(pc.RuntimeTypes), string(runtimeType)) {
+				continue
+			}
+
+			// 使用辅助函数构建下载URL
+			downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+
+			config := &grpcProto.Config{
+				Name:         pc.Name,
+				Type:         string(pc.Type),
+				Version:      pc.Version,
+				Sha256:       pc.SHA256,
+				Signature:    pc.Signature,
+				DownloadUrls: downloadURLs,
+				Detail:       pc.Detail,
+			}
+			configs = append(configs, config)
+		}
+
+		// 如果该 Agent 没有适用的插件，跳过
+		if len(configs) == 0 {
+			s.logger.Debug("该 Agent 没有适用的插件配置，跳过",
+				zap.String("agent_id", conn.AgentID),
+				zap.String("runtime_type", string(runtimeType)))
+			continue
+		}
+
+		// 构建命令
+		cmd := &grpcProto.Command{
+			Configs: configs,
+		}
+
 		select {
 		case conn.sendCh <- cmd:
 			successCount++
 			s.logger.Debug("插件配置已发送到 Agent",
-				zap.String("agent_id", conn.AgentID))
+				zap.String("agent_id", conn.AgentID),
+				zap.Int("plugin_count", len(configs)))
 		case <-conn.ctx.Done():
 			failedAgents = append(failedAgents, conn.AgentID)
 			s.logger.Warn("发送插件配置失败：连接已关闭",
@@ -2505,5 +2550,40 @@ func (s *Service) handleFIMTaskCompletion(ctx context.Context, record *grpcProto
 	}
 
 	return nil
+}
+
+// isAlertWhitelisted 检查告警是否命中白名单
+func (s *Service) isAlertWhitelisted(ruleID, hostID, category, severity string) bool {
+	var whitelists []model.AlertWhitelist
+	if err := s.db.Find(&whitelists).Error; err != nil {
+		s.logger.Warn("查询告警白名单失败，跳过白名单检查", zap.Error(err))
+		return false
+	}
+	for i := range whitelists {
+		if whitelists[i].Matches(ruleID, hostID, category, severity) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsString 检查字符串切片中是否包含指定字符串
+func containsString(slice []string, target string) bool {
+	for _, s := range slice {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// getAgentRuntimeType 获取 Agent 的运行时类型
+func (s *Service) getAgentRuntimeType(agentID string) model.RuntimeType {
+	var host model.Host
+	if err := s.db.Select("runtime_type").Where("host_id = ?", agentID).First(&host).Error; err != nil {
+		// 新主机默认 vm
+		return model.RuntimeTypeVM
+	}
+	return host.RuntimeType
 }
 

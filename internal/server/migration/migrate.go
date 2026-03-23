@@ -169,6 +169,33 @@ func migrateRuntimeTypes(db *gorm.DB, logger *zap.Logger) error {
 			zap.Int64("count", result.RowsAffected))
 	}
 
+	// 4. 更新插件配置的 runtime_types
+	// baseline 和 fim 仅适用于 VM
+	result = db.Model(&model.PluginConfig{}).
+		Where("name IN (?, ?)", "baseline", "fim").
+		Where("runtime_types IS NULL OR runtime_types = '[]' OR runtime_types = '' OR runtime_types = 'null'").
+		Update("runtime_types", model.StringArray{"vm"})
+	if result.Error != nil {
+		logger.Warn("更新 baseline/fim 插件的 runtime_types 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新 baseline/fim 插件的 runtime_types",
+			zap.Int64("count", result.RowsAffected),
+			zap.Strings("runtime_types", []string{"vm"}))
+	}
+
+	// collector 适用于全平台
+	result = db.Model(&model.PluginConfig{}).
+		Where("name = ?", "collector").
+		Where("runtime_types IS NULL OR runtime_types = '[]' OR runtime_types = '' OR runtime_types = 'null'").
+		Update("runtime_types", model.StringArray{"vm", "docker", "k8s"})
+	if result.Error != nil {
+		logger.Warn("更新 collector 插件的 runtime_types 失败", zap.Error(result.Error))
+	} else if result.RowsAffected > 0 {
+		logger.Info("已更新 collector 插件的 runtime_types",
+			zap.Int64("count", result.RowsAffected),
+			zap.Strings("runtime_types", []string{"vm", "docker", "k8s"}))
+	}
+
 	return nil
 }
 

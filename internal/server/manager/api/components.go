@@ -1439,9 +1439,10 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 			DownloadURLs: model.StringArray{
 				downloadURL,
 			},
-			Detail:      fmt.Sprintf(`{"updated_at": "%s"}`, time.Now().Format(time.RFC3339)),
-			Enabled:     true,
-			Description: fmt.Sprintf("%s 插件 v%s", componentName, version.Version),
+			RuntimeTypes: runtimeTypesForPlugin(componentName),
+			Detail:       fmt.Sprintf(`{"updated_at": "%s"}`, time.Now().Format(time.RFC3339)),
+			Enabled:      true,
+			Description:  fmt.Sprintf("%s 插件 v%s", componentName, version.Version),
 		}
 		if err := h.db.Create(&pluginConfig).Error; err != nil {
 			h.logger.Error("创建插件配置失败",
@@ -2015,4 +2016,16 @@ func pluginConfigsToNames(configs []model.PluginConfig) []map[string]string {
 		}
 	}
 	return result
+}
+
+// runtimeTypesForPlugin 根据插件名推断适用的运行时类型
+func runtimeTypesForPlugin(name string) model.StringArray {
+	switch name {
+	case "collector":
+		// collector 适用于全平台
+		return model.StringArray{"vm", "docker", "k8s"}
+	default:
+		// baseline, fim 及其他插件默认仅适用于 VM
+		return model.StringArray{"vm"}
+	}
 }
