@@ -306,7 +306,7 @@ const handleCancel = () => {
 <style scoped>
 .form-tip {
   font-size: 12px;
-  color: #8c8c8c;
+  color: #86909C;
   margin-top: 4px;
 }
 
@@ -321,7 +321,7 @@ const handleCancel = () => {
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: #fafafa;
+  background: #F7F8FA;
   border-radius: 6px;
 }
 
@@ -332,11 +332,11 @@ const handleCancel = () => {
 }
 
 .version-separator {
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .no-requirements {
-  color: #8c8c8c;
+  color: #86909C;
   font-size: 13px;
   padding: 8px 0;
 }

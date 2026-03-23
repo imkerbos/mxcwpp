@@ -11,7 +11,7 @@
             @click="handleItemClick(item.key)"
           >
             <div style="font-size: 24px; font-weight: bold; margin-bottom: 8px">{{ item.value }}</div>
-            <div style="color: #8c8c8c">{{ item.label }}</div>
+            <div style="color: #86909C">{{ item.label }}</div>
           </a-card>
         </a-col>
       </a-row>

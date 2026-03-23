@@ -76,7 +76,7 @@
       <div class="report-page cover-page">
         <div class="cover-content">
           <div class="cover-logo">
-            <SafetyCertificateOutlined style="font-size: 64px; color: #1890ff" />
+            <SafetyCertificateOutlined style="font-size: 64px; color: #165DFF" />
           </div>
           <h1 class="cover-title">{{ report.meta.report_title }}</h1>
           <div class="cover-subtitle">Security Baseline Assessment Report</div>
@@ -161,7 +161,7 @@
             </div>
 
             <div class="coverage-note">
-              <InfoCircleOutlined style="color: #1890ff; margin-right: 8px" />
+              <InfoCircleOutlined style="color: #165DFF; margin-right: 8px" />
               {{ report.summary.coverage_note }}
             </div>
           </div>
@@ -294,7 +294,7 @@
           <div class="score-explanation">
             <p>{{ report.security_score.score_explanation }}</p>
             <p class="security-note">
-              <InfoCircleOutlined style="color: #faad14; margin-right: 8px" />
+              <InfoCircleOutlined style="color: #FF7D00; margin-right: 8px" />
               {{ report.security_score.security_note }}
             </p>
           </div>
@@ -361,8 +361,8 @@
               <td>
                 <span :style="{ color: getScoreColor(host.score) }">{{ Math.round(host.score) }}%</span>
               </td>
-              <td style="color: #52c41a">{{ host.passed_count }}</td>
-              <td style="color: #ff4d4f">{{ host.failed_count }}</td>
+              <td style="color: #00B42A">{{ host.passed_count }}</td>
+              <td style="color: #F53F3F">{{ host.failed_count }}</td>
               <td>
                 <span class="status-tag" :class="host.status">{{ getHostStatusLabel(host.status) }}</span>
               </td>
@@ -401,7 +401,7 @@
             </div>
           </div>
           <div class="coverage-note-box">
-            <InfoCircleOutlined style="color: #1890ff; margin-right: 8px" />
+            <InfoCircleOutlined style="color: #165DFF; margin-right: 8px" />
             {{ report.coverage.improvement_note }}
           </div>
         </div>
@@ -664,15 +664,15 @@ const getConclusionClass = (summary: any): string => {
 }
 
 const getComplianceColor = (rate: number): string => {
-  if (rate >= 90) return '#52c41a'
-  if (rate >= 70) return '#faad14'
-  return '#ff4d4f'
+  if (rate >= 90) return '#00B42A'
+  if (rate >= 70) return '#FF7D00'
+  return '#F53F3F'
 }
 
 const getScoreColor = (score: number): string => {
-  if (score >= 80) return '#52c41a'
-  if (score >= 60) return '#faad14'
-  return '#ff4d4f'
+  if (score >= 80) return '#00B42A'
+  if (score >= 60) return '#FF7D00'
+  return '#F53F3F'
 }
 
 const getSeverityLabel = (severity: string): string => {
@@ -902,7 +902,7 @@ onMounted(() => {
 
   /* 封面页 - 网页预览 */
   .cover-page {
-    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+    background: linear-gradient(135deg, #165DFF 0%, #0E42D2 100%);
     color: #fff;
     display: block;
     text-align: center;
@@ -966,12 +966,12 @@ onMounted(() => {
     align-items: baseline;
     margin-bottom: 20px;
     padding-bottom: 10px;
-    border-bottom: 2px solid #1890ff;
+    border-bottom: 2px solid #165DFF;
 
     .section-number {
       font-size: 24px;
       font-weight: 700;
-      color: #1890ff;
+      color: #165DFF;
       margin-right: 12px;
     }
 
@@ -984,7 +984,7 @@ onMounted(() => {
 
     .section-subtitle {
       font-size: 12px;
-      color: #8c8c8c;
+      color: #86909C;
     }
   }
 
@@ -1019,16 +1019,16 @@ onMounted(() => {
       }
 
       &.success .conclusion-icon {
-        color: #52c41a;
+        color: #00B42A;
       }
 
       &.warning .conclusion-icon {
-        color: #faad14;
+        color: #FF7D00;
       }
 
       &.high .conclusion-icon,
       &.critical .conclusion-icon {
-        color: #ff4d4f;
+        color: #F53F3F;
       }
 
       .conclusion-text {
@@ -1051,7 +1051,7 @@ onMounted(() => {
         gap: 32px;
         margin: 24px 0;
         padding: 20px;
-        background-color: #fafafa;
+        background-color: #F7F8FA;
         border-radius: 6px;
 
         .stat-item {
@@ -1066,7 +1066,7 @@ onMounted(() => {
 
           .stat-label {
             font-size: 13px;
-            color: #8c8c8c;
+            color: #86909C;
             margin-top: 4px;
           }
         }
@@ -1074,9 +1074,9 @@ onMounted(() => {
 
       .coverage-note {
         padding: 10px 14px;
-        background-color: #e6f7ff;
+        background-color: #E8F3FF;
         border-radius: 4px;
-        color: #096dd9;
+        color: #0E42D2;
         font-size: 13px;
       }
 
@@ -1084,7 +1084,7 @@ onMounted(() => {
       .category-coverage {
         margin: 24px 0;
         padding: 16px;
-        background-color: #fafafa;
+        background-color: #F7F8FA;
         border-radius: 6px;
 
         h4 {
@@ -1138,7 +1138,7 @@ onMounted(() => {
             }
 
             .check-count {
-              color: #8c8c8c;
+              color: #86909C;
             }
           }
         }
@@ -1157,7 +1157,7 @@ onMounted(() => {
     }
 
     .label-cell {
-      background-color: #fafafa;
+      background-color: #F7F8FA;
       font-weight: 500;
       width: 100px;
       color: #595959;
@@ -1189,7 +1189,7 @@ onMounted(() => {
         border: 1px solid #b7eb8f;
 
         .stats-icon {
-          color: #52c41a;
+          color: #00B42A;
         }
       }
 
@@ -1198,7 +1198,7 @@ onMounted(() => {
         border: 1px solid #ffccc7;
 
         .stats-icon {
-          color: #ff4d4f;
+          color: #F53F3F;
         }
       }
 
@@ -1207,16 +1207,16 @@ onMounted(() => {
         border: 1px solid #ffe58f;
 
         .stats-icon {
-          color: #faad14;
+          color: #FF7D00;
         }
       }
 
       &.na {
-        background-color: #fafafa;
+        background-color: #F7F8FA;
         border: 1px solid #d9d9d9;
 
         .stats-icon {
-          color: #8c8c8c;
+          color: #86909C;
         }
       }
 
@@ -1236,13 +1236,13 @@ onMounted(() => {
 
         .stats-label {
           font-size: 11px;
-          color: #8c8c8c;
+          color: #86909C;
         }
       }
 
       .stats-percent {
         font-size: 12px;
-        color: #8c8c8c;
+        color: #86909C;
       }
     }
   }
@@ -1272,7 +1272,7 @@ onMounted(() => {
             color: #fff;
 
             &.critical {
-              background-color: #ff4d4f;
+              background-color: #F53F3F;
             }
 
             &.high {
@@ -1302,7 +1302,7 @@ onMounted(() => {
             border-radius: 3px;
 
             &.critical {
-              background-color: #ff4d4f;
+              background-color: #F53F3F;
             }
 
             &.high {
@@ -1359,7 +1359,7 @@ onMounted(() => {
 
         .score-unit {
           font-size: 12px;
-          color: #8c8c8c;
+          color: #86909C;
         }
       }
 
@@ -1399,7 +1399,7 @@ onMounted(() => {
         align-items: center;
         gap: 10px;
         padding: 10px 14px;
-        background-color: #fafafa;
+        background-color: #F7F8FA;
 
         .risk-severity {
           padding: 2px 6px;
@@ -1408,7 +1408,7 @@ onMounted(() => {
           color: #fff;
 
           &.critical {
-            background-color: #ff4d4f;
+            background-color: #F53F3F;
           }
 
           &.high {
@@ -1423,7 +1423,7 @@ onMounted(() => {
         }
 
         .risk-affected {
-          color: #8c8c8c;
+          color: #86909C;
           font-size: 11px;
           margin-left: auto;
         }
@@ -1468,7 +1468,7 @@ onMounted(() => {
     }
 
     th {
-      background-color: #fafafa;
+      background-color: #F7F8FA;
       font-weight: 600;
       color: #595959;
     }
@@ -1485,17 +1485,17 @@ onMounted(() => {
 
       &.pass {
         background-color: #f6ffed;
-        color: #52c41a;
+        color: #00B42A;
       }
 
       &.warning {
         background-color: #fffbe6;
-        color: #faad14;
+        color: #FF7D00;
       }
 
       &.fail {
         background-color: #fff2f0;
-        color: #ff4d4f;
+        color: #F53F3F;
       }
     }
   }
@@ -1531,13 +1531,13 @@ onMounted(() => {
           font-size: 12px;
 
           &.covered {
-            background-color: #e6f7ff;
-            color: #1890ff;
+            background-color: #E8F3FF;
+            color: #165DFF;
           }
 
           &.uncovered {
-            background-color: #f5f5f5;
-            color: #8c8c8c;
+            background-color: #F2F3F5;
+            color: #86909C;
           }
         }
       }
@@ -1545,9 +1545,9 @@ onMounted(() => {
 
     .coverage-note-box {
       padding: 10px 14px;
-      background-color: #e6f7ff;
+      background-color: #E8F3FF;
       border-radius: 4px;
-      color: #096dd9;
+      color: #0E42D2;
       margin-top: 14px;
       font-size: 13px;
     }
@@ -1599,7 +1599,7 @@ onMounted(() => {
 
       .disclaimer {
         padding: 16px;
-        background-color: #fafafa;
+        background-color: #F7F8FA;
         border-radius: 6px;
         margin-bottom: 20px;
 

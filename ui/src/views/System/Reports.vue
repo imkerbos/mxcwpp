@@ -29,7 +29,7 @@
             <a-statistic
               title="主机总数"
               :value="reportStats.hostStats?.total || 0"
-              :value-style="{ color: '#1890ff' }"
+              :value-style="{ color: '#165DFF' }"
             />
           </div>
         </a-card>
@@ -43,7 +43,7 @@
             <a-statistic
               title="基线检查总数"
               :value="reportStats.baselineStats?.totalChecks || 0"
-              :value-style="{ color: '#52c41a' }"
+              :value-style="{ color: '#00B42A' }"
             />
           </div>
         </a-card>
@@ -71,7 +71,7 @@
             <a-statistic
               title="任务总数"
               :value="reportStats.taskStats?.total || 0"
-              :value-style="{ color: '#fa8c16' }"
+              :value-style="{ color: '#D25F00' }"
             />
           </div>
         </a-card>
@@ -215,7 +215,7 @@
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'affected_hosts'">
-                  <span style="color: #ff4d4f; font-weight: 500">
+                  <span style="color: #F53F3F; font-weight: 500">
                     {{ record.affected_hosts }} 台
                   </span>
                 </template>
@@ -244,7 +244,7 @@
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'hostname'">
                   <span>{{ record.hostname || record.host_id.slice(0, 8) }}</span>
-                  <span v-if="record.ip" style="color: #8c8c8c; margin-left: 4px; font-size: 12px">
+                  <span v-if="record.ip" style="color: #86909C; margin-left: 4px; font-size: 12px">
                     ({{ record.ip }})
                   </span>
                 </template>
@@ -445,10 +445,10 @@ const hostStatusChartOption = computed<EChartsOption>(() => ({
         },
       },
       data: [
-        { value: hostStatusDistribution.value.running, name: '运行中', itemStyle: { color: '#52c41a' } },
-        { value: hostStatusDistribution.value.abnormal, name: '异常', itemStyle: { color: '#faad14' } },
-        { value: hostStatusDistribution.value.offline, name: '离线', itemStyle: { color: '#ff4d4f' } },
-        { value: hostStatusDistribution.value.not_installed, name: '未安装', itemStyle: { color: '#8c8c8c' } },
+        { value: hostStatusDistribution.value.running, name: '运行中', itemStyle: { color: '#00B42A' } },
+        { value: hostStatusDistribution.value.abnormal, name: '异常', itemStyle: { color: '#FF7D00' } },
+        { value: hostStatusDistribution.value.offline, name: '离线', itemStyle: { color: '#F53F3F' } },
+        { value: hostStatusDistribution.value.not_installed, name: '未安装', itemStyle: { color: '#86909C' } },
         { value: hostStatusDistribution.value.uninstalled, name: '已卸载', itemStyle: { color: '#d9d9d9' } },
       ].filter(item => item.value > 0),
     },
@@ -492,7 +492,7 @@ const hostRiskChartOption = computed<EChartsOption>(() => ({
         hostRiskDistribution.value.high_risk_baselines,
       ],
       itemStyle: {
-        color: '#ff4d4f',
+        color: '#F53F3F',
       },
     },
   ],
@@ -513,9 +513,9 @@ const baselineResultChartOption = computed<EChartsOption>(() => ({
       type: 'pie',
       radius: '60%',
       data: [
-        { value: reportStats.value.baselineStats.passed, name: '通过', itemStyle: { color: '#52c41a' } },
-        { value: reportStats.value.baselineStats.failed, name: '失败', itemStyle: { color: '#ff4d4f' } },
-        { value: reportStats.value.baselineStats.warning, name: '警告', itemStyle: { color: '#faad14' } },
+        { value: reportStats.value.baselineStats.passed, name: '通过', itemStyle: { color: '#00B42A' } },
+        { value: reportStats.value.baselineStats.failed, name: '失败', itemStyle: { color: '#F53F3F' } },
+        { value: reportStats.value.baselineStats.warning, name: '警告', itemStyle: { color: '#FF7D00' } },
       ].filter(item => item.value > 0),
       emphasis: {
         itemStyle: {
@@ -561,8 +561,8 @@ const severityChartOption = computed<EChartsOption>(() => ({
       ],
       itemStyle: {
         color: (params: any) => {
-          const colors = ['#ff4d4f', '#ff7875', '#ffa940', '#ffc53d']
-          return colors[params.dataIndex] || '#1890ff'
+          const colors = ['#F53F3F', '#ff7875', '#ffa940', '#ffc53d']
+          return colors[params.dataIndex] || '#165DFF'
         },
       },
     },
@@ -638,7 +638,7 @@ const categoryChartOption = computed<EChartsOption>(() => {
         type: 'bar',
         data: categoryData.map(item => item.value),
         itemStyle: {
-          color: '#1890ff',
+          color: '#165DFF',
         },
       },
     ],
@@ -688,7 +688,7 @@ const baselineScoreTrendOption = computed<EChartsOption>(() => ({
       data: baselineScoreTrend.value.scores,
       smooth: true,
       itemStyle: {
-        color: '#1890ff',
+        color: '#165DFF',
       },
       areaStyle: {
         color: {
@@ -711,7 +711,7 @@ const baselineScoreTrendOption = computed<EChartsOption>(() => ({
       data: baselineScoreTrend.value.passRates,
       smooth: true,
       itemStyle: {
-        color: '#52c41a',
+        color: '#00B42A',
       },
     },
   ],
@@ -747,7 +747,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.passed,
       smooth: true,
       itemStyle: {
-        color: '#52c41a',
+        color: '#00B42A',
       },
       areaStyle: {},
     },
@@ -758,7 +758,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.failed,
       smooth: true,
       itemStyle: {
-        color: '#ff4d4f',
+        color: '#F53F3F',
       },
       areaStyle: {},
     },
@@ -769,7 +769,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.warning,
       smooth: true,
       itemStyle: {
-        color: '#faad14',
+        color: '#FF7D00',
       },
       areaStyle: {},
     },
@@ -808,9 +808,9 @@ const getScoreStatus = (score: number): 'success' | 'exception' | 'normal' => {
 }
 
 const getScoreColor = (score: number): string => {
-  if (score >= 80) return '#52c41a'
-  if (score >= 60) return '#faad14'
-  return '#ff4d4f'
+  if (score >= 80) return '#00B42A'
+  if (score >= 60) return '#FF7D00'
+  return '#F53F3F'
 }
 
 // 导航函数
@@ -986,11 +986,11 @@ onUnmounted(() => {
 }
 
 .stat-hosts .stat-icon-bg {
-  background: linear-gradient(135deg, #1890ff, #096dd9);
+  background: linear-gradient(135deg, #165DFF, #0E42D2);
 }
 
 .stat-baseline .stat-icon-bg {
-  background: linear-gradient(135deg, #52c41a, #389e0d);
+  background: linear-gradient(135deg, #00B42A, #009A29);
 }
 
 .stat-policy .stat-icon-bg {
@@ -998,7 +998,7 @@ onUnmounted(() => {
 }
 
 .stat-task .stat-icon-bg {
-  background: linear-gradient(135deg, #fa8c16, #d46b08);
+  background: linear-gradient(135deg, #D25F00, #d46b08);
 }
 
 .charts-row {

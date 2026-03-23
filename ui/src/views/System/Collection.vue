@@ -110,14 +110,14 @@ import {
 .license-status {
   text-align: center;
   padding: 48px 24px 40px;
-  background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
+  background: linear-gradient(135deg, #f6ffed 0%, #E8F3FF 100%);
   border-radius: 12px;
   margin-bottom: 32px;
 }
 
 .status-icon {
   font-size: 56px;
-  color: #52c41a;
+  color: #00B42A;
   margin-bottom: 16px;
   line-height: 1;
 }
@@ -158,7 +158,7 @@ import {
 }
 
 .section-title :deep(.anticon) {
-  color: #1890ff;
+  color: #165DFF;
   font-size: 18px;
 }
 
@@ -186,7 +186,7 @@ import {
 }
 
 .feature-check {
-  color: #52c41a;
+  color: #00B42A;
   font-size: 14px;
   margin-top: 4px;
   flex-shrink: 0;
@@ -210,11 +210,11 @@ import {
 
 .link-item :deep(.anticon) {
   font-size: 16px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .link-item a {
-  color: #1890ff;
+  color: #165DFF;
   text-decoration: none;
 }
 

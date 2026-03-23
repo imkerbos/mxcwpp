@@ -162,7 +162,7 @@ const handleLogin = async () => {
 .login-left {
   flex: 0 0 40%;
   position: relative;
-  background: linear-gradient(135deg, #001529 0%, #002140 40%, #003a70 100%);
+  background: linear-gradient(135deg, #165DFF 0%, #1148C2 40%, #0E42D2 100%);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -181,7 +181,7 @@ const handleLogin = async () => {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, #1890ff 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #165DFF 50%, transparent 100%);
 }
 
 .grid-line.vertical {
@@ -189,7 +189,7 @@ const handleLogin = async () => {
   bottom: 0;
   width: 1px;
   height: auto;
-  background: linear-gradient(180deg, transparent 0%, #1890ff 50%, transparent 100%);
+  background: linear-gradient(180deg, transparent 0%, #165DFF 50%, transparent 100%);
 }
 
 /* 浮动节点 */
@@ -202,7 +202,7 @@ const handleLogin = async () => {
   position: absolute;
   width: 6px;
   height: 6px;
-  background: #1890ff;
+  background: #165DFF;
   border-radius: 50%;
   opacity: 0.4;
   animation: pulse 3s ease-in-out infinite;
@@ -221,12 +221,12 @@ const handleLogin = async () => {
   0%, 100% {
     transform: scale(1);
     opacity: 0.4;
-    box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.4);
+    box-shadow: 0 0 0 0 rgba(22, 93, 255, 0.4);
   }
   50% {
     transform: scale(1.8);
     opacity: 0.8;
-    box-shadow: 0 0 12px 4px rgba(24, 144, 255, 0.2);
+    box-shadow: 0 0 12px 4px rgba(22, 93, 255, 0.2);
   }
 }
 
@@ -241,8 +241,8 @@ const handleLogin = async () => {
 
 .brand-icon {
   margin-bottom: 24px;
-  color: #1890ff;
-  filter: drop-shadow(0 0 20px rgba(24, 144, 255, 0.3));
+  color: #165DFF;
+  filter: drop-shadow(0 0 20px rgba(22, 93, 255, 0.3));
 }
 
 .brand-title {
@@ -281,9 +281,9 @@ const handleLogin = async () => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #1890ff;
+  background: #165DFF;
   flex-shrink: 0;
-  box-shadow: 0 0 8px rgba(24, 144, 255, 0.5);
+  box-shadow: 0 0 8px rgba(22, 93, 255, 0.5);
 }
 
 /* 右侧登录表单区域 */
@@ -312,13 +312,13 @@ const handleLogin = async () => {
   margin: 0 0 4px 0;
   font-size: 26px;
   font-weight: 600;
-  color: #001529;
+  color: #1D2129;
   letter-spacing: 0.5px;
 }
 
 .login-subtitle {
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.45);
+  color: #86909C;
   margin: 0;
 }
 
@@ -343,7 +343,7 @@ const handleLogin = async () => {
 }
 
 .login-input :deep(.anticon) {
-  color: #8c8c8c;
+  color: #86909C;
   font-size: 16px;
 }
 
@@ -353,14 +353,14 @@ const handleLogin = async () => {
   font-size: 16px;
   font-weight: 500;
   margin-top: 8px;
-  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+  background: linear-gradient(135deg, #165DFF 0%, #0E42D2 100%);
   border: none;
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.35);
+  box-shadow: 0 4px 12px rgba(22, 93, 255, 0.35);
   transition: all 0.3s ease;
 }
 
 .login-button:hover {
-  box-shadow: 0 6px 16px rgba(24, 144, 255, 0.45);
+  box-shadow: 0 6px 16px rgba(22, 93, 255, 0.45);
   transform: translateY(-1px);
 }
 

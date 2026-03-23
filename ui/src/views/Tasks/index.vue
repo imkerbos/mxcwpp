@@ -137,7 +137,7 @@
               </template>
               <span>
                 <a-tag>{{ getTaskPolicyIds(record)[0] }}</a-tag>
-                <span style="color: #1890ff; cursor: pointer;">+{{ getTaskPolicyIds(record).length - 1 }}</span>
+                <span style="color: #165DFF; cursor: pointer;">+{{ getTaskPolicyIds(record).length - 1 }}</span>
               </span>
             </a-tooltip>
             <a-tag v-else>{{ getTaskPolicyIds(record)[0] }}</a-tag>
@@ -400,7 +400,7 @@
             <a-statistic
               title="失败"
               :value="taskResultStats.fail"
-              :value-style="{ color: '#cf1322' }"
+              :value-style="{ color: '#CB2634' }"
             >
               <template #prefix>
                 <CloseCircleOutlined />
@@ -411,7 +411,7 @@
             <a-statistic
               title="错误"
               :value="taskResultStats.error"
-              :value-style="{ color: '#faad14' }"
+              :value-style="{ color: '#FF7D00' }"
             >
               <template #prefix>
                 <ExclamationCircleOutlined />
@@ -1446,7 +1446,7 @@ onUnmounted(() => {
 
 .progress-tip {
   text-align: center;
-  color: #1890ff;
+  color: #165DFF;
   margin-top: 8px;
 }
 
@@ -1502,7 +1502,7 @@ onUnmounted(() => {
 }
 
 .log-info .log-level {
-  color: #1890ff;
+  color: #165DFF;
 }
 
 .log-info .log-message {
@@ -1510,32 +1510,32 @@ onUnmounted(() => {
 }
 
 .log-success .log-level {
-  color: #52c41a;
+  color: #00B42A;
 }
 
 .log-success .log-message {
-  color: #52c41a;
+  color: #00B42A;
 }
 
 .log-warning .log-level {
-  color: #faad14;
+  color: #FF7D00;
 }
 
 .log-warning .log-message {
-  color: #faad14;
+  color: #FF7D00;
 }
 
 .log-error .log-level {
-  color: #ff4d4f;
+  color: #F53F3F;
 }
 
 .log-error .log-message {
-  color: #ff4d4f;
+  color: #F53F3F;
 }
 
 /* 失败原因样式 */
 .failure-reason {
-  color: #ff4d4f;
+  color: #F53F3F;
   font-size: 12px;
   cursor: help;
 }
@@ -1593,14 +1593,14 @@ onUnmounted(() => {
   cursor: pointer;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
   padding: 2px 6px;
   border-radius: 4px;
   transition: all 0.2s;
 }
 
 .host-id-cell:hover {
-  background-color: #e6f7ff;
+  background-color: #E8F3FF;
 }
 
 .host-id-cell .copy-icon {
@@ -1614,7 +1614,7 @@ onUnmounted(() => {
 }
 
 .error-message-text {
-  color: #ff4d4f;
+  color: #F53F3F;
   font-size: 12px;
   cursor: help;
 }

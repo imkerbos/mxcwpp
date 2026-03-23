@@ -26,7 +26,7 @@
               <div class="card-title">
                 <span
                   class="group-icon"
-                  :style="{ backgroundColor: group.color || '#1890ff' }"
+                  :style="{ backgroundColor: group.color || '#165DFF' }"
                 >
                   {{ group.icon || group.name.charAt(0) }}
                 </span>
@@ -115,7 +115,7 @@
           <a-divider type="vertical" />
           <span
             class="group-icon small"
-            :style="{ backgroundColor: currentGroup.color || '#1890ff' }"
+            :style="{ backgroundColor: currentGroup.color || '#165DFF' }"
           >
             {{ currentGroup.icon || currentGroup.name.charAt(0) }}
           </span>
@@ -402,7 +402,7 @@ const groupFormState = reactive({
   name: '',
   description: '',
   icon: '',
-  color: '#1890ff',
+  color: '#165DFF',
   sort_order: 0,
   enabled: true,
 })
@@ -515,8 +515,8 @@ const loadGroupPolicies = async () => {
 
 // 获取通过率颜色
 const getPassRateColor = (rate: number) => {
-  if (rate >= 80) return '#52c41a'
-  if (rate >= 60) return '#faad14'
+  if (rate >= 80) return '#00B42A'
+  if (rate >= 60) return '#FF7D00'
   return '#f5222d'
 }
 
@@ -558,7 +558,7 @@ const handleEditGroup = (group: PolicyGroup) => {
   groupFormState.name = group.name
   groupFormState.description = group.description || ''
   groupFormState.icon = group.icon || ''
-  groupFormState.color = group.color || '#1890ff'
+  groupFormState.color = group.color || '#165DFF'
   groupFormState.sort_order = group.sort_order || 0
   groupFormState.enabled = group.enabled
   groupModalVisible.value = true
@@ -682,7 +682,7 @@ const resetGroupForm = () => {
   groupFormState.name = ''
   groupFormState.description = ''
   groupFormState.icon = ''
-  groupFormState.color = '#1890ff'
+  groupFormState.color = '#165DFF'
   groupFormState.sort_order = 0
   groupFormState.enabled = true
   groupFormRef.value?.resetFields()
@@ -997,7 +997,7 @@ watch(
 }
 
 .group-description {
-  color: rgba(0, 0, 0, 0.45);
+  color: #86909C;
   margin-bottom: 16px;
   min-height: 44px;
   display: -webkit-box;
@@ -1009,7 +1009,7 @@ watch(
 .group-stats {
   margin-bottom: 16px;
   padding: 16px;
-  background: linear-gradient(135deg, #fafbfc 0%, #f0f5ff 100%);
+  background: linear-gradient(135deg, #F7F8FA 0%, #f0f5ff 100%);
   border-radius: 8px;
   border: 1px solid #f0f0f0;
 }
@@ -1023,7 +1023,7 @@ watch(
 }
 
 .host-count {
-  color: rgba(0, 0, 0, 0.45);
+  color: #86909C;
   font-size: 13px;
 }
 

@@ -303,7 +303,7 @@ onMounted(() => {
 
 .fix-suggestion {
   pre {
-    background: #f5f5f5;
+    background: #F2F3F5;
     padding: 16px;
     border-radius: 6px;
     margin: 0;

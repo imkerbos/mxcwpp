@@ -63,7 +63,7 @@
           </a-select-option>
         </a-select>
         <div class="form-tip" v-if="formData.runtime_type && filteredPolicies.length === 0">
-          <WarningOutlined style="color: #faad14;" /> 没有找到适用于当前运行时类型的策略
+          <WarningOutlined style="color: #FF7D00;" /> 没有找到适用于当前运行时类型的策略
         </div>
       </a-form-item>
 
@@ -343,7 +343,7 @@ onMounted(() => {
 <style scoped>
 .form-tip {
   font-size: 12px;
-  color: #8c8c8c;
+  color: #86909C;
   margin-top: 4px;
 }
 </style>

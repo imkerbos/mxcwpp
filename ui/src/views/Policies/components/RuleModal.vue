@@ -74,6 +74,17 @@
         />
       </a-form-item>
 
+      <a-form-item label="适用环境" name="runtime_types">
+        <a-checkbox-group v-model:value="formData.runtime_types">
+          <a-checkbox value="vm">物理机/虚拟机</a-checkbox>
+          <a-checkbox value="docker">Docker 容器</a-checkbox>
+          <a-checkbox value="k8s">K8s Pod</a-checkbox>
+        </a-checkbox-group>
+        <template #extra>
+          <span class="form-tip">留空表示继承策略设置；勾选后仅在对应环境执行此规则</span>
+        </template>
+      </a-form-item>
+
       <!-- 检查配置 -->
       <a-divider orientation="left">检查配置</a-divider>
 
@@ -280,6 +291,7 @@ const formData = reactive({
   category: 'other',
   severity: 'medium' as 'critical' | 'high' | 'medium' | 'low',
   description: '',
+  runtime_types: [] as string[],
   check_config: {
     condition: 'all' as 'all' | 'any',
     rules: [{ type: '', param: ['', '', ''], result: '' }] as CheckRuleForm[],
@@ -314,6 +326,7 @@ watch(
         formData.category = props.rule.category || 'other'
         formData.severity = props.rule.severity || 'medium'
         formData.description = props.rule.description || ''
+        formData.runtime_types = props.rule.runtime_types ? [...props.rule.runtime_types] : []
 
         // 处理 check_config
         if (props.rule.check_config) {
@@ -349,6 +362,7 @@ const resetForm = () => {
   formData.category = 'other'
   formData.severity = 'medium'
   formData.description = ''
+  formData.runtime_types = []
   formData.check_config = {
     condition: 'all',
     rules: [{ type: '', param: ['', '', ''], result: '' }],
@@ -412,6 +426,7 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
+        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
         check_config: checkConfig,
         fix_config: fixConfig,
       })
@@ -424,6 +439,7 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
+        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
         check_config: checkConfig,
         fix_config: fixConfig,
       })
@@ -454,7 +470,7 @@ const handleCancel = () => {
 
 <style scoped>
 .check-rules-container {
-  background: #fafafa;
+  background: #F7F8FA;
   padding: 16px;
   border-radius: 8px;
 }
@@ -478,7 +494,7 @@ const handleCancel = () => {
 
 .check-rule-index {
   font-weight: 500;
-  color: #1890ff;
+  color: #165DFF;
 }
 
 .form-tip {
@@ -487,6 +503,6 @@ const handleCancel = () => {
 }
 
 .form-tip.warning {
-  color: #faad14;
+  color: #FF7D00;
 }
 </style>

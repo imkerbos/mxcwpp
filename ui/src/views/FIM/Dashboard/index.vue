@@ -19,34 +19,34 @@
         <a-card>
           <a-statistic title="总变更事件" :value="stats.total" :value-style="{ fontSize: '28px' }">
             <template #prefix>
-              <FileSearchOutlined style="color: #1890ff" />
+              <FileSearchOutlined style="color: #165DFF" />
             </template>
           </a-statistic>
         </a-card>
       </a-col>
       <a-col :span="6">
         <a-card>
-          <a-statistic title="严重/高危事件" :value="stats.critical + stats.high" :value-style="{ color: '#cf1322', fontSize: '28px' }">
+          <a-statistic title="严重/高危事件" :value="stats.critical + stats.high" :value-style="{ color: '#CB2634', fontSize: '28px' }">
             <template #prefix>
-              <WarningOutlined style="color: #cf1322" />
+              <WarningOutlined style="color: #CB2634" />
             </template>
           </a-statistic>
         </a-card>
       </a-col>
       <a-col :span="6">
         <a-card>
-          <a-statistic title="新增文件" :value="stats.added" :value-style="{ color: '#52c41a', fontSize: '28px' }">
+          <a-statistic title="新增文件" :value="stats.added" :value-style="{ color: '#00B42A', fontSize: '28px' }">
             <template #prefix>
-              <PlusCircleOutlined style="color: #52c41a" />
+              <PlusCircleOutlined style="color: #00B42A" />
             </template>
           </a-statistic>
         </a-card>
       </a-col>
       <a-col :span="6">
         <a-card>
-          <a-statistic title="删除文件" :value="stats.removed" :value-style="{ color: '#ff4d4f', fontSize: '28px' }">
+          <a-statistic title="删除文件" :value="stats.removed" :value-style="{ color: '#F53F3F', fontSize: '28px' }">
             <template #prefix>
-              <MinusCircleOutlined style="color: #ff4d4f" />
+              <MinusCircleOutlined style="color: #F53F3F" />
             </template>
           </a-statistic>
         </a-card>
@@ -158,7 +158,7 @@ const trendChartOption = computed(() => ({
       smooth: true,
       areaStyle: { opacity: 0.15 },
       lineStyle: { width: 2 },
-      itemStyle: { color: '#1890ff' },
+      itemStyle: { color: '#165DFF' },
     },
   ],
 }))
@@ -173,10 +173,10 @@ const severityPieOption = computed(() => ({
       center: ['50%', '45%'],
       label: { show: false },
       data: [
-        { value: stats.critical, name: '严重', itemStyle: { color: '#cf1322' } },
+        { value: stats.critical, name: '严重', itemStyle: { color: '#CB2634' } },
         { value: stats.high, name: '高危', itemStyle: { color: '#fa541c' } },
-        { value: stats.medium, name: '中危', itemStyle: { color: '#faad14' } },
-        { value: stats.low, name: '低危', itemStyle: { color: '#1890ff' } },
+        { value: stats.medium, name: '中危', itemStyle: { color: '#FF7D00' } },
+        { value: stats.low, name: '低危', itemStyle: { color: '#165DFF' } },
       ].filter((d) => d.value > 0),
     },
   ],

@@ -379,7 +379,7 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border-radius: 6px;
   border: 1px solid #f0f0f0;
 }

@@ -161,7 +161,7 @@
             </a-tooltip>
             <span v-else class="failure-reason">检查失败</span>
           </template>
-          <span v-else style="color: #52c41a;">-</span>
+          <span v-else style="color: #00B42A;">-</span>
         </template>
       </template>
     </a-table>
@@ -428,19 +428,19 @@ onMounted(() => {
 }
 
 .pass-bg {
-  background: linear-gradient(135deg, #52c41a, #389e0d);
+  background: linear-gradient(135deg, #00B42A, #009A29);
 }
 
 .fail-bg {
-  background: linear-gradient(135deg, #ff4d4f, #cf1322);
+  background: linear-gradient(135deg, #F53F3F, #CB2634);
 }
 
 .error-bg {
-  background: linear-gradient(135deg, #faad14, #d48806);
+  background: linear-gradient(135deg, #FF7D00, #d48806);
 }
 
 .critical-bg {
-  background: linear-gradient(135deg, #ff4d4f, #a8071a);
+  background: linear-gradient(135deg, #F53F3F, #a8071a);
 }
 
 .high-bg {
@@ -448,11 +448,11 @@ onMounted(() => {
 }
 
 .medium-bg {
-  background: linear-gradient(135deg, #faad14, #d48806);
+  background: linear-gradient(135deg, #FF7D00, #d48806);
 }
 
 .low-bg {
-  background: linear-gradient(135deg, #1890ff, #096dd9);
+  background: linear-gradient(135deg, #165DFF, #0E42D2);
 }
 
 .stat-info {
@@ -467,18 +467,18 @@ onMounted(() => {
   line-height: 1;
   margin-bottom: 4px;
 
-  &.pass { color: #52c41a; }
-  &.fail { color: #ff4d4f; }
-  &.error { color: #faad14; }
-  &.critical { color: #cf1322; }
+  &.pass { color: #00B42A; }
+  &.fail { color: #F53F3F; }
+  &.error { color: #FF7D00; }
+  &.critical { color: #CB2634; }
   &.high { color: #fa541c; }
-  &.medium { color: #faad14; }
-  &.low { color: #1890ff; }
+  &.medium { color: #FF7D00; }
+  &.low { color: #165DFF; }
 }
 
 .stat-label {
   font-size: 13px;
-  color: #8c8c8c;
+  color: #86909C;
   font-weight: 400;
 }
 
@@ -496,7 +496,7 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border-radius: 8px;
   border: 1px solid #f0f0f0;
 }
@@ -514,7 +514,7 @@ onMounted(() => {
 }
 
 .failure-reason {
-  color: #ff4d4f;
+  color: #F53F3F;
   font-size: 12px;
   cursor: help;
 }

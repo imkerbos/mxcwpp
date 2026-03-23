@@ -16,7 +16,7 @@
       </a-col>
       <a-col :span="4">
         <a-card size="small">
-          <a-statistic title="严重" :value="stats.critical" :value-style="{ color: '#cf1322' }" />
+          <a-statistic title="严重" :value="stats.critical" :value-style="{ color: '#CB2634' }" />
         </a-card>
       </a-col>
       <a-col :span="4">
@@ -26,12 +26,12 @@
       </a-col>
       <a-col :span="4">
         <a-card size="small">
-          <a-statistic title="中危" :value="stats.medium" :value-style="{ color: '#faad14' }" />
+          <a-statistic title="中危" :value="stats.medium" :value-style="{ color: '#FF7D00' }" />
         </a-card>
       </a-col>
       <a-col :span="4">
         <a-card size="small">
-          <a-statistic title="低危" :value="stats.low" :value-style="{ color: '#1890ff' }" />
+          <a-statistic title="低危" :value="stats.low" :value-style="{ color: '#165DFF' }" />
         </a-card>
       </a-col>
       <a-col :span="4">

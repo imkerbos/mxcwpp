@@ -569,10 +569,10 @@
               {{ selectedPushRecord.total_count }}
             </a-descriptions-item>
             <a-descriptions-item label="成功数量">
-              <span style="color: #52c41a;">{{ selectedPushRecord.success_count }}</span>
+              <span style="color: #00B42A;">{{ selectedPushRecord.success_count }}</span>
             </a-descriptions-item>
             <a-descriptions-item label="失败数量">
-              <span style="color: #ff4d4f;">{{ selectedPushRecord.failed_count }}</span>
+              <span style="color: #F53F3F;">{{ selectedPushRecord.failed_count }}</span>
             </a-descriptions-item>
             <a-descriptions-item label="创建者">
               {{ selectedPushRecord.created_by || '-' }}
@@ -1181,7 +1181,7 @@ onMounted(() => {
 .plugin-status-section {
   margin-bottom: 20px;
   padding: 20px;
-  background: linear-gradient(135deg, #fafbfc 0%, #f0f5ff 100%);
+  background: linear-gradient(135deg, #F7F8FA 0%, #f0f5ff 100%);
   border-radius: 8px;
   border: 1px solid #f0f0f0;
 }
@@ -1219,19 +1219,19 @@ onMounted(() => {
 }
 
 .plugin-status-card.status-ready {
-  border-left: 3px solid #52c41a;
+  border-left: 3px solid #00B42A;
 }
 
 .plugin-status-card.status-missing-package {
-  border-left: 3px solid #ff4d4f;
+  border-left: 3px solid #F53F3F;
 }
 
 .plugin-status-card.status-outdated {
-  border-left: 3px solid #faad14;
+  border-left: 3px solid #FF7D00;
 }
 
 .plugin-status-card.status-default-config {
-  border-left: 3px solid #1890ff;
+  border-left: 3px solid #165DFF;
 }
 
 .plugin-name {
@@ -1256,7 +1256,7 @@ onMounted(() => {
 }
 
 .info-row .label {
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .info-row .value {
@@ -1278,14 +1278,14 @@ onMounted(() => {
 
 .upload-item {
   padding: 16px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border-radius: 8px;
   border: 1px dashed #d9d9d9;
   transition: all 0.2s ease;
 }
 
 .upload-item:hover {
-  border-color: #1890ff;
+  border-color: #165DFF;
   background: #f0f5ff;
 }
 
@@ -1304,7 +1304,7 @@ onMounted(() => {
 
 .upload-file {
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
   word-break: break-all;
   line-height: 1.4;
 }
@@ -1312,7 +1312,7 @@ onMounted(() => {
 .upload-hint {
   margin-top: 12px;
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
 }
 
 /* 包列表样式 */

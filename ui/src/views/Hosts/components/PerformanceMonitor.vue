@@ -152,10 +152,10 @@ const loadMetrics = async () => {
 }
 
 const getUsageColor = (usage?: number): string => {
-  if (!usage) return '#1890ff'
-  if (usage >= 90) return '#ff4d4f'
-  if (usage >= 70) return '#faad14'
-  return '#52c41a'
+  if (!usage) return '#165DFF'
+  if (usage >= 90) return '#F53F3F'
+  if (usage >= 70) return '#FF7D00'
+  return '#00B42A'
 }
 
 const formatBytes = (bytes: number): string => {
@@ -226,23 +226,23 @@ onMounted(() => {
 }
 
 .cpu-bg {
-  background: linear-gradient(135deg, #1890ff, #096dd9);
+  background: linear-gradient(135deg, #165DFF, #0E42D2);
 }
 
 .mem-bg {
-  background: linear-gradient(135deg, #722ed1, #531dab);
+  background: linear-gradient(135deg, #722ED1, #531DAB);
 }
 
 .disk-bg {
-  background: linear-gradient(135deg, #fa8c16, #d46b08);
+  background: linear-gradient(135deg, #D25F00, #d46b08);
 }
 
 .net-send-bg {
-  background: linear-gradient(135deg, #52c41a, #389e0d);
+  background: linear-gradient(135deg, #00B42A, #009A29);
 }
 
 .net-recv-bg {
-  background: linear-gradient(135deg, #13c2c2, #08979c);
+  background: linear-gradient(135deg, #14C9C9, #0FC6C2);
 }
 
 .metric-info {
@@ -252,7 +252,7 @@ onMounted(() => {
 
 .metric-label {
   font-size: 13px;
-  color: #8c8c8c;
+  color: #86909C;
   margin-bottom: 6px;
 }
 
@@ -281,7 +281,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 16px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border-radius: 8px;
   border: 1px solid #f0f0f0;
   margin-bottom: 16px;
@@ -297,7 +297,7 @@ onMounted(() => {
 .source-right {
   display: flex;
   align-items: center;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 /* 图表区域 */

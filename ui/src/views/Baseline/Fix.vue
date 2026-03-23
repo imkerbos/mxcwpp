@@ -126,7 +126,7 @@
           <a-statistic
             title="严重"
             :value="fixableItems.filter(i => i.severity === 'critical').length"
-            :value-style="{ color: '#cf1322' }"
+            :value-style="{ color: '#CB2634' }"
           >
             <template #prefix>
               <ExclamationCircleOutlined />
@@ -148,7 +148,7 @@
           <a-statistic
             title="有自动修复方案"
             :value="fixableItems.filter(i => i.has_fix).length"
-            :value-style="{ color: '#52c41a' }"
+            :value-style="{ color: '#00B42A' }"
           >
             <template #prefix>
               <CheckCircleOutlined />
@@ -259,7 +259,7 @@
           <code>{{ selectedItem.expected }}</code>
         </a-descriptions-item>
         <a-descriptions-item label="实际值" :span="2" v-if="selectedItem.actual">
-          <code style="color: #ff4d4f;">{{ selectedItem.actual }}</code>
+          <code style="color: #F53F3F;">{{ selectedItem.actual }}</code>
         </a-descriptions-item>
         <a-descriptions-item label="修复建议" :span="2" v-if="selectedItem.fix_suggestion">
           {{ selectedItem.fix_suggestion }}
@@ -986,11 +986,11 @@ onMounted(() => {
 }
 
 .log-level-error .log-text {
-  color: #ff4d4f;
+  color: #F53F3F;
 }
 
 .log-level-warn .log-text {
-  color: #faad14;
+  color: #FF7D00;
 }
 
 .log-level-cmd .log-text {

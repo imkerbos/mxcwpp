@@ -121,7 +121,7 @@
         </a-form-item>
         <a-form-item label="定期汇总">
           <a-switch v-model:checked="alertConfig.enable_periodic_summary" />
-          <span style="margin-left: 8px; color: #8c8c8c;">
+          <span style="margin-left: 8px; color: #86909C;">
             {{ alertConfig.enable_periodic_summary ? '已启用：已存在的告警按间隔定期发送' : '已关闭：只在首次发现时发送通知' }}
           </span>
         </a-form-item>
@@ -187,6 +187,7 @@ const filters = ref({
   category: undefined as string | undefined,
   alert_type: undefined as 'baseline' | 'agent_offline' | undefined,
   keyword: undefined as string | undefined,
+  runtime_type: undefined as string | undefined,
 })
 
 
@@ -230,6 +231,9 @@ const loadAlerts = async () => {
     }
     if (filters.value.keyword) {
       params.keyword = filters.value.keyword
+    }
+    if (filters.value.runtime_type) {
+      params.runtime_type = filters.value.runtime_type
     }
 
     const response = await alertsApi.list(params)
@@ -355,7 +359,7 @@ onMounted(() => {
 .config-tip {
   margin-top: 8px;
   font-size: 13px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .stats {
@@ -398,11 +402,11 @@ onMounted(() => {
 }
 
 .stat-active .stat-icon-bg {
-  background: linear-gradient(135deg, #1890ff, #096dd9);
+  background: linear-gradient(135deg, #165DFF, #0E42D2);
 }
 
 .stat-critical .stat-icon-bg {
-  background: linear-gradient(135deg, #ff4d4f, #cf1322);
+  background: linear-gradient(135deg, #F53F3F, #CB2634);
 }
 
 .stat-high .stat-icon-bg {
@@ -410,11 +414,11 @@ onMounted(() => {
 }
 
 .stat-medium .stat-icon-bg {
-  background: linear-gradient(135deg, #faad14, #d48806);
+  background: linear-gradient(135deg, #FF7D00, #d48806);
 }
 
 .stat-low .stat-icon-bg {
-  background: linear-gradient(135deg, #1890ff, #096dd9);
+  background: linear-gradient(135deg, #165DFF, #0E42D2);
 }
 
 .stat-info {
@@ -429,7 +433,7 @@ onMounted(() => {
   line-height: 1;
 
   &.critical {
-    color: #ff4d4f;
+    color: #F53F3F;
   }
 
   &.high {
@@ -437,17 +441,17 @@ onMounted(() => {
   }
 
   &.medium {
-    color: #faad14;
+    color: #FF7D00;
   }
 
   &.low {
-    color: #1890ff;
+    color: #165DFF;
   }
 }
 
 .stat-label {
   font-size: 13px;
-  color: #8c8c8c;
+  color: #86909C;
   font-weight: 400;
 }
 
@@ -475,18 +479,18 @@ onMounted(() => {
   font-weight: 400;
 
   &:hover {
-    color: #1890ff;
+    color: #165DFF;
     background: #f5f7fa;
   }
 
   &.active {
-    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+    background: linear-gradient(135deg, #165DFF 0%, #0E42D2 100%);
     color: #fff;
     font-weight: 500;
-    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
+    box-shadow: 0 2px 8px rgba(22, 93, 255, 0.3);
 
     &:hover {
-      background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+      background: linear-gradient(135deg, #4080FF 0%, #165DFF 100%);
       color: #fff;
     }
   }

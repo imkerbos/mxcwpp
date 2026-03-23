@@ -803,7 +803,7 @@
                       <span style="font-weight: 500;">{{ record.name }}</span>
                     </template>
                     <template v-else-if="column.key === 'version'">
-                      <span :style="{ color: record.need_update ? '#faad14' : 'inherit' }">
+                      <span :style="{ color: record.need_update ? '#FF7D00' : 'inherit' }">
                         {{ record.version || '-' }}
                         <a-tag v-if="record.need_update" color="orange" style="margin-left: 8px; font-size: 11px;">
                           可更新
@@ -849,7 +849,7 @@
             :max-tag-count="10"
           >
           </a-select>
-          <div style="margin-top: 8px; color: rgba(0, 0, 0, 0.45); font-size: 12px;">
+          <div style="margin-top: 8px; color: #86909C; font-size: 12px;">
             提示：输入标签后按回车键添加，最多可添加10个标签，每个标签最多50个字符
           </div>
         </div>
@@ -876,7 +876,7 @@
               {{ bl.name }}
             </a-select-option>
           </a-select>
-          <div style="margin-top: 8px; color: rgba(0, 0, 0, 0.45); font-size: 12px;">
+          <div style="margin-top: 8px; color: #86909C; font-size: 12px;">
             提示：选择业务线后，该主机将归属于所选业务线。留空表示取消业务线绑定。
           </div>
         </div>
@@ -1507,7 +1507,7 @@ onMounted(() => {
 .host-info-card :deep(.ant-card-head-title) {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
 }
 
 .host-info-card :deep(.ant-card-body) {
@@ -1538,7 +1538,7 @@ onMounted(() => {
   grid-template-columns: 100px 1fr;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #F2F3F5;
   min-height: 44px;
   gap: 8px;
 }
@@ -1550,7 +1550,7 @@ onMounted(() => {
 .info-label {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
   text-align: left;
   line-height: 20px;
   white-space: nowrap;
@@ -1559,7 +1559,7 @@ onMounted(() => {
 
 .info-value {
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.65);
+  color: #4E5969;
   line-height: 20px;
   word-break: break-word;
   min-width: 0;
@@ -1573,7 +1573,7 @@ onMounted(() => {
 
 /* 无数据状态（Agent 已连接但采集不到数据，如容器环境） */
 .info-value.empty-value.status-no-data {
-  color: rgba(0, 0, 0, 0.45);
+  color: #86909C;
   font-style: italic;
 }
 
@@ -1592,12 +1592,12 @@ onMounted(() => {
 }
 
 .copyable-text:hover {
-  color: #1890ff;
+  color: #165DFF;
   text-decoration: underline;
 }
 
 .cpu-info-text:hover {
-  color: #1890ff;
+  color: #165DFF;
 }
 
 
@@ -1619,12 +1619,12 @@ onMounted(() => {
 }
 
 .status-dot.online {
-  background-color: #52c41a;
+  background-color: #00B42A;
   box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
 }
 
 .status-dot.offline {
-  background-color: #ff4d4f;
+  background-color: #F53F3F;
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.2);
 }
 
@@ -1676,13 +1676,13 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #F2F3F5;
 }
 
 .risk-card-title {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
 }
 
 .risk-card-title-with-tags {
@@ -1696,7 +1696,7 @@ onMounted(() => {
   padding: 0;
   height: auto;
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
 }
 
 .risk-card-content {
@@ -1726,14 +1726,14 @@ onMounted(() => {
 
 .risk-unprocessed-label {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.65);
+  color: #4E5969;
   line-height: 1.2;
 }
 
 .risk-unprocessed-value {
   font-size: 28px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
   line-height: 1;
 }
 
@@ -1751,7 +1751,7 @@ onMounted(() => {
   height: 70px;
   border: 3px solid #e8e8e8;
   border-radius: 50%;
-  background: #fafbfc;
+  background: #F7F8FA;
   transition: all 0.3s;
 }
 
@@ -1789,7 +1789,7 @@ onMounted(() => {
 }
 
 .risk-stat-dot.critical {
-  background-color: #ff4d4f;
+  background-color: #F53F3F;
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
 }
 
@@ -1799,25 +1799,25 @@ onMounted(() => {
 }
 
 .risk-stat-dot.medium {
-  background-color: #faad14;
+  background-color: #FF7D00;
   box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.15);
 }
 
 .risk-stat-dot.low {
-  background-color: #1890ff;
+  background-color: #165DFF;
   box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
 }
 
 .risk-stat-label {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.65);
+  color: #4E5969;
   white-space: nowrap;
 }
 
 .risk-stat-value {
   font-size: 12px;
   font-weight: 500;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
   margin-left: auto;
 }
 
@@ -1851,7 +1851,7 @@ onMounted(() => {
 .fingerprint-title {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
 }
 
 .fingerprint-link {
@@ -1872,7 +1872,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
   transition: all 0.3s ease;
@@ -1880,7 +1880,7 @@ onMounted(() => {
 }
 
 .fingerprint-item:hover {
-  background: #e6f7ff;
+  background: #E8F3FF;
   border-color: #91d5ff;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(24, 144, 255, 0.12);
@@ -1889,14 +1889,14 @@ onMounted(() => {
 .fingerprint-value {
   font-size: 28px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  color: #1D2129;
   margin-bottom: 8px;
   line-height: 1;
 }
 
 .fingerprint-label {
   font-size: 14px;
-  color: rgba(0, 0, 0, 0.65);
+  color: #4E5969;
   text-align: center;
 }
 
@@ -1963,11 +1963,11 @@ onMounted(() => {
   
   .info-item {
     grid-template-columns: 100px 1fr;
-    border-bottom: 1px solid #f5f5f5;
+    border-bottom: 1px solid #F2F3F5;
   }
   
   .info-item:last-child {
-    border-bottom: 1px solid #f5f5f5;
+    border-bottom: 1px solid #F2F3F5;
   }
   
   .info-group:last-child .info-item:last-child {

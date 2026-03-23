@@ -448,7 +448,7 @@ onMounted(() => {
 }
 
 .host-count-info {
-  color: #1890ff;
+  color: #165DFF;
   font-size: 14px;
 }
 
@@ -472,13 +472,13 @@ onMounted(() => {
 
 .selected-count {
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
   font-weight: normal;
 }
 
 .more-tags {
   font-size: 12px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .no-tags {
@@ -490,6 +490,6 @@ onMounted(() => {
 }
 
 :deep(.ant-table-tbody > tr:hover) {
-  background: #fafafa;
+  background: #F7F8FA;
 }
 </style>

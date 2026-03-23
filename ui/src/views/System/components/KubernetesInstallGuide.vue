@@ -470,14 +470,14 @@ onMounted(() => {
 
 .form-hint {
   margin-left: 8px;
-  color: #8c8c8c;
+  color: #86909C;
   font-size: 12px;
 }
 
 .generated-content {
   margin-top: 24px;
   padding: 16px;
-  background: #fafafa;
+  background: #F7F8FA;
   border-radius: 4px;
 }
 
@@ -505,7 +505,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: #f5f5f5;
+  background: #F2F3F5;
   border-bottom: 1px solid #e8e8e8;
   font-size: 13px;
   font-weight: 500;
@@ -533,7 +533,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 12px;
-  background: #f5f5f5;
+  background: #F2F3F5;
   border-radius: 4px;
   margin: 12px 0;
 }
@@ -554,8 +554,8 @@ onMounted(() => {
 .tip {
   margin: 8px 0;
   padding: 8px 12px;
-  background: #e6f7ff;
-  border-left: 3px solid #1890ff;
+  background: #E8F3FF;
+  border-left: 3px solid #165DFF;
   border-radius: 2px;
   color: #595959;
   font-size: 13px;

@@ -257,7 +257,7 @@ onMounted(() => {
 }
 
 .danger-link {
-  color: #ff4d4f;
+  color: #F53F3F;
 }
 
 .danger-link:hover {

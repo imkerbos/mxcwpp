@@ -607,10 +607,10 @@ const getRulePassRate = (ruleId: string): number => {
 }
 
 const getPassRateColor = (rate: number): string => {
-  if (rate >= 90) return '#52c41a'
-  if (rate >= 70) return '#faad14'
-  if (rate >= 50) return '#fa8c16'
-  return '#ff4d4f'
+  if (rate >= 90) return '#00B42A'
+  if (rate >= 70) return '#FF7D00'
+  if (rate >= 50) return '#D25F00'
+  return '#F53F3F'
 }
 
 const getRowClassName = (record: Rule) => {
@@ -948,7 +948,7 @@ onMounted(() => {
 }
 
 .back-btn:hover {
-  color: #1890ff;
+  color: #165DFF;
 }
 
 .page-title {
@@ -988,7 +988,7 @@ onMounted(() => {
 
 .last-check-time {
   font-size: 13px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .overview-stats-row {
@@ -1011,16 +1011,16 @@ onMounted(() => {
 }
 
 .stat-value.danger {
-  color: #ff4d4f;
+  color: #F53F3F;
 }
 
 .stat-value.success {
-  color: #52c41a;
+  color: #00B42A;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .stat-divider {
@@ -1066,7 +1066,7 @@ onMounted(() => {
 }
 
 .rule-table :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
+  background: #F7F8FA;
   font-weight: 600;
   color: #262626;
   border-bottom: 1px solid #f0f0f0;
@@ -1082,7 +1082,7 @@ onMounted(() => {
 .rule-table :deep(.ant-table-tbody > tr > td) {
   padding: 12px 16px;
   font-size: 13px;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #F2F3F5;
 }
 
 .rule-table :deep(.ant-table-tbody > tr:hover) {
@@ -1090,7 +1090,7 @@ onMounted(() => {
 }
 
 .rule-table :deep(.ant-table-tbody > tr.table-row-selected) {
-  background: #e6f7ff;
+  background: #E8F3FF;
 }
 
 .rule-table :deep(.ant-table-tbody > tr.table-row-selected:hover) {
@@ -1208,7 +1208,7 @@ onMounted(() => {
   font-size: 13px;
   margin-bottom: 8px;
   padding-left: 8px;
-  border-left: 3px solid #1890ff;
+  border-left: 3px solid #165DFF;
 }
 
 .solution-steps {
@@ -1275,7 +1275,7 @@ onMounted(() => {
 }
 
 .host-tags {
-  color: #8c8c8c;
+  color: #86909C;
   font-size: 12px;
 }
 
@@ -1294,7 +1294,7 @@ onMounted(() => {
 }
 
 .host-table :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
+  background: #F7F8FA;
   font-weight: 600;
   color: #262626;
   border-bottom: 1px solid #f0f0f0;
@@ -1303,7 +1303,7 @@ onMounted(() => {
 }
 
 .host-table :deep(.ant-table-tbody > tr > td) {
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #F2F3F5;
   padding: 10px 12px;
   font-size: 12px;
 }
@@ -1343,12 +1343,12 @@ onMounted(() => {
 }
 
 .copy-icon:hover {
-  color: #1890ff;
+  color: #165DFF;
 }
 
 /* 失败原因样式 */
 .failure-reason {
-  color: #ff4d4f;
+  color: #F53F3F;
   font-size: 12px;
   cursor: help;
 }

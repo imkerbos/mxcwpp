@@ -48,6 +48,17 @@
         <a-select-option value="sysctl">内核参数</a-select-option>
         <a-select-option value="service">服务状态</a-select-option>
       </a-select>
+      <a-select
+        v-model:value="localFilters.runtime_type"
+        placeholder="运行环境"
+        allow-clear
+        style="width: 130px"
+        @change="handleSearch"
+      >
+        <a-select-option value="vm">物理机/VM</a-select-option>
+        <a-select-option value="docker">Docker</a-select-option>
+        <a-select-option value="k8s">K8s</a-select-option>
+      </a-select>
       <a-button @click="handleSearch">搜索</a-button>
       <a-button @click="handleRefresh">
         <template #icon>
@@ -155,7 +166,7 @@
       :ok-button-props="{ danger: true }"
     >
       <p>确定要忽略告警「{{ ignoreAlert?.title }}」吗？</p>
-      <p style="color: #8c8c8c; font-size: 13px;">忽略后告警将移至历史记录。</p>
+      <p style="color: #86909C; font-size: 13px;">忽略后告警将移至历史记录。</p>
       <a-alert
         type="warning"
         message="忽略告警不会解决实际的安全问题，建议优先解决告警。"
@@ -449,14 +460,14 @@ const handleIgnoreConfirm = () => {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #e6f7ff;
+  background: #E8F3FF;
   border: 1px solid #91d5ff;
   border-radius: 4px;
   margin-bottom: 16px;
 }
 
 .selection-info {
-  color: #1890ff;
+  color: #165DFF;
   font-size: 14px;
   
   strong {

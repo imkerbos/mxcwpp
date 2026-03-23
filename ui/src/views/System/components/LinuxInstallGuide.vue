@@ -67,7 +67,7 @@
           </a-form-item>
         </a-form>
         <div v-if="isLocalhost" class="warning-tip">
-          <WarningOutlined style="color: #faad14" />
+          <WarningOutlined style="color: #FF7D00" />
           <span>检测到您正在使用 localhost 访问，请输入服务器的实际 IP 地址。</span>
         </div>
       </a-card>
@@ -420,7 +420,7 @@ onMounted(() => {
 }
 
 .config-card {
-  background: #fafafa;
+  background: #F7F8FA;
 }
 
 .warning-tip {
@@ -458,7 +458,7 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #8c8c8c;
+  color: #86909C;
 }
 
 .os-list {
@@ -500,7 +500,7 @@ onMounted(() => {
   align-items: flex-start;
   gap: 8px;
   padding: 12px;
-  background: #f5f5f5;
+  background: #F2F3F5;
   border-radius: 4px;
   margin: 12px 0;
   position: relative;
@@ -540,8 +540,8 @@ onMounted(() => {
 .tip {
   margin: 8px 0;
   padding: 8px 12px;
-  background: #e6f7ff;
-  border-left: 3px solid #1890ff;
+  background: #E8F3FF;
+  border-left: 3px solid #165DFF;
   border-radius: 2px;
   color: #595959;
   font-size: 13px;
@@ -549,7 +549,7 @@ onMounted(() => {
 
 .tip.success {
   background: #f6ffed;
-  border-left-color: #52c41a;
+  border-left-color: #00B42A;
 }
 
 .tip code {
@@ -558,7 +558,7 @@ onMounted(() => {
   border-radius: 2px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
   font-size: 12px;
-  color: #1890ff;
+  color: #165DFF;
 }
 
 p {
@@ -587,7 +587,7 @@ p {
 }
 
 :deep(.ant-collapse-content-box code) {
-  background: #f5f5f5;
+  background: #F2F3F5;
   padding: 2px 6px;
   border-radius: 2px;
   font-family: monospace;

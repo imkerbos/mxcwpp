@@ -349,7 +349,7 @@ onMounted(() => {
 }
 
 .info-label {
-  color: #8c8c8c;
+  color: #86909C;
   font-size: 14px;
   white-space: nowrap;
 }
@@ -361,7 +361,7 @@ onMounted(() => {
 }
 
 .info-value.highlight {
-  color: #1890ff;
+  color: #165DFF;
   font-weight: 600;
 }
 
@@ -378,7 +378,7 @@ onMounted(() => {
 .policy-description {
   margin: 16px 0 0 0;
   padding-top: 16px;
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid #F2F3F5;
   color: #666;
   font-size: 14px;
   line-height: 1.6;

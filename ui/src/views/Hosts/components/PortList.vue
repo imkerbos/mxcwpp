@@ -39,11 +39,11 @@
           <a-tag v-if="record.state" :color="getStateColor(record.state)">
             {{ record.state }}
           </a-tag>
-          <span v-else style="color: #8c8c8c">-</span>
+          <span v-else style="color: #86909C">-</span>
         </template>
         <template v-else-if="column.key === 'container_id'">
           <a-tag v-if="record.container_id" color="blue">{{ record.container_id.substring(0, 12) }}</a-tag>
-          <span v-else style="color: #8c8c8c">-</span>
+          <span v-else style="color: #86909C">-</span>
         </template>
       </template>
       <template #emptyText>

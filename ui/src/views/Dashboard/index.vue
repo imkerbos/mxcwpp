@@ -1,622 +1,579 @@
 <template>
   <div class="dashboard-page">
+    <!-- 页面标题 -->
     <div class="page-header">
       <h2>安全概览</h2>
       <span class="page-header-hint">实时监控平台安全态势</span>
     </div>
 
-    <!-- 第一行：资产概览 -->
-    <a-row :gutter="[16, 16]" class="dashboard-row">
-      <a-col :xs="24" :sm="24" :md="24" :lg="24" :xl="24">
-        <a-card title="资产概览" :bordered="false" class="dashboard-card asset-overview-card">
-          <a-row :gutter="[24, 16]">
-            <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <div class="asset-stat-item">
-                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #1890ff, #096dd9);">
-                  <DesktopOutlined />
-                </div>
-                <a-statistic title="主机" :value="stats.hosts" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
-              </div>
-            </a-col>
-            <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <div class="asset-stat-item">
-                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #722ed1, #531dab);">
-                  <ClusterOutlined />
-                </div>
-                <a-statistic title="集群" :value="stats.clusters" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
-              </div>
-            </a-col>
-            <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <div class="asset-stat-item">
-                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #13c2c2, #08979c);">
-                  <ContainerOutlined />
-                </div>
-                <a-statistic title="容器" :value="stats.containers" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
-              </div>
-            </a-col>
-            <a-col :xs="12" :sm="8" :md="6" :lg="6" :xl="6">
-              <div class="asset-stat-item">
-                <div class="asset-stat-icon" style="background: linear-gradient(135deg, #52c41a, #389e0d);">
-                  <ApiOutlined />
-                </div>
-                <a-statistic title="在线Agent" :value="stats.onlineAgents" :value-style="{ fontSize: '24px', fontWeight: 600 }" />
-              </div>
-            </a-col>
-          </a-row>
-        </a-card>
+    <!-- 第一行: 资产统计卡片 (参考 Elkeid DescribeAgent / DescribeAsset) -->
+    <a-row :gutter="[16, 16]" class="section-row">
+      <a-col :span="4" v-for="item in assetStats" :key="item.key">
+        <div class="stat-card-item" @click="item.route && $router.push(item.route)">
+          <div class="stat-card-icon" :style="{ background: item.gradient }">
+            <component :is="item.icon" />
+          </div>
+          <div class="stat-card-value">{{ item.value }}</div>
+          <div class="stat-card-label">{{ item.label }}</div>
+        </div>
       </a-col>
     </a-row>
 
-    <!-- 第二行：基线风险、基线统计 -->
-    <a-row :gutter="[16, 16]" class="dashboard-row">
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="基线风险 Top 3" :bordered="false" class="dashboard-card">
-          <div class="baseline-risk-content">
-            <div v-if="baselineRisks.length === 0" class="empty-state">
-              <a-empty description="暂无基线风险" :image="false" />
-            </div>
-            <div v-else>
-              <div v-for="(risk, index) in baselineRisks" :key="index" class="baseline-risk-item">
-                <div class="risk-rank">{{ index + 1 }}.</div>
-                <div class="risk-info">
-                  <div class="risk-name">{{ risk.name }}</div>
-                  <div class="risk-stats">
-                    <a-tag color="red">高危 {{ risk.critical }}</a-tag>
-                    <a-tag color="orange">中危 {{ risk.medium }}</a-tag>
-                    <a-tag color="blue">低危 {{ risk.low }}</a-tag>
-                  </div>
-                </div>
-              </div>
-            </div>
+    <!-- 第二行: 告警趋势 (左) + 基线风险 Top5 (右) -->
+    <a-row :gutter="[16, 16]" class="section-row">
+      <a-col :span="14">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <span class="card-title">入侵告警趋势</span>
+            <a-radio-group v-model:value="alertTrendRange" size="small" @change="loadAlertTrend">
+              <a-radio-button value="7d">近 7 天</a-radio-button>
+              <a-radio-button value="30d">近 30 天</a-radio-button>
+            </a-radio-group>
           </div>
-        </a-card>
+          <div class="card-body chart-container">
+            <v-chart v-if="alertTrendData.length > 0" :option="alertTrendOption" autoresize style="height: 280px" />
+            <a-empty v-else description="暂无告警数据" />
+          </div>
+        </div>
       </a-col>
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="基线安全统计" :bordered="false" class="dashboard-card">
-          <div class="baseline-stats-content">
-            <div class="baseline-main-stat">
-              <div class="baseline-number" :style="{ color: getPassRateColor(stats.baselineHardeningPercent) }">
-                {{ stats.baselineHardeningPercent || 0 }}%
-              </div>
-              <div class="baseline-label">整体基线合规率</div>
-            </div>
-            <a-divider style="margin: 16px 0" />
-            <a-space direction="vertical" style="width: 100%" size="middle">
-              <div class="stat-row">
-                <span>检查主机数</span>
-                <span>{{ stats.hosts || 0 }}</span>
-              </div>
-              <div class="stat-row">
-                <span>存在高危基线主机</span>
-                <span class="danger-text">{{ stats.baselineHostPercent || 0 }}%</span>
-              </div>
-              <div class="stat-row">
-                <span>待处理基线风险</span>
-                <span class="danger-text">{{ stats.baselineFailCount || 0 }}</span>
-              </div>
-            </a-space>
+      <a-col :span="10">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <span class="card-title">基线风险 Top 5</span>
           </div>
-        </a-card>
+          <div class="card-body chart-container">
+            <v-chart v-if="baselineRisks.length > 0" :option="baselineRiskOption" autoresize style="height: 280px" />
+            <a-empty v-else description="暂无基线风险" />
+          </div>
+        </div>
       </a-col>
     </a-row>
 
-    <!-- 第四行：Agent 概述、后端服务状态 -->
-    <a-row :gutter="[16, 16]" class="dashboard-row">
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="Agent 概览" :bordered="false" class="dashboard-card">
-          <a-space direction="vertical" style="width: 100%" size="middle">
-            <div class="agent-stat-item">
-              <a-statistic
-                title="在线 Agent"
-                :value="stats.onlineAgents"
-                :value-style="{ color: '#52c41a', fontSize: '20px' }"
-              >
-                <template #suffix>
-                  <span class="stat-suffix">较昨日 {{ stats.onlineAgentsChange || 0 }}</span>
-                </template>
-              </a-statistic>
-            </div>
-            <div class="agent-stat-item">
-              <a-statistic
-                title="离线 Agent"
-                :value="stats.offlineAgents"
-                :value-style="{ color: '#ff4d4f', fontSize: '20px' }"
-              >
-                <template #suffix>
-                  <span class="stat-suffix">较昨日 {{ stats.offlineAgentsChange || 0 }}</span>
-                </template>
-              </a-statistic>
-            </div>
-            <a-divider style="margin: 8px 0" />
-            <div class="agent-stat-item">
-              <div class="stat-label">CPU 平均使用率</div>
-              <div class="stat-value">
-                <span class="stat-number">{{ stats.avgCpuUsage || 0 }}%</span>
-                <span class="stat-suffix">较昨日 {{ stats.avgCpuUsageChange || 0 }}%</span>
-              </div>
-            </div>
-            <div class="agent-stat-item">
-              <div class="stat-label">内存平均使用量</div>
-              <div class="stat-value">
-                <span class="stat-number">{{ formatMemory(stats.avgMemoryUsage ?? 0) }}</span>
-                <span class="stat-suffix">较昨日 {{ formatMemoryChange(stats.avgMemoryUsageChange ?? 0) }}</span>
-              </div>
-            </div>
-          </a-space>
-        </a-card>
+    <!-- 第三行: Agent 状态饼图 (左) + 基线安全统计 (中) + 服务健康 (右) -->
+    <a-row :gutter="[16, 16]" class="section-row">
+      <a-col :span="8">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <span class="card-title">Agent 状态分布</span>
+          </div>
+          <div class="card-body chart-container">
+            <v-chart :option="agentPieOption" autoresize style="height: 240px" />
+          </div>
+        </div>
       </a-col>
-      <a-col :xs="24" :sm="24" :md="12" :lg="12" :xl="12">
-        <a-card title="后端服务状态" :bordered="false" class="dashboard-card">
-          <a-space direction="vertical" style="width: 100%" size="middle">
-            <div class="service-status-item">
-              <div class="service-name">
-                <span class="status-dot-animated" :class="getServiceStatusClass('database')"></span>
-                <span>数据库连接</span>
-              </div>
-              <a-tag :color="getServiceStatusColor(serviceStatus.database)">
-                {{ getServiceStatusText(serviceStatus.database) }}
-              </a-tag>
+      <a-col :span="8">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <span class="card-title">基线安全统计</span>
+          </div>
+          <div class="card-body">
+            <div class="compliance-ring">
+              <a-progress
+                type="circle"
+                :percent="stats.baselineHardeningPercent || 0"
+                :size="120"
+                :stroke-color="getPassRateColor(stats.baselineHardeningPercent)"
+                :format="(p: number) => `${p}%`"
+              />
+              <div class="compliance-label">整体合规率</div>
             </div>
-            <div class="service-status-item">
-              <div class="service-name">
-                <span class="status-dot-animated" :class="getServiceStatusClass('agentcenter')"></span>
-                <span>AgentCenter 服务</span>
+            <div class="compliance-detail">
+              <div class="detail-row">
+                <span class="detail-label">检查主机数</span>
+                <span class="detail-value">{{ stats.hosts || 0 }}</span>
               </div>
-              <a-tag :color="getServiceStatusColor(serviceStatus.agentcenter)">
-                {{ getServiceStatusText(serviceStatus.agentcenter) }}
-              </a-tag>
-            </div>
-            <div class="service-status-item">
-              <div class="service-name">
-                <span class="status-dot-animated" :class="getServiceStatusClass('manager')"></span>
-                <span>Manager 服务</span>
+              <div class="detail-row">
+                <span class="detail-label">高危主机占比</span>
+                <span class="detail-value text-danger">{{ stats.baselineHostPercent || 0 }}%</span>
               </div>
-              <a-tag :color="getServiceStatusColor(serviceStatus.manager)">
-                {{ getServiceStatusText(serviceStatus.manager) }}
-              </a-tag>
+              <div class="detail-row">
+                <span class="detail-label">待修复风险项</span>
+                <span class="detail-value text-danger">{{ stats.baselineFailCount || 0 }}</span>
+              </div>
             </div>
-            <!-- 基线检查插件在 Agent 端运行，Server 端无法直接检查其状态 -->
-            <!-- 如需了解基线检查活动情况，可通过"在线 Agent 数量"或"最近基线检查结果"来判断 -->
-          </a-space>
-        </a-card>
+          </div>
+        </div>
+      </a-col>
+      <a-col :span="8">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <span class="card-title">后端服务状态</span>
+          </div>
+          <div class="card-body">
+            <div class="service-list">
+              <div v-for="svc in serviceList" :key="svc.key" class="service-item">
+                <div class="service-left">
+                  <span class="status-dot" :class="`dot-${svc.status}`"></span>
+                  <span class="service-name">{{ svc.name }}</span>
+                </div>
+                <a-tag :color="statusColorMap[svc.status]" :bordered="false">
+                  {{ statusTextMap[svc.status] }}
+                </a-tag>
+              </div>
+            </div>
+            <a-divider style="margin: 16px 0 12px" />
+            <div class="agent-summary">
+              <div class="agent-summary-item">
+                <span class="agent-summary-label">在线 Agent</span>
+                <span class="agent-summary-value" style="color: #00B42A">{{ stats.onlineAgents || 0 }}</span>
+              </div>
+              <div class="agent-summary-item">
+                <span class="agent-summary-label">离线 Agent</span>
+                <span class="agent-summary-value" style="color: #F53F3F">{{ stats.offlineAgents || 0 }}</span>
+              </div>
+              <div class="agent-summary-item">
+                <span class="agent-summary-label">平均 CPU</span>
+                <span class="agent-summary-value">{{ stats.avgCpuUsage || 0 }}%</span>
+              </div>
+              <div class="agent-summary-item">
+                <span class="agent-summary-label">平均内存</span>
+                <span class="agent-summary-value">{{ formatMemory(stats.avgMemoryUsage ?? 0) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </a-col>
     </a-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   DesktopOutlined,
   ClusterOutlined,
-  ContainerOutlined,
-  ApiOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
 } from '@ant-design/icons-vue'
 import { dashboardApi } from '@/api/dashboard'
-import type { DashboardStats } from '@/api/dashboard'
+import type { DashboardStats, BaselineRisk } from '@/api/dashboard'
 
-interface BaselineRisk {
-  name: string
-  critical: number
-  medium: number
-  low: number
-}
-
+// ========== 数据 ==========
 const stats = ref<DashboardStats>({
-  hosts: 0,
-  clusters: 0,
-  containers: 0,
-  onlineAgents: 0,
-  offlineAgents: 0,
-  onlineAgentsChange: 0,
-  offlineAgentsChange: 0,
-  pendingAlerts: 0,
-  pendingVulnerabilities: 0,
-  vulnDbUpdateTime: '',
-  hotPatchCount: 0,
-  baselineFailCount: 0,
+  hosts: 0, clusters: 0, containers: 0,
+  onlineAgents: 0, offlineAgents: 0,
+  pendingAlerts: 0, pendingVulnerabilities: 0,
+  vulnDbUpdateTime: '', baselineFailCount: 0,
   baselineHardeningPercent: 0,
-  avgCpuUsage: 0,
-  avgCpuUsageChange: 0,
-  avgMemoryUsage: 0,
-  avgMemoryUsageChange: 0,
-  hostAlertPercent: 0,
-  vulnHostPercent: 0,
-  baselineHostPercent: 0,
-  runtimeAlertPercent: 0,
-  virusHostPercent: 0,
 })
 
 const baselineRisks = ref<BaselineRisk[]>([])
+const alertTrendRange = ref('7d')
+const alertTrendData = ref<any[]>([])
 
 const serviceStatus = ref({
-  database: 'healthy',
-  agentcenter: 'healthy',
-  manager: 'healthy',
+  database: 'healthy' as string,
+  agentcenter: 'healthy' as string,
+  manager: 'healthy' as string,
 })
 
+const statusColorMap: Record<string, string> = {
+  healthy: 'green', warning: 'orange', error: 'red',
+}
+const statusTextMap: Record<string, string> = {
+  healthy: '正常', warning: '警告', error: '异常',
+}
+
+// ========== 资产统计卡片 ==========
+const assetStats = computed(() => [
+  {
+    key: 'hosts', label: '主机总数', value: stats.value.hosts,
+    icon: DesktopOutlined, gradient: 'linear-gradient(135deg, #165DFF, #0E42D2)',
+    route: '/hosts',
+  },
+  {
+    key: 'online', label: '在线 Agent', value: stats.value.onlineAgents,
+    icon: CheckCircleOutlined, gradient: 'linear-gradient(135deg, #00B42A, #009A29)',
+    route: '/hosts',
+  },
+  {
+    key: 'offline', label: '离线 Agent', value: stats.value.offlineAgents,
+    icon: WarningOutlined, gradient: 'linear-gradient(135deg, #F53F3F, #CB2634)',
+    route: '/hosts',
+  },
+  {
+    key: 'alerts', label: '待处理告警', value: stats.value.pendingAlerts,
+    icon: WarningOutlined, gradient: 'linear-gradient(135deg, #FF7D00, #D25F00)',
+    route: '/alerts',
+  },
+  {
+    key: 'baseline', label: '待修复基线', value: stats.value.baselineFailCount,
+    icon: DesktopOutlined, gradient: 'linear-gradient(135deg, #FADC19, #F7BA1E)',
+    route: '/policies',
+  },
+  {
+    key: 'clusters', label: '容器集群', value: stats.value.clusters,
+    icon: ClusterOutlined, gradient: 'linear-gradient(135deg, #722ED1, #531DAB)',
+  },
+])
+
+// ========== 告警趋势折线图 ==========
+const alertTrendOption = computed(() => ({
+  tooltip: {
+    trigger: 'axis',
+    backgroundColor: '#fff',
+    borderColor: '#E5E8EF',
+    textStyle: { color: '#1D2129', fontSize: 12 },
+  },
+  legend: {
+    bottom: 0,
+    itemWidth: 12, itemHeight: 3,
+    textStyle: { color: '#86909C', fontSize: 12 },
+  },
+  grid: { top: 16, right: 16, bottom: 36, left: 48 },
+  xAxis: {
+    type: 'category',
+    data: alertTrendData.value.map((d: any) => d.date),
+    axisLine: { lineStyle: { color: '#E5E6EB' } },
+    axisLabel: { color: '#86909C', fontSize: 11 },
+    axisTick: { show: false },
+  },
+  yAxis: {
+    type: 'value', minInterval: 1,
+    axisLine: { show: false },
+    axisLabel: { color: '#86909C', fontSize: 11 },
+    splitLine: { lineStyle: { color: '#F2F3F5' } },
+  },
+  series: [
+    { name: '紧急', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#F53F3F' }, data: alertTrendData.value.map((d: any) => d.critical ?? 0) },
+    { name: '高危', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#FF7D00' }, data: alertTrendData.value.map((d: any) => d.high ?? 0) },
+    { name: '中危', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#FADC19' }, data: alertTrendData.value.map((d: any) => d.medium ?? 0) },
+    { name: '低危', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#165DFF' }, data: alertTrendData.value.map((d: any) => d.low ?? 0) },
+  ],
+}))
+
+// ========== 基线风险 Top5 横向柱状图 ==========
+const baselineRiskOption = computed(() => {
+  const names = baselineRisks.value.map(r => r.name)
+  const criticalData = baselineRisks.value.map(r => r.critical)
+  const mediumData = baselineRisks.value.map(r => r.medium)
+  const lowData = baselineRisks.value.map(r => r.low)
+
+  return {
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      backgroundColor: '#fff', borderColor: '#E5E8EF',
+      textStyle: { color: '#1D2129', fontSize: 12 },
+    },
+    legend: {
+      bottom: 0, itemWidth: 12, itemHeight: 8,
+      textStyle: { color: '#86909C', fontSize: 12 },
+    },
+    grid: { top: 8, right: 16, bottom: 36, left: 120 },
+    xAxis: {
+      type: 'value', minInterval: 1,
+      axisLine: { show: false },
+      axisLabel: { color: '#86909C', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#F2F3F5' } },
+    },
+    yAxis: {
+      type: 'category', data: names.reverse(),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { color: '#4E5969', fontSize: 12, width: 110, overflow: 'truncate' },
+    },
+    series: [
+      { name: '高危', type: 'bar', stack: 'total', barWidth: 16, itemStyle: { color: '#F53F3F', borderRadius: [0, 0, 0, 0] }, data: criticalData.reverse() },
+      { name: '中危', type: 'bar', stack: 'total', barWidth: 16, itemStyle: { color: '#FF7D00' }, data: mediumData.reverse() },
+      { name: '低危', type: 'bar', stack: 'total', barWidth: 16, itemStyle: { color: '#165DFF', borderRadius: [0, 2, 2, 0] }, data: lowData.reverse() },
+    ],
+  }
+})
+
+// ========== Agent 状态饼图 ==========
+const agentPieOption = computed(() => ({
+  tooltip: {
+    trigger: 'item',
+    backgroundColor: '#fff', borderColor: '#E5E8EF',
+    textStyle: { color: '#1D2129', fontSize: 12 },
+  },
+  legend: {
+    orient: 'vertical', right: 24, top: 'center',
+    itemWidth: 10, itemHeight: 10, itemGap: 16,
+    textStyle: { color: '#4E5969', fontSize: 13 },
+  },
+  series: [{
+    type: 'pie', radius: ['55%', '80%'], center: ['35%', '50%'],
+    avoidLabelOverlap: false,
+    label: {
+      show: true, position: 'center',
+      formatter: () => `{total|${(stats.value.onlineAgents || 0) + (stats.value.offlineAgents || 0)}}\n{label|总计}`,
+      rich: {
+        total: { fontSize: 24, fontWeight: 700, color: '#1D2129', lineHeight: 32 },
+        label: { fontSize: 12, color: '#86909C', lineHeight: 20 },
+      },
+    },
+    itemStyle: { borderColor: '#fff', borderWidth: 2 },
+    data: [
+      { value: stats.value.onlineAgents || 0, name: '在线', itemStyle: { color: '#00B42A' } },
+      { value: stats.value.offlineAgents || 0, name: '离线', itemStyle: { color: '#F53F3F' } },
+    ],
+  }],
+}))
+
+// ========== 服务列表 ==========
+const serviceList = computed(() => [
+  { key: 'database', name: '数据库', status: serviceStatus.value.database },
+  { key: 'agentcenter', name: 'AgentCenter', status: serviceStatus.value.agentcenter },
+  { key: 'manager', name: 'Manager', status: serviceStatus.value.manager },
+])
+
+// ========== 工具函数 ==========
 const getPassRateColor = (rate: number): string => {
-  if (rate >= 90) return '#52c41a'
-  if (rate >= 70) return '#faad14'
-  if (rate >= 50) return '#fa8c16'
-  return '#ff4d4f'
+  if (rate >= 90) return '#00B42A'
+  if (rate >= 70) return '#FF7D00'
+  return '#F53F3F'
 }
 
 const formatMemory = (bytes: number): string => {
-  if (!bytes || bytes === 0) return '0B'
+  if (!bytes || bytes === 0) return '0 B'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + sizes[i]
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
 }
 
-const formatMemoryChange = (bytes: number): string => {
-  if (!bytes || bytes === 0) return '0B'
-  const sign = bytes > 0 ? '+' : ''
-  return sign + formatMemory(bytes)
-}
-
-const getServiceStatusClass = (service: string) => {
-  const status = serviceStatus.value[service as keyof typeof serviceStatus.value]
-  return {
-    'status-dot-healthy': status === 'healthy',
-    'status-dot-warning': status === 'warning',
-    'status-dot-error': status === 'error',
+// ========== 数据加载 ==========
+const loadAlertTrend = async () => {
+  try {
+    // TODO: 接入真实 API, 当前使用空数据
+    alertTrendData.value = []
+  } catch {
+    alertTrendData.value = []
   }
-}
-
-const getServiceStatusColor = (status: string) => {
-  const colorMap: Record<string, string> = {
-    healthy: 'green',
-    warning: 'orange',
-    error: 'red',
-  }
-  return colorMap[status] || 'default'
-}
-
-const getServiceStatusText = (status: string) => {
-  const textMap: Record<string, string> = {
-    healthy: '正常',
-    warning: '警告',
-    error: '异常',
-  }
-  return textMap[status] || '未知'
 }
 
 const loadDashboardData = async () => {
   try {
-    // 加载 Dashboard 统计数据
-    const dashboardStats = await dashboardApi.getStats()
-
+    const data = await dashboardApi.getStats()
     stats.value = {
-      ...dashboardStats,
-      baselineHardeningPercent: Math.round(dashboardStats.baselineHardeningPercent || 0),
-      baselineHostPercent: Math.round(dashboardStats.baselineHostPercent || 0),
-      onlineAgentsChange: dashboardStats.onlineAgentsChange || 0,
-      offlineAgentsChange: dashboardStats.offlineAgentsChange || 0,
-      hotPatchCount: dashboardStats.hotPatchCount || 0,
-      avgCpuUsage: dashboardStats.avgCpuUsage || 0,
-      avgCpuUsageChange: dashboardStats.avgCpuUsageChange || 0,
-      avgMemoryUsage: dashboardStats.avgMemoryUsage || 0,
-      avgMemoryUsageChange: dashboardStats.avgMemoryUsageChange || 0,
-      hostAlertPercent: dashboardStats.hostAlertPercent || 0,
-      vulnHostPercent: dashboardStats.vulnHostPercent || 0,
-      runtimeAlertPercent: dashboardStats.runtimeAlertPercent || 0,
-      virusHostPercent: dashboardStats.virusHostPercent || 0,
+      ...data,
+      baselineHardeningPercent: Math.round(data.baselineHardeningPercent || 0),
+      baselineHostPercent: Math.round(data.baselineHostPercent ?? 0),
     }
-
-    // 加载基线风险 Top 3
-    if (dashboardStats.baselineRisks) {
-      baselineRisks.value = dashboardStats.baselineRisks.slice(0, 3)
+    if (data.baselineRisks) {
+      baselineRisks.value = data.baselineRisks.slice(0, 5)
     }
-
-    // 加载服务状态
-    if (dashboardStats.serviceStatus) {
+    if (data.serviceStatus) {
       serviceStatus.value = {
-        database: dashboardStats.serviceStatus.database || 'healthy',
-        agentcenter: dashboardStats.serviceStatus.agentcenter || 'healthy',
-        manager: dashboardStats.serviceStatus.manager || 'healthy',
+        database: data.serviceStatus.database || 'healthy',
+        agentcenter: data.serviceStatus.agentcenter || 'healthy',
+        manager: data.serviceStatus.manager || 'healthy',
       }
     }
   } catch (error) {
-    console.error('加载Dashboard数据失败:', error)
+    console.error('加载 Dashboard 数据失败:', error)
   }
 }
 
-let refreshInterval: number | null = null
+let refreshTimer: number | null = null
 
 onMounted(() => {
   loadDashboardData()
-  // 每30秒刷新一次数据
-  refreshInterval = window.setInterval(() => {
-    loadDashboardData()
-  }, 30000)
+  loadAlertTrend()
+  refreshTimer = window.setInterval(loadDashboardData, 30000)
 })
 
 onUnmounted(() => {
-  if (refreshInterval !== null) {
-    clearInterval(refreshInterval)
-  }
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 </script>
 
 <style scoped>
 .dashboard-page {
   width: 100%;
-  padding: 0;
 }
 
-.page-header {
-  margin-bottom: 24px;
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.page-header-hint {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-}
-
-.dashboard-row {
+.section-row {
   margin-bottom: 16px;
 }
 
-.dashboard-card {
-  height: 100%;
-  min-height: 280px;
-}
-
-/* 资产概览卡片 */
-.asset-overview-card {
-  min-height: auto;
-  height: auto;
-}
-
-.dashboard-card :deep(.ant-card-body) {
+/* ========== 资产统计卡片 ========== */
+.stat-card-item {
+  background: #FFFFFF;
+  border: 1px solid #E5E8EF;
+  border-radius: 8px;
   padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.asset-overview-card :deep(.ant-card-body) {
+.stat-card-item:hover {
+  border-color: #165DFF;
+  box-shadow: 0 2px 8px rgba(22, 93, 255, 0.1);
+}
+
+.stat-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font-size: 18px;
+  margin: 0 auto 12px;
+}
+
+.stat-card-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1D2129;
+  line-height: 1.2;
+}
+
+.stat-card-label {
+  font-size: 13px;
+  color: #86909C;
+  margin-top: 4px;
+}
+
+/* ========== Dashboard Card (Elkeid 风格) ========== */
+.dashboard-card {
+  background: #FFFFFF;
+  border: 1px solid #E5E8EF;
+  border-radius: 8px;
+  height: 100%;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #F2F3F5;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1D2129;
+}
+
+.card-body {
   padding: 16px 20px;
 }
 
-/* 资产统计项 - 带图标 */
-.asset-stat-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.asset-stat-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+.chart-container {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
-  font-size: 20px;
-  flex-shrink: 0;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-.empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
+/* ========== 基线安全统计 ========== */
+.compliance-ring {
+  text-align: center;
+  padding: 12px 0;
 }
 
-.stat-row {
+.compliance-label {
+  font-size: 13px;
+  color: #86909C;
+  margin-top: 8px;
+}
+
+.compliance-detail {
+  margin-top: 12px;
+}
+
+.detail-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 12px;
-  font-size: 14px;
-  border-radius: 6px;
-  transition: background 0.2s;
+  padding: 8px 0;
+  border-bottom: 1px solid #F7F8FA;
 }
 
-.stat-row:hover {
-  background: #fafbfc;
-}
-
-/* 基线风险 */
-.baseline-risk-content {
-  min-height: 200px;
-}
-
-.baseline-risk-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  border-bottom: 1px solid #f5f5f5;
-  border-radius: 6px;
-  transition: background 0.2s;
-}
-
-.baseline-risk-item:hover {
-  background: #fafbfc;
-}
-
-.baseline-risk-item:last-child {
+.detail-row:last-child {
   border-bottom: none;
 }
 
-.risk-rank {
-  font-size: 16px;
-  font-weight: bold;
-  color: #1890ff;
-  min-width: 24px;
+.detail-label {
+  font-size: 13px;
+  color: #4E5969;
 }
 
-.risk-info {
-  flex: 1;
-}
-
-.risk-name {
+.detail-value {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
-  margin-bottom: 8px;
+  color: #1D2129;
 }
 
-.risk-stats {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 基线安全统计 */
-.baseline-stats-content {
+/* ========== 后端服务状态 ========== */
+.service-list {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 12px;
 }
 
-.baseline-main-stat {
-  text-align: center;
-  padding: 20px 0;
-  background: linear-gradient(135deg, #f6ffed 0%, #e6f7ff 100%);
-  border-radius: 8px;
-  margin-bottom: 4px;
-}
-
-.baseline-number {
-  font-size: 40px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.baseline-label {
-  color: #8c8c8c;
-  margin-top: 8px;
-  font-size: 14px;
-}
-
-.danger-text {
-  color: #ff4d4f;
-  font-weight: 500;
-}
-
-/* Agent 概述 */
-.agent-stat-item {
-  padding: 8px 0;
-}
-
-.stat-label {
-  font-size: 14px;
-  color: #8c8c8c;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.stat-number {
-  font-size: 20px;
-  font-weight: 500;
-  color: #333;
-}
-
-.stat-suffix {
-  font-size: 12px;
-  color: #8c8c8c;
-}
-
-/* 后端服务状态 */
-.service-status-item {
+.service-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 4px;
   transition: background 0.2s;
 }
 
-.service-status-item:hover {
-  background: #fafbfc;
+.service-item:hover {
+  background: #F7F8FA;
 }
 
-.service-name {
+.service-left {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
-  color: #333;
 }
 
-/* 带动画的状态点 */
-.status-dot-animated {
+.service-name {
+  font-size: 14px;
+  color: #1D2129;
+}
+
+/* 状态指示点 */
+.status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   display: inline-block;
-  position: relative;
 }
 
-.status-dot-animated::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  animation: status-pulse 2s ease-in-out infinite;
+.dot-healthy {
+  background: #00B42A;
+  box-shadow: 0 0 0 3px rgba(0, 180, 42, 0.15);
 }
 
-.status-dot-healthy {
-  background-color: #52c41a;
+.dot-warning {
+  background: #FF7D00;
+  box-shadow: 0 0 0 3px rgba(255, 125, 0, 0.15);
 }
 
-.status-dot-healthy::after {
-  border: 1px solid rgba(82, 196, 26, 0.3);
+.dot-error {
+  background: #F53F3F;
+  box-shadow: 0 0 0 3px rgba(245, 63, 63, 0.15);
 }
 
-.status-dot-warning {
-  background-color: #ff9800;
+/* Agent 概要指标 */
+.agent-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
-.status-dot-warning::after {
-  border: 1px solid rgba(255, 152, 0, 0.3);
+.agent-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.status-dot-error {
-  background-color: #ff4d4f;
+.agent-summary-label {
+  font-size: 12px;
+  color: #86909C;
 }
 
-.status-dot-error::after {
-  border: 1px solid rgba(255, 77, 79, 0.3);
-}
-
-@keyframes status-pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.5;
-    transform: scale(1.3);
-  }
-}
-
-/* 响应式调整 */
-@media (max-width: 768px) {
-  .dashboard-card {
-    min-height: auto;
-  }
-
-  .baseline-number {
-    font-size: 28px;
-  }
+.agent-summary-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1D2129;
 }
 </style>

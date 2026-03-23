@@ -806,7 +806,7 @@ onMounted(() => {
   .page-description {
     margin: 0;
     font-size: 14px;
-    color: #8c8c8c;
+    color: #86909C;
   }
 }
 
@@ -816,7 +816,7 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #fafbfc;
+  background: #F7F8FA;
   border-radius: 6px;
   border: 1px solid #f0f0f0;
 
@@ -831,7 +831,7 @@ onMounted(() => {
 
 .config-url {
   font-size: 12px;
-  color: #8c8c8c;
+  color: #86909C;
   word-break: break-all;
 }
 
@@ -866,7 +866,7 @@ onMounted(() => {
 .form-tip {
   margin-top: 8px;
   font-size: 12px;
-  color: #8c8c8c;
+  color: #86909C;
   line-height: 1.5;
 }
 
