@@ -38,9 +38,10 @@ type ListAlertsRequest struct {
 	HostID    string `form:"host_id"`
 	RuleID    string `form:"rule_id"`
 	Category  string `form:"category"`
-	AlertType string `form:"alert_type"` // baseline, agent_offline
-	Keyword   string `form:"keyword"`    // 搜索标题或描述
-	ResultID  string `form:"result_id"`  // 根据 result_id 查询
+	AlertType   string `form:"alert_type"`   // baseline, agent_offline
+	Keyword     string `form:"keyword"`      // 搜索标题或描述
+	ResultID    string `form:"result_id"`    // 根据 result_id 查询
+	RuntimeType string `form:"runtime_type"` // vm, docker, k8s
 }
 
 // ListAlerts 获取告警列表
@@ -99,6 +100,10 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	}
 	if req.Keyword != "" {
 		query = query.Where("title LIKE ? OR description LIKE ?", "%"+req.Keyword+"%", "%"+req.Keyword+"%")
+	}
+	if req.RuntimeType != "" {
+		query = query.Joins("JOIN hosts ON hosts.host_id = alerts.host_id").
+			Where("hosts.runtime_type = ?", req.RuntimeType)
 	}
 
 	// 获取总数
