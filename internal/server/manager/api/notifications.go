@@ -123,15 +123,16 @@ func (h *NotificationsHandler) GetNotification(c *gin.Context) {
 
 // CreateNotificationRequest 创建通知请求
 type CreateNotificationRequest struct {
-	Name        string                   `json:"name" binding:"required"`
-	Description string                   `json:"description"`
-	Enabled     bool                     `json:"enabled"`
-	Type        model.NotificationType   `json:"type" binding:"required"`
-	Severities  []string                 `json:"severities"`
-	Scope       model.NotificationScope  `json:"scope" binding:"required"`
-	ScopeValue  model.ScopeValueData     `json:"scope_value"`
-	FrontendURL string                   `json:"frontend_url"`
-	Config      model.NotificationConfig `json:"config" binding:"required"`
+	Name           string                   `json:"name" binding:"required"`
+	Description    string                   `json:"description"`
+	NotifyCategory model.NotifyCategory     `json:"notify_category" binding:"required"`
+	Enabled        bool                     `json:"enabled"`
+	Type           model.NotificationType   `json:"type" binding:"required"`
+	Severities     []string                 `json:"severities"`
+	Scope          model.NotificationScope  `json:"scope" binding:"required"`
+	ScopeValue     model.ScopeValueData     `json:"scope_value"`
+	FrontendURL    string                   `json:"frontend_url"`
+	Config         model.NotificationConfig `json:"config" binding:"required"`
 }
 
 // CreateNotification 创建通知
@@ -164,15 +165,16 @@ func (h *NotificationsHandler) CreateNotification(c *gin.Context) {
 	}
 
 	notification := model.Notification{
-		Name:        req.Name,
-		Description: req.Description,
-		Enabled:     req.Enabled,
-		Type:        req.Type,
-		Severities:  model.StringArray(req.Severities),
-		Scope:       req.Scope,
-		ScopeValue:  string(scopeValueJSON),
-		FrontendURL: req.FrontendURL,
-		Config:      req.Config,
+		Name:           req.Name,
+		Description:    req.Description,
+		NotifyCategory: req.NotifyCategory,
+		Enabled:        req.Enabled,
+		Type:           req.Type,
+		Severities:     model.StringArray(req.Severities),
+		Scope:          req.Scope,
+		ScopeValue:     string(scopeValueJSON),
+		FrontendURL:    req.FrontendURL,
+		Config:         req.Config,
 	}
 
 	if err := h.db.Create(&notification).Error; err != nil {
@@ -193,15 +195,16 @@ func (h *NotificationsHandler) CreateNotification(c *gin.Context) {
 
 // UpdateNotificationRequest 更新通知请求
 type UpdateNotificationRequest struct {
-	Name        string                    `json:"name"`
-	Description string                    `json:"description"`
-	Enabled     *bool                     `json:"enabled"`
-	Type        model.NotificationType    `json:"type"`
-	Severities  []string                  `json:"severities"`
-	Scope       model.NotificationScope   `json:"scope"`
-	ScopeValue  *model.ScopeValueData     `json:"scope_value"`
-	FrontendURL string                    `json:"frontend_url"`
-	Config      *model.NotificationConfig `json:"config"`
+	Name           string                    `json:"name"`
+	Description    string                    `json:"description"`
+	NotifyCategory model.NotifyCategory      `json:"notify_category"`
+	Enabled        *bool                     `json:"enabled"`
+	Type           model.NotificationType    `json:"type"`
+	Severities     []string                  `json:"severities"`
+	Scope          model.NotificationScope   `json:"scope"`
+	ScopeValue     *model.ScopeValueData     `json:"scope_value"`
+	FrontendURL    string                    `json:"frontend_url"`
+	Config         *model.NotificationConfig `json:"config"`
 }
 
 // UpdateNotification 更新通知
@@ -461,6 +464,9 @@ func (h *NotificationsHandler) updateNotificationFields(
 	}
 	if req.Description != "" {
 		notification.Description = req.Description
+	}
+	if req.NotifyCategory != "" {
+		notification.NotifyCategory = req.NotifyCategory
 	}
 	if req.Enabled != nil {
 		notification.Enabled = *req.Enabled
