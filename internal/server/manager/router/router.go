@@ -57,6 +57,11 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 静态文件服务（用于访问上传的 Logo 等文件）
 	router.Static("/uploads", "./uploads")
 
+	// K8s Audit Webhook（不需要认证，apiserver 通过 cluster_token 鉴权）
+	alarmService := biz.NewKubeAlarmService(db, logger)
+	auditHandler := api.NewKubeAuditHandler(db, logger, alarmService)
+	router.POST("/api/v1/kube/audit-webhook/:cluster_token", auditHandler.ReceiveAuditWebhook)
+
 	// API 路由
 	apiV1 := router.Group("/api/v1")
 
@@ -82,15 +87,16 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 需要认证的路由
 	apiV1Auth := apiV1.Group("")
 	apiV1Auth.Use(authHandler.AuthMiddleware())
+	apiV1Auth.Use(middleware.AuditLog(db, logger))
 
 	// 注册所有 API 路由
-	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService)
+	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService)
 
 	return router
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -106,10 +112,13 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupSystemConfigAPI(router, db, logger)
 	setupNotificationsAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
+	setupAlertWhitelistAPI(router, db, logger)
+	setupAuditLogAPI(router, db, logger)
 	setupComponentsAPI(router, db, logger, cfg)
 	setupPolicyImportExportAPI(router, db, logger)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger)
+	setupKubeAPI(router, db, logger, alarmService)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -303,6 +312,21 @@ func setupAlertsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.POST("/alerts/batch/delete", handler.BatchDeleteAlerts)
 }
 
+// setupAuditLogAPI 设置操作审计日志 API 路由
+func setupAuditLogAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewAuditLogHandler(db, logger)
+	router.GET("/audit-logs", handler.ListAuditLogs)
+}
+
+// setupAlertWhitelistAPI 设置告警白名单 API 路由
+func setupAlertWhitelistAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewAlertWhitelistHandler(db, logger)
+	router.GET("/alerts/whitelist", handler.ListWhitelist)
+	router.POST("/alerts/whitelist", handler.CreateWhitelist)
+	router.PUT("/alerts/whitelist/:id", handler.UpdateWhitelist)
+	router.DELETE("/alerts/whitelist/:id", handler.DeleteWhitelist)
+}
+
 // setupComponentsAPI 设置组件管理 API 路由
 func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config) {
 	handler := api.NewComponentsHandler(db, logger, cfg, "./uploads", "/uploads")
@@ -348,6 +372,53 @@ func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *za
 func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewInspectionHandler(db, logger)
 	router.GET("/inspection/overview", handler.GetOverview)
+}
+
+// setupKubeAPI 设置 Kubernetes 容器安全 API 路由
+func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService) {
+	kubeClient := biz.NewKubeClientManager(db, logger)
+
+	// 集群管理
+	clusterHandler := api.NewKubeClusterHandler(db, logger, kubeClient)
+	router.GET("/kube/clusters", clusterHandler.ListClusters)
+	router.POST("/kube/clusters", clusterHandler.CreateCluster)
+	router.GET("/kube/clusters/:id", clusterHandler.GetCluster)
+	router.PUT("/kube/clusters/:id", clusterHandler.UpdateCluster)
+	router.DELETE("/kube/clusters/:id", clusterHandler.DeleteCluster)
+	router.GET("/kube/clusters/:id/nodes", clusterHandler.GetClusterNodes)
+	router.GET("/kube/clusters/:id/pods", clusterHandler.GetClusterPods)
+	router.GET("/kube/clusters/:id/workloads", clusterHandler.GetClusterWorkloads)
+
+	// 容器告警
+	alarmHandler := api.NewKubeAlarmHandler(db, logger)
+	router.GET("/kube/alarms", alarmHandler.ListAlarms)
+	router.POST("/kube/alarms/:id/process", alarmHandler.ProcessAlarm)
+	router.POST("/kube/alarms/batch-process", alarmHandler.BatchProcessAlarms)
+	router.POST("/kube/alarms/batch-ignore", alarmHandler.BatchIgnoreAlarms)
+
+	// 安全事件
+	eventHandler := api.NewKubeEventHandler(db, logger)
+	router.GET("/kube/events", eventHandler.ListEvents)
+	router.POST("/kube/events/:id/handle", eventHandler.HandleEvent)
+
+	// 基线检查
+	baselineChecker := biz.NewKubeBaselineChecker(db, logger, kubeClient)
+	baselineHandler := api.NewKubeBaselineHandler(db, logger, baselineChecker)
+	router.GET("/kube/baseline", baselineHandler.ListBaseline)
+	router.GET("/kube/baseline/:id", baselineHandler.GetBaselineDetail)
+	router.POST("/kube/baseline/detect", baselineHandler.RunBaselineCheck)
+
+	// 白名单
+	whitelistHandler := api.NewKubeWhitelistHandler(db, logger)
+	router.GET("/kube/whitelist", whitelistHandler.ListWhitelist)
+	router.POST("/kube/whitelist", whitelistHandler.CreateWhitelist)
+	router.PUT("/kube/whitelist/:id", whitelistHandler.UpdateWhitelist)
+	router.DELETE("/kube/whitelist/:id", whitelistHandler.DeleteWhitelist)
+
+	// 统计
+	statsHandler := api.NewKubeStatsHandler(db, logger)
+	router.GET("/kube/stats/summary", statsHandler.GetSummary)
+	router.GET("/kube/stats/alarm-trend", statsHandler.GetAlarmTrend)
 }
 
 // setupFIMAPI 设置 FIM（文件完整性监控）API 路由

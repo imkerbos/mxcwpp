@@ -168,6 +168,8 @@ var (
 		&SystemConfig{},
 		&Notification{},
 		&Alert{},
+		&AlertWhitelist{},
+		&AuditLog{},
 		&PluginConfig{},
 		&Component{},
 		&ComponentVersion{},
@@ -179,5 +181,10 @@ var (
 		&FIMEvent{},
 		&FIMTask{},
 		&FIMTaskHostStatus{},
+		&KubeCluster{},
+		&KubeAlarm{},
+		&KubeEvent{},
+		&KubeBaseline{},
+		&KubeWhitelist{},
 	}
 )
