@@ -3,7 +3,14 @@
   "name": "账户安全基线",
   "version": "1.0.0",
   "description": "系统账户安全检查（参考 CIS Benchmark 和等保 2.0）",
-  "os_family": ["rocky", "centos", "oracle", "debian", "ubuntu", "almalinux"],
+  "os_family": [
+    "rocky",
+    "centos",
+    "oracle",
+    "debian",
+    "ubuntu",
+    "almalinux"
+  ],
   "os_version": ">=7",
   "enabled": true,
   "rules": [
@@ -18,7 +25,11 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/passwd", "^root:x:0:0:", "match"]
+            "param": [
+              "/etc/passwd",
+              "^root:x:0:0:",
+              "match"
+            ]
           }
         ]
       },
@@ -37,7 +48,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($3 == 0 && $1 != \"root\") { print $1 }' /etc/passwd | wc -l", "^0$"]
+            "param": [
+              "awk -F: '($3 == 0 && $1 != \"root\") { print $1 }' /etc/passwd | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -56,15 +70,27 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/profile", "^\\s*TMOUT=", "match"]
+            "param": [
+              "/etc/profile",
+              "^\\s*TMOUT=",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/bashrc", "^\\s*TMOUT=", "match"]
+            "param": [
+              "/etc/bashrc",
+              "^\\s*TMOUT=",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/profile.d/timeout.sh", "^\\s*TMOUT=", "match"]
+            "param": [
+              "/etc/profile.d/timeout.sh",
+              "^\\s*TMOUT=",
+              "match"
+            ]
           }
         ]
       },
@@ -84,7 +110,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($3 < 1000 && $1 != \"root\" && $7 !~ /nologin|false|sync|shutdown|halt/) { print $1 }' /etc/passwd | wc -l", "^0$"]
+            "param": [
+              "awk -F: '($3 < 1000 && $1 != \"root\" && $7 !~ /nologin|false|sync|shutdown|halt/) { print $1 }' /etc/passwd | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -104,7 +133,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($2 == \"\") { print $1 }' /etc/shadow 2>/dev/null | while read user; do shell=$(getent passwd $user | cut -d: -f7); if [[ \"$shell\" != */nologin && \"$shell\" != */false && \"$shell\" != \"\" ]]; then echo $user; fi; done | wc -l", "^0$"]
+            "param": [
+              "awk -F: '($2 == \"\") { print $1 }' /etc/shadow 2>/dev/null | while read user; do shell=$(getent passwd $user | cut -d: -f7); if [[ \"$shell\" != */nologin && \"$shell\" != */false && \"$shell\" != \"\" ]]; then echo $user; fi; done | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -123,15 +155,27 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/profile", "^\\s*umask\\s+0?[0-2]7$", "match"]
+            "param": [
+              "/etc/profile",
+              "^\\s*umask\\s+0?[0-2]7$",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/bashrc", "^\\s*umask\\s+0?[0-2]7$", "match"]
+            "param": [
+              "/etc/bashrc",
+              "^\\s*umask\\s+0?[0-2]7$",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/login.defs", "^\\s*UMASK\\s+0?[0-2]7$", "match"]
+            "param": [
+              "/etc/login.defs",
+              "^\\s*UMASK\\s+0?[0-2]7$",
+              "match"
+            ]
           }
         ]
       },
@@ -151,7 +195,9 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/securetty"]
+            "param": [
+              "/etc/securetty"
+            ]
           }
         ]
       },
@@ -170,7 +216,11 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/passwd", "^guest:", "not_match"]
+            "param": [
+              "/etc/passwd",
+              "^guest:",
+              "not_match"
+            ]
           }
         ]
       },
@@ -190,7 +240,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '($3 >= 1000 && $6 != \"\" && $6 != \"/dev/null\" && $7 !~ /nologin|false/) { system(\"test -d \" $6 \" || echo \" $1) }' /etc/passwd | wc -l", "^0$"]
+            "param": [
+              "awk -F: '($3 >= 1000 && $6 != \"\" && $6 != \"/dev/null\" && $7 !~ /nologin|false/) { system(\"test -d \" $6 \" || echo \" $1) }' /etc/passwd | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -209,7 +262,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["find /home -maxdepth 1 -type d -perm /027 2>/dev/null | wc -l", "^[01]$"]
+            "param": [
+              "find /home -maxdepth 1 -type d -perm /027 2>/dev/null | wc -l",
+              "^[01]$"
+            ]
           }
         ]
       },
@@ -229,7 +285,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '{print $3}' /etc/passwd | sort | uniq -d | wc -l", "^0$"]
+            "param": [
+              "awk -F: '{print $3}' /etc/passwd | sort | uniq -d | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -248,7 +307,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '{print $3}' /etc/group | sort | uniq -d | wc -l", "^0$"]
+            "param": [
+              "awk -F: '{print $3}' /etc/group | sort | uniq -d | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -267,7 +329,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '{print $1}' /etc/passwd | sort | uniq -d | wc -l", "^0$"]
+            "param": [
+              "awk -F: '{print $1}' /etc/passwd | sort | uniq -d | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -286,7 +351,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["awk -F: '{print $1}' /etc/group | sort | uniq -d | wc -l", "^0$"]
+            "param": [
+              "awk -F: '{print $1}' /etc/group | sort | uniq -d | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -305,11 +373,19 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/sudoers", "^%wheel\\s+ALL=\\(ALL\\)", "match"]
+            "param": [
+              "/etc/sudoers",
+              "^%wheel\\s+ALL=\\(ALL\\)",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/sudoers.d/wheel", "^%wheel\\s+ALL=\\(ALL\\)", "match"]
+            "param": [
+              "/etc/sudoers.d/wheel",
+              "^%wheel\\s+ALL=\\(ALL\\)",
+              "match"
+            ]
           }
         ]
       },
@@ -328,7 +404,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["find /home /root -name '.rhosts' 2>/dev/null | wc -l", "^0$"]
+            "param": [
+              "find /home /root -name '.rhosts' 2>/dev/null | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -348,7 +427,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["find /home /root -name '.netrc' 2>/dev/null | wc -l", "^0$"]
+            "param": [
+              "find /home /root -name '.netrc' 2>/dev/null | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -368,7 +450,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["find /home /root -name '.forward' 2>/dev/null | wc -l", "^0$"]
+            "param": [
+              "find /home /root -name '.forward' 2>/dev/null | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -388,7 +473,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["echo $PATH | grep -E '(^|:)\\.(:|\\/|$)' && echo FOUND || echo OK", "^OK$"]
+            "param": [
+              "echo $PATH | grep -E '(^|:)\\.(:|\\/|$)' && echo FOUND || echo OK",
+              "^OK$"
+            ]
           }
         ]
       },
@@ -408,7 +496,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["for dir in $(echo $PATH | tr ':' ' '); do [ -d \"$dir\" ] && stat -c '%a' \"$dir\" 2>/dev/null | grep -qE '^[0-7][2367][0-7]$' && echo $dir; done | wc -l", "^0$"]
+            "param": [
+              "for dir in $(echo $PATH | tr ':' ' '); do [ -d \"$dir\" ] && stat -c '%a' \"$dir\" 2>/dev/null | grep -qE '^[0-7][2367][0-7]$' && echo $dir; done | wc -l",
+              "^0$"
+            ]
           }
         ]
       },
@@ -428,13 +519,77 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/pam.d/su", "pam_wheel.so", "match"]
+            "param": [
+              "/etc/pam.d/su",
+              "pam_wheel.so",
+              "match"
+            ]
           }
         ]
       },
       "fix": {
         "suggestion": "配置 /etc/pam.d/su，启用 pam_wheel.so",
         "command": "sed -i 's/^#auth.*pam_wheel.so/auth required pam_wheel.so/' /etc/pam.d/su"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_022",
+      "category": "account",
+      "title": "sudo 使用 pty",
+      "description": "sudo 应配置 use_pty，防止 sudo 被用于在后台运行恶意程序",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": [
+              "/etc/sudoers"
+            ]
+          },
+          {
+            "type": "file_line_match",
+            "param": [
+              "/etc/sudoers",
+              "^Defaults\\s+use_pty",
+              "match"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/sudoers 中添加: Defaults use_pty",
+        "command": "echo 'Defaults use_pty' >> /etc/sudoers"
+      }
+    },
+    {
+      "rule_id": "LINUX_ACCOUNT_023",
+      "category": "account",
+      "title": "sudo 操作日志",
+      "description": "sudo 应配置独立日志文件，记录所有提权操作",
+      "severity": "medium",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": [
+              "/etc/sudoers"
+            ]
+          },
+          {
+            "type": "file_line_match",
+            "param": [
+              "/etc/sudoers",
+              "^Defaults\\s+logfile=",
+              "match"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "在 /etc/sudoers 中添加: Defaults logfile=/var/log/sudo.log",
+        "command": "echo 'Defaults logfile=/var/log/sudo.log' >> /etc/sudoers"
       }
     }
   ]

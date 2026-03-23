@@ -3,7 +3,14 @@
   "name": "关键文件权限基线",
   "version": "2.0.0",
   "description": "关键系统文件权限检查（参考 CIS Benchmark 和等保 2.0）",
-  "os_family": ["rocky", "centos", "oracle", "debian", "ubuntu", "almalinux"],
+  "os_family": [
+    "rocky",
+    "centos",
+    "oracle",
+    "debian",
+    "ubuntu",
+    "almalinux"
+  ],
   "os_version": ">=7",
   "enabled": true,
   "rules": [
@@ -18,11 +25,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/passwd"]
+            "param": [
+              "/etc/passwd"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/passwd", "644"]
+            "param": [
+              "/etc/passwd",
+              "644"
+            ]
           }
         ]
       },
@@ -42,11 +54,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/shadow"]
+            "param": [
+              "/etc/shadow"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/shadow", "000"]
+            "param": [
+              "/etc/shadow",
+              "000"
+            ]
           }
         ]
       },
@@ -66,11 +83,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/ssh/sshd_config"]
+            "param": [
+              "/etc/ssh/sshd_config"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/sshd_config", "600"]
+            "param": [
+              "/etc/ssh/sshd_config",
+              "600"
+            ]
           }
         ]
       },
@@ -90,11 +112,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/group"]
+            "param": [
+              "/etc/group"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/group", "644"]
+            "param": [
+              "/etc/group",
+              "644"
+            ]
           }
         ]
       },
@@ -114,11 +141,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/gshadow"]
+            "param": [
+              "/etc/gshadow"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/gshadow", "000"]
+            "param": [
+              "/etc/gshadow",
+              "000"
+            ]
           }
         ]
       },
@@ -138,11 +170,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/passwd"]
+            "param": [
+              "/etc/passwd"
+            ]
           },
           {
             "type": "file_owner",
-            "param": ["/etc/passwd", "root:root"]
+            "param": [
+              "/etc/passwd",
+              "root:root"
+            ]
           }
         ]
       },
@@ -162,11 +199,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/shadow"]
+            "param": [
+              "/etc/shadow"
+            ]
           },
           {
             "type": "file_owner",
-            "param": ["/etc/shadow", "root:root"]
+            "param": [
+              "/etc/shadow",
+              "root:root"
+            ]
           }
         ]
       },
@@ -186,11 +228,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/crontab"]
+            "param": [
+              "/etc/crontab"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/crontab", "600"]
+            "param": [
+              "/etc/crontab",
+              "600"
+            ]
           }
         ]
       },
@@ -210,11 +257,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/crontab"]
+            "param": [
+              "/etc/crontab"
+            ]
           },
           {
             "type": "file_owner",
-            "param": ["/etc/crontab", "root:root"]
+            "param": [
+              "/etc/crontab",
+              "root:root"
+            ]
           }
         ]
       },
@@ -234,11 +286,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/sudoers"]
+            "param": [
+              "/etc/sudoers"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/sudoers", "440"]
+            "param": [
+              "/etc/sudoers",
+              "440"
+            ]
           }
         ]
       },
@@ -258,11 +315,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/sudoers"]
+            "param": [
+              "/etc/sudoers"
+            ]
           },
           {
             "type": "file_owner",
-            "param": ["/etc/sudoers", "root:root"]
+            "param": [
+              "/etc/sudoers",
+              "root:root"
+            ]
           }
         ]
       },
@@ -282,15 +344,24 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["! test -f /boot/grub2/grub.cfg && ! test -f /boot/grub/grub.cfg && echo skip", "skip"]
+            "param": [
+              "! test -f /boot/grub2/grub.cfg && ! test -f /boot/grub/grub.cfg && echo skip",
+              "skip"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/boot/grub2/grub.cfg", "600"]
+            "param": [
+              "/boot/grub2/grub.cfg",
+              "600"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/boot/grub/grub.cfg", "600"]
+            "param": [
+              "/boot/grub/grub.cfg",
+              "600"
+            ]
           }
         ]
       },
@@ -310,11 +381,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/rsyslog.conf"]
+            "param": [
+              "/etc/rsyslog.conf"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/rsyslog.conf", "640"]
+            "param": [
+              "/etc/rsyslog.conf",
+              "640"
+            ]
           }
         ]
       },
@@ -334,11 +410,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/var/log"]
+            "param": [
+              "/var/log"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/var/log", "755"]
+            "param": [
+              "/var/log",
+              "755"
+            ]
           }
         ]
       },
@@ -358,11 +439,16 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/ssh"]
+            "param": [
+              "/etc/ssh"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh", "755"]
+            "param": [
+              "/etc/ssh",
+              "755"
+            ]
           }
         ]
       },
@@ -382,15 +468,24 @@
         "rules": [
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_rsa_key", "600"]
+            "param": [
+              "/etc/ssh/ssh_host_rsa_key",
+              "600"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_ecdsa_key", "600"]
+            "param": [
+              "/etc/ssh/ssh_host_ecdsa_key",
+              "600"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_ed25519_key", "600"]
+            "param": [
+              "/etc/ssh/ssh_host_ed25519_key",
+              "600"
+            ]
           }
         ]
       },
@@ -410,15 +505,24 @@
         "rules": [
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_rsa_key.pub", "644"]
+            "param": [
+              "/etc/ssh/ssh_host_rsa_key.pub",
+              "644"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_ecdsa_key.pub", "644"]
+            "param": [
+              "/etc/ssh/ssh_host_ecdsa_key.pub",
+              "644"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/ssh/ssh_host_ed25519_key.pub", "644"]
+            "param": [
+              "/etc/ssh/ssh_host_ed25519_key.pub",
+              "644"
+            ]
           }
         ]
       },
@@ -438,17 +542,133 @@
         "rules": [
           {
             "type": "file_exists",
-            "param": ["/etc/security/limits.conf"]
+            "param": [
+              "/etc/security/limits.conf"
+            ]
           },
           {
             "type": "file_permission",
-            "param": ["/etc/security/limits.conf", "644"]
+            "param": [
+              "/etc/security/limits.conf",
+              "644"
+            ]
           }
         ]
       },
       "fix": {
         "suggestion": "执行 chmod 644 /etc/security/limits.conf",
         "command": "chmod 644 /etc/security/limits.conf"
+      }
+    },
+    {
+      "rule_id": "LINUX_FILE_021",
+      "category": "file_permission",
+      "title": "/etc/motd 文件权限",
+      "description": "/etc/motd 文件权限应为 644，属主为 root",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": [
+              "/etc/motd"
+            ]
+          },
+          {
+            "type": "file_permission",
+            "param": [
+              "/etc/motd",
+              "644"
+            ]
+          },
+          {
+            "type": "file_owner",
+            "param": [
+              "/etc/motd",
+              "root",
+              "root"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "执行 chmod 644 /etc/motd && chown root:root /etc/motd",
+        "command": "chmod 644 /etc/motd && chown root:root /etc/motd"
+      }
+    },
+    {
+      "rule_id": "LINUX_FILE_022",
+      "category": "file_permission",
+      "title": "/etc/issue 文件权限",
+      "description": "/etc/issue 文件权限应为 644，属主为 root",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": [
+              "/etc/issue"
+            ]
+          },
+          {
+            "type": "file_permission",
+            "param": [
+              "/etc/issue",
+              "644"
+            ]
+          },
+          {
+            "type": "file_owner",
+            "param": [
+              "/etc/issue",
+              "root",
+              "root"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "执行 chmod 644 /etc/issue && chown root:root /etc/issue",
+        "command": "chmod 644 /etc/issue && chown root:root /etc/issue"
+      }
+    },
+    {
+      "rule_id": "LINUX_FILE_023",
+      "category": "file_permission",
+      "title": "/etc/issue.net 文件权限",
+      "description": "/etc/issue.net 文件权限应为 644，属主为 root",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "file_exists",
+            "param": [
+              "/etc/issue.net"
+            ]
+          },
+          {
+            "type": "file_permission",
+            "param": [
+              "/etc/issue.net",
+              "644"
+            ]
+          },
+          {
+            "type": "file_owner",
+            "param": [
+              "/etc/issue.net",
+              "root",
+              "root"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "执行 chmod 644 /etc/issue.net && chown root:root /etc/issue.net",
+        "command": "chmod 644 /etc/issue.net && chown root:root /etc/issue.net"
       }
     }
   ]

@@ -3,7 +3,14 @@
   "name": "系统服务状态基线",
   "version": "2.0.0",
   "description": "关键系统服务状态检查（参考 CIS Benchmark 和等保 2.0）",
-  "os_family": ["rocky", "centos", "oracle", "debian", "ubuntu", "almalinux"],
+  "os_family": [
+    "rocky",
+    "centos",
+    "oracle",
+    "debian",
+    "ubuntu",
+    "almalinux"
+  ],
   "os_version": ">=7",
   "enabled": true,
   "rules": [
@@ -18,11 +25,17 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["sshd", "active"]
+            "param": [
+              "sshd",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["ssh", "active"]
+            "param": [
+              "ssh",
+              "active"
+            ]
           }
         ]
       },
@@ -42,15 +55,24 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["chronyd", "active"]
+            "param": [
+              "chronyd",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["ntpd", "active"]
+            "param": [
+              "ntpd",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["systemd-timesyncd", "active"]
+            "param": [
+              "systemd-timesyncd",
+              "active"
+            ]
           }
         ]
       },
@@ -70,7 +92,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["telnet.socket", "inactive"]
+            "param": [
+              "telnet.socket",
+              "inactive"
+            ]
           }
         ]
       },
@@ -90,7 +115,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["rsh.socket", "inactive"]
+            "param": [
+              "rsh.socket",
+              "inactive"
+            ]
           }
         ]
       },
@@ -110,7 +138,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["rlogin.socket", "inactive"]
+            "param": [
+              "rlogin.socket",
+              "inactive"
+            ]
           }
         ]
       },
@@ -130,7 +161,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["rexec.socket", "inactive"]
+            "param": [
+              "rexec.socket",
+              "inactive"
+            ]
           }
         ]
       },
@@ -150,7 +184,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["vsftpd", "inactive"]
+            "param": [
+              "vsftpd",
+              "inactive"
+            ]
           }
         ]
       },
@@ -170,7 +207,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["nfs-server", "inactive"]
+            "param": [
+              "nfs-server",
+              "inactive"
+            ]
           }
         ]
       },
@@ -190,7 +230,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["avahi-daemon", "inactive"]
+            "param": [
+              "avahi-daemon",
+              "inactive"
+            ]
           }
         ]
       },
@@ -210,7 +253,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["cups", "inactive"]
+            "param": [
+              "cups",
+              "inactive"
+            ]
           }
         ]
       },
@@ -230,7 +276,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["dhcpd", "inactive"]
+            "param": [
+              "dhcpd",
+              "inactive"
+            ]
           }
         ]
       },
@@ -250,7 +299,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["named", "inactive"]
+            "param": [
+              "named",
+              "inactive"
+            ]
           }
         ]
       },
@@ -270,7 +322,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["xrdp", "inactive"]
+            "param": [
+              "xrdp",
+              "inactive"
+            ]
           }
         ]
       },
@@ -290,7 +345,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["snmpd", "inactive"]
+            "param": [
+              "snmpd",
+              "inactive"
+            ]
           }
         ]
       },
@@ -310,7 +368,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["tftp.socket", "inactive"]
+            "param": [
+              "tftp.socket",
+              "inactive"
+            ]
           }
         ]
       },
@@ -330,7 +391,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["xinetd", "inactive"]
+            "param": [
+              "xinetd",
+              "inactive"
+            ]
           }
         ]
       },
@@ -350,19 +414,31 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["firewalld", "active"]
+            "param": [
+              "firewalld",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["iptables", "active"]
+            "param": [
+              "iptables",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["nftables", "active"]
+            "param": [
+              "nftables",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["ufw", "active"]
+            "param": [
+              "ufw",
+              "active"
+            ]
           }
         ]
       },
@@ -382,19 +458,31 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["if command -v getenforce >/dev/null 2>&1; then getenforce; else echo 'getenforce_not_found'; fi", "^(Enforcing|Permissive)$"]
+            "param": [
+              "if command -v getenforce >/dev/null 2>&1; then getenforce; else echo 'getenforce_not_found'; fi",
+              "^(Enforcing|Permissive)$"
+            ]
           },
           {
             "type": "command_exec",
-            "param": ["if [ -f /sys/kernel/security/apparmor/profiles ]; then cat /sys/kernel/security/apparmor/profiles 2>/dev/null | wc -l; else echo 0; fi", "^[1-9][0-9]*$"]
+            "param": [
+              "if [ -f /sys/kernel/security/apparmor/profiles ]; then cat /sys/kernel/security/apparmor/profiles 2>/dev/null | wc -l; else echo 0; fi",
+              "^[1-9][0-9]*$"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["apparmor", "active"]
+            "param": [
+              "apparmor",
+              "active"
+            ]
           },
           {
             "type": "command_exec",
-            "param": ["aa-status --enabled 2>/dev/null && echo 'enabled' || echo 'disabled'", "^enabled$"]
+            "param": [
+              "aa-status --enabled 2>/dev/null && echo 'enabled' || echo 'disabled'",
+              "^enabled$"
+            ]
           }
         ]
       },
@@ -413,7 +501,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["auditd", "active"]
+            "param": [
+              "auditd",
+              "active"
+            ]
           }
         ]
       },
@@ -433,15 +524,24 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["rsyslog", "active"]
+            "param": [
+              "rsyslog",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["syslog-ng", "active"]
+            "param": [
+              "syslog-ng",
+              "active"
+            ]
           },
           {
             "type": "service_status",
-            "param": ["systemd-journald", "active"]
+            "param": [
+              "systemd-journald",
+              "active"
+            ]
           }
         ]
       },
@@ -461,7 +561,10 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["rpcbind", "inactive"]
+            "param": [
+              "rpcbind",
+              "inactive"
+            ]
           }
         ]
       },
@@ -481,11 +584,18 @@
         "rules": [
           {
             "type": "service_status",
-            "param": ["postfix", "inactive"]
+            "param": [
+              "postfix",
+              "inactive"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/postfix/main.cf", "inet_interfaces\\s*=\\s*localhost", "match"]
+            "param": [
+              "/etc/postfix/main.cf",
+              "inet_interfaces\\s*=\\s*localhost",
+              "match"
+            ]
           }
         ]
       },
@@ -505,7 +615,10 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["rpm -q xorg-x11-server-Xorg 2>/dev/null || dpkg -l xorg 2>/dev/null || echo not_installed", "not_installed"]
+            "param": [
+              "rpm -q xorg-x11-server-Xorg 2>/dev/null || dpkg -l xorg 2>/dev/null || echo not_installed",
+              "not_installed"
+            ]
           }
         ]
       },
@@ -525,15 +638,24 @@
         "rules": [
           {
             "type": "command_exec",
-            "param": ["systemctl is-enabled chronyd 2>/dev/null || echo disabled", "^enabled$"]
+            "param": [
+              "systemctl is-enabled chronyd 2>/dev/null || echo disabled",
+              "^enabled$"
+            ]
           },
           {
             "type": "command_exec",
-            "param": ["systemctl is-enabled ntpd 2>/dev/null || echo disabled", "^enabled$"]
+            "param": [
+              "systemctl is-enabled ntpd 2>/dev/null || echo disabled",
+              "^enabled$"
+            ]
           },
           {
             "type": "command_exec",
-            "param": ["systemctl is-enabled systemd-timesyncd 2>/dev/null || echo disabled", "^enabled$"]
+            "param": [
+              "systemctl is-enabled systemd-timesyncd 2>/dev/null || echo disabled",
+              "^enabled$"
+            ]
           }
         ]
       },
@@ -553,20 +675,55 @@
         "rules": [
           {
             "type": "file_line_match",
-            "param": ["/etc/chrony.conf", "^(server|pool)\\s+", "match"]
+            "param": [
+              "/etc/chrony.conf",
+              "^(server|pool)\\s+",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/ntp.conf", "^server\\s+", "match"]
+            "param": [
+              "/etc/ntp.conf",
+              "^server\\s+",
+              "match"
+            ]
           },
           {
             "type": "file_line_match",
-            "param": ["/etc/systemd/timesyncd.conf", "^NTP=", "match"]
+            "param": [
+              "/etc/systemd/timesyncd.conf",
+              "^NTP=",
+              "match"
+            ]
           }
         ]
       },
       "fix": {
         "suggestion": "配置 NTP 服务器，编辑 /etc/chrony.conf 添加 server 或 pool 配置"
+      }
+    },
+    {
+      "rule_id": "LINUX_SERVICE_026",
+      "category": "service",
+      "title": "预链接（prelink）已禁用",
+      "description": "prelink 会修改二进制文件，干扰文件完整性检查工具（如 AIDE），应确保未安装或已禁用",
+      "severity": "low",
+      "check": {
+        "condition": "all",
+        "rules": [
+          {
+            "type": "package_installed",
+            "param": [
+              "prelink",
+              "not_installed"
+            ]
+          }
+        ]
+      },
+      "fix": {
+        "suggestion": "卸载 prelink：yum remove prelink 或 apt remove prelink",
+        "command": "rpm -e prelink 2>/dev/null || apt-get remove -y prelink 2>/dev/null; true"
       }
     }
   ]
