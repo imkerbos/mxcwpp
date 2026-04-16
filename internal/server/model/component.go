@@ -18,8 +18,9 @@ const (
 type ComponentCategory string
 
 const (
-	ComponentCategoryAgent  ComponentCategory = "agent"  // Agent 主程序
-	ComponentCategoryPlugin ComponentCategory = "plugin" // 插件
+	ComponentCategoryAgent      ComponentCategory = "agent"      // Agent 主程序
+	ComponentCategoryPlugin     ComponentCategory = "plugin"     // 插件
+	ComponentCategoryDependency ComponentCategory = "dependency" // 第三方依赖
 )
 
 // PackageType 包格式类型
@@ -29,6 +30,7 @@ const (
 	PackageTypeRPM    PackageType = "rpm"    // RPM 包 (RHEL/CentOS/Rocky)
 	PackageTypeDEB    PackageType = "deb"    // DEB 包 (Debian/Ubuntu)
 	PackageTypeBinary PackageType = "binary" // 二进制文件
+	PackageTypeTGZ    PackageType = "tgz"    // tar.gz 包（第三方依赖）
 )
 
 // Component 组件表
