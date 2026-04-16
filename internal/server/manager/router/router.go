@@ -2,7 +2,9 @@
 package router
 
 import (
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -10,11 +12,13 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/metrics"
+	"github.com/imkerbos/mxsec-platform/internal/server/prometheus"
 )
 
 // Setup 设置并返回配置好的 Gin 路由引擎
-func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService) *gin.Engine {
+func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater) *gin.Engine {
 	// 设置 Gin 模式
 	if cfg.Log.Level == "debug" {
 		gin.SetMode(gin.DebugMode)
@@ -54,6 +58,10 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// Agent 更新检查路由（不需要认证，Agent CLI 直接调用）
 	router.GET("/api/v1/agent/update-check", componentsHandler.CheckAgentUpdate)
 
+	// 第三方依赖包下载路由（不需要认证，Agent 直接下载）
+	router.GET("/api/v1/dependency/download/:name", componentsHandler.DownloadDependencyPackage)
+	router.HEAD("/api/v1/dependency/download/:name", componentsHandler.DownloadDependencyPackage)
+
 	// 静态文件服务（用于访问上传的 Logo 等文件）
 	router.Static("/uploads", "./uploads")
 
@@ -61,6 +69,13 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	alarmService := biz.NewKubeAlarmService(db, logger)
 	auditHandler := api.NewKubeAuditHandler(db, logger, alarmService)
 	router.POST("/api/v1/kube/audit-webhook/:cluster_token", auditHandler.ReceiveAuditWebhook)
+
+	// AC 内部注册接口（不需要 JWT，AC 到 Manager 的内部调用）
+	discoveryHandler := api.NewDiscoveryHandler(acRegistry, logger)
+	internalAC := router.Group("/api/v1/internal/ac")
+	internalAC.POST("/register", discoveryHandler.Register)
+	internalAC.POST("/heartbeat", discoveryHandler.Heartbeat)
+	internalAC.DELETE("/deregister", discoveryHandler.Deregister)
 
 	// API 路由
 	apiV1 := router.Group("/api/v1")
@@ -89,14 +104,17 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV1Auth.Use(authHandler.AuthMiddleware())
 	apiV1Auth.Use(middleware.AuditLog(db, logger))
 
+	// 服务发现查询（需要认证，运维 / 前端监控页面调用）
+	apiV1Auth.GET("/discovery/agentcenter", discoveryHandler.ListACInstances)
+
 	// 注册所有 API 路由
-	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService)
+	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater)
 
 	return router
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -104,7 +122,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupTasksAPI(router, db, logger)
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger)
-	setupDashboardAPI(router, db, logger)
+	setupDashboardAPI(router, db, logger, chConn, redisClient)
 	setupUsersAPI(router, db, logger)
 	setupAssetsAPI(router, db, logger)
 	setupReportsAPI(router, db, logger)
@@ -117,8 +135,38 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupComponentsAPI(router, db, logger, cfg)
 	setupPolicyImportExportAPI(router, db, logger)
 	setupInspectionAPI(router, db, logger)
-	setupFIMAPI(router, db, logger)
+	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService)
+	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
+	setupBackupsAPI(router, db, logger)
+	setupVulnerabilitiesAPI(router, db, logger)
+	setupAntivirusAPI(router, db, logger, virusDBUpdater)
+	setupQuarantineAPI(router, db, logger)
+	setupDetectionRulesAPI(router, db, logger)
+	setupAlertContextAPI(router, db, logger, chConn)
+	setupThreatIntelAPI(router, db, logger, redisClient)
+	setupNetworkBlockAPI(router, db, logger)
+	setupDependencyAPI(router, db, logger, acDispatcher)
+	setupMigrationAPI(router, db, logger)
+}
+
+// setupMigrationAPI 设置 MVP1 → MVP2 迁移助手 API 路由
+func setupMigrationAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewMigrationHandler(db, logger)
+	router.POST("/system/migration/test-connection", handler.TestConnection)
+	router.POST("/system/migration/jobs", handler.StartJob)
+	router.GET("/system/migration/jobs", handler.ListJobs)
+	router.GET("/system/migration/jobs/:id", handler.GetJob)
+	router.POST("/system/migration/jobs/:id/cancel", handler.CancelJob)
+}
+
+// setupNetworkBlockAPI 设置网络阻断 API 路由
+func setupNetworkBlockAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewNetworkBlockHandler(db, logger)
+	router.GET("/network-block/rules", handler.ListRules)
+	router.POST("/network-block/rules", handler.CreateRule)
+	router.POST("/network-block/rules/:id/remove", handler.RemoveRule)
+	router.DELETE("/network-block/rules/:id", handler.DeleteRule)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -210,10 +258,9 @@ func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.DELETE("/fix-tasks/:task_id", handler.DeleteFixTask)
 }
 
-
 // setupDashboardAPI 设置 Dashboard API 路由
-func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewDashboardHandler(db, logger)
+func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client) {
+	handler := api.NewDashboardHandler(db, logger, chConn, redisClient)
 	router.GET("/dashboard/stats", handler.GetDashboardStats)
 }
 
@@ -230,6 +277,12 @@ func setupUsersAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 // setupAssetsAPI 设置资产 API 路由
 func setupAssetsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewAssetsHandler(db, logger)
+	router.GET("/assets/overview", handler.GetOverview)
+	router.GET("/assets/history", handler.GetHistory)
+	router.GET("/assets/statistics", handler.GetStatistics)
+	router.GET("/assets/relations", handler.GetRelations)
+	router.GET("/assets/status", handler.GetCollectionStatus)
+	router.GET("/assets/top", handler.GetTopN)
 	router.GET("/assets/processes", handler.ListProcesses)
 	router.GET("/assets/ports", handler.ListPorts)
 	router.GET("/assets/users", handler.ListUsers)
@@ -241,6 +294,8 @@ func setupAssetsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/assets/kmods", handler.ListKmods)
 	router.GET("/assets/services", handler.ListServices)
 	router.GET("/assets/crons", handler.ListCrons)
+	router.GET("/assets/export", handler.ExportAssets)
+	router.GET("/assets/sbom", handler.ExportSBOM)
 }
 
 // setupReportsAPI 设置报表 API 路由
@@ -256,6 +311,20 @@ func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	// Top 统计
 	router.GET("/reports/top-failed-rules", handler.GetTopFailedRules)
 	router.GET("/reports/top-risk-hosts", handler.GetTopRiskHosts)
+	// 分类报告
+	router.GET("/reports/antivirus", handler.GetAntivirusReport)
+	router.GET("/reports/vulnerability", handler.GetVulnerabilityReport)
+	router.GET("/reports/kube", handler.GetKubeReport)
+	router.GET("/reports/runtime", handler.GetRuntimeReport)
+	// Executive 报告（可导出 PDF）
+	router.GET("/reports/antivirus/:task_id/executive", handler.GetAntivirusExecutiveReport)
+	router.GET("/reports/vulnerability/executive", handler.GetVulnerabilityExecutiveReport)
+	router.GET("/reports/kube/executive", handler.GetKubeExecutiveReport)
+	router.GET("/reports/runtime/executive", handler.GetRuntimeExecutiveReport)
+	// 已保存的报告
+	router.GET("/reports/generated", handler.ListGeneratedReports)
+	router.GET("/reports/generated/:id", handler.GetGeneratedReport)
+	router.DELETE("/reports/generated/:id", handler.DeleteGeneratedReport)
 }
 
 // setupBusinessLinesAPI 设置业务线 API 路由
@@ -303,6 +372,7 @@ func setupAlertsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewAlertsHandler(db, logger)
 	router.GET("/alerts", handler.ListAlerts)
 	router.GET("/alerts/statistics", handler.GetAlertStatistics)
+	router.GET("/alerts/runtime-statistics", handler.GetRuntimeAlertStatistics)
 	router.GET("/alerts/:id", handler.GetAlert)
 	router.POST("/alerts/:id/resolve", handler.ResolveAlert)
 	router.POST("/alerts/:id/ignore", handler.IgnoreAlert)
@@ -422,7 +492,7 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 }
 
 // setupFIMAPI 设置 FIM（文件完整性监控）API 路由
-func setupFIMAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+func setupFIMAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
 	// 策略管理
 	policiesHandler := api.NewFIMPoliciesHandler(db, logger)
 	router.GET("/fim/policies", policiesHandler.ListFIMPolicies)
@@ -439,8 +509,116 @@ func setupFIMAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.POST("/fim/tasks/:id/run", tasksHandler.RunFIMTask)
 
 	// 事件查询
-	eventsHandler := api.NewFIMEventsHandler(db, logger)
+	eventsHandler := api.NewFIMEventsHandler(db, logger, chConn)
 	router.GET("/fim/events", eventsHandler.ListFIMEvents)
 	router.GET("/fim/events/stats", eventsHandler.GetFIMEventStats)
 	router.GET("/fim/events/:id", eventsHandler.GetFIMEvent)
+}
+
+// setupMonitorAPI 设置系统监控 API 路由
+func setupMonitorAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, acRegistry *sd.Registry, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client) {
+	handler := api.NewMonitorHandler(cfg, db, chConn, promClient, acRegistry, logger, redisClient)
+	router.GET("/monitor/host", handler.GetHostMonitor)
+	router.GET("/monitor/services", handler.GetServicesMonitor)
+	router.GET("/monitor/service-alerts", handler.GetServiceAlerts)
+	router.POST("/monitor/service-alerts/:id/ack", handler.AckServiceAlert)
+}
+
+// setupBackupsAPI 设置配置备份 API 路由
+func setupBackupsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewBackupsHandler(db, logger)
+	router.GET("/system/backups", handler.ListBackups)
+	router.POST("/system/backups", handler.CreateBackup)
+	router.GET("/system/backup-config", handler.GetBackupConfig)
+	router.PUT("/system/backup-config", handler.UpdateBackupConfig)
+	router.GET("/system/backups/:id/download", handler.DownloadBackup)
+	router.POST("/system/backups/:id/restore", handler.RestoreBackup)
+	router.DELETE("/system/backups/:id", handler.DeleteBackup)
+}
+
+// setupAntivirusAPI 设置病毒查杀 API 路由
+func setupAntivirusAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, virusDBUpdater *biz.VirusDBUpdater) {
+	handler := api.NewAntivirusHandler(db, logger, virusDBUpdater)
+
+	// 扫描任务 CRUD
+	router.GET("/antivirus/tasks", handler.ListTasks)
+	router.POST("/antivirus/tasks", handler.CreateTask)
+	router.GET("/antivirus/tasks/:id", handler.GetTask)
+	router.DELETE("/antivirus/tasks/:id", handler.DeleteTask)
+	router.POST("/antivirus/tasks/:id/cancel", handler.CancelTask)
+
+	// 扫描结果查询
+	router.GET("/antivirus/results", handler.ListResults)
+	router.GET("/antivirus/results/:id", handler.GetResult)
+	router.POST("/antivirus/results/:id/quarantine", handler.QuarantineResult)
+	router.POST("/antivirus/results/:id/ignore", handler.IgnoreResult)
+	router.POST("/antivirus/results/:id/delete-file", handler.DeleteFileResult)
+
+	// 统计概览
+	router.GET("/antivirus/statistics", handler.GetStatistics)
+
+	// 病毒库同步状态
+	router.GET("/antivirus/virus-db/status", handler.GetVirusDBStatus)
+	router.GET("/antivirus/virus-db/history", handler.GetVirusDBHistory)
+	router.POST("/antivirus/virus-db/sync", handler.TriggerVirusDBSync)
+}
+
+// setupQuarantineAPI 设置文件隔离箱 API 路由
+func setupQuarantineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewQuarantineHandler(db, logger)
+	router.GET("/quarantine/files", handler.ListFiles)
+	router.GET("/quarantine/files/:id", handler.GetFile)
+	router.POST("/quarantine/files/:id/restore", handler.RestoreFile)
+	router.DELETE("/quarantine/files/:id", handler.DeleteFile)
+	router.POST("/quarantine/files/batch-delete", handler.BatchDelete)
+	router.GET("/quarantine/statistics", handler.GetStatistics)
+}
+
+// setupVulnerabilitiesAPI 设置漏洞管理 API 路由
+func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewVulnerabilitiesHandler(db, logger)
+	router.GET("/vulnerabilities", handler.ListVulnerabilities)
+	router.POST("/vulnerabilities/:id/ignore", handler.IgnoreVulnerability)
+	router.POST("/vulnerabilities/scan", handler.TriggerScan)
+	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
+	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
+}
+
+// setupAlertContextAPI 设置告警溯源 API 路由
+func setupAlertContextAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
+	handler := api.NewAlertContextHandler(db, chConn, logger)
+	router.GET("/alerts/:id/context", handler.GetAlertContext)
+}
+
+// setupDetectionRulesAPI 设置检测规则管理 API 路由
+func setupDetectionRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewDetectionRulesHandler(db, logger)
+	router.GET("/detection-rules", handler.ListRules)
+	router.GET("/detection-rules/categories", handler.GetCategories)
+	router.GET("/detection-rules/mitre-ids", handler.GetMitreIDs)
+	router.GET("/detection-rules/statistics", handler.GetStatistics)
+	router.GET("/detection-rules/:id", handler.GetRule)
+	router.POST("/detection-rules", handler.CreateRule)
+	router.PUT("/detection-rules/:id", handler.UpdateRule)
+	router.DELETE("/detection-rules/:id", handler.DeleteRule)
+	router.POST("/detection-rules/:id/toggle", handler.ToggleRule)
+}
+
+// setupThreatIntelAPI 设置威胁情报 API 路由
+func setupThreatIntelAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, redisClient *redis.Client) {
+	service := biz.NewThreatIntel(db, redisClient, logger)
+	handler := api.NewThreatIntelHandler(service, redisClient, logger)
+	router.GET("/threat-intel/stats", handler.GetIOCStats)
+	router.GET("/threat-intel/iocs", handler.ListIOCs)
+	router.POST("/threat-intel/check", handler.CheckIOC)
+	router.POST("/threat-intel/sync", handler.TriggerSync)
+	router.GET("/threat-intel/sync-status", handler.GetSyncStatus)
+	router.GET("/threat-intel/sync-history", handler.GetSyncHistory)
+}
+
+// setupDependencyAPI 设置依赖管理 API 路由
+func setupDependencyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewDependencyHandler(db, logger, acDispatcher)
+	router.POST("/hosts/dependency/install", handler.Install)
+	router.POST("/hosts/dependency/status", handler.Status)
 }

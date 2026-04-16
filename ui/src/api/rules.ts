@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { Rule, CheckConfig, FixConfig } from './types'
+import type { Rule, CheckConfig, FixConfig, RuntimeType } from './types'
 
 export interface RuleCreateData {
   rule_id: string
@@ -7,6 +7,7 @@ export interface RuleCreateData {
   title: string
   description?: string
   severity?: 'critical' | 'high' | 'medium' | 'low'
+  runtime_types?: RuntimeType[]
   check_config: CheckConfig
   fix_config?: FixConfig
 }
@@ -16,6 +17,8 @@ export interface RuleUpdateData {
   title?: string
   description?: string
   severity?: 'critical' | 'high' | 'medium' | 'low'
+  enabled?: boolean
+  runtime_types?: RuntimeType[]
   check_config?: CheckConfig
   fix_config?: FixConfig
 }

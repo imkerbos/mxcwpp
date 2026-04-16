@@ -7,7 +7,7 @@
 
     <!-- 服务概览卡片 -->
     <a-row :gutter="[16, 16]" class="section-row">
-      <a-col :span="8" v-for="svc in services" :key="svc.name">
+      <a-col v-for="svc in services" :key="svc.name" :xs="24" :md="12" :xl="8">
         <div class="service-card" :class="{ 'service-error': svc.status === 'error' }">
           <div class="service-card-header">
             <div class="service-info">
@@ -43,6 +43,7 @@
             <span>运行时间: {{ svc.uptime }}</span>
             <span>版本: {{ svc.version }}</span>
           </div>
+          <div v-if="svc.detail" class="service-detail">{{ svc.detail }}</div>
         </div>
       </a-col>
     </a-row>
@@ -60,7 +61,7 @@
             </a-radio-group>
           </div>
           <div class="card-body chart-container">
-            <v-chart v-if="qpsData.length > 0" :option="qpsChartOption" autoresize style="height: 280px" />
+            <v-chart v-if="hasQpsSeries" :option="qpsChartOption" autoresize style="height: 280px" />
             <a-empty v-else description="暂无数据" />
           </div>
         </div>
@@ -87,8 +88,8 @@
         <a-table :columns="connColumns" :data-source="connectionStats" :pagination="false" size="middle">
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'status'">
-              <a-tag :color="record.status === 'active' ? 'green' : 'default'" :bordered="false">
-                {{ record.status === 'active' ? '活跃' : '空闲' }}
+              <a-tag :color="connectionStatusColor(record.status)" :bordered="false">
+                {{ connectionStatusText(record.status) }}
               </a-tag>
             </template>
           </template>
@@ -102,7 +103,22 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import apiClient from '@/api/client'
 
+interface ServiceInfo {
+  name: string
+  status: string
+  qps: number
+  cpu: number
+  memory: string
+  pid: string
+  uptime: string
+  version: string
+  detail?: string
+}
+
+type QPSPoint = Record<string, string | number>
+
 const timeRange = ref('1h')
+const qpsPalette = ['#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#722ED1', '#14C9C9']
 
 const statusColorMap: Record<string, string> = {
   healthy: 'green', warning: 'orange', error: 'red',
@@ -111,13 +127,8 @@ const statusTextMap: Record<string, string> = {
   healthy: '正常', warning: '警告', error: '异常',
 }
 
-const services = ref([
-  { name: 'Manager', status: 'healthy', qps: 0, cpu: 0, memory: '0 MB', pid: '--', uptime: '--', version: '--' },
-  { name: 'AgentCenter', status: 'healthy', qps: 0, cpu: 0, memory: '0 MB', pid: '--', uptime: '--', version: '--' },
-  { name: 'MySQL', status: 'healthy', qps: 0, cpu: 0, memory: '0 MB', pid: '--', uptime: '--', version: '--' },
-])
-
-const qpsData = ref<any[]>([])
+const services = ref<ServiceInfo[]>([])
+const qpsData = ref<QPSPoint[]>([])
 const latencyData = ref<any[]>([])
 const connectionStats = ref<any[]>([])
 
@@ -129,6 +140,18 @@ const connColumns = [
   { title: '总连接数', dataIndex: 'totalConnections', key: 'totalConnections' },
   { title: '状态', key: 'status', width: 100 },
 ]
+
+const qpsSeriesKeys = computed(() => {
+  const keys = new Set<string>()
+  qpsData.value.forEach(point => {
+    Object.keys(point).forEach(key => {
+      if (key !== 'time') keys.add(key)
+    })
+  })
+  return Array.from(keys)
+})
+
+const hasQpsSeries = computed(() => qpsData.value.length > 0 && qpsSeriesKeys.value.length > 0)
 
 const qpsChartOption = computed(() => ({
   tooltip: {
@@ -156,8 +179,15 @@ const qpsChartOption = computed(() => ({
     splitLine: { lineStyle: { color: '#F2F3F5' } },
   },
   series: [
-    { name: 'Manager', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#165DFF' }, data: qpsData.value.map(d => d.manager ?? 0) },
-    { name: 'AgentCenter', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#00B42A' }, data: qpsData.value.map(d => d.agentcenter ?? 0) },
+    ...qpsSeriesKeys.value.map((key, index) => ({
+      name: key,
+      type: 'line',
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { width: 2 },
+      itemStyle: { color: qpsPalette[index % qpsPalette.length] },
+      data: qpsData.value.map(d => Number(d[key] ?? 0)),
+    })),
   ],
 }))
 
@@ -193,13 +223,25 @@ const latencyChartOption = computed(() => ({
   ],
 }))
 
+const connectionStatusColor = (status: string) => {
+  if (status === 'warning') return 'orange'
+  if (status === 'error') return 'red'
+  return 'green'
+}
+
+const connectionStatusText = (status: string) => {
+  if (status === 'warning') return '告警'
+  if (status === 'error') return '异常'
+  return '活跃'
+}
+
 const loadData = async () => {
   try {
     const res = await apiClient.get<any>('/monitor/services', { params: { range: timeRange.value } })
-    if (res.services) services.value = res.services
-    if (res.qps) qpsData.value = res.qps
-    if (res.latency) latencyData.value = res.latency
-    if (res.connections) connectionStats.value = res.connections
+    services.value = Array.isArray(res.services) ? res.services : []
+    qpsData.value = Array.isArray(res.qps) ? res.qps : []
+    latencyData.value = Array.isArray(res.latency) ? res.latency : []
+    connectionStats.value = Array.isArray(res.connections) ? res.connections : []
   } catch {
     // API 未就绪
   }
@@ -248,11 +290,19 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 
 .service-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   font-size: 12px;
   color: #86909C;
   padding-top: 12px;
   border-top: 1px solid #F2F3F5;
+}
+
+.service-detail {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #4E5969;
+  word-break: break-all;
 }
 
 .dashboard-card {

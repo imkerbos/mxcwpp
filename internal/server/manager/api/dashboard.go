@@ -2,62 +2,122 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"math"
 	"net"
 	"net/http"
-	"sort"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
+const (
+	dashboardCacheKey = "mxsec:cache:dashboard:stats"
+	dashboardCacheTTL = 30 * time.Second
+)
+
 // DashboardHandler 是 Dashboard API 处理器
 type DashboardHandler struct {
-	db     *gorm.DB
-	logger *zap.Logger
+	db          *gorm.DB
+	logger      *zap.Logger
+	chConn      chdriver.Conn // 可为 nil（ClickHouse 未启用时降级为 0）
+	redisClient *redis.Client // 可为 nil（Redis 未启用时不缓存）
+	sfGroup     singleflight.Group
 }
 
 // NewDashboardHandler 创建 Dashboard 处理器
-func NewDashboardHandler(db *gorm.DB, logger *zap.Logger) *DashboardHandler {
+func NewDashboardHandler(db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client) *DashboardHandler {
 	return &DashboardHandler{
-		db:     db,
-		logger: logger,
+		db:          db,
+		logger:      logger,
+		chConn:      chConn,
+		redisClient: redisClient,
 	}
 }
 
 // GetDashboardStats 获取 Dashboard 统计数据
 // GET /api/v1/dashboard/stats
 func (h *DashboardHandler) GetDashboardStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// 尝试从 Redis 缓存读取
+	if h.redisClient != nil {
+		if cached, err := h.redisClient.Get(ctx, dashboardCacheKey).Bytes(); err == nil {
+			c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
+			return
+		}
+	}
+
+	// singleflight：同一时刻只有一个 goroutine 计算，其余等待复用结果
+	// 防止缓存过期瞬间的惊群效应
+	jsonBytes, err, _ := h.sfGroup.Do(dashboardCacheKey, func() (interface{}, error) {
+		return h.computeStats()
+	})
+	if err != nil {
+		h.logger.Error("计算 Dashboard 统计失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "统计数据查询失败"})
+		return
+	}
+
+	data := jsonBytes.([]byte)
+
+	// 写入 Redis 缓存
+	if h.redisClient != nil {
+		h.redisClient.Set(ctx, dashboardCacheKey, data, dashboardCacheTTL)
+	}
+
+	c.Data(http.StatusOK, "application/json; charset=utf-8", data)
+}
+
+// computeStats 计算所有 Dashboard 统计数据并序列化为 JSON
+func (h *DashboardHandler) computeStats() ([]byte, error) {
 	stats := gin.H{}
 
-	// 1. 资产概览
-	// 统计物理主机（非容器）
-	var hostCount int64
-	h.db.Model(&model.Host{}).Where("is_container = ?", false).Count(&hostCount)
+	// 1. 资产概览（单次 GROUP BY 替代 6 条独立 COUNT）
+	type hostCountRow struct {
+		IsContainer bool
+		Status      string
+		Cnt         int64
+	}
+	var hostCountRows []hostCountRow
+	h.db.Model(&model.Host{}).
+		Select("is_container, status, COUNT(*) AS cnt").
+		Group("is_container, status").
+		Scan(&hostCountRows)
 
-	// 统计容器
-	var containerCount int64
-	h.db.Model(&model.Host{}).Where("is_container = ?", true).Count(&containerCount)
-
-	var onlineHostCount int64
-	h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", "online", false).Count(&onlineHostCount)
-
-	var onlineContainerCount int64
-	h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", "online", true).Count(&onlineContainerCount)
-
-	var offlineHostCount int64
-	h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", "offline", false).Count(&offlineHostCount)
-
-	var offlineContainerCount int64
-	h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", "offline", true).Count(&offlineContainerCount)
+	var hostCount, containerCount, onlineHostCount, onlineContainerCount, offlineHostCount, offlineContainerCount int64
+	for _, r := range hostCountRows {
+		if !r.IsContainer {
+			hostCount += r.Cnt
+			if r.Status == "online" {
+				onlineHostCount = r.Cnt
+			} else if r.Status == "offline" {
+				offlineHostCount += r.Cnt
+			}
+		} else {
+			containerCount += r.Cnt
+			if r.Status == "online" {
+				onlineContainerCount = r.Cnt
+			} else if r.Status == "offline" {
+				offlineContainerCount += r.Cnt
+			}
+		}
+	}
 
 	stats["hosts"] = hostCount
-	stats["clusters"] = 0 // TODO: 后续实现集群统计
+	var clusterCount int64
+	h.db.Model(&model.KubeCluster{}).Count(&clusterCount)
+	stats["clusters"] = clusterCount
 	stats["containers"] = containerCount
-	stats["onlineAgents"] = onlineHostCount + onlineContainerCount // 在线Agent总数（主机+容器）
+	stats["onlineAgents"] = onlineHostCount + onlineContainerCount
 	stats["offlineAgents"] = offlineHostCount + offlineContainerCount
 
 	// 计算Agent数量变化（较昨日）
@@ -66,100 +126,141 @@ func (h *DashboardHandler) GetDashboardStats(c *gin.Context) {
 	stats["offlineAgentsChange"] = offlineChange
 
 	// 2. 入侵告警统计（简化实现，后续扩展）
-	stats["pendingAlerts"] = 0 // TODO: 实现告警统计
+	var pendingAlerts int64
+	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Count(&pendingAlerts)
+	stats["pendingAlerts"] = pendingAlerts
 
-	// 3. 漏洞风险统计（简化实现，后续扩展）
-	stats["pendingVulnerabilities"] = 0 // TODO: 实现漏洞统计
-	stats["vulnDbUpdateTime"] = ""      // TODO: 实现漏洞库更新时间
-	stats["hotPatchCount"] = 0          // TODO: 实现漏洞热补丁统计
+	// 3. 漏洞风险统计
+	var pendingVulns int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ?", "unpatched").Count(&pendingVulns)
+	stats["pendingVulnerabilities"] = pendingVulns
 
-	// 4. 基线风险统计
-	// 查询最近7天的基线检查结果
+	var latestVuln model.Vulnerability
+	if err := h.db.Order("discovered_at DESC").First(&latestVuln).Error; err == nil {
+		stats["vulnDbUpdateTime"] = latestVuln.DiscoveredAt
+	} else {
+		stats["vulnDbUpdateTime"] = ""
+	}
+
+	var hotPatchCount int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ?", "patched").Count(&hotPatchCount)
+	stats["hotPatchCount"] = hotPatchCount
+
+	// 4. 基线风险统计（单次聚合查询替代 5 条独立 COUNT）
 	sevenDaysAgo := time.Now().AddDate(0, 0, -7)
 	var baselineFailCount int64
 	h.db.Model(&model.ScanResult{}).
 		Where("status = ? AND checked_at >= ?", "fail", sevenDaysAgo).
 		Count(&baselineFailCount)
-
 	stats["baselineFailCount"] = baselineFailCount
 
-	// 计算基线加固百分比（优化：使用SQL聚合查询）
 	baselineHardeningPercent, baselineHostPercent := h.calculateBaselinePercentages()
 	stats["baselineHardeningPercent"] = baselineHardeningPercent
 	stats["baselineHostPercent"] = baselineHostPercent
 
-	// 5. 基线风险 Top 3
+	// 5. 基线风险 Top 3（单次 JOIN + GROUP BY 替代 N+1 查询）
 	baselineRisks := h.getBaselineRisksTop3()
 	stats["baselineRisks"] = baselineRisks
 
-	// 6. Agent 资源使用统计（暂时返回0，后续从心跳数据中获取）
-	stats["avgCpuUsage"] = 0.0
-	stats["avgCpuUsageChange"] = 0.0
-	stats["avgMemoryUsage"] = 0
-	stats["avgMemoryUsageChange"] = 0
+	// 6. Agent 资源使用统计（从 ClickHouse host_metrics_hourly 物化视图查询）
+	avgCPU, avgMem := h.queryAvgMetrics()
+	stats["avgCpuUsage"] = avgCPU
+	stats["avgMemoryUsage"] = avgMem
+	// CPU/内存同比变化：对比 24 小时前同时段
+	yesterdayCPU, yesterdayMem := h.queryAvgMetricsYesterday()
+	if yesterdayCPU > 0 {
+		stats["avgCpuUsageChange"] = math.Round((avgCPU-yesterdayCPU)*10) / 10
+	} else {
+		stats["avgCpuUsageChange"] = 0.0
+	}
+	if yesterdayMem > 0 {
+		stats["avgMemoryUsageChange"] = math.Round((avgMem-yesterdayMem)*10) / 10
+	} else {
+		stats["avgMemoryUsageChange"] = 0.0
+	}
 
 	// 7. 主机风险分布百分比
-	stats["hostAlertPercent"] = 0.0    // TODO: 存在告警的主机百分比
-	stats["vulnHostPercent"] = 0.0     // TODO: 存在高可利用漏洞的主机百分比
-	stats["runtimeAlertPercent"] = 0.0 // TODO: 存在运行时安全告警的主机百分比
-	stats["virusHostPercent"] = 0.0    // TODO: 存在病毒文件的主机百分比
+	var alertHostCount int64
+	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Distinct("host_id").Count(&alertHostCount)
+	totalHosts := hostCount + containerCount
+	if totalHosts > 0 {
+		stats["hostAlertPercent"] = float64(alertHostCount) / float64(totalHosts) * 100.0
+	} else {
+		stats["hostAlertPercent"] = 0.0
+	}
+	var vulnHostCount int64
+	h.db.Model(&model.HostVulnerability{}).Where("status = ?", "unpatched").Distinct("host_id").Count(&vulnHostCount)
+	if totalHosts > 0 {
+		stats["vulnHostPercent"] = float64(vulnHostCount) / float64(totalHosts) * 100.0
+	} else {
+		stats["vulnHostPercent"] = 0.0
+	}
+	// 运行时安全告警：来自 CEL 规则引擎的告警（type = 'detection_rule'）
+	var runtimeAlertHostCount int64
+	h.db.Model(&model.Alert{}).Where("status = ? AND alert_type = ?", model.AlertStatusActive, "detection_rule").Distinct("host_id").Count(&runtimeAlertHostCount)
+	if totalHosts > 0 {
+		stats["runtimeAlertPercent"] = math.Round(float64(runtimeAlertHostCount)/float64(totalHosts)*1000) / 10
+	} else {
+		stats["runtimeAlertPercent"] = 0.0
+	}
+	// 病毒主机百分比：扫描结果中有未处理威胁的主机
+	var virusHostCount int64
+	h.db.Model(&model.AntivirusScanResult{}).Where("status != ?", "cleaned").Distinct("host_id").Count(&virusHostCount)
+	if totalHosts > 0 {
+		stats["virusHostPercent"] = math.Round(float64(virusHostCount)/float64(totalHosts)*1000) / 10
+	} else {
+		stats["virusHostPercent"] = 0.0
+	}
 
 	// 8. 后端服务状态
-	// 注意：基线检查插件在 Agent 端运行，Server 端无法直接检查其状态
-	// 如果需要了解基线检查活动情况，可以通过"在线 Agent 数量"或"最近基线检查结果"来判断
 	serviceStatus := gin.H{
 		"database":    h.checkDatabaseStatus(),
 		"agentcenter": h.checkAgentCenterStatus(),
-		"manager":     "healthy", // Manager 服务本身，如果这个接口能访问说明服务正常
+		"manager":     "healthy",
 	}
 	stats["serviceStatus"] = serviceStatus
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": stats,
-	})
+	// 9. 告警趋势（最近 30 天，按天 + 等级聚合；前端按 7d/30d 本地切片）
+	stats["alertTrend"] = h.queryAlertTrend()
+
+	// 10. 最新告警（最近 5 条 active 告警，精简字段）
+	stats["latestAlerts"] = h.queryLatestAlerts()
+
+	stats = sanitizeDashboardValue(stats).(gin.H)
+
+	return json.Marshal(gin.H{"code": 0, "data": stats})
 }
 
 // calculateAgentChanges 计算Agent数量变化（较昨日）
-// 简化实现：由于没有历史快照数据，使用24小时前的心跳时间来判断
-// 如果主机在24-48小时前有心跳，认为24小时前是在线的
 func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 	now := time.Now()
 	oneDayAgo := now.AddDate(0, 0, -1)
 	twoDaysAgo := now.AddDate(0, 0, -2)
 
-	// 查询24小时前在线的主机（通过last_heartbeat判断）
-	// 如果last_heartbeat在24-48小时前之间，说明24小时前可能是在线的
 	var yesterdayOnlineCount int64
 	h.db.Model(&model.Host{}).
 		Where("last_heartbeat >= ? AND last_heartbeat < ?", twoDaysAgo, oneDayAgo).
 		Count(&yesterdayOnlineCount)
 
-	// 查询当前在线的主机数量
 	var currentOnlineCount int64
 	h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&currentOnlineCount)
 
-	// 查询当前离线的主机数量
 	var currentOfflineCount int64
 	h.db.Model(&model.Host{}).Where("status = ?", "offline").Count(&currentOfflineCount)
 
-	// 查询24小时前的主机总数（创建时间在24小时前）
 	var yesterdayTotalCount int64
 	h.db.Model(&model.Host{}).
 		Where("created_at <= ?", oneDayAgo).
 		Count(&yesterdayTotalCount)
 
-	// 计算24小时前的离线数（总主机数 - 在线数）
 	var yesterdayOfflineCount int64
 	if yesterdayTotalCount > yesterdayOnlineCount {
 		yesterdayOfflineCount = yesterdayTotalCount - yesterdayOnlineCount
 	}
 
-	// 计算变化
 	onlineChange := int(currentOnlineCount) - int(yesterdayOnlineCount)
 	offlineChange := int(currentOfflineCount) - int(yesterdayOfflineCount)
 
-	// 如果数据不足（没有历史数据），返回0
 	if yesterdayTotalCount == 0 {
 		onlineChange = 0
 		offlineChange = 0
@@ -169,58 +270,43 @@ func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 }
 
 // calculateBaselinePercentages 计算基线合规率和存在高危基线问题的主机百分比
+// 优化：单次聚合查询替代 5 条独立 COUNT
 func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 	var totalHosts int64
 	h.db.Model(&model.Host{}).Count(&totalHosts)
-
 	if totalHosts == 0 {
-		return 100.0, 0.0 // 没有主机时，合规率为100%，高危主机为0%
+		return 100.0, 0.0
 	}
 
-	// 统计有基线检查结果的主机（作为检查过的主机）
-	var hostsWithResults int64
-	h.db.Model(&model.ScanResult{}).
-		Distinct("host_id").
-		Count(&hostsWithResults)
+	var result struct {
+		HostsWithResults int64 `gorm:"column:hosts_with_results"`
+		PassCount        int64 `gorm:"column:pass_count"`
+		FailCount        int64 `gorm:"column:fail_count"`
+		HighRiskHosts    int64 `gorm:"column:high_risk_hosts"`
+	}
+	h.db.Raw(`
+		SELECT
+			COUNT(DISTINCT host_id) AS hosts_with_results,
+			SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) AS pass_count,
+			SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
+			COUNT(DISTINCT CASE WHEN status = 'fail' AND severity IN ('high','critical') THEN host_id END) AS high_risk_hosts
+		FROM scan_results
+	`).Scan(&result)
 
-	if hostsWithResults == 0 {
-		return 100.0, 0.0 // 没有检查结果时，默认合规
+	if result.HostsWithResults == 0 {
+		return 100.0, 0.0
 	}
 
-	// 统计检查通过的结果数
-	var passCount int64
-	h.db.Model(&model.ScanResult{}).
-		Where("status = ?", "pass").
-		Count(&passCount)
-
-	// 统计检查失败的结果数
-	var failCount int64
-	h.db.Model(&model.ScanResult{}).
-		Where("status = ?", "fail").
-		Count(&failCount)
-
-	// 基线合规率 = 通过的检查项数 / 总检查项数 * 100
-	totalResults := passCount + failCount
-	var complianceRate float64
+	totalResults := result.PassCount + result.FailCount
+	complianceRate := 100.0
 	if totalResults > 0 {
-		complianceRate = float64(passCount) / float64(totalResults) * 100.0
-	} else {
-		complianceRate = 100.0
+		complianceRate = float64(result.PassCount) / float64(totalResults) * 100.0
 	}
-
-	// 存在高危基线的主机百分比（查询有high或critical级别失败结果的主机）
-	var hostsWithHighRiskBaseline int64
-	h.db.Model(&model.ScanResult{}).
-		Where("status = ? AND severity IN (?)", "fail", []string{"high", "critical"}).
-		Distinct("host_id").
-		Count(&hostsWithHighRiskBaseline)
-
-	highRiskHostPercent := float64(hostsWithHighRiskBaseline) / float64(totalHosts) * 100.0
-
-	// 确保百分比在合理范围内
 	if complianceRate > 100.0 {
 		complianceRate = 100.0
 	}
+
+	highRiskHostPercent := float64(result.HighRiskHosts) / float64(totalHosts) * 100.0
 	if highRiskHostPercent > 100.0 {
 		highRiskHostPercent = 100.0
 	}
@@ -228,72 +314,197 @@ func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 	return complianceRate, highRiskHostPercent
 }
 
-// getBaselineRisksTop3 获取基线风险 Top 3（优化：使用更好的排序算法）
+// getBaselineRisksTop3 获取基线风险 Top 3
+// 优化：单次 JOIN+GROUP BY 替代 N×3+1 条查询
 func (h *DashboardHandler) getBaselineRisksTop3() []gin.H {
-	// 查询所有策略，统计每个策略的风险数量
-	type PolicyRisk struct {
-		PolicyID string
-		Name     string
-		Critical int64
-		Medium   int64
-		Low      int64
-		Score    int64 // 风险评分
+	var rows []struct {
+		PolicyID      string `gorm:"column:policy_id"`
+		Name          string `gorm:"column:name"`
+		CriticalCount int64  `gorm:"column:critical_count"`
+		MediumCount   int64  `gorm:"column:medium_count"`
+		LowCount      int64  `gorm:"column:low_count"`
 	}
 
-	var policyRisks []PolicyRisk
+	h.db.Raw(`
+		SELECT p.id AS policy_id, p.name,
+			SUM(CASE WHEN sr.severity = 'critical' THEN 1 ELSE 0 END) AS critical_count,
+			SUM(CASE WHEN sr.severity = 'medium'   THEN 1 ELSE 0 END) AS medium_count,
+			SUM(CASE WHEN sr.severity = 'low'      THEN 1 ELSE 0 END) AS low_count
+		FROM scan_results sr
+		INNER JOIN policies p ON p.id = sr.policy_id
+		WHERE sr.status = 'fail'
+		GROUP BY p.id, p.name
+		ORDER BY (SUM(CASE WHEN sr.severity = 'critical' THEN 3
+		               WHEN sr.severity = 'medium'   THEN 2
+		               ELSE 1 END)) DESC
+		LIMIT 3
+	`).Scan(&rows)
 
-	// 查询所有策略
-	var policies []model.Policy
-	h.db.Find(&policies)
-
-	for _, policy := range policies {
-		var criticalCount, mediumCount, lowCount int64
-
-		// 查询该策略下失败的基线检查结果，按严重程度统计
-		h.db.Model(&model.ScanResult{}).
-			Where("policy_id = ? AND status = ? AND severity = ?", policy.ID, "fail", "critical").
-			Count(&criticalCount)
-
-		h.db.Model(&model.ScanResult{}).
-			Where("policy_id = ? AND status = ? AND severity = ?", policy.ID, "fail", "medium").
-			Count(&mediumCount)
-
-		h.db.Model(&model.ScanResult{}).
-			Where("policy_id = ? AND status = ? AND severity = ?", policy.ID, "fail", "low").
-			Count(&lowCount)
-
-		// 只包含有风险的策略
-		if criticalCount > 0 || mediumCount > 0 || lowCount > 0 {
-			// 风险评分：critical * 3 + medium * 2 + low
-			score := criticalCount*3 + mediumCount*2 + lowCount
-			policyRisks = append(policyRisks, PolicyRisk{
-				PolicyID: policy.ID,
-				Name:     policy.Name,
-				Critical: criticalCount,
-				Medium:   mediumCount,
-				Low:      lowCount,
-				Score:    score,
-			})
-		}
-	}
-
-	// 按风险评分排序（降序）
-	sort.Slice(policyRisks, func(i, j int) bool {
-		return policyRisks[i].Score > policyRisks[j].Score
-	})
-
-	// 取 Top 3
-	top3 := make([]gin.H, 0, 3)
-	for i := 0; i < len(policyRisks) && i < 3; i++ {
+	top3 := make([]gin.H, 0, len(rows))
+	for _, r := range rows {
 		top3 = append(top3, gin.H{
-			"name":     policyRisks[i].Name,
-			"critical": policyRisks[i].Critical,
-			"medium":   policyRisks[i].Medium,
-			"low":      policyRisks[i].Low,
+			"name":     r.Name,
+			"critical": r.CriticalCount,
+			"medium":   r.MediumCount,
+			"low":      r.LowCount,
 		})
 	}
-
 	return top3
+}
+
+// queryAvgMetrics 从 ClickHouse host_metrics_hourly 查询过去 1 小时全局平均 CPU/内存使用率
+func (h *DashboardHandler) queryAvgMetrics() (float64, float64) {
+	if h.chConn == nil {
+		return 0, 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	row := h.chConn.QueryRow(ctx,
+		`SELECT round(avgMerge(cpu_avg), 1), round(avgMerge(mem_avg), 1)
+		 FROM host_metrics_hourly
+		 WHERE hour >= subtractHours(now(), 1)`)
+
+	var avgCPU, avgMem float64
+	if err := row.Scan(&avgCPU, &avgMem); err != nil {
+		h.logger.Warn("ClickHouse 查询 host_metrics_hourly 失败", zap.Error(err))
+		return 0, 0
+	}
+	if !isFiniteFloat(avgCPU) || !isFiniteFloat(avgMem) {
+		h.logger.Warn("ClickHouse 返回了非有限 Dashboard 指标",
+			zap.Float64("avg_cpu", avgCPU),
+			zap.Float64("avg_mem", avgMem))
+		return 0, 0
+	}
+	return avgCPU, avgMem
+}
+
+// queryAvgMetricsYesterday 查询 24 小时前同时段的平均 CPU/内存，用于计算同比变化
+func (h *DashboardHandler) queryAvgMetricsYesterday() (float64, float64) {
+	if h.chConn == nil {
+		return 0, 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	row := h.chConn.QueryRow(ctx,
+		`SELECT round(avgMerge(cpu_avg), 1), round(avgMerge(mem_avg), 1)
+		 FROM host_metrics_hourly
+		 WHERE hour >= subtractHours(now(), 25) AND hour < subtractHours(now(), 24)`)
+
+	var avgCPU, avgMem float64
+	if err := row.Scan(&avgCPU, &avgMem); err != nil {
+		return 0, 0
+	}
+	if !isFiniteFloat(avgCPU) || !isFiniteFloat(avgMem) {
+		return 0, 0
+	}
+	return avgCPU, avgMem
+}
+
+func isFiniteFloat(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func sanitizeDashboardValue(v interface{}) interface{} {
+	switch value := v.(type) {
+	case float64:
+		if !isFiniteFloat(value) {
+			return 0.0
+		}
+		return value
+	case float32:
+		if !isFiniteFloat(float64(value)) {
+			return float32(0)
+		}
+		return value
+	case gin.H:
+		sanitized := make(gin.H, len(value))
+		for k, item := range value {
+			sanitized[k] = sanitizeDashboardValue(item)
+		}
+		return sanitized
+	case []gin.H:
+		sanitized := make([]gin.H, len(value))
+		for i, item := range value {
+			sanitized[i] = sanitizeDashboardValue(item).(gin.H)
+		}
+		return sanitized
+	case []interface{}:
+		sanitized := make([]interface{}, len(value))
+		for i, item := range value {
+			sanitized[i] = sanitizeDashboardValue(item)
+		}
+		return sanitized
+	default:
+		return v
+	}
+}
+
+// queryAlertTrend 查询最近 30 天告警趋势（按天+等级聚合）
+func (h *DashboardHandler) queryAlertTrend() []gin.H {
+	type trendRow struct {
+		Date     string `gorm:"column:date"`
+		Critical int64  `gorm:"column:critical"`
+		High     int64  `gorm:"column:high"`
+		Medium   int64  `gorm:"column:medium"`
+		Low      int64  `gorm:"column:low"`
+	}
+	var rows []trendRow
+	h.db.Raw(`
+		SELECT DATE(last_seen_at) AS date,
+			SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+			SUM(CASE WHEN severity = 'high'     THEN 1 ELSE 0 END) AS high,
+			SUM(CASE WHEN severity = 'medium'   THEN 1 ELSE 0 END) AS medium,
+			SUM(CASE WHEN severity = 'low'      THEN 1 ELSE 0 END) AS low
+		FROM alerts
+		WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+		GROUP BY DATE(last_seen_at)
+		ORDER BY date
+	`).Scan(&rows)
+
+	trend := make([]gin.H, 0, len(rows))
+	for _, r := range rows {
+		trend = append(trend, gin.H{
+			"date":     r.Date,
+			"critical": r.Critical,
+			"high":     r.High,
+			"medium":   r.Medium,
+			"low":      r.Low,
+		})
+	}
+	return trend
+}
+
+// queryLatestAlerts 查询最近 5 条未处理告警（精简字段 + 主机名）
+func (h *DashboardHandler) queryLatestAlerts() []gin.H {
+	type alertRow struct {
+		ID         uint      `gorm:"column:id"`
+		Title      string    `gorm:"column:title"`
+		Severity   string    `gorm:"column:severity"`
+		Hostname   string    `gorm:"column:hostname"`
+		LastSeenAt time.Time `gorm:"column:last_seen_at"`
+	}
+	var rows []alertRow
+	h.db.Table("alerts").
+		Select("alerts.id, alerts.title, alerts.severity, hosts.hostname, alerts.last_seen_at").
+		Joins("LEFT JOIN hosts ON hosts.host_id = alerts.host_id").
+		Where("alerts.status = ?", model.AlertStatusActive).
+		Order("alerts.last_seen_at DESC").
+		Limit(5).
+		Scan(&rows)
+
+	latest := make([]gin.H, 0, len(rows))
+	for _, r := range rows {
+		latest = append(latest, gin.H{
+			"id":           r.ID,
+			"title":        r.Title,
+			"severity":     r.Severity,
+			"hostname":     r.Hostname,
+			"last_seen_at": r.LastSeenAt.Format(model.TimeFormat),
+		})
+	}
+	return latest
 }
 
 // checkDatabaseStatus 检查数据库连接状态
@@ -307,7 +518,6 @@ func (h *DashboardHandler) checkDatabaseStatus() string {
 		return "error"
 	}
 
-	// 执行 ping 操作（带超时）
 	done := make(chan error, 1)
 	go func() {
 		done <- sqlDB.Ping()
@@ -325,31 +535,20 @@ func (h *DashboardHandler) checkDatabaseStatus() string {
 }
 
 // checkAgentCenterStatus 检查 AgentCenter 服务状态
-// 通过检查 AgentCenter gRPC 端口是否可访问来判断服务本身是否健康
 func (h *DashboardHandler) checkAgentCenterStatus() string {
-	// AgentCenter 默认端口是 6751
-	// 尝试多个可能的地址（支持 Docker 环境和本地环境）
 	addresses := []string{
-		"localhost:6751",   // 本地开发环境
-		"agentcenter:6751", // Docker Compose 环境（服务名）
-		"127.0.0.1:6751",   // 本地回环地址
+		"localhost:6751",
+		"agentcenter:6751",
+		"127.0.0.1:6751",
 	}
 
 	for _, addr := range addresses {
 		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 		if err == nil {
 			conn.Close()
-			// 端口可访问，服务运行正常
 			return "healthy"
 		}
 	}
 
-	// 所有地址都不可访问，服务可能未运行
 	return "error"
 }
-
-// 注意：基线检查插件在 Agent 端运行，Server 端无法直接检查其状态
-// 如需了解基线检查活动情况，可以通过以下方式：
-// 1. 检查在线 Agent 数量（有在线 Agent 说明 Agent 和插件可能在工作）
-// 2. 检查最近的基线检查结果（有结果说明插件最近执行过检查）
-// 3. 检查扫描任务状态（有运行中的任务说明插件可能在工作）

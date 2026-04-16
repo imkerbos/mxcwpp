@@ -3,9 +3,6 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layouts/BasicLayout.vue'
 import { useAuthStore } from '@/stores/auth'
 
-// 开发中页面组件
-const DevInProgress = () => import('@/views/Error/DevInProgress.vue')
-
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -181,7 +178,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'asset-fingerprint',
         name: 'AssetFingerprint',
-        component: DevInProgress,
+        component: () => import('@/views/AssetFingerprint/index.vue'),
         meta: { title: '资产指纹' },
       },
       // 白名单
@@ -195,60 +192,74 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'vuln-list',
         name: 'VulnList',
-        component: DevInProgress,
+        component: () => import('@/views/VulnList/index.vue'),
         meta: { title: '漏洞列表' },
       },
       // 病毒查杀
       {
         path: 'virus/scan',
         name: 'VirusScan',
-        component: DevInProgress,
-        meta: { title: '病毒扫描' },
+        component: () => import('@/views/Virus/Scan.vue'),
+        meta: { title: '病毒查杀' },
       },
       {
         path: 'virus/quarantine',
         name: 'VirusQuarantine',
-        component: DevInProgress,
+        component: () => import('@/views/Virus/Quarantine.vue'),
         meta: { title: '文件隔离箱' },
       },
-      // 系统管理 — 组件策略
+      // 运行时告警事件
       {
-        path: 'system/comp-policy',
-        name: 'CompPolicy',
-        component: DevInProgress,
-        meta: { title: '组件策略' },
+        path: 'detection/events',
+        name: 'RuntimeAlerts',
+        component: () => import('@/views/RuntimeAlerts/index.vue'),
+        meta: { title: '运行时告警事件' },
+      },
+      // 检测规则管理
+      {
+        path: 'detection/rules',
+        name: 'DetectionRules',
+        component: () => import('@/views/Detection/Rules.vue'),
+        meta: { title: '检测规则' },
+      },
+      // 威胁情报
+      {
+        path: 'threat-intel',
+        name: 'ThreatIntel',
+        component: () => import('@/views/ThreatIntel/index.vue'),
+        meta: { title: '威胁情报' },
+      },
+      // 系统管理 — 迁移助手
+      {
+        path: 'system/migration',
+        name: 'SystemMigration',
+        component: () => import('@/views/System/Migration.vue'),
+        meta: { title: '迁移助手' },
       },
       // 系统管理 — 配置备份
       {
         path: 'system/backup',
         name: 'SystemBackup',
-        component: DevInProgress,
+        component: () => import('@/views/System/Backup.vue'),
         meta: { title: '配置备份' },
-      },
-      // 系统管理 — 日志查询
-      {
-        path: 'system/log-query',
-        name: 'LogQuery',
-        component: DevInProgress,
-        meta: { title: '日志查询' },
       },
       // 系统监控
       {
         path: 'system/host-monitor',
         name: 'HostMonitor',
-        component: DevInProgress,
+        component: () => import('@/views/Monitoring/HostMonitor.vue'),
         meta: { title: '后端监控' },
       },
       {
         path: 'system/service-monitor',
         name: 'ServiceMonitor',
-        component: DevInProgress,
+        component: () => import('@/views/Monitoring/ServiceMonitor.vue'),
         meta: { title: '后端服务' },
       },
       {
         path: 'system/service-alert',
         name: 'ServiceAlert',
-        component: DevInProgress,
+        component: () => import('@/views/Monitoring/ServiceAlert.vue'),
         meta: { title: '服务告警' },
       },
       // 审计日志
@@ -295,30 +306,23 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Kube/Whitelist.vue'),
         meta: { title: '容器白名单' },
       },
-      // RASP 应用防护
+      // RASP 已弃用，由 Tetragon eBPF 运行时检测替代
+      // 保留路由兼容旧书签，重定向到检测规则页
       {
         path: 'rasp/apps',
-        name: 'RaspApps',
-        component: DevInProgress,
-        meta: { title: '应用列表' },
+        redirect: '/detection/rules',
       },
       {
         path: 'rasp/config',
-        name: 'RaspConfig',
-        component: DevInProgress,
-        meta: { title: 'RASP 配置' },
+        redirect: '/detection/rules',
       },
       {
         path: 'rasp/alarms',
-        name: 'RaspAlarms',
-        component: DevInProgress,
-        meta: { title: 'RASP 告警' },
+        redirect: '/alerts',
       },
       {
         path: 'rasp/vulns',
-        name: 'RaspVulns',
-        component: DevInProgress,
-        meta: { title: '运行时漏洞' },
+        redirect: '/vuln-list',
       },
     ],
   },

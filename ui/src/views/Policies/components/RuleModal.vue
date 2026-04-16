@@ -262,7 +262,7 @@ import {
   ExclamationCircleOutlined,
 } from '@ant-design/icons-vue'
 import { rulesApi } from '@/api/rules'
-import type { Rule, CheckRule } from '@/api/types'
+import type { Rule, CheckRule, RuntimeType } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue'
 
 const props = defineProps<{
@@ -291,7 +291,7 @@ const formData = reactive({
   category: 'other',
   severity: 'medium' as 'critical' | 'high' | 'medium' | 'low',
   description: '',
-  runtime_types: [] as string[],
+  runtime_types: [] as RuntimeType[],
   check_config: {
     condition: 'all' as 'all' | 'any',
     rules: [{ type: '', param: ['', '', ''], result: '' }] as CheckRuleForm[],
@@ -426,7 +426,7 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
-        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
+        runtime_types: formData.runtime_types.length > 0 ? [...formData.runtime_types] : undefined,
         check_config: checkConfig,
         fix_config: fixConfig,
       })
@@ -439,7 +439,7 @@ const handleSubmit = async () => {
         title: formData.title,
         description: formData.description,
         severity: formData.severity,
-        runtime_types: formData.runtime_types.length > 0 ? formData.runtime_types : undefined,
+        runtime_types: formData.runtime_types.length > 0 ? [...formData.runtime_types] : undefined,
         check_config: checkConfig,
         fix_config: fixConfig,
       })

@@ -3,9 +3,11 @@ package biz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -13,18 +15,22 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/prometheus"
 )
 
+var ErrPrometheusDatasourceNotConfigured = errors.New("找不到数据源，请配置 Prometheus 数据源")
+
 // MetricsService 是监控数据查询服务
 type MetricsService struct {
 	db               *gorm.DB
 	prometheusClient *prometheus.Client
+	chConn           chdriver.Conn // 可为 nil，ClickHouse 未启用时降级
 	logger           *zap.Logger
 }
 
 // NewMetricsService 创建监控数据查询服务
-func NewMetricsService(db *gorm.DB, prometheusClient *prometheus.Client, logger *zap.Logger) *MetricsService {
+func NewMetricsService(db *gorm.DB, prometheusClient *prometheus.Client, chConn chdriver.Conn, logger *zap.Logger) *MetricsService {
 	return &MetricsService{
 		db:               db,
 		prometheusClient: prometheusClient,
+		chConn:           chConn,
 		logger:           logger,
 	}
 }
@@ -34,17 +40,19 @@ type HostMetrics struct {
 	HostID     string             `json:"host_id"`
 	Latest     *LatestMetrics     `json:"latest,omitempty"`      // 最新监控数据
 	TimeSeries *TimeSeriesMetrics `json:"time_series,omitempty"` // 时间序列数据
-	Source     string             `json:"source"`                // 数据源：mysql 或 prometheus
+	Source     string             `json:"source"`                // 数据源：prometheus
 }
 
 // LatestMetrics 是最新监控数据
 type LatestMetrics struct {
-	CPUUsage     *float64   `json:"cpu_usage,omitempty"`
-	MemUsage     *float64   `json:"mem_usage,omitempty"`
-	DiskUsage    *float64   `json:"disk_usage,omitempty"`
-	NetBytesSent *uint64    `json:"net_bytes_sent,omitempty"`
-	NetBytesRecv *uint64    `json:"net_bytes_recv,omitempty"`
-	CollectedAt  *time.Time `json:"collected_at,omitempty"`
+	CPUUsage       *float64   `json:"cpu_usage,omitempty"`
+	MemUsage       *float64   `json:"mem_usage,omitempty"`
+	DiskUsage      *float64   `json:"disk_usage,omitempty"`
+	NetBytesSent   *uint64    `json:"net_bytes_sent,omitempty"`
+	NetBytesRecv   *uint64    `json:"net_bytes_recv,omitempty"`
+	DiskReadBytes  *uint64    `json:"disk_read_bytes,omitempty"`
+	DiskWriteBytes *uint64    `json:"disk_write_bytes,omitempty"`
+	CollectedAt    *time.Time `json:"collected_at,omitempty"`
 }
 
 // TimeSeriesMetrics 是时间序列监控数据
@@ -52,6 +60,10 @@ type TimeSeriesMetrics struct {
 	CPUUsage  []TimeSeriesPoint `json:"cpu_usage,omitempty"`
 	MemUsage  []TimeSeriesPoint `json:"mem_usage,omitempty"`
 	DiskUsage []TimeSeriesPoint `json:"disk_usage,omitempty"`
+	NetIn     []TimeSeriesPoint `json:"net_in,omitempty"`
+	NetOut    []TimeSeriesPoint `json:"net_out,omitempty"`
+	DiskRead  []TimeSeriesPoint `json:"disk_read,omitempty"`
+	DiskWrite []TimeSeriesPoint `json:"disk_write,omitempty"`
 }
 
 // TimeSeriesPoint 是时间序列数据点
@@ -61,15 +73,121 @@ type TimeSeriesPoint struct {
 }
 
 // GetHostMetrics 获取主机监控数据
-// 根据配置自动选择 MySQL 或 Prometheus 查询
 func (s *MetricsService) GetHostMetrics(ctx context.Context, hostID string, startTime, endTime *time.Time) (*HostMetrics, error) {
-	// 检查是否配置了 Prometheus
-	if s.prometheusClient != nil {
-		return s.getHostMetricsFromPrometheus(ctx, hostID, startTime, endTime)
+	if s.prometheusClient == nil {
+		return nil, ErrPrometheusDatasourceNotConfigured
 	}
 
-	// 否则使用 MySQL 查询
-	return s.getHostMetricsFromMySQL(ctx, hostID, startTime, endTime)
+	return s.getHostMetricsFromPrometheus(ctx, hostID, startTime, endTime)
+}
+
+// resolveTimeRange 返回有效的时间范围（nil 时默认最近 1 小时）
+func resolveTimeRange(startTime, endTime *time.Time) (time.Time, time.Time) {
+	now := time.Now()
+	if startTime == nil || endTime == nil {
+		return now.Add(-1 * time.Hour), now
+	}
+	return *startTime, *endTime
+}
+
+// getHostMetricsFromClickHouse 从 ClickHouse 查询单主机时序数据
+// range < 24h：查原始 host_metrics 表（分钟级精度）
+// range >= 24h：查物化视图 host_metrics_hourly（小时级，性能更好）
+func (s *MetricsService) getHostMetricsFromClickHouse(ctx context.Context, hostID string, start, end time.Time) (*HostMetrics, error) {
+	duration := end.Sub(start)
+	if duration >= 24*time.Hour {
+		return s.getHostMetricsFromMaterializedView(ctx, hostID, start, end)
+	}
+
+	var bucketFn string
+	switch {
+	case duration <= 2*time.Hour:
+		bucketFn = "toStartOfFiveMinutes"
+	default:
+		bucketFn = "toStartOfFifteenMinutes"
+	}
+
+	rows, err := s.chConn.Query(ctx, fmt.Sprintf(`
+		SELECT
+			%s(timestamp)                   AS bucket,
+			round(avg(cpu_usage),1)         AS cpu,
+			round(avg(mem_usage),1)         AS mem,
+			round(avg(disk_usage),1)        AS disk,
+			toUInt64(sum(net_in))           AS net_in,
+			toUInt64(sum(net_out))          AS net_out,
+			toUInt64(sum(disk_read_bytes))  AS disk_read,
+			toUInt64(sum(disk_write_bytes)) AS disk_write
+		FROM host_metrics
+		WHERE host_id = ? AND timestamp >= ? AND timestamp <= ?
+		GROUP BY bucket
+		ORDER BY bucket ASC
+	`, bucketFn), hostID, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("ClickHouse 查询主机时序指标失败: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanHostMetricRows(rows, hostID, "clickhouse")
+}
+
+// getHostMetricsFromMaterializedView 查物化视图 host_metrics_hourly（用于 >= 24h 范围）
+func (s *MetricsService) getHostMetricsFromMaterializedView(ctx context.Context, hostID string, start, end time.Time) (*HostMetrics, error) {
+	rows, err := s.chConn.Query(ctx, `
+		SELECT
+			hour                              AS bucket,
+			round(avgMerge(cpu_avg),1)        AS cpu,
+			round(avgMerge(mem_avg),1)        AS mem,
+			round(avgMerge(disk_avg),1)       AS disk,
+			toUInt64(sumMerge(net_in_total))  AS net_in,
+			toUInt64(sumMerge(net_out_total)) AS net_out,
+			toUInt64(sumMerge(disk_read_total))  AS disk_read,
+			toUInt64(sumMerge(disk_write_total)) AS disk_write
+		FROM host_metrics_hourly
+		WHERE host_id = ? AND hour >= ? AND hour <= ?
+		GROUP BY hour
+		ORDER BY hour ASC
+	`, hostID, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("ClickHouse 查询物化视图指标失败: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanHostMetricRows(rows, hostID, "clickhouse_mv")
+}
+
+// scanHostMetricRows 扫描指标查询结果行，复用于原始表和物化视图查询
+func (s *MetricsService) scanHostMetricRows(rows chdriver.Rows, hostID, source string) (*HostMetrics, error) {
+	metrics := &HostMetrics{HostID: hostID, Source: source}
+	ts := &TimeSeriesMetrics{}
+	var lastCPU, lastMem, lastDisk float64
+
+	for rows.Next() {
+		var bucket time.Time
+		var cpu, mem, disk float64
+		var netIn, netOut, diskRead, diskWrite uint64
+		if err := rows.Scan(&bucket, &cpu, &mem, &disk, &netIn, &netOut, &diskRead, &diskWrite); err != nil {
+			continue
+		}
+		ts.CPUUsage = append(ts.CPUUsage, TimeSeriesPoint{Timestamp: bucket, Value: cpu})
+		ts.MemUsage = append(ts.MemUsage, TimeSeriesPoint{Timestamp: bucket, Value: mem})
+		ts.DiskUsage = append(ts.DiskUsage, TimeSeriesPoint{Timestamp: bucket, Value: disk})
+		lastCPU, lastMem, lastDisk = cpu, mem, disk
+	}
+	if rows.Err() != nil {
+		s.logger.Warn("ClickHouse 游标读取错误", zap.Error(rows.Err()))
+	}
+
+	if len(ts.CPUUsage) > 0 {
+		now := time.Now()
+		metrics.Latest = &LatestMetrics{
+			CPUUsage:    &lastCPU,
+			MemUsage:    &lastMem,
+			DiskUsage:   &lastDisk,
+			CollectedAt: &now,
+		}
+		metrics.TimeSeries = ts
+	}
+	return metrics, nil
 }
 
 // getHostMetricsFromMySQL 从 MySQL 获取主机监控数据
@@ -129,8 +247,9 @@ func (s *MetricsService) getHostMetricsFromPrometheus(ctx context.Context, hostI
 	// 查询最新监控数据（即时查询）
 	latest, err := s.getLatestMetricsFromPrometheus(ctx, labels)
 	if err != nil {
-		s.logger.Warn("从 Prometheus 查询最新监控数据失败", zap.Error(err))
-	} else {
+		return nil, fmt.Errorf("查询 Prometheus 最新监控数据失败: %w", err)
+	}
+	if latest != nil {
 		metrics.Latest = latest
 	}
 
@@ -138,8 +257,9 @@ func (s *MetricsService) getHostMetricsFromPrometheus(ctx context.Context, hostI
 	if startTime != nil && endTime != nil {
 		timeSeries, err := s.getTimeSeriesFromPrometheus(ctx, labels, *startTime, *endTime)
 		if err != nil {
-			s.logger.Warn("从 Prometheus 查询时间序列数据失败", zap.Error(err))
-		} else {
+			return nil, fmt.Errorf("查询 Prometheus 时间序列数据失败: %w", err)
+		}
+		if timeSeries != nil && timeSeries.hasData() {
 			metrics.TimeSeries = timeSeries
 		}
 	}
@@ -150,23 +270,55 @@ func (s *MetricsService) getHostMetricsFromPrometheus(ctx context.Context, hostI
 // getLatestMetricsFromPrometheus 从 Prometheus 获取最新监控数据
 func (s *MetricsService) getLatestMetricsFromPrometheus(ctx context.Context, labels map[string]string) (*LatestMetrics, error) {
 	latest := &LatestMetrics{}
+	var firstErr error
 
-	// 查询 CPU 使用率
-	if cpuValue, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_cpu_usage", labels); err == nil && cpuValue != nil {
-		latest.CPUUsage = cpuValue
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_cpu_usage", labels); err == nil && v != nil {
+		latest.CPUUsage = v
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_mem_usage", labels); err == nil && v != nil {
+		latest.MemUsage = v
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_disk_usage", labels); err == nil && v != nil {
+		latest.DiskUsage = v
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_net_in", labels); err == nil && v != nil {
+		u := uint64(*v)
+		latest.NetBytesRecv = &u
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_net_out", labels); err == nil && v != nil {
+		u := uint64(*v)
+		latest.NetBytesSent = &u
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_disk_read_bytes", labels); err == nil && v != nil {
+		u := uint64(*v)
+		latest.DiskReadBytes = &u
+	} else if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_disk_write_bytes", labels); err == nil && v != nil {
+		u := uint64(*v)
+		latest.DiskWriteBytes = &u
+	} else if err != nil && firstErr == nil {
+		firstErr = err
 	}
 
-	// 查询内存使用率
-	if memValue, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_mem_usage", labels); err == nil && memValue != nil {
-		latest.MemUsage = memValue
+	if !latest.hasData() {
+		if firstErr != nil {
+			return nil, firstErr
+		}
+		return nil, nil
 	}
 
-	// 查询磁盘使用率
-	if diskValue, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_host_disk_usage", labels); err == nil && diskValue != nil {
-		latest.DiskUsage = diskValue
-	}
-
-	// 设置采集时间（使用当前时间）
 	now := time.Now()
 	latest.CollectedAt = &now
 
@@ -176,6 +328,7 @@ func (s *MetricsService) getLatestMetricsFromPrometheus(ctx context.Context, lab
 // getTimeSeriesFromPrometheus 从 Prometheus 获取时间序列数据
 func (s *MetricsService) getTimeSeriesFromPrometheus(ctx context.Context, labels map[string]string, start, end time.Time) (*TimeSeriesMetrics, error) {
 	timeSeries := &TimeSeriesMetrics{}
+	var firstErr error
 
 	// 计算步长（根据时间范围自动调整）
 	duration := end.Sub(start)
@@ -190,26 +343,51 @@ func (s *MetricsService) getTimeSeriesFromPrometheus(ctx context.Context, labels
 		step = "1h" // 1 小时
 	}
 
-	// 查询 CPU 使用率时间序列
-	if cpuPoints, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_cpu_usage", labels, start, end, step); err == nil {
-		timeSeries.CPUUsage = convertToTimeSeriesPoints(cpuPoints)
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_cpu_usage", labels, start, end, step); err == nil {
+		timeSeries.CPUUsage = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_mem_usage", labels, start, end, step); err == nil {
+		timeSeries.MemUsage = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_disk_usage", labels, start, end, step); err == nil {
+		timeSeries.DiskUsage = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_net_in", labels, start, end, step); err == nil {
+		timeSeries.NetIn = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_net_out", labels, start, end, step); err == nil {
+		timeSeries.NetOut = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_disk_read_bytes", labels, start, end, step); err == nil {
+		timeSeries.DiskRead = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_disk_write_bytes", labels, start, end, step); err == nil {
+		timeSeries.DiskWrite = convertToTimeSeriesPoints(pts)
+	} else if firstErr == nil {
+		firstErr = err
 	}
 
-	// 查询内存使用率时间序列
-	if memPoints, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_mem_usage", labels, start, end, step); err == nil {
-		timeSeries.MemUsage = convertToTimeSeriesPoints(memPoints)
-	}
-
-	// 查询磁盘使用率时间序列
-	if diskPoints, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_host_disk_usage", labels, start, end, step); err == nil {
-		timeSeries.DiskUsage = convertToTimeSeriesPoints(diskPoints)
+	if !timeSeries.hasData() && firstErr != nil {
+		return nil, firstErr
 	}
 
 	return timeSeries, nil
 }
 
 // getTimeSeriesFromMySQL 从 MySQL 获取时间序列数据
-func (s *MetricsService) getTimeSeriesFromMySQL(ctx context.Context, hostID string, start, end time.Time) (*TimeSeriesMetrics, error) {
+func (s *MetricsService) getTimeSeriesFromMySQL(_ context.Context, hostID string, start, end time.Time) (*TimeSeriesMetrics, error) {
 	timeSeries := &TimeSeriesMetrics{}
 
 	// 查询 CPU 使用率时间序列
@@ -276,4 +454,32 @@ func convertToTimeSeriesPoints(points []prometheus.TimeSeriesPoint) []TimeSeries
 		})
 	}
 	return result
+}
+
+func (m *LatestMetrics) hasData() bool {
+	if m == nil {
+		return false
+	}
+
+	return m.CPUUsage != nil ||
+		m.MemUsage != nil ||
+		m.DiskUsage != nil ||
+		m.NetBytesSent != nil ||
+		m.NetBytesRecv != nil ||
+		m.DiskReadBytes != nil ||
+		m.DiskWriteBytes != nil
+}
+
+func (m *TimeSeriesMetrics) hasData() bool {
+	if m == nil {
+		return false
+	}
+
+	return len(m.CPUUsage) > 0 ||
+		len(m.MemUsage) > 0 ||
+		len(m.DiskUsage) > 0 ||
+		len(m.NetIn) > 0 ||
+		len(m.NetOut) > 0 ||
+		len(m.DiskRead) > 0 ||
+		len(m.DiskWrite) > 0
 }

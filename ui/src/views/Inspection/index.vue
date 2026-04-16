@@ -66,6 +66,7 @@
           <a-select v-model:value="filterIssue" placeholder="问题筛选" style="width: 150px" allow-clear>
             <a-select-option value="agent_outdated">Agent 待更新</a-select-option>
             <a-select-option value="plugin_error">插件异常</a-select-option>
+            <a-select-option value="plugin_dormant">插件休眠</a-select-option>
             <a-select-option value="plugin_outdated">插件待更新</a-select-option>
           </a-select>
           <a-select v-model:value="filterAgentVersion" placeholder="Agent 版本" style="width: 130px" allow-clear>
@@ -134,6 +135,9 @@
       <div v-if="selectedRowKeys.length > 0" class="batch-bar">
         <span>已选择 {{ selectedRowKeys.length }} 台主机</span>
         <a-space>
+          <a-popconfirm title="确定为选中主机批量安装 Tetragon？" @confirm="handleBatchInstallTetragon">
+            <a-button type="primary" size="small" :loading="depInstalling">批量安装 Tetragon</a-button>
+          </a-popconfirm>
           <a-popconfirm title="确定批量重启选中主机的 Agent？" @confirm="handleBatchRestart">
             <a-button type="primary" danger size="small">批量重启 Agent</a-button>
           </a-popconfirm>
@@ -144,12 +148,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { inspectionApi, type InspectionHostItem, type InspectionSummary } from '@/api/inspection'
 import { hostsApi } from '@/api/hosts'
 import { formatDateTime } from '@/utils/date'
+
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const hosts = ref<InspectionHostItem[]>([])
@@ -162,12 +170,22 @@ const summary = ref<InspectionSummary>({
   plugin_outdated_count: 0,
 })
 const selectedRowKeys = ref<string[]>([])
-const searchText = ref('')
-const filterStatus = ref<string | undefined>(undefined)
-const filterIssue = ref<string | undefined>(undefined)
-const filterAgentVersion = ref<string | undefined>(undefined)
+const searchText = ref((route.query.search as string) || '')
+const filterStatus = ref<string | undefined>((route.query.status as string) || undefined)
+const filterIssue = ref<string | undefined>((route.query.issue as string) || undefined)
+const filterAgentVersion = ref<string | undefined>((route.query.agent_version as string) || undefined)
 const latestAgentVersion = ref('')
 const latestPluginVersions = ref<Record<string, string>>({})
+
+// URI 持久化：筛选条件变更时同步到 URL
+watch([filterStatus, filterIssue, filterAgentVersion, searchText], () => {
+  const query: Record<string, string> = {}
+  if (filterStatus.value) query.status = filterStatus.value
+  if (filterIssue.value) query.issue = filterIssue.value
+  if (filterAgentVersion.value) query.agent_version = filterAgentVersion.value
+  if (searchText.value) query.search = searchText.value
+  router.replace({ query })
+})
 
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
@@ -206,6 +224,8 @@ const filteredHosts = computed(() => {
     result = result.filter(h => isAgentOutdated(h))
   } else if (filterIssue.value === 'plugin_error') {
     result = result.filter(h => h.plugins?.some(p => p.status === 'error' || p.status === 'stopped'))
+  } else if (filterIssue.value === 'plugin_dormant') {
+    result = result.filter(h => h.plugins?.some(p => p.status === 'dormant'))
   } else if (filterIssue.value === 'plugin_outdated') {
     result = result.filter(h => h.plugins?.some(p => p.need_update))
   }
@@ -231,6 +251,7 @@ const pluginStatusColor = (status: string) => {
     case 'stopped': return 'orange'
     case 'error': return 'red'
     case 'updating': return 'blue'
+    case 'dormant': return 'purple'
     default: return 'default'
   }
 }
@@ -241,6 +262,7 @@ const pluginStatusText = (status: string) => {
     case 'stopped': return '已停止'
     case 'error': return '异常'
     case 'updating': return '更新中'
+    case 'dormant': return '休眠'
     default: return status
   }
 }
@@ -272,6 +294,21 @@ const handleRestartAgent = async (record: InspectionHostItem) => {
     message.success('重启命令已提交')
   } catch (error: any) {
     message.error(error?.message || '重启失败')
+  }
+}
+
+const depInstalling = ref(false)
+
+const handleBatchInstallTetragon = async () => {
+  depInstalling.value = true
+  try {
+    await hostsApi.installDependency(selectedRowKeys.value, 'tetragon')
+    message.success(`已向 ${selectedRowKeys.value.length} 台主机下发 Tetragon 安装命令`)
+    selectedRowKeys.value = []
+  } catch (error: any) {
+    message.error(error?.message || '批量安装 Tetragon 失败')
+  } finally {
+    depInstalling.value = false
   }
 }
 

@@ -76,11 +76,8 @@
                 {{ statusTextMap[record.status] }}
               </a-tag>
             </template>
-            <template v-if="column.key === 'target'">
-              <div>
-                <a-tag :bordered="false" color="purple" v-if="record.namespace">{{ record.namespace }}</a-tag>
-                <span>{{ record.target }}</span>
-              </div>
+            <template v-if="column.key === 'alarmType'">
+              <a-tag :color="alarmTypeColorMap[record.alarmType] || 'default'" :bordered="false">{{ alarmTypeTextMap[record.alarmType] || record.alarmType }}</a-tag>
             </template>
             <template v-if="column.key === 'action'">
               <a-space>
@@ -94,19 +91,49 @@
     </div>
 
     <!-- 告警详情 Drawer -->
-    <a-drawer v-model:open="showDetail" title="告警详情" width="640">
+    <a-drawer v-model:open="showDetail" title="告警详情" width="680">
       <template v-if="detailRecord">
-        <a-descriptions :column="1" bordered size="small">
+        <!-- 告警标题 -->
+        <div class="alarm-detail-header">
+          <a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false" class="severity-tag">{{ severityTextMap[detailRecord.severity] }}</a-tag>
+          <span class="alarm-detail-title">{{ detailRecord.title }}</span>
+        </div>
+
+        <!-- 告警摘要 -->
+        <div class="alarm-detail-message">{{ detailRecord.message }}</div>
+
+        <!-- 规则说明 -->
+        <div class="alarm-detail-section" v-if="detailRecord.description">
+          <div class="section-label">规则说明</div>
+          <div class="section-content">{{ detailRecord.description }}</div>
+        </div>
+
+        <!-- 处置建议 -->
+        <div class="alarm-detail-section remediation" v-if="detailRecord.remediation">
+          <div class="section-label">处置建议</div>
+          <div class="section-content remediation-content">{{ detailRecord.remediation }}</div>
+        </div>
+
+        <a-divider style="margin: 16px 0" />
+
+        <!-- 基本信息 -->
+        <a-descriptions :column="2" bordered size="small">
           <a-descriptions-item label="告警 ID">{{ detailRecord.id }}</a-descriptions-item>
+          <a-descriptions-item label="告警类型">
+            <a-tag :color="alarmTypeColorMap[detailRecord.alarmType] || 'default'" :bordered="false">{{ alarmTypeTextMap[detailRecord.alarmType] || detailRecord.alarmType }}</a-tag>
+          </a-descriptions-item>
           <a-descriptions-item label="集群">{{ detailRecord.clusterName }}</a-descriptions-item>
-          <a-descriptions-item label="严重级别"><a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false">{{ severityTextMap[detailRecord.severity] }}</a-tag></a-descriptions-item>
-          <a-descriptions-item label="告警类型">{{ detailRecord.alarmType }}</a-descriptions-item>
-          <a-descriptions-item label="影响对象">{{ detailRecord.target }}</a-descriptions-item>
-          <a-descriptions-item label="Namespace">{{ detailRecord.namespace }}</a-descriptions-item>
-          <a-descriptions-item label="告警内容">{{ detailRecord.message }}</a-descriptions-item>
+          <a-descriptions-item label="Namespace">{{ detailRecord.namespace || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="影响对象" :span="2">{{ detailRecord.target || '-' }}</a-descriptions-item>
           <a-descriptions-item label="发现时间">{{ detailRecord.createdAt }}</a-descriptions-item>
+          <a-descriptions-item label="状态">
+            <a-tag :color="detailRecord.status === 'pending' ? 'orange' : detailRecord.status === 'processed' ? 'green' : 'default'" :bordered="false">
+              {{ statusTextMap[detailRecord.status] }}
+            </a-tag>
+          </a-descriptions-item>
         </a-descriptions>
-        <a-divider v-if="detailRecord.rawData">原始数据</a-divider>
+
+        <a-divider v-if="detailRecord.rawData" style="margin: 16px 0">原始审计事件</a-divider>
         <pre v-if="detailRecord.rawData" class="raw-json">{{ JSON.stringify(detailRecord.rawData, null, 2) }}</pre>
       </template>
     </a-drawer>
@@ -135,14 +162,32 @@ const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: tr
 const severityColorMap: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold', low: 'blue' }
 const severityTextMap: Record<string, string> = { critical: '紧急', high: '高危', medium: '中危', low: '低危' }
 const statusTextMap: Record<string, string> = { pending: '待处理', processed: '已处理', ignored: '已忽略' }
+const alarmTypeTextMap: Record<string, string> = {
+  container_escape: '容器逃逸',
+  abnormal_process: '异常进程',
+  abnormal_network: '异常网络',
+  file_tamper: '文件篡改',
+  privilege_escalation: '权限提升',
+  reverse_shell: '反弹 Shell',
+  crypto_mining: '挖矿行为',
+}
+const alarmTypeColorMap: Record<string, string> = {
+  container_escape: 'red',
+  abnormal_process: 'orange',
+  abnormal_network: 'purple',
+  file_tamper: 'gold',
+  privilege_escalation: 'red',
+  reverse_shell: 'red',
+  crypto_mining: 'volcano',
+}
 
 const columns = [
   { title: '告警时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
   { title: '级别', key: 'severity', width: 80 },
   { title: '集群', dataIndex: 'clusterName', key: 'clusterName', width: 140 },
-  { title: '告警类型', dataIndex: 'alarmType', key: 'alarmType', width: 140 },
-  { title: '影响对象', key: 'target' },
-  { title: '告警内容', dataIndex: 'message', key: 'message', ellipsis: true },
+  { title: '告警类型', key: 'alarmType', width: 120 },
+  { title: '告警标题', dataIndex: 'title', key: 'title', width: 260, ellipsis: true },
+  { title: '告警摘要', dataIndex: 'message', key: 'message', ellipsis: true },
   { title: '状态', key: 'status', width: 100 },
   { title: '操作', key: 'action', width: 130 },
 ]
@@ -168,7 +213,14 @@ const handleProcess = async (record: any) => { try { await apiClient.post(`/kube
 const handleBatchProcess = async () => { try { await apiClient.post('/kube/alarms/batch-process', { ids: selectedRowKeys.value }); message.success('批量处理成功'); selectedRowKeys.value = []; loadAlarms() } catch { message.error('操作失败') } }
 const handleBatchIgnore = async () => { try { await apiClient.post('/kube/alarms/batch-ignore', { ids: selectedRowKeys.value }); message.success('批量忽略成功'); selectedRowKeys.value = []; loadAlarms() } catch { message.error('操作失败') } }
 
-onMounted(() => { loadAlarms() })
+const loadClusters = async () => {
+  try {
+    const res = await apiClient.get<any>('/kube/clusters', { params: { page_size: 100 } })
+    clusterOptions.value = (res.items ?? []).map((c: any) => ({ value: String(c.id), label: c.name }))
+  } catch { /* ignore */ }
+}
+
+onMounted(() => { loadClusters(); loadAlarms() })
 </script>
 
 <style scoped>
@@ -189,4 +241,14 @@ onMounted(() => { loadAlarms() })
 .filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; padding: 12px 16px; background: #F7F8FA; border-radius: 4px; border: 1px solid #E5E8EF; flex-wrap: wrap; }
 
 .raw-json { background: #F7F8FA; padding: 16px; border-radius: 4px; font-size: 12px; font-family: 'SF Mono', 'Consolas', monospace; overflow-x: auto; max-height: 300px; color: #1D2129; }
+
+.alarm-detail-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.alarm-detail-title { font-size: 16px; font-weight: 600; color: #1D2129; }
+.severity-tag { font-size: 13px; }
+.alarm-detail-message { font-size: 14px; color: #4E5969; line-height: 1.6; margin-bottom: 16px; padding: 12px 16px; background: #F7F8FA; border-radius: 6px; border-left: 3px solid #165DFF; }
+
+.alarm-detail-section { margin-bottom: 12px; }
+.section-label { font-size: 13px; font-weight: 600; color: #1D2129; margin-bottom: 6px; }
+.section-content { font-size: 13px; color: #4E5969; line-height: 1.8; padding: 10px 14px; background: #F7F8FA; border-radius: 6px; }
+.alarm-detail-section.remediation .section-content { background: #FFF7E6; border-left: 3px solid #FF7D00; white-space: pre-line; }
 </style>

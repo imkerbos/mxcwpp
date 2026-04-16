@@ -1,6 +1,12 @@
 import apiClient from './client'
 import type {
   PaginatedResponse,
+  AssetStatistics,
+  AssetHistoryResult,
+  AssetOverview,
+  AssetCollectionStatus,
+  AssetTopItem,
+  AssetRelationsResult,
   Process,
   Port,
   AssetUser,
@@ -123,35 +129,71 @@ export const assetsApi = {
     return apiClient.get<PaginatedResponse<Cron>>('/assets/crons', { params })
   },
 
-  // 获取资产统计信息（用于资产指纹展示）
-  getStatistics: async (hostId: string) => {
-    const [
-      processes,
-      ports,
-      users,
-      containers,
-      software,
-      services,
-      crons,
-    ] = await Promise.all([
-      assetsApi.listProcesses({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listPorts({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listUsers({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listContainers({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listSoftware({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listServices({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-      assetsApi.listCrons({ host_id: hostId, page: 1, page_size: 1 }).catch(() => ({ total: 0, items: [] })),
-    ])
+  // 导出资产数据（CSV / JSON）
+  exportAssets: (params: {
+    type: string
+    host_id?: string
+    business_line?: string
+    format?: 'csv' | 'json'
+  }) => {
+    return apiClient.download('/assets/export', params as Record<string, unknown>)
+  },
 
-    return {
-      processes: processes.total,
-      ports: ports.total,
-      users: users.total,
-      containers: containers.total,
-      packages: software.total,
-      services: services.total,
-      cron: crons.total,
-      integrity: 0, // TODO: 后续实现完整性校验统计
+  // 获取资产统计信息（用于资产指纹展示）
+  getStatistics: (hostId?: string, businessLine?: string) => {
+    const params = {
+      host_id: hostId || undefined,
+      business_line: businessLine || undefined,
     }
+    return apiClient.get<AssetStatistics>('/assets/statistics', { params })
+  },
+
+  // 获取资产总览
+  getOverview: (hostId?: string, businessLine?: string) => {
+    const params = {
+      host_id: hostId || undefined,
+      business_line: businessLine || undefined,
+    }
+    return apiClient.get<AssetOverview>('/assets/overview', { params })
+  },
+
+  // 获取资产历史快照
+  getHistory: (params?: {
+    host_id?: string
+    business_line?: string
+    days?: number
+    limit?: number
+  }) => {
+    return apiClient.get<AssetHistoryResult>('/assets/history', { params })
+  },
+
+  // 获取资产采集状态
+  getCollectionStatus: (hostId?: string, businessLine?: string) => {
+    const params = {
+      host_id: hostId || undefined,
+      business_line: businessLine || undefined,
+    }
+    return apiClient.get<AssetCollectionStatus>('/assets/status', { params })
+  },
+
+  // 获取主机资产关系视图
+  getRelations: (params: {
+    host_id?: string
+    business_line?: string
+    keyword?: string
+    limit?: number
+    all?: boolean
+  }) => {
+    return apiClient.get<AssetRelationsResult>('/assets/relations', { params })
+  },
+
+  // 获取资产 TopN 聚合
+  getTopN: (params: {
+    type: string
+    host_id?: string
+    business_line?: string
+    limit?: number
+  }) => {
+    return apiClient.get<{ items: AssetTopItem[] }>('/assets/top', { params })
   },
 }

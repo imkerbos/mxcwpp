@@ -2,12 +2,11 @@
   <div class="asset-fingerprint-page">
     <div class="page-header">
       <h2>资产指纹</h2>
-      <span class="page-header-hint">全局资产指纹采集汇总, 跨主机维度查看</span>
+      <span class="page-header-hint">全局资产指纹采集汇总，跨主机维度查看</span>
     </div>
 
-    <!-- 统计卡片 -->
     <a-row :gutter="[16, 16]" class="section-row">
-      <a-col :span="4" v-for="item in tabStats" :key="item.key">
+      <a-col v-for="item in tabStats" :key="item.key" :xs="12" :md="8" :xl="6" :xxl="4">
         <div
           class="fp-stat-card"
           :class="{ active: activeTab === item.key }"
@@ -22,270 +21,361 @@
       </a-col>
     </a-row>
 
-    <!-- Tab 内容 -->
     <div class="dashboard-card">
       <div class="card-body">
-        <!-- 筛选栏 -->
-        <div class="filter-bar">
-          <a-input-search
-            v-model:value="searchText"
-            :placeholder="searchPlaceholder"
-            style="width: 280px"
-            allow-clear
-            @search="loadData"
-          />
-          <a-select v-model:value="filterHost" style="width: 200px" placeholder="按主机筛选" allow-clear show-search @change="loadData">
-            <a-select-option v-for="h in hostOptions" :key="h.value" :value="h.value">{{ h.label }}</a-select-option>
-          </a-select>
-          <a-button @click="handleExport">导出</a-button>
+        <a-alert
+          v-if="collectionStatus?.message"
+          :type="collectionStatus.level === 'error' ? 'error' : 'warning'"
+          show-icon
+          style="margin-bottom: 16px"
+          :message="collectionStatus.message"
+          :description="collectionStatusDescription"
+        />
+
+        <div v-if="overview" class="overview-panel">
+          <div class="overview-header">
+            <div>
+              <div class="overview-title">采集覆盖总览</div>
+              <div class="overview-subtitle">
+                {{ overview.scope === 'host' ? '当前主机资产覆盖情况' : '全局主机资产覆盖情况' }}
+              </div>
+            </div>
+            <div class="overview-meta">
+              <span>覆盖率 {{ formatRate(overview.coverage_rate) }}</span>
+              <span v-if="overview.last_collected_at">最近采集 {{ overview.last_collected_at }}</span>
+            </div>
+          </div>
+
+          <a-row :gutter="[12, 12]">
+            <a-col v-for="item in overviewCards" :key="item.key" :xs="12" :md="8" :xl="4">
+              <div class="overview-card">
+                <div class="overview-card-label">{{ item.label }}</div>
+                <div class="overview-card-value">{{ item.value }}</div>
+                <div v-if="item.hint" class="overview-card-hint">{{ item.hint }}</div>
+              </div>
+            </a-col>
+          </a-row>
         </div>
 
-        <!-- 端口列表 -->
-        <a-table
-          v-if="activeTab === 'ports'"
-          :columns="portColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
+        <AssetRecordsTable
+          v-model:selectedHostId="filterHost"
+          v-model:selectedBusinessLine="filterBusinessLine"
+          :asset-type="activeTab"
+          :allow-host-filter="true"
+          :allow-business-line-filter="true"
+          :host-options="hostOptions"
+          :business-line-options="businessLineOptions"
+          :host-map="hostMap"
         />
 
-        <!-- 进程列表 -->
-        <a-table
-          v-if="activeTab === 'processes'"
-          :columns="processColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
-        />
+        <div class="insight-panel">
+          <div class="insight-header">
+            <div class="insight-title">资产洞察</div>
+            <div class="insight-subtitle">默认收起，并放到主资产表后面，避免影响主操作区</div>
+          </div>
 
-        <!-- 用户列表 -->
-        <a-table
-          v-if="activeTab === 'users'"
-          :columns="userColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
-        />
+          <a-collapse
+            v-model:activeKey="activeInsightPanels"
+            accordion
+            ghost
+            class="insight-collapse"
+          >
+            <a-collapse-panel key="portrait" header="资产画像">
+              <div class="topn-content">
+                <a-tag v-for="item in topItems" :key="`${item.name}-${item.value}`" color="blue">
+                  {{ item.name }} · {{ item.value }}
+                </a-tag>
+                <span v-if="topItems.length === 0" class="topn-empty">当前筛选条件下暂无聚合数据</span>
+              </div>
+            </a-collapse-panel>
 
-        <!-- 软件包 -->
-        <a-table
-          v-if="activeTab === 'packages'"
-          :columns="packageColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
-        />
+            <a-collapse-panel key="history" header="资产历史">
+              <AssetHistoryPanel
+                :host-id="filterHost"
+                :business-line="filterBusinessLine"
+                title="资产历史"
+              />
+            </a-collapse-panel>
 
-        <!-- 定时任务 -->
-        <a-table
-          v-if="activeTab === 'crontabs'"
-          :columns="crontabColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
-        />
+            <a-collapse-panel key="risk" header="风险收敛">
+              <div class="relations-subtitle">聚焦有漏洞、暴露端口或最近 FIM 变更的高风险资产对象</div>
+              <AssetRelationsPanel
+                :host-id="filterHost"
+                :business-line="filterBusinessLine"
+                :default-only-high-risk="true"
+              />
+            </a-collapse-panel>
 
-        <!-- 服务列表 -->
-        <a-table
-          v-if="activeTab === 'services'"
-          :columns="serviceColumns"
-          :data-source="tableData"
-          :loading="loading"
-          :pagination="pagination"
-          @change="handleTableChange"
-          size="middle"
-          row-key="id"
-        />
+            <a-collapse-panel key="relations" header="资产关系">
+              <div class="relations-subtitle">跨主机检索进程、端口、应用、软件包、漏洞与 FIM 变更关联</div>
+              <AssetRelationsPanel
+                :host-id="filterHost"
+                :business-line="filterBusinessLine"
+              />
+            </a-collapse-panel>
+          </a-collapse>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   ApiOutlined,
-  CodeOutlined,
-  UserOutlined,
   AppstoreOutlined,
-  ClockCircleOutlined,
+  CloudOutlined,
   CloudServerOutlined,
+  CodeOutlined,
+  DatabaseOutlined,
+  DeploymentUnitOutlined,
+  HddOutlined,
+  NodeIndexOutlined,
+  PartitionOutlined,
+  UserOutlined,
 } from '@ant-design/icons-vue'
-import apiClient from '@/api/client'
+import { assetsApi } from '@/api/assets'
+import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
+import { hostsApi } from '@/api/hosts'
+import type { AssetCollectionStatus, AssetOverview, AssetTopItem } from '@/api/types'
+import AssetHistoryPanel from '@/components/assets/AssetHistoryPanel.vue'
+import AssetRecordsTable from '@/components/assets/AssetRecordsTable.vue'
+import AssetRelationsPanel from '@/components/assets/AssetRelationsPanel.vue'
 
-const activeTab = ref('ports')
-const searchText = ref('')
+type AssetTabKey =
+  | 'ports'
+  | 'processes'
+  | 'users'
+  | 'packages'
+  | 'containers'
+  | 'apps'
+  | 'network-interfaces'
+  | 'volumes'
+  | 'kmods'
+  | 'services'
+  | 'crontabs'
+
+interface HostOption {
+  value: string
+  label: string
+}
+
+interface HostMapItem {
+  hostname?: string
+  ipv4?: string[]
+  business_line?: string
+}
+
+interface BusinessLineOption {
+  value: string
+  label: string
+}
+
+interface AssetTabStat {
+  key: AssetTabKey
+  label: string
+  count: number
+  icon: any
+}
+
+const activeTab = ref<AssetTabKey>('ports')
 const filterHost = ref<string>()
-const loading = ref(false)
-const tableData = ref<any[]>([])
-const hostOptions = ref<any[]>([])
+const filterBusinessLine = ref<string>()
+const collectionStatus = ref<AssetCollectionStatus>()
+const overview = ref<AssetOverview>()
+const activeInsightPanels = ref<string[]>([])
+const hostOptions = ref<HostOption[]>([])
+const businessLineOptions = ref<BusinessLineOption[]>([])
+const hostMap = ref<Record<string, HostMapItem>>({})
+const topItems = ref<AssetTopItem[]>([])
 
-const pagination = ref({
-  current: 1,
-  pageSize: 20,
-  total: 0,
-  showSizeChanger: true,
-  showTotal: (total: number) => `共 ${total} 条`,
-})
-
-const tabStats = ref([
+const tabStats = ref<AssetTabStat[]>([
   { key: 'ports', label: '开放端口', count: 0, icon: ApiOutlined },
   { key: 'processes', label: '运行进程', count: 0, icon: CodeOutlined },
   { key: 'users', label: '系统用户', count: 0, icon: UserOutlined },
   { key: 'packages', label: '软件包', count: 0, icon: AppstoreOutlined },
-  { key: 'crontabs', label: '定时任务', count: 0, icon: ClockCircleOutlined },
+  { key: 'containers', label: '容器', count: 0, icon: CloudOutlined },
+  { key: 'apps', label: '应用', count: 0, icon: DatabaseOutlined },
+  { key: 'network-interfaces', label: '网卡', count: 0, icon: NodeIndexOutlined },
+  { key: 'volumes', label: '磁盘卷', count: 0, icon: HddOutlined },
+  { key: 'kmods', label: '内核模块', count: 0, icon: PartitionOutlined },
   { key: 'services', label: '系统服务', count: 0, icon: CloudServerOutlined },
+  { key: 'crontabs', label: '定时任务', count: 0, icon: DeploymentUnitOutlined },
 ])
 
-const searchPlaceholder = computed(() => {
-  const map: Record<string, string> = {
-    ports: '搜索端口号或服务名',
-    processes: '搜索进程名或PID',
-    users: '搜索用户名',
-    packages: '搜索软件包名',
-    crontabs: '搜索任务命令',
-    services: '搜索服务名',
+const collectionStatusDescription = computed(() => {
+  if (!collectionStatus.value) return undefined
+
+  const parts: string[] = []
+  if (collectionStatus.value.collector.version) {
+    parts.push(`collector 版本: ${collectionStatus.value.collector.version}`)
   }
-  return map[activeTab.value] || '搜索'
+  if (collectionStatus.value.last_collected_at) {
+    parts.push(`最近采集时间: ${collectionStatus.value.last_collected_at}`)
+  }
+  return parts.length > 0 ? parts.join(' | ') : undefined
 })
 
-const portColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '端口', dataIndex: 'port', key: 'port', width: 100 },
-  { title: '协议', dataIndex: 'protocol', key: 'protocol', width: 80 },
-  { title: '进程名', dataIndex: 'processName', key: 'processName', width: 140 },
-  { title: 'PID', dataIndex: 'pid', key: 'pid', width: 80 },
-  { title: '监听地址', dataIndex: 'listenAddr', key: 'listenAddr' },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-]
+const overviewCards = computed(() => {
+  if (!overview.value) return []
 
-const processColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '进程名', dataIndex: 'name', key: 'name', width: 160 },
-  { title: 'PID', dataIndex: 'pid', key: 'pid', width: 80 },
-  { title: '用户', dataIndex: 'user', key: 'user', width: 120 },
-  { title: '命令行', dataIndex: 'cmdline', key: 'cmdline', ellipsis: true },
-  { title: 'CPU%', dataIndex: 'cpu', key: 'cpu', width: 80 },
-  { title: '内存%', dataIndex: 'memory', key: 'memory', width: 80 },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-]
+  return [
+    {
+      key: 'total',
+      label: '纳管主机',
+      value: overview.value.total_hosts,
+      hint: overview.value.scope === 'host' ? '当前筛选主机' : '当前筛选范围内主机总数',
+    },
+    {
+      key: 'covered',
+      label: '已采集主机',
+      value: overview.value.covered_hosts,
+      hint: '至少存在一类资产指纹',
+    },
+    {
+      key: 'uncovered',
+      label: '待补采主机',
+      value: overview.value.uncovered_hosts,
+      hint: '当前还没有任何资产数据',
+    },
+    {
+      key: 'online',
+      label: '在线主机',
+      value: overview.value.online_hosts,
+      hint: '最近心跳在线',
+    },
+    {
+      key: 'offline',
+      label: '离线主机',
+      value: overview.value.offline_hosts,
+      hint: '当前不可达或无心跳',
+    },
+    {
+      key: 'business-line',
+      label: '业务线',
+      value: overview.value.business_line_count,
+      hint: '当前范围覆盖的业务线数量',
+    },
+  ]
+})
 
-const userColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '用户名', dataIndex: 'username', key: 'username', width: 140 },
-  { title: 'UID', dataIndex: 'uid', key: 'uid', width: 80 },
-  { title: 'GID', dataIndex: 'gid', key: 'gid', width: 80 },
-  { title: 'Home', dataIndex: 'homeDir', key: 'homeDir' },
-  { title: 'Shell', dataIndex: 'shell', key: 'shell', width: 160 },
-  { title: '最后登录', dataIndex: 'lastLogin', key: 'lastLogin', width: 180 },
-]
+const formatRate = (value?: number) => `${(value ?? 0).toFixed(1)}%`
 
-const packageColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '包名', dataIndex: 'name', key: 'name', width: 200 },
-  { title: '版本', dataIndex: 'version', key: 'version', width: 200 },
-  { title: '类型', dataIndex: 'type', key: 'type', width: 100 },
-  { title: '架构', dataIndex: 'arch', key: 'arch', width: 100 },
-  { title: '安装时间', dataIndex: 'installedAt', key: 'installedAt', width: 180 },
-]
-
-const crontabColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '用户', dataIndex: 'user', key: 'user', width: 120 },
-  { title: '调度', dataIndex: 'schedule', key: 'schedule', width: 160 },
-  { title: '命令', dataIndex: 'command', key: 'command', ellipsis: true },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-]
-
-const serviceColumns = [
-  { title: '主机', dataIndex: 'hostname', key: 'hostname', width: 160 },
-  { title: '服务名', dataIndex: 'name', key: 'name', width: 200 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '启动方式', dataIndex: 'startType', key: 'startType', width: 100 },
-  { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
-  { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 180 },
-]
-
-const loadData = async () => {
-  loading.value = true
+const loadOverview = async () => {
   try {
-    const res = await apiClient.get<any>(`/asset-fingerprint/${activeTab.value}`, {
-      params: {
-        page: pagination.value.current,
-        page_size: pagination.value.pageSize,
-        search: searchText.value || undefined,
-        host_id: filterHost.value || undefined,
-      },
-    })
-    tableData.value = res.items ?? []
-    pagination.value.total = res.total ?? 0
+    overview.value = await assetsApi.getOverview(filterHost.value, filterBusinessLine.value)
   } catch {
-    tableData.value = []
-  } finally {
-    loading.value = false
+    overview.value = undefined
   }
 }
 
 const loadStats = async () => {
   try {
-    const res = await apiClient.get<any>('/asset-fingerprint/stats')
-    if (res) {
-      tabStats.value.forEach(tab => {
-        tab.count = res[tab.key] ?? 0
-      })
+    const stats = await assetsApi.getStatistics(filterHost.value, filterBusinessLine.value)
+    for (const tab of tabStats.value) {
+      if (tab.key === 'ports') tab.count = stats.ports ?? 0
+      else if (tab.key === 'processes') tab.count = stats.processes ?? 0
+      else if (tab.key === 'users') tab.count = stats.users ?? 0
+      else if (tab.key === 'packages') tab.count = stats.software ?? 0
+      else if (tab.key === 'containers') tab.count = stats.containers ?? 0
+      else if (tab.key === 'apps') tab.count = stats.apps ?? 0
+      else if (tab.key === 'network-interfaces') tab.count = stats.network_interfaces ?? 0
+      else if (tab.key === 'volumes') tab.count = stats.volumes ?? 0
+      else if (tab.key === 'kmods') tab.count = stats.kmods ?? 0
+      else if (tab.key === 'services') tab.count = stats.services ?? 0
+      else if (tab.key === 'crontabs') tab.count = stats.crons ?? 0
     }
-  } catch {
-    // API 未就绪
-  }
-}
-
-const loadHosts = async () => {
-  try {
-    const res = await apiClient.get<any>('/hosts', { params: { page_size: 1000 } })
-    hostOptions.value = (res.items ?? []).map((h: any) => ({
-      value: h.id,
-      label: h.hostname || h.intranet_ip,
-    }))
   } catch {
     // ignore
   }
 }
 
-const handleTableChange = (pag: any) => {
-  pagination.value.current = pag.current
-  pagination.value.pageSize = pag.pageSize
-  loadData()
+const loadCollectionStatus = async () => {
+  try {
+    collectionStatus.value = await assetsApi.getCollectionStatus(filterHost.value, filterBusinessLine.value)
+  } catch {
+    collectionStatus.value = undefined
+  }
 }
 
-const handleExport = () => {
-  // TODO: 实现导出功能
+const loadTopN = async () => {
+  try {
+    const res = await assetsApi.getTopN({
+      type: activeTab.value,
+      host_id: filterHost.value,
+      business_line: filterBusinessLine.value,
+      limit: 5,
+    })
+    topItems.value = res.items ?? []
+  } catch {
+    topItems.value = []
+  }
 }
+
+const loadHosts = async () => {
+  try {
+    const params: Record<string, unknown> = { page_size: 1000 }
+    if (filterBusinessLine.value) params.business_line = filterBusinessLine.value
+    const res = await hostsApi.list(params)
+    hostOptions.value = (res.items ?? []).map((host) => ({
+      value: host.host_id,
+      label: host.hostname ? `${host.hostname} (${host.ipv4?.[0] || host.host_id.slice(0, 12)})` : (host.ipv4?.[0] || host.host_id),
+    }))
+
+    hostMap.value = Object.fromEntries((res.items ?? []).map((host) => [
+      host.host_id,
+      {
+        hostname: host.hostname,
+        ipv4: host.ipv4,
+        business_line: host.business_line,
+      },
+    ]))
+  } catch {
+    hostOptions.value = []
+    hostMap.value = {}
+  }
+}
+
+const loadBusinessLines = async () => {
+  try {
+    const res = await businessLinesApi.list({ enabled: 'true', page_size: 1000 })
+    businessLineOptions.value = (res.items ?? []).map((item: BusinessLine) => ({
+      value: item.code,
+      label: item.name,
+    }))
+  } catch {
+    businessLineOptions.value = []
+  }
+}
+
+watch(filterHost, () => {
+  loadOverview()
+  loadStats()
+  loadCollectionStatus()
+  loadTopN()
+})
+
+watch(filterBusinessLine, () => {
+  filterHost.value = undefined
+  loadHosts()
+  loadOverview()
+  loadStats()
+  loadCollectionStatus()
+  loadTopN()
+})
 
 watch(activeTab, () => {
-  pagination.value.current = 1
-  searchText.value = ''
-  loadData()
+  loadTopN()
 })
 
 onMounted(() => {
-  loadStats()
+  loadBusinessLines()
   loadHosts()
-  loadData()
+  loadOverview()
+  loadStats()
+  loadCollectionStatus()
+  loadTopN()
 })
 </script>
 
@@ -301,12 +391,16 @@ onMounted(() => {
   text-align: center;
   cursor: pointer;
   transition: all 0.2s;
+  height: 100%;
 }
+
 .fp-stat-card:hover { border-color: #165DFF; }
+
 .fp-stat-card.active {
   border-color: #165DFF;
   background: #E8F3FF;
 }
+
 .fp-stat-icon { font-size: 20px; color: #165DFF; margin-bottom: 8px; }
 .fp-stat-value { font-size: 22px; font-weight: 700; color: #1D2129; line-height: 1.2; }
 .fp-stat-label { font-size: 12px; color: #86909C; margin-top: 4px; }
@@ -316,16 +410,116 @@ onMounted(() => {
   border: 1px solid #E5E8EF;
   border-radius: 8px;
 }
+
 .card-body { padding: 20px; }
 
-.filter-bar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+.overview-panel {
   margin-bottom: 16px;
-  padding: 12px 16px;
-  background: #F7F8FA;
-  border-radius: 4px;
+  padding: 16px;
+  background: linear-gradient(135deg, #FBFCFF 0%, #F5F9FF 100%);
+  border: 1px solid #DCE8FF;
+  border-radius: 10px;
+}
+
+.overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.overview-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1D2129;
+}
+
+.overview-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #86909C;
+}
+
+.overview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  font-size: 12px;
+  color: #4E5969;
+}
+
+.overview-card {
+  min-height: 96px;
+  padding: 14px;
+  background: #FFFFFF;
   border: 1px solid #E5E8EF;
+  border-radius: 8px;
+}
+
+.overview-card-label {
+  font-size: 12px;
+  color: #86909C;
+}
+
+.overview-card-value {
+  margin-top: 8px;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #1D2129;
+}
+
+.overview-card-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #4E5969;
+}
+
+.insight-panel {
+  margin-bottom: 16px;
+  padding: 16px;
+  background: #FFFFFF;
+  border: 1px solid #E5E8EF;
+  border-radius: 10px;
+}
+
+.insight-header {
+  margin-bottom: 8px;
+}
+
+.insight-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1D2129;
+}
+
+.insight-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #86909C;
+}
+
+.topn-empty {
+  font-size: 12px;
+  color: #86909C;
+}
+
+.insight-collapse :deep(.ant-collapse-header) {
+  font-weight: 600;
+  color: #1D2129;
+}
+
+.topn-content {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.relations-subtitle {
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #86909C;
 }
 </style>

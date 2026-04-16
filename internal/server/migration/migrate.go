@@ -57,6 +57,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("通知类别迁移处理", zap.Error(err))
 	}
 
+	// 添加性能优化索引（幂等）
+	if err := AddPerformanceIndexes(db, logger); err != nil {
+		logger.Warn("添加性能索引失败", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
 	return nil
 }

@@ -11,6 +11,226 @@ export interface PaginatedResponse<T> {
   items: T[]
 }
 
+export interface AssetStatistics {
+  processes: number
+  ports: number
+  users: number
+  software: number
+  containers: number
+  apps: number
+  network_interfaces: number
+  volumes: number
+  kmods: number
+  services: number
+  crons: number
+}
+
+export interface AssetCollectorStatus {
+  version?: string
+  config_enabled: boolean
+  package_uploaded: boolean
+  package_path?: string
+  host_status?: string
+  host_version?: string
+}
+
+export interface AssetCollectionStatus {
+  host_id?: string
+  scope: 'global' | 'host'
+  has_data: boolean
+  last_collected_at?: string
+  level?: 'warning' | 'error'
+  message?: string
+  collector: AssetCollectorStatus
+}
+
+export interface AssetOverview {
+  scope: 'global' | 'host'
+  total_hosts: number
+  covered_hosts: number
+  uncovered_hosts: number
+  online_hosts: number
+  offline_hosts: number
+  business_line_count: number
+  coverage_rate: number
+  last_collected_at?: string
+}
+
+export interface AssetHistoryPoint {
+  timestamp: string
+  total: number
+  delta_total: number
+  statistics: AssetStatistics
+}
+
+export interface AssetHistoryResult {
+  scope: 'global' | 'host'
+  host_id?: string
+  business_line?: string
+  total_snapshots: number
+  latest_collected_at?: string
+  points: AssetHistoryPoint[]
+}
+
+export interface AssetTopItem {
+  name: string
+  value: number
+}
+
+export interface AssetRelationProcess {
+  pid: string
+  ppid: string
+  exe: string
+  cmdline: string
+  username: string
+  container_id?: string
+  collected_at?: string
+}
+
+export interface AssetRelationHost {
+  host_id: string
+  hostname: string
+  ipv4?: string[]
+  business_line?: string
+  status?: string
+  agent_version?: string
+  runtime_type?: string
+  last_heartbeat?: string
+}
+
+export interface AssetRelationPort {
+  protocol: string
+  port: number
+  state: string
+}
+
+export interface AssetRelationApp {
+  app_type: string
+  app_name: string
+  version: string
+  port: number
+  config_path: string
+}
+
+export interface AssetRelationSoftware {
+  name: string
+  version: string
+  package_type: string
+  architecture: string
+}
+
+export interface AssetRelationContainer {
+  container_id: string
+  container_name: string
+  image: string
+  runtime: string
+  status: string
+}
+
+export interface AssetRelationService {
+  service_name: string
+  service_type: string
+  status: string
+  enabled: boolean
+}
+
+export interface AssetRelationConfidence {
+  level: 'exact' | 'mixed' | 'heuristic'
+  matched_by: string[]
+}
+
+export interface AssetRelationVulnerability {
+  cve_id: string
+  severity: string
+  component: string
+  status: string
+  current_version?: string
+  fixed_version?: string
+}
+
+export interface AssetRelationChange {
+  event_id: string
+  file_path: string
+  change_type: string
+  severity: string
+  category?: string
+  detected_at: string
+}
+
+export interface AssetRelationRiskSummary {
+  exposed_port_count: number
+  vulnerability_count: number
+  fim_change_count: number
+  last_changed_at?: string
+}
+
+export interface AssetRelationItem {
+  host: AssetRelationHost
+  process: AssetRelationProcess
+  ports?: AssetRelationPort[]
+  apps?: AssetRelationApp[]
+  software?: AssetRelationSoftware[]
+  services?: AssetRelationService[]
+  container?: AssetRelationContainer
+  confidence: AssetRelationConfidence
+  risks: AssetRelationRiskSummary
+  vulnerabilities?: AssetRelationVulnerability[]
+  recent_changes?: AssetRelationChange[]
+  related_kinds: string[]
+  relation_score: number
+}
+
+export interface AssetRelationsResult {
+  scope: 'global' | 'host'
+  host_id?: string
+  business_line?: string
+  total: number
+  items: AssetRelationItem[]
+}
+
+export interface VulnerabilityHost {
+  id: number
+  vulnId: number
+  hostId: string
+  hostname: string
+  ip: string
+  currentVersion: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Vulnerability {
+  id: number
+  cveId: string
+  severity: string
+  cvssScore: number
+  component: string
+  description: string
+  affectedHosts: number
+  status: string
+  discoveredAt: string
+  currentVersion: string
+  fixedVersion?: string
+  referenceUrl?: string
+  createdAt?: string
+  updatedAt?: string
+  hosts?: VulnerabilityHost[]
+}
+
+export interface VulnerabilityStats {
+  total: number
+  critical: number
+  high: number
+  affectedHosts: number
+}
+
+export interface VulnerabilityListResult {
+  total: number
+  items: Vulnerability[]
+  stats: VulnerabilityStats
+}
+
 // 运行时类型
 export type RuntimeType = 'vm' | 'docker' | 'k8s'
 
@@ -394,7 +614,7 @@ export interface HostMetrics {
   host_id: string
   latest?: LatestMetrics
   time_series?: TimeSeriesMetrics
-  source: 'mysql' | 'prometheus'
+  source: 'prometheus'
 }
 
 export interface LatestMetrics {
@@ -403,6 +623,8 @@ export interface LatestMetrics {
   disk_usage?: number
   net_bytes_sent?: number
   net_bytes_recv?: number
+  disk_read_bytes?: number
+  disk_write_bytes?: number
   collected_at?: string
 }
 
@@ -410,6 +632,10 @@ export interface TimeSeriesMetrics {
   cpu_usage?: TimeSeriesPoint[]
   mem_usage?: TimeSeriesPoint[]
   disk_usage?: TimeSeriesPoint[]
+  net_in?: TimeSeriesPoint[]
+  net_out?: TimeSeriesPoint[]
+  disk_read?: TimeSeriesPoint[]
+  disk_write?: TimeSeriesPoint[]
 }
 
 export interface TimeSeriesPoint {

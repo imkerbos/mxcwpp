@@ -4,10 +4,10 @@
 import apiClient from './client'
 
 // 组件分类
-export type ComponentCategory = 'agent' | 'plugin'
+export type ComponentCategory = 'agent' | 'plugin' | 'dependency'
 
 // 包类型
-export type PackageType = 'rpm' | 'deb' | 'binary'
+export type PackageType = 'rpm' | 'deb' | 'binary' | 'tgz'
 
 // 架构类型
 export type ArchType = 'amd64' | 'arm64'
@@ -98,6 +98,7 @@ export interface PluginSyncStatus {
 export interface BroadcastPluginConfigsResponse {
   plugin_count: number
   online_agent_count: number
+  skipped_container?: number
   plugins: Array<{
     name: string
     version: string

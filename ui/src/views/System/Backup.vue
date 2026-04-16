@@ -187,7 +187,16 @@ const handleDelete = async (id: string) => {
   catch { message.error('删除失败') }
 }
 
-onMounted(() => { loadBackups() })
+const loadAutoBackupConfig = async () => {
+  try {
+    const res = await apiClient.get<any>('/system/backup-config')
+    if (res) {
+      autoBackup.value = { enabled: res.enabled ?? false, frequency: res.frequency ?? 'daily', retention: res.retention ?? 7 }
+    }
+  } catch { /* 使用默认值 */ }
+}
+
+onMounted(() => { loadBackups(); loadAutoBackupConfig() })
 </script>
 
 <style scoped>

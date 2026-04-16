@@ -70,7 +70,7 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	// 5.2 初始化基线得分缓存（TTL: 5分钟）
 	scoreCache := biz.NewBaselineScoreCache(db, logger, 5*time.Minute)
 
-	// 5.3 初始化 Prometheus 客户端（如果配置了）
+	// 5.3 初始化 Prometheus 客户端（主机性能监控唯一数据源）
 	var prometheusClient *prometheus.Client
 	if cfg.Metrics.Prometheus.Enabled {
 		queryURL := extractPrometheusQueryURL(cfg, logger)
@@ -80,8 +80,8 @@ func Initialize(configPath string) (*ManagerServices, error) {
 		}
 	}
 
-	// 5.4 初始化监控数据查询服务
-	metricsService := biz.NewMetricsService(db, prometheusClient, logger)
+	// 5.4 初始化监控数据查询服务（主机性能监控仅使用 Prometheus）
+	metricsService := biz.NewMetricsService(db, prometheusClient, nil, logger)
 
 	return &ManagerServices{
 		Config:         cfg,
@@ -103,7 +103,7 @@ func extractPrometheusQueryURL(cfg *config.Config, logger *zap.Logger) string {
 	// 从 remote_write_url 提取基础 URL
 	remoteWriteURL := cfg.Metrics.Prometheus.RemoteWriteURL
 	if remoteWriteURL == "" {
-		logger.Warn("Prometheus 已启用但未配置查询 URL，将使用 MySQL 存储")
+		logger.Warn("Prometheus 已启用但未配置查询 URL")
 		return ""
 	}
 

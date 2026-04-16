@@ -98,14 +98,13 @@ export const menuConfig: MenuItem[] = [
     ],
   },
   {
-    key: 'rasp',
-    title: '应用防护',
+    key: 'runtime-detection',
+    title: '运行时检测',
     icon: ThunderboltOutlined,
     children: [
-      { key: 'rasp-apps', title: '应用列表', route: '/rasp/apps' },
-      { key: 'rasp-config', title: 'RASP 配置', route: '/rasp/config' },
-      { key: 'rasp-alarms', title: 'RASP 告警', route: '/rasp/alarms' },
-      { key: 'rasp-vulns', title: '运行时漏洞', route: '/rasp/vulns' },
+      { key: 'runtime-alerts', title: '告警事件', route: '/detection/events' },
+      { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },
+      { key: 'threat-intel', title: '威胁情报', route: '/threat-intel' },
     ],
   },
   {
@@ -114,7 +113,6 @@ export const menuConfig: MenuItem[] = [
     icon: SettingOutlined,
     children: [
       { key: 'system-components', title: '组件列表', route: '/system/components' },
-      { key: 'system-comp-policy', title: '组件策略', route: '/system/comp-policy' },
       { key: 'system-install', title: '安装配置', route: '/system/install' },
       { key: 'users', title: '用户管理', route: '/users' },
       { key: 'system-notification', title: '通知管理', route: '/system/notification' },
@@ -123,7 +121,7 @@ export const menuConfig: MenuItem[] = [
       { key: 'system-task-report', title: '任务报告', route: '/system/task-report' },
       { key: 'inspection', title: '运维巡检', route: '/system/inspection' },
       { key: 'system-backup', title: '配置备份', route: '/system/backup' },
-      { key: 'system-log-query', title: '日志查询', route: '/system/log-query' },
+      { key: 'system-migration', title: '迁移助手', route: '/system/migration', adminOnly: true },
       { key: 'system-collection', title: '平台授权', route: '/system/collection' },
     ],
   },

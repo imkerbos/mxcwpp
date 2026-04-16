@@ -51,7 +51,7 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'notify_category'">
-          <a-tag :color="record.notify_category === 'baseline_alert' ? 'green' : 'orange'">
+          <a-tag :color="NOTIFY_CATEGORY_COLOR_MAP[record.notify_category] || 'default'">
             {{ NOTIFY_CATEGORY_TEXT_MAP[record.notify_category] || record.notify_category }}
           </a-tag>
         </template>
@@ -63,20 +63,12 @@
           />
         </template>
         <template v-else-if="column.key === 'severities'">
-          <template v-if="record.notify_category === 'baseline_alert'">
+          <template v-if="record.severities?.length">
             <a-space size="small">
-              <a-tag v-if="record.severities?.includes('critical')" color="red" size="small">
-                严重
-              </a-tag>
-              <a-tag v-if="record.severities?.includes('high')" color="orange" size="small">
-                高危
-              </a-tag>
-              <a-tag v-if="record.severities?.includes('medium')" color="blue" size="small">
-                中危
-              </a-tag>
-              <a-tag v-if="record.severities?.includes('low')" color="default" size="small">
-                低危
-              </a-tag>
+              <a-tag v-if="record.severities.includes('critical')" color="red" size="small">严重</a-tag>
+              <a-tag v-if="record.severities.includes('high')" color="orange" size="small">高危</a-tag>
+              <a-tag v-if="record.severities.includes('medium')" color="blue" size="small">中危</a-tag>
+              <a-tag v-if="record.severities.includes('low')" color="default" size="small">低危</a-tag>
             </a-space>
           </template>
           <template v-else>
@@ -125,11 +117,11 @@
         :wrapper-col="{ span: 19 }"
       >
         <a-form-item label="通知类别" name="notify_category" required>
-          <a-radio-group v-model:value="formData.notify_category" @change="handleNotifyCategoryChange">
-            <a-radio v-for="opt in notifyCategoryOptions" :key="opt.value" :value="opt.value">
+          <a-select v-model:value="formData.notify_category" @change="handleNotifyCategoryChange" placeholder="请选择通知类别">
+            <a-select-option v-for="opt in notifyCategoryOptions" :key="opt.value" :value="opt.value">
               {{ opt.label }}
-            </a-radio>
-          </a-radio-group>
+            </a-select-option>
+          </a-select>
           <div class="form-tip">
             {{ notifyCategoryOptions.find(o => o.value === formData.notify_category)?.description }}
           </div>
@@ -143,8 +135,8 @@
           />
         </a-form-item>
 
-        <!-- 基线告警才显示通知等级 -->
-        <a-form-item v-if="formData.notify_category === 'baseline_alert'" label="通知等级" name="severities" required>
+        <!-- 带等级过滤的通知类别显示等级选择器 -->
+        <a-form-item v-if="currentCategoryHasSeverity" label="通知等级" name="severities" required>
           <div class="severity-section">
             <a-checkbox-group v-model:value="formData.severities" class="severity-checkbox-group">
               <a-checkbox value="critical">严重</a-checkbox>
@@ -165,6 +157,16 @@
             show-icon
             message="Agent 离线通知"
             description="当 Agent 断开连接时，将自动发送离线通知到配置的通知渠道。"
+          />
+        </a-form-item>
+
+        <!-- K8s 告警通知的说明 -->
+        <a-form-item v-if="formData.notify_category === 'kube_alert'" label="通知说明">
+          <a-alert
+            type="info"
+            show-icon
+            message="K8s 安全告警"
+            description="当 K8s 审计检测引擎触发安全告警时发送通知。主机范围配置对此类通知无效，始终按全局范围匹配。"
           />
         </a-form-item>
 
@@ -199,7 +201,7 @@
               allow-clear
               show-search
             >
-              <a-select-option v-for="bl in businessLines" :key="bl.name" :value="bl.name" :label="bl.name">
+              <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code" :label="bl.name">
                 {{ bl.name }}
               </a-select-option>
             </a-select>
@@ -371,14 +373,35 @@ import { hostsApi, type Host } from '@/api/hosts'
 
 // 通知类别选项
 const notifyCategoryOptions = [
-  { value: 'baseline_alert', label: '基线安全告警', description: '基线检测发现安全问题时发送通知' },
-  { value: 'agent_offline', label: 'Agent 离线通知', description: 'Agent 断开连接时发送通知' },
+  { value: 'baseline_alert', label: '基线安全告警', description: '基线检测发现安全问题时发送通知', hasSeverity: true },
+  { value: 'agent_offline', label: 'Agent 离线通知', description: 'Agent 断开连接时发送通知', hasSeverity: false },
+  { value: 'vulnerability_alert', label: '漏洞告警', description: '漏洞扫描发现高危漏洞时发送通知', hasSeverity: true },
+  { value: 'virus_alert', label: '病毒查杀告警', description: '检测到病毒或恶意文件时发送通知', hasSeverity: true },
+  { value: 'fim_alert', label: '文件完整性告警', description: '关键文件被篡改、新增或删除时发送通知', hasSeverity: true },
+  { value: 'runtime_alert', label: '运行时检测告警', description: '运行时检测规则触发告警时发送通知', hasSeverity: true },
+  { value: 'kube_alert', label: 'K8s 安全告警', description: 'K8s 审计检测规则触发告警时发送通知', hasSeverity: true },
 ]
 
 // 通知类别文本映射
 const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
   baseline_alert: '基线安全告警',
   agent_offline: 'Agent 离线通知',
+  vulnerability_alert: '漏洞告警',
+  virus_alert: '病毒查杀告警',
+  fim_alert: '文件完整性告警',
+  runtime_alert: '运行时检测告警',
+  kube_alert: 'K8s 安全告警',
+}
+
+// 通知类别颜色映射
+const NOTIFY_CATEGORY_COLOR_MAP: Record<string, string> = {
+  baseline_alert: 'green',
+  agent_offline: 'orange',
+  vulnerability_alert: 'red',
+  virus_alert: 'volcano',
+  fim_alert: 'gold',
+  runtime_alert: 'purple',
+  kube_alert: 'blue',
 }
 
 const SCOPE_TEXT_MAP: Record<string, string> = {
@@ -442,13 +465,19 @@ const formData = reactive<CreateNotificationRequest>({
   },
 })
 
+// 当前类别是否需要等级选择
+const currentCategoryHasSeverity = computed(() => {
+  const opt = notifyCategoryOptions.find(o => o.value === formData.notify_category)
+  return opt?.hasSeverity ?? false
+})
+
 const formRules = {
   name: [{ required: true, message: '请输入通知名称', trigger: 'blur' }],
   notify_category: [{ required: true, message: '请选择通知类别', trigger: 'change' }],
   severities: [{
     validator: (_rule: any, value: string[]) => {
-      // 只有基线告警才需要验证 severities
-      if (formData.notify_category === 'baseline_alert' && (!value || value.length === 0)) {
+      // 带等级过滤的类别才需要验证 severities
+      if (currentCategoryHasSeverity.value && (!value || value.length === 0)) {
         return Promise.reject('请选择至少一个通知等级')
       }
       return Promise.resolve()
@@ -732,7 +761,10 @@ const handleTestNotification = async () => {
     if (isEdit.value && editingId.value) {
       testData.notification_id = editingId.value
     }
-    
+
+    // 传递通知类别，让后端使用对应类别的模拟数据
+    testData.notify_category = formData.notify_category
+
     await notificationsApi.test(testData)
     message.success('测试通知发送成功')
   } catch (error: any) {
@@ -755,11 +787,16 @@ const handleNotifyCategoryChange = () => {
   // 切换通知类别时，清空 severities
   formData.severities = []
   // 根据类别设置默认名称
-  if (formData.notify_category === 'baseline_alert') {
-    formData.name = formData.name || '基线安全告警'
-  } else if (formData.notify_category === 'agent_offline') {
-    formData.name = formData.name || 'Agent 离线通知'
+  const defaultNames: Record<string, string> = {
+    baseline_alert: '基线安全告警',
+    agent_offline: 'Agent 离线通知',
+    vulnerability_alert: '漏洞告警',
+    virus_alert: '病毒查杀告警',
+    fim_alert: '文件完整性告警',
+    runtime_alert: '运行时检测告警',
+    kube_alert: 'K8s 安全告警',
   }
+  formData.name = formData.name || defaultNames[formData.notify_category] || ''
 }
 
 const handleCustomAlertOk = () => {

@@ -153,7 +153,7 @@
           <a-select-option value="__unbound__">
             <span style="color: #86909C;">无业务线</span>
           </a-select-option>
-          <a-select-option v-for="bl in businessLines" :key="bl.name" :value="bl.name">
+          <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
             {{ bl.name }}
           </a-select-option>
         </a-select>
@@ -307,7 +307,7 @@
           allow-clear
           :filter-option="filterBusinessLineOption"
         >
-          <a-select-option v-for="bl in businessLines" :key="bl.name" :value="bl.name">
+          <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
             {{ bl.name }}
           </a-select-option>
         </a-select>
@@ -502,7 +502,9 @@ const columns = [
     key: 'business_line',
     width: 120,
     customRender: ({ record }: { record: Host }) => {
-      return record.business_line || '-'
+      if (!record.business_line) return '-'
+      const bl = businessLines.value.find(b => b.code === record.business_line)
+      return bl ? bl.name : record.business_line
     },
   },
   {

@@ -52,10 +52,24 @@ export interface ListAlertsParams {
   host_id?: string
   rule_id?: string
   category?: string
-  alert_type?: 'baseline' | 'agent_offline'
+  alert_type?: 'baseline' | 'runtime' | 'agent_offline'
   keyword?: string
   result_id?: string
   runtime_type?: string
+  business_line?: string
+  mitre_id?: string
+  start_time?: string
+  end_time?: string
+}
+
+export interface RuntimeAlertStatistics {
+  total: number
+  active: number
+  today: number
+  critical: number
+  high: number
+  medium: number
+  low: number
 }
 
 export interface AlertWhitelist {
@@ -94,6 +108,11 @@ export const alertsApi = {
   // 获取告警统计
   statistics: () => {
     return apiClient.get<AlertStatistics>('/alerts/statistics')
+  },
+
+  // 获取运行时告警统计
+  runtimeStatistics: () => {
+    return apiClient.get<RuntimeAlertStatistics>('/alerts/runtime-statistics')
   },
 
   // 解决告警

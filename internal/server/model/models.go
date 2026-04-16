@@ -186,5 +186,17 @@ var (
 		&KubeEvent{},
 		&KubeBaseline{},
 		&KubeWhitelist{},
+		&ConfigBackup{},
+		&Vulnerability{},
+		&HostVulnerability{},
+		&CommandAckRecord{},
+		&AntivirusScanTask{},
+		&AntivirusScanResult{},
+		&QuarantineFile{},
+		&DetectionRule{},
+		&NetworkBlockRule{},
+		&SecurityDBSyncRecord{},
+		&GeneratedReport{},
+		&MigrationJob{},
 	}
 )

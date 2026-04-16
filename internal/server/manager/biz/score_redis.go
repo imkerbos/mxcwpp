@@ -16,7 +16,7 @@ import (
 // RedisClient Redis 客户端接口（用于依赖注入和测试）
 type RedisClient interface {
 	Get(ctx context.Context, key string) (string, error)
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	Set(ctx context.Context, key string, value any, expiration time.Duration) error
 	Del(ctx context.Context, keys ...string) error
 	Exists(ctx context.Context, key string) (bool, error)
 }

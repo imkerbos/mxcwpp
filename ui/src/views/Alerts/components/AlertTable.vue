@@ -30,9 +30,10 @@
         placeholder="告警类型"
         allow-clear
         style="width: 150px"
-        @change="handleSearch"
+        @change="handleAlertTypeChange"
       >
         <a-select-option value="baseline">基线安全</a-select-option>
+        <a-select-option value="runtime">运行时检测</a-select-option>
         <a-select-option value="agent_offline">Agent 离线</a-select-option>
       </a-select>
       <a-select
@@ -42,11 +43,30 @@
         style="width: 150px"
         @change="handleSearch"
       >
-        <a-select-option value="ssh">SSH</a-select-option>
-        <a-select-option value="password">密码策略</a-select-option>
-        <a-select-option value="file_permission">文件权限</a-select-option>
-        <a-select-option value="sysctl">内核参数</a-select-option>
-        <a-select-option value="service">服务状态</a-select-option>
+        <template v-if="localFilters.alert_type === 'runtime'">
+          <a-select-option value="reverse_shell">反弹 Shell</a-select-option>
+          <a-select-option value="cryptomining">挖矿检测</a-select-option>
+          <a-select-option value="c2_communication">C2 通信</a-select-option>
+          <a-select-option value="credential_access">凭证窃取</a-select-option>
+          <a-select-option value="privilege_escalation">权限提升</a-select-option>
+          <a-select-option value="persistence">持久化</a-select-option>
+          <a-select-option value="defense_evasion">防御规避</a-select-option>
+          <a-select-option value="execution">命令执行</a-select-option>
+          <a-select-option value="lateral_movement">横向移动</a-select-option>
+          <a-select-option value="webshell">Webshell</a-select-option>
+          <a-select-option value="exfiltration">数据外泄</a-select-option>
+          <a-select-option value="network_scan">网络探测</a-select-option>
+          <a-select-option value="resource_hijacking">资源劫持</a-select-option>
+          <a-select-option value="malware">恶意软件</a-select-option>
+          <a-select-option value="ransomware">勒索软件</a-select-option>
+        </template>
+        <template v-else>
+          <a-select-option value="ssh">SSH</a-select-option>
+          <a-select-option value="password">密码策略</a-select-option>
+          <a-select-option value="file_permission">文件权限</a-select-option>
+          <a-select-option value="sysctl">内核参数</a-select-option>
+          <a-select-option value="service">服务状态</a-select-option>
+        </template>
       </a-select>
       <a-select
         v-model:value="localFilters.runtime_type"
@@ -394,6 +414,11 @@ const getStatusText = (status: string) => {
     ignored: '已忽略',
   }
   return texts[status] || status
+}
+
+const handleAlertTypeChange = () => {
+  localFilters.value.category = undefined
+  handleSearch()
 }
 
 const handleSearch = () => {

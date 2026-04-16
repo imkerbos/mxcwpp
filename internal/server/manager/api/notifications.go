@@ -311,8 +311,9 @@ func (h *NotificationsHandler) DeleteNotification(c *gin.Context) {
 type TestNotificationRequest struct {
 	Type           model.NotificationType   `json:"type" binding:"required"`
 	Config         model.NotificationConfig `json:"config" binding:"required"`
-	FrontendURL    string                   `json:"frontend_url"`    // 可选，用于测试跳转链接
-	NotificationID *uint                    `json:"notification_id"` // 可选，如果提供则使用完整的通知配置
+	FrontendURL    string                   `json:"frontend_url"`       // 可选，用于测试跳转链接
+	NotificationID *uint                    `json:"notification_id"`    // 可选，如果提供则使用完整的通知配置
+	NotifyCategory model.NotifyCategory     `json:"notify_category"`    // 可选，指定测试的通知类别
 }
 
 // TestNotification 测试通知
@@ -352,39 +353,46 @@ func (h *NotificationsHandler) TestNotification(c *gin.Context) {
 			var dbNotification model.Notification
 			if err := h.db.First(&dbNotification, *req.NotificationID).Error; err == nil {
 				notification.Name = dbNotification.Name
-				// 使用通知的前端URL（如果请求中提供了，优先使用请求中的）
 				if req.FrontendURL == "" {
 					notification.FrontendURL = dbNotification.FrontendURL
+				}
+				// 自动使用通知的类别
+				if req.NotifyCategory == "" {
+					req.NotifyCategory = dbNotification.NotifyCategory
 				}
 			}
 		}
 
-		// 创建模拟的告警数据
-		alertData := &biz.AlertData{
-			HostID:        "test-host-001",
-			Hostname:      "测试主机",
-			IP:            "192.168.1.100",
-			OSFamily:      "rocky",
-			OSVersion:     "9.0",
-			RuleID:        "TEST_RULE_001",
-			RuleName:      "测试规则：禁止 root 远程登录",
-			Category:      "ssh",
-			Severity:      "high",
-			Title:         "禁止 root 远程登录",
-			Description:   "SSH 配置应禁止 root 用户远程登录",
-			Actual:        "yes",
-			Expected:      "no",
-			FixSuggestion: "修改 /etc/ssh/sshd_config，设置 PermitRootLogin no",
-			TaskID:        "test-task-001",
-			PolicyID:      "test-policy-001",
-			CheckedAt:     time.Now(),
-			FrontendURL:   notification.FrontendURL,
-			ResultID:      "test-result-001",
-		}
-
-		// 使用 biz 包中的方法构建告警卡片
 		notificationService := biz.NewNotificationService(h.db, h.logger)
-		testMessage = notificationService.BuildLarkAlertCardForTest(&notification, alertData)
+
+		// 根据通知类别使用不同的模拟数据
+		if card := notificationService.BuildTestLarkCard(&notification, req.NotifyCategory); card != nil {
+			testMessage = card
+		} else {
+			// 默认：基线告警模拟数据
+			alertData := &biz.AlertData{
+				HostID:        "test-host-001",
+				Hostname:      "测试主机",
+				IP:            "192.168.1.100",
+				OSFamily:      "rocky",
+				OSVersion:     "9.0",
+				RuleID:        "TEST_RULE_001",
+				RuleName:      "测试规则：禁止 root 远程登录",
+				Category:      "ssh",
+				Severity:      "high",
+				Title:         "禁止 root 远程登录",
+				Description:   "SSH 配置应禁止 root 用户远程登录",
+				Actual:        "yes",
+				Expected:      "no",
+				FixSuggestion: "修改 /etc/ssh/sshd_config，设置 PermitRootLogin no",
+				TaskID:        "test-task-001",
+				PolicyID:      "test-policy-001",
+				CheckedAt:     time.Now(),
+				FrontendURL:   notification.FrontendURL,
+				ResultID:      "test-result-001",
+			}
+			testMessage = notificationService.BuildLarkAlertCardForTest(&notification, alertData)
+		}
 	} else {
 		// Webhook 类型使用简单的测试消息
 		testMessage = h.buildTestMessage(req.Type, req.Config)

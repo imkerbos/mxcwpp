@@ -13,6 +13,10 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0', // 允许外部访问
+    watch: {
+      usePolling: true,
+      interval: 500,
+    },
     proxy: {
       '/api': {
         // 在 Docker 容器内，使用服务名访问；本地开发时使用 localhost

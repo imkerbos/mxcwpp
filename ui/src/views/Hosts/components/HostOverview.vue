@@ -803,18 +803,28 @@
                       <span style="font-weight: 500;">{{ record.name }}</span>
                     </template>
                     <template v-else-if="column.key === 'version'">
-                      <span :style="{ color: record.need_update ? '#FF7D00' : 'inherit' }">
+                      <span :style="{ color: record.need_update && !(host?.is_container && record.status === 'not_installed') ? '#FF7D00' : 'inherit' }">
                         {{ record.version || '-' }}
-                        <a-tag v-if="record.need_update" color="orange" style="margin-left: 8px; font-size: 11px;">
-                          可更新
-                        </a-tag>
+                        <template v-if="record.need_update && !(host?.is_container && record.status === 'not_installed')">
+                          <a-tooltip v-if="host?.is_container" title="容器环境请通过重建镜像更新，不支持在线推送">
+                            <a-tag color="default" style="margin-left: 8px; font-size: 11px; cursor: help;">
+                              请重建镜像
+                            </a-tag>
+                          </a-tooltip>
+                          <a-tag v-else color="orange" style="margin-left: 8px; font-size: 11px;">
+                            可更新
+                          </a-tag>
+                        </template>
                       </span>
                     </template>
                     <template v-else-if="column.key === 'latest_version'">
                       {{ record.latest_version || '-' }}
                     </template>
                     <template v-else-if="column.key === 'status'">
-                      <a-tag :color="componentStatusMap[record.status]?.color || 'default'">
+                      <a-tooltip v-if="host?.is_container && record.status === 'not_installed'" title="容器环境中插件随镜像部署，无需单独安装">
+                        <a-tag color="default" style="cursor: help;">容器环境无需安装</a-tag>
+                      </a-tooltip>
+                      <a-tag v-else :color="componentStatusMap[record.status]?.color || 'default'">
                         {{ componentStatusMap[record.status]?.text || record.status }}
                       </a-tag>
                     </template>
@@ -823,6 +833,18 @@
                     </template>
                     <template v-else-if="column.key === 'updated_at'">
                       {{ record.updated_at ? formatDateTime(record.updated_at) : '-' }}
+                    </template>
+                    <template v-else-if="column.key === 'action'">
+                      <a-popconfirm
+                        v-if="needsTetragonInstall(record)"
+                        title="确定安装 Tetragon 依赖？安装后 Sensor 插件将自动恢复运行。"
+                        @confirm="handleInstallTetragon"
+                      >
+                        <a-button type="link" size="small" :loading="depInstalling" :disabled="host?.status !== 'online'">
+                          安装 Tetragon
+                        </a-button>
+                      </a-popconfirm>
+                      <span v-else style="color: #bfbfbf">-</span>
                     </template>
                   </template>
                 </a-table>
@@ -872,7 +894,7 @@
             allow-clear
             :filter-option="filterBusinessLineOption"
           >
-            <a-select-option v-for="bl in businessLines" :key="bl.name" :value="bl.name">
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
               {{ bl.name }}
             </a-select-option>
           </a-select>
@@ -984,6 +1006,7 @@ const componentStatusMap: Record<string, { text: string; color: string }> = {
   error: { text: '错误', color: 'red' },
   not_installed: { text: '未安装', color: 'orange' },
   updating: { text: '更新中', color: 'blue' },
+  dormant: { text: '休眠', color: 'purple' },
 }
 
 // 组件表格列定义
@@ -994,6 +1017,7 @@ const componentColumns = [
   { title: '状态', dataIndex: 'status', key: 'status' },
   { title: '启动时间', dataIndex: 'start_time', key: 'start_time' },
   { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at' },
+  { title: '操作', key: 'action', width: 120, align: 'center' as const },
 ]
 
 // 加载组件列表（包含 Agent 和插件）
@@ -1048,6 +1072,26 @@ const loadComponents = async () => {
     console.error('加载组件列表失败:', error)
   } finally {
     componentsLoading.value = false
+  }
+}
+
+// sensor 插件依赖（Tetragon）相关
+const depInstalling = ref(false)
+
+const needsTetragonInstall = (record: ComponentInfo) => {
+  return record.name === 'sensor' && ['error', 'dormant', 'not_installed'].includes(record.status)
+}
+
+const handleInstallTetragon = async () => {
+  if (!props.host) return
+  depInstalling.value = true
+  try {
+    await hostsApi.installDependency([props.host.host_id], 'tetragon')
+    message.success('Tetragon 安装命令已下发，请稍后刷新查看状态')
+  } catch (error: any) {
+    message.error(error?.message || '安装命令下发失败')
+  } finally {
+    depInstalling.value = false
   }
 }
 

@@ -47,7 +47,7 @@ export interface HostPlugin {
   id?: number
   name: string
   version: string
-  status: 'running' | 'stopped' | 'error' | 'not_installed' | 'updating'
+  status: 'running' | 'stopped' | 'error' | 'not_installed' | 'updating' | 'dormant'
   start_time?: string
   updated_at?: string
   latest_version: string
@@ -98,6 +98,7 @@ export const hostsApi = {
   getMetrics: (hostId: string, params?: {
     start_time?: string
     end_time?: string
+    range?: '1h' | '6h' | '24h'
   }) => {
     return apiClient.get<HostMetrics>(`/hosts/${hostId}/metrics`, { params })
   },
@@ -135,6 +136,16 @@ export const hostsApi = {
   // 获取 Agent 重启记录
   getRestartRecords: () => {
     return apiClient.get('/hosts/restart-records')
+  },
+
+  // 依赖安装（如 Tetragon）
+  installDependency: (hostIds: string[], dependency: string, action: 'install' | 'uninstall' | 'status' = 'install', version?: string) => {
+    return apiClient.post<{ message: string; data: Array<{ host_id: string; request_id?: string; status: string; error?: string }> }>('/hosts/dependency/install', {
+      host_ids: hostIds,
+      dependency,
+      action,
+      version,
+    })
   },
 
   // 导出主机基线检查结果

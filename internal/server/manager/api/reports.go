@@ -2017,3 +2017,1860 @@ func (h *ReportsHandler) GetExecutiveTaskReport(c *gin.Context) {
 		"data": report,
 	})
 }
+
+// parseReportTimeRange 解析报告接口公共的 start_time/end_time 查询参数
+// 默认时间范围为最近 7 天
+func parseReportTimeRange(c *gin.Context) (time.Time, time.Time, bool) {
+	startTimeStr := c.Query("start_time")
+	endTimeStr := c.Query("end_time")
+
+	var startTime, endTime time.Time
+	var err error
+
+	if startTimeStr != "" {
+		startTime, err = time.Parse("2006-01-02", startTimeStr)
+		if err != nil {
+			BadRequest(c, "无效的 start_time 参数，格式应为 YYYY-MM-DD")
+			return time.Time{}, time.Time{}, false
+		}
+		startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.Local)
+	} else {
+		startTime = time.Now().AddDate(0, 0, -7)
+		startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.Local)
+	}
+
+	if endTimeStr != "" {
+		endTime, err = time.Parse("2006-01-02", endTimeStr)
+		if err != nil {
+			BadRequest(c, "无效的 end_time 参数，格式应为 YYYY-MM-DD")
+			return time.Time{}, time.Time{}, false
+		}
+		endTime = time.Date(endTime.Year(), endTime.Month(), endTime.Day(), 23, 59, 59, 999999999, time.Local)
+	} else {
+		endTime = time.Now()
+	}
+
+	return startTime, endTime, true
+}
+
+// ============================================================
+// 病毒查杀报告
+// ============================================================
+
+// GetAntivirusReport 获取病毒查杀报告
+// GET /api/v1/reports/antivirus
+func (h *ReportsHandler) GetAntivirusReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	// 1. summary 汇总
+	type avSummary struct {
+		TotalTasks         int64
+		TotalThreats       int64
+		DetectedThreats    int64
+		QuarantinedThreats int64
+		AffectedHosts      int64
+	}
+	var summary avSummary
+
+	// 任务数量（按创建时间过滤）
+	h.db.Model(&model.AntivirusScanTask{}).
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Count(&summary.TotalTasks)
+
+	// 威胁统计（按检测时间过滤）
+	resultsQuery := h.db.Model(&model.AntivirusScanResult{}).
+		Where("detected_at >= ? AND detected_at <= ?", startTime, endTime)
+
+	resultsQuery.Count(&summary.TotalThreats)
+	h.db.Model(&model.AntivirusScanResult{}).
+		Where("detected_at >= ? AND detected_at <= ? AND action = ?", startTime, endTime, "detected").
+		Count(&summary.DetectedThreats)
+	h.db.Model(&model.AntivirusScanResult{}).
+		Where("detected_at >= ? AND detected_at <= ? AND action = ?", startTime, endTime, "quarantined").
+		Count(&summary.QuarantinedThreats)
+
+	// 影响主机数（DISTINCT）
+	h.db.Model(&model.AntivirusScanResult{}).
+		Where("detected_at >= ? AND detected_at <= ?", startTime, endTime).
+		Distinct("host_id").
+		Count(&summary.AffectedHosts)
+
+	// 2. 严重级别分布（仅统计未处理的）
+	severityDistribution := map[string]int64{
+		"critical": 0, "high": 0, "medium": 0, "low": 0,
+	}
+	var severityRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.AntivirusScanResult{}).
+		Select("severity, COUNT(*) as count").
+		Where("detected_at >= ? AND detected_at <= ? AND action = ?", startTime, endTime, "detected").
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		if r.Severity != "" {
+			severityDistribution[r.Severity] = r.Count
+		}
+	}
+
+	// 3. 威胁类型分布
+	threatTypeDistribution := make(map[string]int64)
+	var threatTypeRows []struct {
+		ThreatType string
+		Count      int64
+	}
+	h.db.Model(&model.AntivirusScanResult{}).
+		Select("threat_type, COUNT(*) as count").
+		Where("detected_at >= ? AND detected_at <= ?", startTime, endTime).
+		Group("threat_type").
+		Scan(&threatTypeRows)
+	for _, r := range threatTypeRows {
+		if r.ThreatType != "" {
+			threatTypeDistribution[r.ThreatType] = r.Count
+		}
+	}
+
+	// 4. 处置动作分布
+	actionDistribution := map[string]int64{
+		"detected": 0, "quarantined": 0, "deleted": 0, "ignored": 0,
+	}
+	var actionRows []struct {
+		Action string
+		Count  int64
+	}
+	h.db.Model(&model.AntivirusScanResult{}).
+		Select("action, COUNT(*) as count").
+		Where("detected_at >= ? AND detected_at <= ?", startTime, endTime).
+		Group("action").
+		Scan(&actionRows)
+	for _, r := range actionRows {
+		if r.Action != "" {
+			actionDistribution[r.Action] = r.Count
+		}
+	}
+
+	// 5. Top 10 威胁名称
+	type topThreatRow struct {
+		ThreatName    string
+		Count         int64
+		Severity      string
+		AffectedHosts int64
+	}
+	var topThreats []topThreatRow
+	h.db.Raw(`
+		SELECT threat_name,
+			COUNT(*) as count,
+			MAX(severity) as severity,
+			COUNT(DISTINCT host_id) as affected_hosts
+		FROM antivirus_scan_results
+		WHERE detected_at >= ? AND detected_at <= ?
+		GROUP BY threat_name
+		ORDER BY count DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&topThreats)
+
+	// 6. Top 10 受影响主机
+	type topAffectedHostRow struct {
+		HostID      string
+		Hostname    string
+		IP          string
+		ThreatCount int64
+	}
+	var topAffectedHosts []topAffectedHostRow
+	h.db.Raw(`
+		SELECT host_id,
+			MAX(hostname) as hostname,
+			MAX(ip) as ip,
+			COUNT(*) as threat_count
+		FROM antivirus_scan_results
+		WHERE detected_at >= ? AND detected_at <= ?
+		GROUP BY host_id
+		ORDER BY threat_count DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&topAffectedHosts)
+
+	// 补全主机信息（如 hostname / ip 为空，从 hosts 表查询）
+	hostIDs := make([]string, 0, len(topAffectedHosts))
+	for _, row := range topAffectedHosts {
+		if row.Hostname == "" || row.IP == "" {
+			hostIDs = append(hostIDs, row.HostID)
+		}
+	}
+	if len(hostIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", hostIDs).Find(&hosts)
+		hostMap := make(map[string]model.Host, len(hosts))
+		for _, host := range hosts {
+			hostMap[host.HostID] = host
+		}
+		for i := range topAffectedHosts {
+			if host, ok := hostMap[topAffectedHosts[i].HostID]; ok {
+				if topAffectedHosts[i].Hostname == "" {
+					topAffectedHosts[i].Hostname = host.Hostname
+				}
+				if topAffectedHosts[i].IP == "" && len(host.IPv4) > 0 {
+					topAffectedHosts[i].IP = host.IPv4[0]
+				}
+			}
+		}
+	}
+
+	topThreatsOut := make([]gin.H, 0, len(topThreats))
+	for _, t := range topThreats {
+		topThreatsOut = append(topThreatsOut, gin.H{
+			"threatName":    t.ThreatName,
+			"count":         t.Count,
+			"severity":      t.Severity,
+			"affectedHosts": t.AffectedHosts,
+		})
+	}
+	topAffectedHostsOut := make([]gin.H, 0, len(topAffectedHosts))
+	for _, t := range topAffectedHosts {
+		topAffectedHostsOut = append(topAffectedHostsOut, gin.H{
+			"hostId":      t.HostID,
+			"hostname":    t.Hostname,
+			"ip":          t.IP,
+			"threatCount": t.ThreatCount,
+		})
+	}
+
+	Success(c, gin.H{
+		"summary": gin.H{
+			"totalTasks":         summary.TotalTasks,
+			"totalThreats":       summary.TotalThreats,
+			"detectedThreats":    summary.DetectedThreats,
+			"quarantinedThreats": summary.QuarantinedThreats,
+			"affectedHosts":      summary.AffectedHosts,
+		},
+		"severityDistribution":   severityDistribution,
+		"threatTypeDistribution": threatTypeDistribution,
+		"actionDistribution":     actionDistribution,
+		"topThreats":             topThreatsOut,
+		"topAffectedHosts":       topAffectedHostsOut,
+	})
+}
+
+// ============================================================
+// 漏洞管理报告
+// ============================================================
+
+// GetVulnerabilityReport 获取漏洞管理报告
+// GET /api/v1/reports/vulnerability
+func (h *ReportsHandler) GetVulnerabilityReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	// 1. summary
+	type vulnSummary struct {
+		TotalVulns     int64
+		UnpatchedVulns int64
+		FixedVulns     int64
+		IgnoredVulns   int64
+		AffectedHosts  int64
+	}
+	var summary vulnSummary
+
+	baseQuery := h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ?", startTime, endTime)
+	baseQuery.Count(&summary.TotalVulns)
+
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "unpatched").
+		Count(&summary.UnpatchedVulns)
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "fixed").
+		Count(&summary.FixedVulns)
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "ignored").
+		Count(&summary.IgnoredVulns)
+
+	// 影响主机数（DISTINCT）
+	h.db.Model(&model.HostVulnerability{}).
+		Distinct("host_id").
+		Count(&summary.AffectedHosts)
+
+	// 2. 严重级别分布
+	severityDistribution := map[string]int64{
+		"critical": 0, "high": 0, "medium": 0, "low": 0,
+	}
+	var severityRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.Vulnerability{}).
+		Select("severity, COUNT(*) as count").
+		Where("discovered_at >= ? AND discovered_at <= ?", startTime, endTime).
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		if r.Severity != "" {
+			severityDistribution[r.Severity] = r.Count
+		}
+	}
+
+	// 3. 组件分布 Top 15
+	type componentRow struct {
+		Component string
+		Count     int64
+	}
+	var componentRows []componentRow
+	h.db.Raw(`
+		SELECT component, COUNT(*) as count
+		FROM vulnerabilities
+		WHERE discovered_at >= ? AND discovered_at <= ? AND component <> ''
+		GROUP BY component
+		ORDER BY count DESC
+		LIMIT 15
+	`, startTime, endTime).Scan(&componentRows)
+	componentDistribution := make([]gin.H, 0, len(componentRows))
+	for _, r := range componentRows {
+		componentDistribution = append(componentDistribution, gin.H{
+			"component": r.Component,
+			"count":     r.Count,
+		})
+	}
+
+	// 4. Top 10 高危漏洞
+	type topVulnRow struct {
+		CveID         string
+		Severity      string
+		CvssScore     float64
+		Component     string
+		AffectedHosts int
+		Status        string
+	}
+	var topVulns []topVulnRow
+	h.db.Raw(`
+		SELECT cve_id, severity, cvss_score, component, affected_hosts, status
+		FROM vulnerabilities
+		WHERE discovered_at >= ? AND discovered_at <= ?
+		ORDER BY cvss_score DESC, affected_hosts DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&topVulns)
+
+	topVulnsOut := make([]gin.H, 0, len(topVulns))
+	for _, v := range topVulns {
+		topVulnsOut = append(topVulnsOut, gin.H{
+			"cveId":         v.CveID,
+			"severity":      v.Severity,
+			"cvssScore":     v.CvssScore,
+			"component":     v.Component,
+			"affectedHosts": v.AffectedHosts,
+			"status":        v.Status,
+		})
+	}
+
+	// 5. Top 10 受影响主机
+	type topVulnHostRow struct {
+		HostID        string
+		Hostname      string
+		IP            string
+		VulnCount     int64
+		CriticalCount int64
+		HighCount     int64
+	}
+	var topVulnHosts []topVulnHostRow
+	h.db.Raw(`
+		SELECT hv.host_id,
+			MAX(hv.hostname) as hostname,
+			MAX(hv.ip) as ip,
+			COUNT(*) as vuln_count,
+			SUM(CASE WHEN v.severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
+			SUM(CASE WHEN v.severity = 'high' THEN 1 ELSE 0 END) as high_count
+		FROM host_vulnerabilities hv
+		LEFT JOIN vulnerabilities v ON hv.vuln_id = v.id
+		GROUP BY hv.host_id
+		ORDER BY vuln_count DESC
+		LIMIT 10
+	`).Scan(&topVulnHosts)
+
+	// 补全主机信息
+	vhIDs := make([]string, 0, len(topVulnHosts))
+	for _, row := range topVulnHosts {
+		if row.Hostname == "" || row.IP == "" {
+			vhIDs = append(vhIDs, row.HostID)
+		}
+	}
+	if len(vhIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", vhIDs).Find(&hosts)
+		hostMap := make(map[string]model.Host, len(hosts))
+		for _, host := range hosts {
+			hostMap[host.HostID] = host
+		}
+		for i := range topVulnHosts {
+			if host, ok := hostMap[topVulnHosts[i].HostID]; ok {
+				if topVulnHosts[i].Hostname == "" {
+					topVulnHosts[i].Hostname = host.Hostname
+				}
+				if topVulnHosts[i].IP == "" && len(host.IPv4) > 0 {
+					topVulnHosts[i].IP = host.IPv4[0]
+				}
+			}
+		}
+	}
+
+	topVulnHostsOut := make([]gin.H, 0, len(topVulnHosts))
+	for _, t := range topVulnHosts {
+		topVulnHostsOut = append(topVulnHostsOut, gin.H{
+			"hostId":        t.HostID,
+			"hostname":      t.Hostname,
+			"ip":            t.IP,
+			"vulnCount":     t.VulnCount,
+			"criticalCount": t.CriticalCount,
+			"highCount":     t.HighCount,
+		})
+	}
+
+	Success(c, gin.H{
+		"summary": gin.H{
+			"totalVulns":     summary.TotalVulns,
+			"unpatchedVulns": summary.UnpatchedVulns,
+			"fixedVulns":     summary.FixedVulns,
+			"ignoredVulns":   summary.IgnoredVulns,
+			"affectedHosts":  summary.AffectedHosts,
+		},
+		"severityDistribution":  severityDistribution,
+		"componentDistribution": componentDistribution,
+		"topVulns":              topVulnsOut,
+		"topAffectedHosts":      topVulnHostsOut,
+	})
+}
+
+// ============================================================
+// 容器安全报告
+// ============================================================
+
+// GetKubeReport 获取容器安全报告
+// GET /api/v1/reports/kube
+func (h *ReportsHandler) GetKubeReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	// 1. summary
+	type kubeSummary struct {
+		TotalAlarms     int64
+		PendingAlarms   int64
+		ProcessedAlarms int64
+		IgnoredAlarms   int64
+		ClusterCount    int64
+	}
+	var summary kubeSummary
+
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Count(&summary.TotalAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "pending").
+		Count(&summary.PendingAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "processed").
+		Count(&summary.ProcessedAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "ignored").
+		Count(&summary.IgnoredAlarms)
+	h.db.Model(&model.KubeCluster{}).Count(&summary.ClusterCount)
+
+	// 2. 严重级别分布（仅 pending）
+	severityDistribution := map[string]int64{
+		"critical": 0, "high": 0, "medium": 0, "low": 0,
+	}
+	var severityRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.KubeAlarm{}).
+		Select("severity, COUNT(*) as count").
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "pending").
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		if r.Severity != "" {
+			severityDistribution[r.Severity] = r.Count
+		}
+	}
+
+	// 3. 告警类型分布
+	alarmTypeDistribution := make(map[string]int64)
+	var alarmTypeRows []struct {
+		AlarmType string
+		Count     int64
+	}
+	h.db.Model(&model.KubeAlarm{}).
+		Select("alarm_type, COUNT(*) as count").
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Group("alarm_type").
+		Scan(&alarmTypeRows)
+	for _, r := range alarmTypeRows {
+		if r.AlarmType != "" {
+			alarmTypeDistribution[r.AlarmType] = r.Count
+		}
+	}
+
+	// 4. 集群分布
+	type clusterRow struct {
+		ClusterName string
+		Count       int64
+	}
+	var clusterRows []clusterRow
+	h.db.Raw(`
+		SELECT cluster_name, COUNT(*) as count
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ? AND cluster_name <> ''
+		GROUP BY cluster_name
+		ORDER BY count DESC
+	`, startTime, endTime).Scan(&clusterRows)
+	clusterDistribution := make([]gin.H, 0, len(clusterRows))
+	for _, r := range clusterRows {
+		clusterDistribution = append(clusterDistribution, gin.H{
+			"clusterName": r.ClusterName,
+			"count":       r.Count,
+		})
+	}
+
+	// 5. Top 10 Namespace
+	type namespaceRow struct {
+		Namespace   string
+		ClusterName string
+		Count       int64
+	}
+	var namespaceRows []namespaceRow
+	h.db.Raw(`
+		SELECT namespace, cluster_name, COUNT(*) as count
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ? AND namespace <> ''
+		GROUP BY namespace, cluster_name
+		ORDER BY count DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&namespaceRows)
+	topNamespaces := make([]gin.H, 0, len(namespaceRows))
+	for _, r := range namespaceRows {
+		topNamespaces = append(topNamespaces, gin.H{
+			"namespace":   r.Namespace,
+			"clusterName": r.ClusterName,
+			"count":       r.Count,
+		})
+	}
+
+	// 6. Top 10 影响目标
+	type targetRow struct {
+		Target    string
+		Namespace string
+		Count     int64
+		Severity  string
+	}
+	var targetRows []targetRow
+	h.db.Raw(`
+		SELECT target,
+			MAX(namespace) as namespace,
+			COUNT(*) as count,
+			MAX(severity) as severity
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ? AND target <> ''
+		GROUP BY target
+		ORDER BY count DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&targetRows)
+	topTargets := make([]gin.H, 0, len(targetRows))
+	for _, r := range targetRows {
+		topTargets = append(topTargets, gin.H{
+			"target":    r.Target,
+			"namespace": r.Namespace,
+			"count":     r.Count,
+			"severity":  r.Severity,
+		})
+	}
+
+	Success(c, gin.H{
+		"summary": gin.H{
+			"totalAlarms":     summary.TotalAlarms,
+			"pendingAlarms":   summary.PendingAlarms,
+			"processedAlarms": summary.ProcessedAlarms,
+			"ignoredAlarms":   summary.IgnoredAlarms,
+			"clusterCount":    summary.ClusterCount,
+		},
+		"severityDistribution":  severityDistribution,
+		"alarmTypeDistribution": alarmTypeDistribution,
+		"clusterDistribution":   clusterDistribution,
+		"topNamespaces":         topNamespaces,
+		"topTargets":            topTargets,
+	})
+}
+
+// ============================================================
+// 运行时检测报告
+// ============================================================
+
+// GetRuntimeReport 获取运行时检测报告
+// GET /api/v1/reports/runtime
+func (h *ReportsHandler) GetRuntimeReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	// CEL 规则前缀过滤
+	const celPrefix = "cel-%"
+
+	// 1. summary
+	type runtimeSummary struct {
+		TotalAlerts    int64
+		ActiveAlerts   int64
+		ResolvedAlerts int64
+		TodayAlerts    int64
+		AffectedHosts  int64
+	}
+	var summary runtimeSummary
+
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?", celPrefix, startTime, endTime).
+		Count(&summary.TotalAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND status = ?",
+			celPrefix, startTime, endTime, "active").
+		Count(&summary.ActiveAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND status = ?",
+			celPrefix, startTime, endTime, "resolved").
+		Count(&summary.ResolvedAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND DATE(last_seen_at) = CURDATE()", celPrefix).
+		Count(&summary.TodayAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?", celPrefix, startTime, endTime).
+		Distinct("host_id").
+		Count(&summary.AffectedHosts)
+
+	// 2. 严重级别分布（仅 active）
+	severityDistribution := map[string]int64{
+		"critical": 0, "high": 0, "medium": 0, "low": 0,
+	}
+	var severityRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) as count").
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND status = ?",
+			celPrefix, startTime, endTime, "active").
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		if r.Severity != "" {
+			severityDistribution[r.Severity] = r.Count
+		}
+	}
+
+	// 3. 规则分类分布 Top 15
+	type categoryRow struct {
+		Category string
+		Count    int64
+	}
+	var categoryRows []categoryRow
+	h.db.Raw(`
+		SELECT category, COUNT(*) as count
+		FROM alerts
+		WHERE rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND category <> ''
+		GROUP BY category
+		ORDER BY count DESC
+		LIMIT 15
+	`, celPrefix, startTime, endTime).Scan(&categoryRows)
+	categoryDistribution := make([]gin.H, 0, len(categoryRows))
+	for _, r := range categoryRows {
+		categoryDistribution = append(categoryDistribution, gin.H{
+			"category": r.Category,
+			"count":    r.Count,
+		})
+	}
+
+	// 4. MITRE ATT&CK 分布 Top 15（JOIN detection_rules）
+	type mitreRow struct {
+		MitreID string
+		Count   int64
+	}
+	var mitreRows []mitreRow
+	h.db.Raw(`
+		SELECT dr.mitre_id as mitre_id, COUNT(*) as count
+		FROM alerts a
+		INNER JOIN detection_rules dr ON a.rule_id = CONCAT('cel-', dr.id)
+		WHERE a.rule_id LIKE ? AND a.last_seen_at >= ? AND a.last_seen_at <= ? AND dr.mitre_id <> ''
+		GROUP BY dr.mitre_id
+		ORDER BY count DESC
+		LIMIT 15
+	`, celPrefix, startTime, endTime).Scan(&mitreRows)
+	mitreDistribution := make([]gin.H, 0, len(mitreRows))
+	for _, r := range mitreRows {
+		mitreDistribution = append(mitreDistribution, gin.H{
+			"mitreId": r.MitreID,
+			"count":   r.Count,
+		})
+	}
+
+	// 5. Top 10 检测规则
+	type topRuleRow struct {
+		RuleID   string
+		RuleName string
+		Count    int64
+		Severity string
+	}
+	var topRules []topRuleRow
+	h.db.Raw(`
+		SELECT a.rule_id as rule_id,
+			COALESCE(dr.name, a.rule_id) as rule_name,
+			COUNT(*) as count,
+			MAX(a.severity) as severity
+		FROM alerts a
+		LEFT JOIN detection_rules dr ON a.rule_id = CONCAT('cel-', dr.id)
+		WHERE a.rule_id LIKE ? AND a.last_seen_at >= ? AND a.last_seen_at <= ?
+		GROUP BY a.rule_id, dr.name
+		ORDER BY count DESC
+		LIMIT 10
+	`, celPrefix, startTime, endTime).Scan(&topRules)
+	topRulesOut := make([]gin.H, 0, len(topRules))
+	for _, r := range topRules {
+		topRulesOut = append(topRulesOut, gin.H{
+			"ruleId":   r.RuleID,
+			"ruleName": r.RuleName,
+			"count":    r.Count,
+			"severity": r.Severity,
+		})
+	}
+
+	// 6. Top 10 受影响主机
+	type topRuntimeHostRow struct {
+		HostID        string
+		AlertCount    int64
+		CriticalCount int64
+	}
+	var topRuntimeHosts []topRuntimeHostRow
+	h.db.Raw(`
+		SELECT host_id,
+			COUNT(*) as alert_count,
+			SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count
+		FROM alerts
+		WHERE rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?
+		GROUP BY host_id
+		ORDER BY alert_count DESC
+		LIMIT 10
+	`, celPrefix, startTime, endTime).Scan(&topRuntimeHosts)
+
+	// 补全主机 hostname/ip
+	hostIDs := make([]string, 0, len(topRuntimeHosts))
+	for _, row := range topRuntimeHosts {
+		hostIDs = append(hostIDs, row.HostID)
+	}
+	hostMap := make(map[string]model.Host)
+	if len(hostIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", hostIDs).Find(&hosts)
+		for _, host := range hosts {
+			hostMap[host.HostID] = host
+		}
+	}
+	topRuntimeHostsOut := make([]gin.H, 0, len(topRuntimeHosts))
+	for _, t := range topRuntimeHosts {
+		host := hostMap[t.HostID]
+		ip := ""
+		if len(host.IPv4) > 0 {
+			ip = host.IPv4[0]
+		}
+		topRuntimeHostsOut = append(topRuntimeHostsOut, gin.H{
+			"hostId":        t.HostID,
+			"hostname":      host.Hostname,
+			"ip":            ip,
+			"alertCount":    t.AlertCount,
+			"criticalCount": t.CriticalCount,
+		})
+	}
+
+	Success(c, gin.H{
+		"summary": gin.H{
+			"totalAlerts":    summary.TotalAlerts,
+			"activeAlerts":   summary.ActiveAlerts,
+			"resolvedAlerts": summary.ResolvedAlerts,
+			"todayAlerts":    summary.TodayAlerts,
+			"affectedHosts":  summary.AffectedHosts,
+		},
+		"severityDistribution": severityDistribution,
+		"categoryDistribution": categoryDistribution,
+		"mitreDistribution":    mitreDistribution,
+		"topRules":             topRulesOut,
+		"topAffectedHosts":     topRuntimeHostsOut,
+	})
+}
+
+// ============================================================
+// Executive Report（可导出 PDF 的专业报告）
+// ============================================================
+
+// getCompanyName 获取系统配置中的公司名称
+func (h *ReportsHandler) getCompanyName() string {
+	companyName := "矩阵云安全平台"
+	var siteConfig model.SystemConfig
+	if err := h.db.Where("`key` = ?", "site_config").First(&siteConfig).Error; err == nil && siteConfig.Value != "" {
+		companyName = "矩阵云安全平台"
+	}
+	return companyName
+}
+
+// getScanTypeLabel 获取扫描类型中文标签
+func getScanTypeLabel(scanType string) string {
+	labels := map[string]string{
+		"quick":  "快速扫描",
+		"full":   "全盘扫描",
+		"custom": "自定义扫描",
+	}
+	if label, ok := labels[scanType]; ok {
+		return label
+	}
+	return scanType
+}
+
+// getThreatTypeLabel 获取威胁类型中文标签
+func getThreatTypeLabel(threatType string) string {
+	labels := map[string]string{
+		"virus":      "病毒",
+		"trojan":     "木马",
+		"worm":       "蠕虫",
+		"ransomware": "勒索软件",
+		"rootkit":    "Rootkit",
+		"miner":      "挖矿程序",
+		"backdoor":   "后门",
+		"other":      "其他",
+	}
+	if label, ok := labels[threatType]; ok {
+		return label
+	}
+	return threatType
+}
+
+// GetAntivirusExecutiveReport 获取病毒查杀 Executive 报告
+// GET /api/v1/reports/antivirus/:task_id/executive
+func (h *ReportsHandler) GetAntivirusExecutiveReport(c *gin.Context) {
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		BadRequest(c, "task_id 参数不能为空")
+		return
+	}
+
+	// 1. 获取任务信息
+	var task model.AntivirusScanTask
+	if err := h.db.Where("id = ?", taskID).First(&task).Error; err != nil {
+		h.logger.Error("查询病毒扫描任务失败", zap.String("task_id", taskID), zap.Error(err))
+		NotFound(c, "任务不存在")
+		return
+	}
+
+	if task.Status != "completed" {
+		BadRequest(c, "任务尚未完成，无法生成报告")
+		return
+	}
+
+	// 2. 聚合扫描结果
+	var results []model.AntivirusScanResult
+	h.db.Where("task_id = ?", task.ID).Find(&results)
+
+	// 统计 severity 分布
+	bySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	byThreatType := make(map[string]int64)
+	byAction := map[string]int64{"detected": 0, "quarantined": 0, "deleted": 0, "ignored": 0}
+
+	for _, r := range results {
+		bySeverity[r.Severity]++
+		byThreatType[r.ThreatType]++
+		byAction[r.Action]++
+	}
+
+	// 3. 按主机聚合
+	type hostAgg struct {
+		ThreatCount   int64
+		CriticalCount int64
+		HighCount     int64
+	}
+	hostAggs := make(map[string]*hostAgg)
+	hostInfoMap := make(map[string]struct{ Hostname, IP string })
+
+	for _, r := range results {
+		agg, ok := hostAggs[r.HostID]
+		if !ok {
+			agg = &hostAgg{}
+			hostAggs[r.HostID] = agg
+		}
+		agg.ThreatCount++
+		if r.Severity == "critical" {
+			agg.CriticalCount++
+		}
+		if r.Severity == "high" {
+			agg.HighCount++
+		}
+		hostInfoMap[r.HostID] = struct{ Hostname, IP string }{r.Hostname, r.IP}
+	}
+
+	// 补全主机信息
+	hostIDs := make([]string, 0, len(hostAggs))
+	for hid := range hostAggs {
+		hostIDs = append(hostIDs, hid)
+	}
+	if len(hostIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", hostIDs).Find(&hosts)
+		for _, host := range hosts {
+			ip := ""
+			if len(host.IPv4) > 0 {
+				ip = host.IPv4[0]
+			}
+			hostInfoMap[host.HostID] = struct{ Hostname, IP string }{host.Hostname, ip}
+		}
+	}
+
+	hostDetails := make([]gin.H, 0, len(hostAggs))
+	for hid, agg := range hostAggs {
+		info := hostInfoMap[hid]
+		hostDetails = append(hostDetails, gin.H{
+			"hostId":        hid,
+			"hostname":      info.Hostname,
+			"ip":            info.IP,
+			"threatCount":   agg.ThreatCount,
+			"criticalCount": agg.CriticalCount,
+			"highCount":     agg.HighCount,
+		})
+	}
+
+	// 4. Top 威胁
+	type threatAgg struct {
+		Count         int64
+		Severity      string
+		AffectedHosts map[string]bool
+		FilePaths     []string
+	}
+	threatMap := make(map[string]*threatAgg)
+	for _, r := range results {
+		agg, ok := threatMap[r.ThreatName]
+		if !ok {
+			agg = &threatAgg{AffectedHosts: make(map[string]bool)}
+			threatMap[r.ThreatName] = agg
+		}
+		agg.Count++
+		agg.Severity = r.Severity
+		agg.AffectedHosts[r.HostID] = true
+		if len(agg.FilePaths) < 5 {
+			agg.FilePaths = append(agg.FilePaths, r.FilePath)
+		}
+	}
+
+	topThreats := make([]gin.H, 0)
+	for name, agg := range threatMap {
+		topThreats = append(topThreats, gin.H{
+			"threatName":    name,
+			"count":         agg.Count,
+			"severity":      agg.Severity,
+			"affectedHosts": len(agg.AffectedHosts),
+			"filePaths":     agg.FilePaths,
+		})
+	}
+
+	// 5. 生成结论
+	hasCritical := bySeverity["critical"] > 0
+	hasHigh := bySeverity["high"] > 0
+	totalThreats := int64(len(results))
+
+	var overallConclusion, threatOverview string
+	if totalThreats == 0 {
+		overallConclusion = "未发现安全威胁"
+		threatOverview = "本次扫描未发现任何威胁文件，系统安全状态良好。"
+	} else if hasCritical {
+		overallConclusion = "存在严重安全威胁"
+		threatOverview = fmt.Sprintf("共发现 %d 个威胁，其中包含 %d 个严重威胁和 %d 个高危威胁，需立即处理。",
+			totalThreats, bySeverity["critical"], bySeverity["high"])
+	} else if hasHigh {
+		overallConclusion = "存在高危安全威胁"
+		threatOverview = fmt.Sprintf("共发现 %d 个威胁，其中包含 %d 个高危威胁，建议尽快处理。",
+			totalThreats, bySeverity["high"])
+	} else {
+		overallConclusion = "存在低风险威胁"
+		threatOverview = fmt.Sprintf("共发现 %d 个威胁，均为中低风险，建议按计划处理。", totalThreats)
+	}
+
+	// 6. 生成建议
+	actionSuggestions := make([]string, 0)
+	if hasCritical {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【紧急】立即隔离或删除 %d 个严重威胁文件", bySeverity["critical"]))
+	}
+	if hasHigh {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【重要】优先处理 %d 个高危威胁", bySeverity["high"]))
+	}
+	if byAction["detected"] > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("仍有 %d 个威胁处于「已检测」状态，建议尽快隔离或删除", byAction["detected"]))
+	}
+	actionSuggestions = append(actionSuggestions, "建议定期执行全盘扫描，保持病毒库及时更新")
+	actionSuggestions = append(actionSuggestions, "对高危威胁涉及的主机进行深入排查，确认是否存在横向扩散")
+
+	// 7. 生成报告编号
+	reportID := fmt.Sprintf("AV-%s-%d", time.Now().Format("20060102"), task.ID)
+
+	companyName := h.getCompanyName()
+
+	var startedAt, finishedAt string
+	if task.StartedAt != nil {
+		startedAt = time.Time(*task.StartedAt).Format("2006-01-02 15:04:05")
+	}
+	if task.FinishedAt != nil {
+		finishedAt = time.Time(*task.FinishedAt).Format("2006-01-02 15:04:05")
+	}
+
+	reportData := gin.H{
+		"meta": gin.H{
+			"reportId":    reportID,
+			"reportTitle": "病毒查杀扫描报告",
+			"generatedAt": time.Now().Format("2006-01-02 15:04:05"),
+			"companyName": companyName,
+			"scanType":    getScanTypeLabel(task.ScanType),
+			"checkTarget": fmt.Sprintf("%d 台服务器", task.TotalHosts),
+		},
+		"summary": gin.H{
+			"overallConclusion": overallConclusion,
+			"threatOverview":    threatOverview,
+			"hasCriticalThreat": hasCritical,
+			"hasHighThreat":     hasHigh,
+		},
+		"taskInfo": gin.H{
+			"taskId":       task.ID,
+			"taskName":     task.Name,
+			"scanType":     task.ScanType,
+			"hostCount":    task.TotalHosts,
+			"scannedHosts": task.ScannedHosts,
+			"threatCount":  task.ThreatCount,
+			"startedAt":    startedAt,
+			"finishedAt":   finishedAt,
+		},
+		"statistics": gin.H{
+			"totalThreats":       totalThreats,
+			"detectedThreats":    byAction["detected"],
+			"quarantinedThreats": byAction["quarantined"],
+			"deletedThreats":     byAction["deleted"],
+			"ignoredThreats":     byAction["ignored"],
+			"bySeverity":         bySeverity,
+			"byThreatType":       byThreatType,
+			"byAction":           byAction,
+		},
+		"hostDetails": hostDetails,
+		"topThreats":  topThreats,
+		"recommendation": gin.H{
+			"overallAssessment": fmt.Sprintf("本次扫描共检查 %d 台主机，发现 %d 个威胁。%s", task.TotalHosts, totalThreats, threatOverview),
+			"actionSuggestions": actionSuggestions,
+			"disclaimer":        "本报告仅反映扫描时刻的系统状态，不代表系统的绝对安全。建议定期执行扫描并保持病毒库更新。",
+		},
+	}
+
+	h.saveGeneratedReport(model.ReportTypeAntivirus, "病毒查杀扫描报告", reportID, task.Name, reportData)
+	Success(c, reportData)
+}
+
+// GetVulnerabilityExecutiveReport 获取漏洞管理 Executive 报告
+// GET /api/v1/reports/vulnerability/executive
+func (h *ReportsHandler) GetVulnerabilityExecutiveReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	companyName := h.getCompanyName()
+	reportID := fmt.Sprintf("VR-%s-%08x", time.Now().Format("20060102"), time.Now().UnixNano()&0xFFFFFFFF)
+
+	// 1. 漏洞统计
+	var totalVulns, unpatchedVulns, fixedVulns, ignoredVulns int64
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ?", startTime, endTime).
+		Count(&totalVulns)
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "unpatched").
+		Count(&unpatchedVulns)
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "fixed").
+		Count(&fixedVulns)
+	h.db.Model(&model.Vulnerability{}).
+		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "ignored").
+		Count(&ignoredVulns)
+
+	var affectedHosts int64
+	h.db.Model(&model.HostVulnerability{}).
+		Joins("LEFT JOIN vulnerabilities ON host_vulnerabilities.vuln_id = vulnerabilities.id").
+		Where("vulnerabilities.discovered_at >= ? AND vulnerabilities.discovered_at <= ?", startTime, endTime).
+		Distinct("host_vulnerabilities.host_id").
+		Count(&affectedHosts)
+
+	// 2. 严重级别分布
+	bySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var severityRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.Vulnerability{}).
+		Select("severity, COUNT(*) as count").
+		Where("discovered_at >= ? AND discovered_at <= ?", startTime, endTime).
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		if r.Severity != "" {
+			bySeverity[r.Severity] = r.Count
+		}
+	}
+
+	// 3. 组件分布
+	type componentRow struct {
+		Component string
+		Count     int64
+	}
+	var componentRows []componentRow
+	h.db.Raw(`
+		SELECT component, COUNT(*) as count
+		FROM vulnerabilities
+		WHERE discovered_at >= ? AND discovered_at <= ? AND component <> ''
+		GROUP BY component
+		ORDER BY count DESC
+		LIMIT 15
+	`, startTime, endTime).Scan(&componentRows)
+	byComponent := make([]gin.H, 0, len(componentRows))
+	for _, r := range componentRows {
+		byComponent = append(byComponent, gin.H{"component": r.Component, "count": r.Count})
+	}
+
+	// 4. 主机明细
+	type vulnHostRow struct {
+		HostID        string
+		Hostname      string
+		IP            string
+		VulnCount     int64
+		CriticalCount int64
+		HighCount     int64
+	}
+	var vulnHosts []vulnHostRow
+	h.db.Raw(`
+		SELECT hv.host_id,
+			MAX(hv.hostname) as hostname,
+			MAX(hv.ip) as ip,
+			COUNT(*) as vuln_count,
+			SUM(CASE WHEN v.severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
+			SUM(CASE WHEN v.severity = 'high' THEN 1 ELSE 0 END) as high_count
+		FROM host_vulnerabilities hv
+		LEFT JOIN vulnerabilities v ON hv.vuln_id = v.id
+		WHERE v.discovered_at >= ? AND v.discovered_at <= ?
+		GROUP BY hv.host_id
+		ORDER BY vuln_count DESC
+	`, startTime, endTime).Scan(&vulnHosts)
+
+	// 补全主机信息
+	vhIDs := make([]string, 0, len(vulnHosts))
+	for _, row := range vulnHosts {
+		if row.Hostname == "" || row.IP == "" {
+			vhIDs = append(vhIDs, row.HostID)
+		}
+	}
+	if len(vhIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", vhIDs).Find(&hosts)
+		hMap := make(map[string]model.Host, len(hosts))
+		for _, host := range hosts {
+			hMap[host.HostID] = host
+		}
+		for i := range vulnHosts {
+			if host, ok := hMap[vulnHosts[i].HostID]; ok {
+				if vulnHosts[i].Hostname == "" {
+					vulnHosts[i].Hostname = host.Hostname
+				}
+				if vulnHosts[i].IP == "" && len(host.IPv4) > 0 {
+					vulnHosts[i].IP = host.IPv4[0]
+				}
+			}
+		}
+	}
+
+	hostDetails := make([]gin.H, 0, len(vulnHosts))
+	for _, h := range vulnHosts {
+		hostDetails = append(hostDetails, gin.H{
+			"hostId": h.HostID, "hostname": h.Hostname, "ip": h.IP,
+			"vulnCount": h.VulnCount, "criticalCount": h.CriticalCount, "highCount": h.HighCount,
+		})
+	}
+
+	// 5. Top 高危漏洞
+	type topVulnRow struct {
+		CveID         string
+		Severity      string
+		CvssScore     float64
+		Component     string
+		AffectedHosts int
+		Description   string
+	}
+	var topVulns []topVulnRow
+	h.db.Raw(`
+		SELECT cve_id, severity, cvss_score, component, affected_hosts, description
+		FROM vulnerabilities
+		WHERE discovered_at >= ? AND discovered_at <= ?
+		ORDER BY cvss_score DESC, affected_hosts DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&topVulns)
+	topVulnsOut := make([]gin.H, 0, len(topVulns))
+	for _, v := range topVulns {
+		topVulnsOut = append(topVulnsOut, gin.H{
+			"cveId": v.CveID, "severity": v.Severity, "cvssScore": v.CvssScore,
+			"component": v.Component, "affectedHosts": v.AffectedHosts, "description": v.Description,
+		})
+	}
+
+	// 6. 结论
+	hasCritical := bySeverity["critical"] > 0
+	hasHigh := bySeverity["high"] > 0
+	complianceRate := 0.0
+	if totalVulns > 0 {
+		complianceRate = float64(fixedVulns) / float64(totalVulns) * 100.0
+	}
+
+	var overallConclusion, vulnOverview string
+	if totalVulns == 0 {
+		overallConclusion = "未发现漏洞"
+		vulnOverview = "报告周期内未发现新漏洞。"
+	} else if hasCritical {
+		overallConclusion = "存在严重漏洞"
+		vulnOverview = fmt.Sprintf("共发现 %d 个漏洞，其中 %d 个严重、%d 个高危，%d 个未修复。",
+			totalVulns, bySeverity["critical"], bySeverity["high"], unpatchedVulns)
+	} else if hasHigh {
+		overallConclusion = "存在高危漏洞"
+		vulnOverview = fmt.Sprintf("共发现 %d 个漏洞，其中 %d 个高危，%d 个未修复。",
+			totalVulns, bySeverity["high"], unpatchedVulns)
+	} else {
+		overallConclusion = "漏洞风险可控"
+		vulnOverview = fmt.Sprintf("共发现 %d 个漏洞，均为中低风险。", totalVulns)
+	}
+
+	actionSuggestions := make([]string, 0)
+	if hasCritical {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【紧急】立即修复 %d 个严重漏洞", bySeverity["critical"]))
+	}
+	if hasHigh {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【重要】优先修复 %d 个高危漏洞", bySeverity["high"]))
+	}
+	if unpatchedVulns > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("制定修复计划，处理 %d 个未修复漏洞", unpatchedVulns))
+	}
+	actionSuggestions = append(actionSuggestions, "建议定期执行漏洞扫描，保持组件及时更新")
+
+	periodStr := fmt.Sprintf("%s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
+
+	reportData := gin.H{
+		"meta": gin.H{
+			"reportId":     reportID,
+			"reportTitle":  "漏洞管理分析报告",
+			"generatedAt":  time.Now().Format("2006-01-02 15:04:05"),
+			"companyName":  companyName,
+			"reportPeriod": periodStr,
+			"checkTarget":  fmt.Sprintf("%d 台服务器", affectedHosts),
+		},
+		"summary": gin.H{
+			"overallConclusion": overallConclusion,
+			"vulnOverview":      vulnOverview,
+			"hasCriticalVuln":   hasCritical,
+			"hasHighVuln":       hasHigh,
+			"complianceRate":    complianceRate,
+		},
+		"statistics": gin.H{
+			"totalVulns":     totalVulns,
+			"unpatchedVulns": unpatchedVulns,
+			"fixedVulns":     fixedVulns,
+			"ignoredVulns":   ignoredVulns,
+			"affectedHosts":  affectedHosts,
+			"bySeverity":     bySeverity,
+			"byComponent":    byComponent,
+		},
+		"hostDetails": hostDetails,
+		"topVulns":    topVulnsOut,
+		"recommendation": gin.H{
+			"overallAssessment": fmt.Sprintf("报告周期内共发现 %d 个漏洞，影响 %d 台主机。%s", totalVulns, affectedHosts, vulnOverview),
+			"actionSuggestions": actionSuggestions,
+			"disclaimer":        "本报告基于当前已知漏洞数据库生成，不覆盖零日漏洞。建议持续关注安全公告并及时更新。",
+		},
+	}
+
+	h.saveGeneratedReport(model.ReportTypeVulnerability, "漏洞管理分析报告", reportID, periodStr, reportData)
+	Success(c, reportData)
+}
+
+// GetKubeExecutiveReport 获取容器安全 Executive 报告
+// GET /api/v1/reports/kube/executive
+func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	companyName := h.getCompanyName()
+	reportID := fmt.Sprintf("KS-%s-%08x", time.Now().Format("20060102"), time.Now().UnixNano()&0xFFFFFFFF)
+
+	// 1. 告警统计
+	var totalAlarms, pendingAlarms, processedAlarms, ignoredAlarms, clusterCount int64
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Count(&totalAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "pending").
+		Count(&pendingAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "processed").
+		Count(&processedAlarms)
+	h.db.Model(&model.KubeAlarm{}).
+		Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "ignored").
+		Count(&ignoredAlarms)
+	h.db.Model(&model.KubeCluster{}).Count(&clusterCount)
+
+	// 告警严重级别分布
+	alarmBySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var alarmSevRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.KubeAlarm{}).
+		Select("severity, COUNT(*) as count").
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Group("severity").
+		Scan(&alarmSevRows)
+	for _, r := range alarmSevRows {
+		if r.Severity != "" {
+			alarmBySeverity[r.Severity] = r.Count
+		}
+	}
+
+	// 告警类型分布
+	alarmByType := make(map[string]int64)
+	var alarmTypeRows []struct {
+		AlarmType string
+		Count     int64
+	}
+	h.db.Model(&model.KubeAlarm{}).
+		Select("alarm_type, COUNT(*) as count").
+		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+		Group("alarm_type").
+		Scan(&alarmTypeRows)
+	for _, r := range alarmTypeRows {
+		if r.AlarmType != "" {
+			alarmByType[r.AlarmType] = r.Count
+		}
+	}
+
+	// 按集群分布
+	type clusterAlarmRow struct {
+		ClusterName string
+		Count       int64
+	}
+	var clusterAlarmRows []clusterAlarmRow
+	h.db.Raw(`
+		SELECT cluster_name, COUNT(*) as count
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ? AND cluster_name <> ''
+		GROUP BY cluster_name
+		ORDER BY count DESC
+	`, startTime, endTime).Scan(&clusterAlarmRows)
+	alarmByCluster := make([]gin.H, 0, len(clusterAlarmRows))
+	for _, r := range clusterAlarmRows {
+		alarmByCluster = append(alarmByCluster, gin.H{"clusterName": r.ClusterName, "count": r.Count})
+	}
+
+	// 2. 基线检查统计
+	var totalChecks, passedChecks, failedChecks, warningChecks int64
+	h.db.Model(&model.KubeBaseline{}).
+		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime).
+		Count(&totalChecks)
+	h.db.Model(&model.KubeBaseline{}).
+		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "pass").
+		Count(&passedChecks)
+	h.db.Model(&model.KubeBaseline{}).
+		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "fail").
+		Count(&failedChecks)
+	h.db.Model(&model.KubeBaseline{}).
+		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "warning").
+		Count(&warningChecks)
+
+	baselineBySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var bslSevRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.KubeBaseline{}).
+		Select("severity, COUNT(*) as count").
+		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "fail").
+		Group("severity").
+		Scan(&bslSevRows)
+	for _, r := range bslSevRows {
+		if r.Severity != "" {
+			baselineBySeverity[r.Severity] = r.Count
+		}
+	}
+
+	baselineByCategory := make(map[string]int64)
+	var bslCatRows []struct {
+		Category string
+		Count    int64
+	}
+	h.db.Model(&model.KubeBaseline{}).
+		Select("category, COUNT(*) as count").
+		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime).
+		Group("category").
+		Scan(&bslCatRows)
+	for _, r := range bslCatRows {
+		if r.Category != "" {
+			baselineByCategory[r.Category] = r.Count
+		}
+	}
+
+	// 3. 集群概览（告警数 + 基线通过率）
+	type clusterDetailRow struct {
+		ClusterName string
+		AlarmCount  int64
+	}
+	var clusterDetailRows []clusterDetailRow
+	h.db.Raw(`
+		SELECT cluster_name, COUNT(*) as alarm_count
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ? AND cluster_name <> ''
+		GROUP BY cluster_name
+	`, startTime, endTime).Scan(&clusterDetailRows)
+
+	clusterDetails := make([]gin.H, 0, len(clusterDetailRows))
+	for _, cd := range clusterDetailRows {
+		// 计算该集群基线通过率
+		var cTotal, cPassed int64
+		h.db.Model(&model.KubeBaseline{}).
+			Where("cluster_name = ? AND checked_at >= ? AND checked_at <= ?", cd.ClusterName, startTime, endTime).
+			Count(&cTotal)
+		h.db.Model(&model.KubeBaseline{}).
+			Where("cluster_name = ? AND checked_at >= ? AND checked_at <= ? AND result = ?", cd.ClusterName, startTime, endTime, "pass").
+			Count(&cPassed)
+		passRate := 0.0
+		if cTotal > 0 {
+			passRate = float64(cPassed) / float64(cTotal) * 100.0
+		}
+		clusterDetails = append(clusterDetails, gin.H{
+			"clusterName":      cd.ClusterName,
+			"alarmCount":       cd.AlarmCount,
+			"baselinePassRate": passRate,
+		})
+	}
+
+	// 4. Top 告警
+	type topAlarmRow struct {
+		Namespace string
+		Target    string
+		AlarmType string
+		Count     int64
+	}
+	var topAlarmRows []topAlarmRow
+	h.db.Raw(`
+		SELECT namespace, target, alarm_type, COUNT(*) as count
+		FROM kube_alarms
+		WHERE created_at >= ? AND created_at <= ?
+		GROUP BY namespace, target, alarm_type
+		ORDER BY count DESC
+		LIMIT 10
+	`, startTime, endTime).Scan(&topAlarmRows)
+	topAlarms := make([]gin.H, 0, len(topAlarmRows))
+	for _, r := range topAlarmRows {
+		topAlarms = append(topAlarms, gin.H{
+			"namespace": r.Namespace, "target": r.Target,
+			"alarmType": r.AlarmType, "count": r.Count,
+		})
+	}
+
+	// 5. 结论
+	hasCriticalAlarm := alarmBySeverity["critical"] > 0
+
+	var overallConclusion, alarmOverview, baselineOverview string
+	if totalAlarms == 0 && failedChecks == 0 {
+		overallConclusion = "容器安全状态良好"
+	} else if hasCriticalAlarm {
+		overallConclusion = "存在严重安全隐患"
+	} else if totalAlarms > 0 || failedChecks > 0 {
+		overallConclusion = "存在安全隐患"
+	}
+
+	alarmOverview = fmt.Sprintf("共发现 %d 个告警，其中 %d 个待处理。", totalAlarms, pendingAlarms)
+	baselinePassRate := 0.0
+	if totalChecks > 0 {
+		baselinePassRate = float64(passedChecks) / float64(totalChecks) * 100.0
+	}
+	baselineOverview = fmt.Sprintf("CIS 基线检查 %d 项，通过 %d 项，通过率 %.1f%%。", totalChecks, passedChecks, baselinePassRate)
+
+	actionSuggestions := make([]string, 0)
+	if hasCriticalAlarm {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【紧急】处理 %d 个严重告警", alarmBySeverity["critical"]))
+	}
+	if pendingAlarms > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("处理 %d 个待处理告警", pendingAlarms))
+	}
+	if failedChecks > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("修复 %d 项基线不合规配置", failedChecks))
+	}
+	actionSuggestions = append(actionSuggestions, "建议定期执行容器安全检查，关注集群安全态势")
+
+	periodStr := fmt.Sprintf("%s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
+
+	reportData := gin.H{
+		"meta": gin.H{
+			"reportId":     reportID,
+			"reportTitle":  "容器安全检查报告",
+			"generatedAt":  time.Now().Format("2006-01-02 15:04:05"),
+			"companyName":  companyName,
+			"reportPeriod": periodStr,
+			"checkTarget":  fmt.Sprintf("%d 个集群", clusterCount),
+		},
+		"summary": gin.H{
+			"overallConclusion": overallConclusion,
+			"alarmOverview":     alarmOverview,
+			"baselineOverview":  baselineOverview,
+			"hasCriticalAlarm":  hasCriticalAlarm,
+		},
+		"alarmStatistics": gin.H{
+			"totalAlarms":     totalAlarms,
+			"pendingAlarms":   pendingAlarms,
+			"processedAlarms": processedAlarms,
+			"ignoredAlarms":   ignoredAlarms,
+			"bySeverity":      alarmBySeverity,
+			"byAlarmType":     alarmByType,
+			"byCluster":       alarmByCluster,
+		},
+		"baselineStatistics": gin.H{
+			"totalChecks": totalChecks,
+			"passed":      passedChecks,
+			"failed":      failedChecks,
+			"warning":     warningChecks,
+			"bySeverity":  baselineBySeverity,
+			"byCategory":  baselineByCategory,
+		},
+		"clusterDetails": clusterDetails,
+		"topAlarms":      topAlarms,
+		"recommendation": gin.H{
+			"overallAssessment": fmt.Sprintf("报告周期内 %d 个集群共产生 %d 个告警，%s", clusterCount, totalAlarms, baselineOverview),
+			"actionSuggestions": actionSuggestions,
+			"disclaimer":        "本报告基于容器安全监控和 CIS 基线检查数据生成，建议结合实际业务场景综合评估。",
+		},
+	}
+
+	h.saveGeneratedReport(model.ReportTypeKube, "容器安全检查报告", reportID, periodStr, reportData)
+	Success(c, reportData)
+}
+
+// GetRuntimeExecutiveReport 获取运行时检测 Executive 报告
+// GET /api/v1/reports/runtime/executive
+func (h *ReportsHandler) GetRuntimeExecutiveReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	companyName := h.getCompanyName()
+	reportID := fmt.Sprintf("RT-%s-%08x", time.Now().Format("20060102"), time.Now().UnixNano()&0xFFFFFFFF)
+	const celPrefix = "cel-%"
+
+	// 1. 告警统计
+	var totalAlerts, activeAlerts, resolvedAlerts, todayAlerts, affectedHosts int64
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?", celPrefix, startTime, endTime).
+		Count(&totalAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND status = ?",
+			celPrefix, startTime, endTime, "active").
+		Count(&activeAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND status = ?",
+			celPrefix, startTime, endTime, "resolved").
+		Count(&resolvedAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND DATE(last_seen_at) = CURDATE()", celPrefix).
+		Count(&todayAlerts)
+	h.db.Model(&model.Alert{}).
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?", celPrefix, startTime, endTime).
+		Distinct("host_id").
+		Count(&affectedHosts)
+
+	// 严重级别分布
+	bySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var sevRows []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) as count").
+		Where("rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?", celPrefix, startTime, endTime).
+		Group("severity").
+		Scan(&sevRows)
+	for _, r := range sevRows {
+		if r.Severity != "" {
+			bySeverity[r.Severity] = r.Count
+		}
+	}
+
+	// 分类分布
+	type categoryRow struct {
+		Category string
+		Count    int64
+	}
+	var categoryRows []categoryRow
+	h.db.Raw(`
+		SELECT category, COUNT(*) as count
+		FROM alerts
+		WHERE rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ? AND category <> ''
+		GROUP BY category
+		ORDER BY count DESC
+		LIMIT 15
+	`, celPrefix, startTime, endTime).Scan(&categoryRows)
+	byCategory := make([]gin.H, 0, len(categoryRows))
+	for _, r := range categoryRows {
+		byCategory = append(byCategory, gin.H{"category": r.Category, "count": r.Count})
+	}
+
+	// MITRE 分布
+	type mitreRow struct {
+		MitreID string
+		Count   int64
+	}
+	var mitreRows []mitreRow
+	h.db.Raw(`
+		SELECT dr.mitre_id as mitre_id, COUNT(*) as count
+		FROM alerts a
+		INNER JOIN detection_rules dr ON a.rule_id = CONCAT('cel-', dr.id)
+		WHERE a.rule_id LIKE ? AND a.last_seen_at >= ? AND a.last_seen_at <= ? AND dr.mitre_id <> ''
+		GROUP BY dr.mitre_id
+		ORDER BY count DESC
+		LIMIT 15
+	`, celPrefix, startTime, endTime).Scan(&mitreRows)
+	byMitre := make([]gin.H, 0, len(mitreRows))
+	for _, r := range mitreRows {
+		byMitre = append(byMitre, gin.H{"mitreId": r.MitreID, "count": r.Count})
+	}
+
+	// 2. 主机明细
+	type hostRow struct {
+		HostID        string
+		AlertCount    int64
+		CriticalCount int64
+		HighCount     int64
+	}
+	var hostRows []hostRow
+	h.db.Raw(`
+		SELECT host_id,
+			COUNT(*) as alert_count,
+			SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
+			SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) as high_count
+		FROM alerts
+		WHERE rule_id LIKE ? AND last_seen_at >= ? AND last_seen_at <= ?
+		GROUP BY host_id
+		ORDER BY alert_count DESC
+	`, celPrefix, startTime, endTime).Scan(&hostRows)
+
+	hIDs := make([]string, 0, len(hostRows))
+	for _, r := range hostRows {
+		hIDs = append(hIDs, r.HostID)
+	}
+	hostMap := make(map[string]model.Host)
+	if len(hIDs) > 0 {
+		var hosts []model.Host
+		h.db.Where("host_id IN ?", hIDs).Find(&hosts)
+		for _, host := range hosts {
+			hostMap[host.HostID] = host
+		}
+	}
+
+	hostDetails := make([]gin.H, 0, len(hostRows))
+	for _, r := range hostRows {
+		host := hostMap[r.HostID]
+		ip := ""
+		if len(host.IPv4) > 0 {
+			ip = host.IPv4[0]
+		}
+		hostDetails = append(hostDetails, gin.H{
+			"hostId": r.HostID, "hostname": host.Hostname, "ip": ip,
+			"alertCount": r.AlertCount, "criticalCount": r.CriticalCount, "highCount": r.HighCount,
+		})
+	}
+
+	// 3. Top 检测规则
+	type topRuleRow struct {
+		RuleID   string
+		RuleName string
+		Count    int64
+		Severity string
+	}
+	var topRules []topRuleRow
+	h.db.Raw(`
+		SELECT a.rule_id as rule_id,
+			COALESCE(dr.name, a.rule_id) as rule_name,
+			COUNT(*) as count,
+			MAX(a.severity) as severity
+		FROM alerts a
+		LEFT JOIN detection_rules dr ON a.rule_id = CONCAT('cel-', dr.id)
+		WHERE a.rule_id LIKE ? AND a.last_seen_at >= ? AND a.last_seen_at <= ?
+		GROUP BY a.rule_id, dr.name
+		ORDER BY count DESC
+		LIMIT 10
+	`, celPrefix, startTime, endTime).Scan(&topRules)
+	topRulesOut := make([]gin.H, 0, len(topRules))
+	for _, r := range topRules {
+		topRulesOut = append(topRulesOut, gin.H{
+			"ruleId": r.RuleID, "ruleName": r.RuleName,
+			"count": r.Count, "severity": r.Severity,
+		})
+	}
+
+	// 4. 结论
+	hasCritical := bySeverity["critical"] > 0
+	hasHigh := bySeverity["high"] > 0
+
+	var overallConclusion, alertOverview string
+	if totalAlerts == 0 {
+		overallConclusion = "未检测到运行时威胁"
+		alertOverview = "报告周期内未检测到运行时告警。"
+	} else if hasCritical {
+		overallConclusion = "发现严重运行时威胁"
+		alertOverview = fmt.Sprintf("共检测到 %d 条告警，其中 %d 条严重、%d 条高危，影响 %d 台主机。",
+			totalAlerts, bySeverity["critical"], bySeverity["high"], affectedHosts)
+	} else if hasHigh {
+		overallConclusion = "发现高危运行时威胁"
+		alertOverview = fmt.Sprintf("共检测到 %d 条告警，其中 %d 条高危，影响 %d 台主机。",
+			totalAlerts, bySeverity["high"], affectedHosts)
+	} else {
+		overallConclusion = "运行时检测正常"
+		alertOverview = fmt.Sprintf("共检测到 %d 条告警，均为中低风险。", totalAlerts)
+	}
+
+	actionSuggestions := make([]string, 0)
+	if hasCritical {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【紧急】立即调查 %d 条严重告警，确认是否存在入侵行为", bySeverity["critical"]))
+	}
+	if hasHigh {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("【重要】优先排查 %d 条高危告警", bySeverity["high"]))
+	}
+	if activeAlerts > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("处理 %d 条活跃告警，确认并关闭已处理的事件", activeAlerts))
+	}
+	actionSuggestions = append(actionSuggestions, "建议持续监控运行时检测告警，及时响应安全事件")
+	actionSuggestions = append(actionSuggestions, "定期审查检测规则，根据业务场景优化误报规则")
+
+	periodStr := fmt.Sprintf("%s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
+
+	reportData := gin.H{
+		"meta": gin.H{
+			"reportId":     reportID,
+			"reportTitle":  "运行时检测分析报告",
+			"generatedAt":  time.Now().Format("2006-01-02 15:04:05"),
+			"companyName":  companyName,
+			"reportPeriod": periodStr,
+			"checkTarget":  fmt.Sprintf("%d 台服务器", affectedHosts),
+		},
+		"summary": gin.H{
+			"overallConclusion": overallConclusion,
+			"alertOverview":     alertOverview,
+			"hasCriticalAlert":  hasCritical,
+			"hasHighAlert":      hasHigh,
+		},
+		"statistics": gin.H{
+			"totalAlerts":   totalAlerts,
+			"activeAlerts":  activeAlerts,
+			"resolvedAlerts": resolvedAlerts,
+			"todayAlerts":   todayAlerts,
+			"affectedHosts": affectedHosts,
+			"bySeverity":    bySeverity,
+			"byCategory":    byCategory,
+			"byMitre":       byMitre,
+		},
+		"hostDetails": hostDetails,
+		"topRules":    topRulesOut,
+		"recommendation": gin.H{
+			"overallAssessment": fmt.Sprintf("报告周期内 %d 台主机共产生 %d 条运行时告警。%s", affectedHosts, totalAlerts, alertOverview),
+			"actionSuggestions": actionSuggestions,
+			"disclaimer":        "本报告基于运行时检测规则生成，告警可能包含误报。建议结合实际业务场景进行人工确认。",
+		},
+	}
+
+	h.saveGeneratedReport(model.ReportTypeRuntime, "运行时检测分析报告", reportID, periodStr, reportData)
+	Success(c, reportData)
+}
+
+// saveGeneratedReport 保存已生成的报告到数据库
+func (h *ReportsHandler) saveGeneratedReport(reportType model.ReportType, title, reportID, period string, data gin.H) {
+	record := model.GeneratedReport{
+		ReportType: reportType,
+		Title:      title,
+		ReportID:   reportID,
+		Period:     period,
+		ReportData: model.ReportJSON(data),
+	}
+	if err := h.db.Create(&record).Error; err != nil {
+		h.logger.Error("保存报告失败", zap.String("report_id", reportID), zap.Error(err))
+	}
+}
+
+// ListGeneratedReports 获取已保存的报告列表
+// GET /api/v1/reports/generated
+func (h *ReportsHandler) ListGeneratedReports(c *gin.Context) {
+	reportType := c.Query("report_type")
+
+	var reports []model.GeneratedReport
+	query := h.db.Select("id, report_type, title, report_id, period, created_at").Order("created_at DESC")
+	if reportType != "" {
+		query = query.Where("report_type = ?", reportType)
+	}
+	if err := query.Find(&reports).Error; err != nil {
+		h.logger.Error("查询报告列表失败", zap.Error(err))
+		InternalError(c, "查询报告列表失败")
+		return
+	}
+
+	Success(c, gin.H{"items": reports, "total": len(reports)})
+}
+
+// GetGeneratedReport 获取已保存的报告详情
+// GET /api/v1/reports/generated/:id
+func (h *ReportsHandler) GetGeneratedReport(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		BadRequest(c, "id 参数不能为空")
+		return
+	}
+
+	var report model.GeneratedReport
+	if err := h.db.Where("id = ?", id).First(&report).Error; err != nil {
+		NotFound(c, "报告不存在")
+		return
+	}
+
+	Success(c, report.ReportData)
+}
+
+// DeleteGeneratedReport 删除已保存的报告
+// DELETE /api/v1/reports/generated/:id
+func (h *ReportsHandler) DeleteGeneratedReport(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		BadRequest(c, "id 参数不能为空")
+		return
+	}
+
+	result := h.db.Where("id = ?", id).Delete(&model.GeneratedReport{})
+	if result.Error != nil {
+		h.logger.Error("删除报告失败", zap.String("id", id), zap.Error(result.Error))
+		InternalError(c, "删除报告失败")
+		return
+	}
+	if result.RowsAffected == 0 {
+		NotFound(c, "报告不存在")
+		return
+	}
+
+	Success(c, nil)
+}

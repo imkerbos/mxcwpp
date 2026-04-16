@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -162,17 +163,20 @@ type HostRiskDistribution struct {
 func (h *HostsHandler) GetHostStatusDistribution(c *gin.Context) {
 	var distribution HostStatusDistribution
 
-	// 运行中（在线）
-	h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&distribution.Running)
-
-	// 离线
-	h.db.Model(&model.Host{}).Where("status = ?", "offline").Count(&distribution.Offline)
-
-	// 运行异常（暂时用离线超过一定时间的主机表示，后续可扩展）
-	// TODO: 实现运行异常的逻辑
-
-	// 未安装和已卸载（暂时返回0，后续扩展）
-	// TODO: 实现未安装和已卸载的逻辑
+	// 单次 GROUP BY 替代多条独立 COUNT
+	var rows []struct {
+		Status string
+		Cnt    int64
+	}
+	h.db.Model(&model.Host{}).Select("status, COUNT(*) AS cnt").Group("status").Scan(&rows)
+	for _, r := range rows {
+		switch r.Status {
+		case "online":
+			distribution.Running = r.Cnt
+		case "offline":
+			distribution.Offline = r.Cnt
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -182,40 +186,33 @@ func (h *HostsHandler) GetHostStatusDistribution(c *gin.Context) {
 
 // GetHostRiskDistribution 获取主机基线风险分布（按严重程度）
 // GET /api/v1/hosts/risk-distribution
+// 优化：单次 GROUP BY 替代 4 条 DISTINCT 查询
 func (h *HostsHandler) GetHostRiskDistribution(c *gin.Context) {
 	var distribution HostRiskDistribution
 
-	// 统计存在严重(critical)风险基线的主机数
-	var hostsWithCritical []string
-	h.db.Model(&model.ScanResult{}).
-		Select("DISTINCT host_id").
-		Where("status = ? AND severity = ?", "fail", "critical").
-		Pluck("host_id", &hostsWithCritical)
-	distribution.Critical = int64(len(hostsWithCritical))
+	var rows []struct {
+		Severity string
+		Cnt      int64
+	}
+	h.db.Raw(`
+		SELECT severity, COUNT(DISTINCT host_id) AS cnt
+		FROM scan_results
+		WHERE status = 'fail'
+		GROUP BY severity
+	`).Scan(&rows)
 
-	// 统计存在高危(high)风险基线的主机数
-	var hostsWithHigh []string
-	h.db.Model(&model.ScanResult{}).
-		Select("DISTINCT host_id").
-		Where("status = ? AND severity = ?", "fail", "high").
-		Pluck("host_id", &hostsWithHigh)
-	distribution.High = int64(len(hostsWithHigh))
-
-	// 统计存在中危(medium)风险基线的主机数
-	var hostsWithMedium []string
-	h.db.Model(&model.ScanResult{}).
-		Select("DISTINCT host_id").
-		Where("status = ? AND severity = ?", "fail", "medium").
-		Pluck("host_id", &hostsWithMedium)
-	distribution.Medium = int64(len(hostsWithMedium))
-
-	// 统计存在低危(low)风险基线的主机数
-	var hostsWithLow []string
-	h.db.Model(&model.ScanResult{}).
-		Select("DISTINCT host_id").
-		Where("status = ? AND severity = ?", "fail", "low").
-		Pluck("host_id", &hostsWithLow)
-	distribution.Low = int64(len(hostsWithLow))
+	for _, r := range rows {
+		switch r.Severity {
+		case "critical":
+			distribution.Critical = r.Cnt
+		case "high":
+			distribution.High = r.Cnt
+		case "medium":
+			distribution.Medium = r.Cnt
+		case "low":
+			distribution.Low = r.Cnt
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -465,8 +462,25 @@ func (h *HostsHandler) GetHostMetrics(c *gin.Context) {
 		}
 	}
 
-	// 如果没有指定时间范围，默认查询最近 1 小时
-	if startTime == nil && endTime == nil {
+	// range 快捷参数：1h / 6h / 24h，优先于 start_time / end_time
+	if rangeParam := c.Query("range"); rangeParam != "" && startTime == nil {
+		var dur time.Duration
+		switch rangeParam {
+		case "6h":
+			dur = 6 * time.Hour
+		case "24h":
+			dur = 24 * time.Hour
+		default:
+			dur = time.Hour
+		}
+		now := time.Now()
+		ago := now.Add(-dur)
+		startTime = &ago
+		endTime = &now
+	}
+
+	// 默认最近 1 小时
+	if startTime == nil {
 		now := time.Now()
 		oneHourAgo := now.Add(-1 * time.Hour)
 		startTime = &oneHourAgo
@@ -477,9 +491,13 @@ func (h *HostsHandler) GetHostMetrics(c *gin.Context) {
 	metrics, err := h.metricsService.GetHostMetrics(c.Request.Context(), hostID, startTime, endTime)
 	if err != nil {
 		h.logger.Error("查询主机监控数据失败", zap.String("host_id", hostID), zap.Error(err))
+		message := "Prometheus 数据源查询失败，请检查 Prometheus 服务和配置"
+		if errors.Is(err, biz.ErrPrometheusDatasourceNotConfigured) {
+			message = err.Error()
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
-			"message": "查询主机监控数据失败",
+			"message": message,
 		})
 		return
 	}
@@ -550,9 +568,57 @@ func (h *HostsHandler) GetHostRiskStatistics(c *gin.Context) {
 		stats.Baseline.Total += r.Count
 	}
 
-	// 安全告警和漏洞风险统计暂时返回0（后续扩展）
-	// TODO: 实现安全告警统计（需要告警数据表）
-	// TODO: 实现漏洞风险统计（需要漏洞数据表）
+	// 安全告警统计（从 alerts 表查询）
+	var alertResults []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) as count").
+		Where("host_id = ? AND status = ?", hostID, model.AlertStatusActive).
+		Group("severity").
+		Scan(&alertResults)
+
+	for _, r := range alertResults {
+		switch r.Severity {
+		case "critical":
+			stats.Alerts.Critical = r.Count
+		case "high":
+			stats.Alerts.High = r.Count
+		case "medium":
+			stats.Alerts.Medium = r.Count
+		case "low":
+			stats.Alerts.Low = r.Count
+		}
+		stats.Alerts.Total += r.Count
+	}
+
+	// 漏洞风险统计（从 host_vulnerabilities JOIN vulnerabilities）
+	var vulnResults []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Raw(`
+		SELECT v.severity, COUNT(*) as count
+		FROM host_vulnerabilities hv
+		JOIN vulnerabilities v ON v.id = hv.vuln_id
+		WHERE hv.host_id = ? AND hv.status = 'unpatched'
+		GROUP BY v.severity
+	`, hostID).Scan(&vulnResults)
+
+	for _, r := range vulnResults {
+		switch r.Severity {
+		case "critical":
+			stats.Vulnerabilities.Critical = r.Count
+		case "high":
+			stats.Vulnerabilities.High = r.Count
+		case "medium":
+			stats.Vulnerabilities.Medium = r.Count
+		case "low":
+			stats.Vulnerabilities.Low = r.Count
+		}
+		stats.Vulnerabilities.Total += r.Count
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
@@ -810,12 +876,17 @@ func (h *HostsHandler) DeleteHost(c *gin.Context) {
 			return err
 		}
 
-		// 6. 清除基线得分缓存
+		// 6. 删除主机漏洞关联数据
+		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostVulnerability{}).Error; err != nil {
+			return err
+		}
+
+		// 7. 清除基线得分缓存
 		if h.scoreCache != nil {
 			h.scoreCache.InvalidateHostScore(hostID)
 		}
 
-		// 7. 最后删除主机记录
+		// 8. 最后删除主机记录
 		if err := tx.Delete(&host).Error; err != nil {
 			return err
 		}

@@ -271,7 +271,7 @@
             :loading="businessLinesLoading"
             style="width: 100%"
           >
-            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.name">
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
               {{ bl.name }} ({{ bl.host_count || 0 }}台)
             </a-select-option>
           </a-select>
@@ -441,7 +441,7 @@
             :loading="businessLinesLoading"
             style="width: 100%"
           >
-            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.name">
+            <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
               {{ bl.name }} ({{ bl.host_count || 0 }}台)
             </a-select-option>
           </a-select>

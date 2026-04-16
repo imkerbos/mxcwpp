@@ -72,7 +72,14 @@
         :pagination="{ pageSize: 15, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'title'">
+          <template v-if="column.key === 'enabled'">
+            <a-switch
+              :checked="record.enabled"
+              size="small"
+              @change="(checked: boolean) => handleToggleEnabled(record, checked)"
+            />
+          </template>
+          <template v-else-if="column.key === 'title'">
             <div>
               <span style="font-weight: 500;">{{ record.title }}</span>
             </div>
@@ -149,6 +156,11 @@ const editingRule = ref<Rule | null>(null)
 
 const ruleColumns = [
   {
+    title: '启用',
+    key: 'enabled',
+    width: 70,
+  },
+  {
     title: '规则名称',
     key: 'title',
     ellipsis: true,
@@ -218,6 +230,16 @@ const handleCreateRule = () => {
 const handleEditRule = (rule: Rule) => {
   editingRule.value = rule
   ruleModalVisible.value = true
+}
+
+const handleToggleEnabled = async (rule: Rule, checked: boolean) => {
+  try {
+    await rulesApi.update(rule.rule_id, { enabled: checked })
+    rule.enabled = checked
+    message.success(checked ? '规则已启用' : '规则已禁用')
+  } catch {
+    message.error('操作失败')
+  }
 }
 
 const handleDeleteRule = async (rule: Rule) => {

@@ -4,12 +4,24 @@
     <div class="page-header">
       <h2>任务报告</h2>
       <div class="header-actions">
-        <a-button @click="loadCompletedTasks" :loading="loadingTasks">
+        <a-button v-if="activeTab === 'baseline'" @click="loadCompletedTasks" :loading="loadingTasks">
           <template #icon><ReloadOutlined /></template>
           刷新
         </a-button>
       </div>
     </div>
+
+    <!-- Tab 切换 -->
+    <a-tabs v-model:activeKey="activeTab" style="margin-bottom: 16px">
+      <a-tab-pane key="baseline" tab="基线检查" />
+      <a-tab-pane key="antivirus" tab="病毒查杀" />
+      <a-tab-pane key="vulnerability" tab="漏洞管理" />
+      <a-tab-pane key="kube" tab="容器安全" />
+      <a-tab-pane key="runtime" tab="运行时检测" />
+    </a-tabs>
+
+    <!-- 基线检查 Tab（现有全部内容） -->
+    <template v-if="activeTab === 'baseline'">
 
     <!-- 任务列表 -->
     <div v-if="!report">
@@ -454,6 +466,14 @@
       </div>
       </div><!-- report-container -->
     </div><!-- report-detail-wrapper -->
+
+    </template><!-- baseline tab end -->
+
+    <!-- 其他 Tab -->
+    <AntivirusTaskReport v-if="activeTab === 'antivirus'" />
+    <VulnTaskReport v-if="activeTab === 'vulnerability'" />
+    <KubeTaskReport v-if="activeTab === 'kube'" />
+    <RuntimeTaskReport v-if="activeTab === 'runtime'" />
   </div>
 </template>
 
@@ -479,6 +499,13 @@ import {
 import { tasksApi } from '@/api/tasks'
 import { policiesApi } from '@/api/policies'
 import html2pdf from 'html2pdf.js'
+import AntivirusTaskReport from './task-reports/AntivirusTaskReport.vue'
+import VulnTaskReport from './task-reports/VulnTaskReport.vue'
+import KubeTaskReport from './task-reports/KubeTaskReport.vue'
+import RuntimeTaskReport from './task-reports/RuntimeTaskReport.vue'
+
+// Tab 切换
+const activeTab = ref('baseline')
 
 // 数据
 const loading = ref(false)

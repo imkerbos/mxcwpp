@@ -2,11 +2,18 @@
 package migration
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
 
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -18,6 +25,14 @@ import (
 
 // DefaultPolicyGroupID 默认策略组ID
 const DefaultPolicyGroupID = "system-baseline"
+
+type managedPluginBootstrap struct {
+	Name         string
+	Type         model.PluginType
+	RuntimeTypes model.StringArray
+	Description  string
+	Detail       string
+}
 
 // InitDefaultData 初始化默认数据（策略和规则）
 // 首次启动时创建默认策略组和策略数据，后续启动不再重建用户已删除的数据
@@ -33,6 +48,16 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		return fmt.Errorf("初始化默认用户失败: %w", err)
 	}
 
+	// 初始化默认组件（始终执行，确保组件列表完整）
+	if err := initDefaultComponents(db, logger); err != nil {
+		return fmt.Errorf("初始化默认组件失败: %w", err)
+	}
+
+	// 迁移 data/deps/ 下的旧依赖文件到 Component 表（仅运行一次）
+	if err := migrateDepFiles(db, logger); err != nil {
+		logger.Warn("迁移依赖文件失败", zap.Error(err))
+	}
+
 	// 初始化默认插件配置（始终执行，确保插件配置存在）
 	if err := initDefaultPluginConfigs(db, logger, pluginsCfg); err != nil {
 		return fmt.Errorf("初始化默认插件配置失败: %w", err)
@@ -41,6 +66,11 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 	// 初始化默认 FIM 策略（始终执行，仅在表为空时插入）
 	if err := initDefaultFIMPolicies(db, logger); err != nil {
 		return fmt.Errorf("初始化默认 FIM 策略失败: %w", err)
+	}
+
+	// 初始化内置检测规则（仅在表为空时插入）
+	if err := initBuiltinDetectionRules(db, logger); err != nil {
+		logger.Warn("初始化内置检测规则失败", zap.Error(err))
 	}
 
 	// 检查是否已完成首次数据初始化
@@ -85,7 +115,7 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 // isDataInitialized 检查默认数据是否已完成首次初始化
 func isDataInitialized(db *gorm.DB) bool {
 	var cfg model.SystemConfig
-	err := db.Where("key = ? AND category = ?", "data_initialized", "system").First(&cfg).Error
+	err := db.Where("`key` = ? AND category = ?", "data_initialized", "system").First(&cfg).Error
 	return err == nil && cfg.Value == "true"
 }
 
@@ -318,106 +348,182 @@ func associateExistingPoliciesWithGroup(db *gorm.DB, logger *zap.Logger) error {
 
 // initDefaultPluginConfigs 初始化默认插件配置
 func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *config.PluginsConfig) error {
-	// 构建插件下载 URL
-	// 如果配置了 base_url，使用 HTTP 下载
-	// 否则使用 file:// 协议（仅限开发环境）
-	var baselineURL, collectorURL, fimURL string
-	if pluginsCfg != nil && pluginsCfg.BaseURL != "" {
-		// 生产环境：使用 HTTP URL
-		baselineURL = pluginsCfg.BaseURL + "/baseline"
-		collectorURL = pluginsCfg.BaseURL + "/collector"
-		fimURL = pluginsCfg.BaseURL + "/fim"
-		logger.Info("使用 HTTP 插件下载 URL",
-			zap.String("base_url", pluginsCfg.BaseURL),
-		)
-	} else {
-		// 开发环境：使用 file:// 协议
-		pluginDir := "/workspace/dist/plugins"
-		if pluginsCfg != nil && pluginsCfg.Dir != "" {
-			pluginDir = pluginsCfg.Dir
-		}
-		baselineURL = "file://" + pluginDir + "/baseline"
-		collectorURL = "file://" + pluginDir + "/collector"
-		fimURL = "file://" + pluginDir + "/fim"
-		logger.Info("使用 file:// 插件下载 URL（开发环境）",
-			zap.String("plugin_dir", pluginDir),
-		)
-	}
-
-	// 定义默认插件配置
-	defaultPlugins := []model.PluginConfig{
+	managedPlugins := []managedPluginBootstrap{
 		{
-			Name:    "baseline",
-			Type:    model.PluginTypeBaseline,
-			Version: "1.0.2", // 版本更新，触发 URL 更新
-			SHA256:  "",      // 暂时为空，后续可以添加校验
-			DownloadURLs: model.StringArray{
-				baselineURL,
-			},
+			Name:         "baseline",
+			Type:         model.PluginTypeBaseline,
 			RuntimeTypes: model.StringArray{"vm"},
-			Detail:       `{"check_interval": 3600}`,
-			Enabled:      true,
 			Description:  "Linux 基线安全检查插件，执行操作系统安全配置检查",
+			Detail:       `{"check_interval": 3600}`,
 		},
 		{
-			Name:    "collector",
-			Type:    model.PluginTypeCollector,
-			Version: "1.0.2",
-			SHA256:  "",
-			DownloadURLs: model.StringArray{
-				collectorURL,
-			},
+			Name:         "collector",
+			Type:         model.PluginTypeCollector,
 			RuntimeTypes: model.StringArray{"vm", "docker", "k8s"},
-			Detail:       `{"collect_interval": 300}`,
-			Enabled:      true,
 			Description:  "资产采集插件，采集主机进程、端口、用户等信息",
+			Detail:       `{"collect_interval": 300}`,
 		},
 		{
-			Name:    "fim",
-			Type:    model.PluginTypeFIM,
-			Version: "1.0.0",
-			SHA256:  "",
-			DownloadURLs: model.StringArray{
-				fimURL,
-			},
+			Name:         "fim",
+			Type:         model.PluginTypeFIM,
 			RuntimeTypes: model.StringArray{"vm"},
-			Detail:       `{"check_timeout_minutes": 30}`,
-			Enabled:      true,
 			Description:  "文件完整性监控插件，基于 AIDE 检测文件变更",
+			Detail:       `{"check_timeout_minutes": 30}`,
+		},
+		{
+			Name:         "scanner",
+			Type:         model.PluginTypeScanner,
+			RuntimeTypes: model.StringArray{"vm"},
+			Description:  "病毒查杀插件，基于 ClamAV + YARA-X 双引擎检测恶意文件",
+			Detail:       `{"quarantine_dir": "/var/mxsec/quarantine", "yara_rules_dir": "/var/mxsec/yara-rules"}`,
+		},
+		{
+			Name:         "sensor",
+			Type:         model.PluginTypeSensor,
+			RuntimeTypes: model.StringArray{"vm"},
+			Description:  "eBPF 实时监控插件，基于 Tetragon 采集进程/文件/网络事件",
+			Detail:       `{"tetragon_socket": "/var/run/tetragon/tetragon.sock"}`,
 		},
 	}
 
-	for _, plugin := range defaultPlugins {
-		// 检查插件是否已存在
-		var existing model.PluginConfig
-		err := db.Where("name = ?", plugin.Name).First(&existing).Error
-
-		if err == nil {
-			// 插件已存在，跳过（不覆盖已有配置）
-			// 版本应该由组件管理系统（component_versions）统一管理
-			logger.Debug("插件配置已存在，跳过初始化",
-				zap.String("name", plugin.Name),
-				zap.String("current_version", existing.Version),
-			)
-			continue
+	for _, plugin := range managedPlugins {
+		if err := ensureManagedPluginConfig(db, logger, pluginsCfg, plugin); err != nil {
+			return err
 		}
-
-		if err != gorm.ErrRecordNotFound {
-			return fmt.Errorf("检查插件配置 %s 失败: %w", plugin.Name, err)
-		}
-
-		// 创建新的插件配置（仅在不存在时）
-		if err := db.Create(&plugin).Error; err != nil {
-			return fmt.Errorf("创建插件配置 %s 失败: %w", plugin.Name, err)
-		}
-		logger.Info("插件配置初始化成功",
-			zap.String("name", plugin.Name),
-			zap.String("type", string(plugin.Type)),
-			zap.String("version", plugin.Version),
-		)
 	}
 
 	return nil
+}
+
+func ensureManagedPluginConfig(db *gorm.DB, logger *zap.Logger, pluginsCfg *config.PluginsConfig, plugin managedPluginBootstrap) error {
+	var existing model.PluginConfig
+	err := db.Where("name = ?", plugin.Name).First(&existing).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("检查插件配置 %s 失败: %w", plugin.Name, err)
+	}
+	hasExisting := err == nil
+
+	version, pkg, found, err := findLatestUploadedPluginPackage(db, plugin.Name)
+	if err != nil {
+		return fmt.Errorf("查询插件 %s 上传包失败: %w", plugin.Name, err)
+	}
+
+	if !found {
+		if hasExisting {
+			updates := map[string]interface{}{
+				"enabled":       false,
+				"download_urls": model.StringArray{},
+				"sha256":        "",
+				"runtime_types": plugin.RuntimeTypes,
+				"description":   plugin.Description,
+				"detail":        plugin.Detail,
+			}
+			if err := db.Model(&existing).Updates(updates).Error; err != nil {
+				return fmt.Errorf("禁用未上传插件配置 %s 失败: %w", plugin.Name, err)
+			}
+			logger.Info("插件尚未上传，已禁用历史插件配置",
+				zap.String("name", plugin.Name),
+				zap.String("current_version", existing.Version),
+			)
+		} else {
+			logger.Debug("插件尚未上传，跳过创建默认插件配置",
+				zap.String("name", plugin.Name),
+			)
+		}
+		return nil
+	}
+
+	downloadURL := buildManagedPluginDownloadURL(pluginsCfg, plugin.Name)
+	detail := fmt.Sprintf(`{"source":"component_upload","updated_at":"%s"}`, time.Now().Format(time.RFC3339))
+
+	if !hasExisting {
+		pluginConfig := model.PluginConfig{
+			Name:         plugin.Name,
+			Type:         plugin.Type,
+			Version:      version.Version,
+			SHA256:       pkg.SHA256,
+			DownloadURLs: model.StringArray{downloadURL},
+			RuntimeTypes: plugin.RuntimeTypes,
+			Detail:       detail,
+			Enabled:      true,
+			Description:  plugin.Description,
+		}
+		if err := db.Create(&pluginConfig).Error; err != nil {
+			return fmt.Errorf("创建插件配置 %s 失败: %w", plugin.Name, err)
+		}
+		logger.Info("根据已上传组件包创建插件配置",
+			zap.String("name", plugin.Name),
+			zap.String("version", version.Version),
+			zap.String("download_url", downloadURL),
+		)
+		return nil
+	}
+
+	updates := map[string]interface{}{
+		"type":          plugin.Type,
+		"version":       version.Version,
+		"sha256":        pkg.SHA256,
+		"download_urls": model.StringArray{downloadURL},
+		"runtime_types": plugin.RuntimeTypes,
+		"detail":        detail,
+		"enabled":       true,
+		"description":   plugin.Description,
+	}
+	if err := db.Model(&existing).Updates(updates).Error; err != nil {
+		return fmt.Errorf("更新插件配置 %s 失败: %w", plugin.Name, err)
+	}
+	logger.Info("根据已上传组件包同步插件配置",
+		zap.String("name", plugin.Name),
+		zap.String("version", version.Version),
+		zap.String("download_url", downloadURL),
+	)
+	return nil
+}
+
+func findLatestUploadedPluginPackage(db *gorm.DB, pluginName string) (model.ComponentVersion, model.ComponentPackage, bool, error) {
+	var component model.Component
+	if err := db.Where("name = ? AND category = ?", pluginName, model.ComponentCategoryPlugin).First(&component).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return model.ComponentVersion{}, model.ComponentPackage{}, false, nil
+		}
+		return model.ComponentVersion{}, model.ComponentPackage{}, false, err
+	}
+
+	var version model.ComponentVersion
+	if err := db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&version).Error; err != nil {
+		if err := db.Where("component_id = ?", component.ID).Order("created_at DESC").First(&version).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return model.ComponentVersion{}, model.ComponentPackage{}, false, nil
+			}
+			return model.ComponentVersion{}, model.ComponentPackage{}, false, err
+		}
+	}
+
+	var pkg model.ComponentPackage
+	if err := db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
+		version.ID, model.PackageTypeBinary, "amd64", true).First(&pkg).Error; err != nil {
+		if err := db.Where("version_id = ? AND pkg_type = ? AND enabled = ?",
+			version.ID, model.PackageTypeBinary, true).First(&pkg).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return model.ComponentVersion{}, model.ComponentPackage{}, false, nil
+			}
+			return model.ComponentVersion{}, model.ComponentPackage{}, false, err
+		}
+	}
+
+	info, err := os.Stat(pkg.FilePath)
+	if err != nil || info.IsDir() {
+		return model.ComponentVersion{}, model.ComponentPackage{}, false, nil
+	}
+
+	return version, pkg, true, nil
+}
+
+func buildManagedPluginDownloadURL(pluginsCfg *config.PluginsConfig, pluginName string) string {
+	if pluginsCfg != nil && pluginsCfg.BaseURL != "" {
+		return fmt.Sprintf("%s/%s", strings.TrimRight(pluginsCfg.BaseURL, "/"), pluginName)
+	}
+	return fmt.Sprintf("/api/v1/plugins/download/%s", pluginName)
 }
 
 // initDefaultFIMPolicies 初始化默认 FIM 策略
@@ -576,5 +682,353 @@ func initDefaultFIMPolicies(db *gorm.DB, logger *zap.Logger) error {
 		)
 	}
 
+	return nil
+}
+
+// builtinRuleYAML 内置规则 YAML 定义结构
+type builtinRuleYAML struct {
+	Rules []struct {
+		Name        string   `mapstructure:"name"`
+		Expression  string   `mapstructure:"expression"`
+		Severity    string   `mapstructure:"severity"`
+		Category    string   `mapstructure:"category"`
+		MitreID     string   `mapstructure:"mitre_id"`
+		DataTypes   []string `mapstructure:"data_types"`
+		Description string   `mapstructure:"description"`
+	} `mapstructure:"rules"`
+}
+
+// initBuiltinDetectionRules 初始化内置 CEL 检测规则
+// 增量导入：按 name 去重，已存在的跳过，新规则自动补入
+func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
+	// 查找 YAML 文件
+	yamlPaths := []string{
+		"configs/rules/builtin-rules.yaml",
+		"/opt/mxsec-platform/configs/rules/builtin-rules.yaml",
+	}
+
+	var yamlData []byte
+	var loadErr error
+	for _, p := range yamlPaths {
+		yamlData, loadErr = os.ReadFile(p)
+		if loadErr == nil {
+			logger.Info("加载内置规则文件", zap.String("path", p))
+			break
+		}
+	}
+
+	if yamlData == nil {
+		return fmt.Errorf("未找到内置规则文件: %v", loadErr)
+	}
+
+	// 使用 viper 解析 YAML
+	v := viper.New()
+	v.SetConfigType("yaml")
+	if err := v.ReadConfig(strings.NewReader(string(yamlData))); err != nil {
+		return fmt.Errorf("解析内置规则 YAML 失败: %w", err)
+	}
+
+	var rulesFile builtinRuleYAML
+	if err := v.Unmarshal(&rulesFile); err != nil {
+		return fmt.Errorf("反序列化内置规则失败: %w", err)
+	}
+
+	// 查询已存在的规则名称，用于跳过
+	var existingNames []string
+	db.Model(&model.DetectionRule{}).Pluck("name", &existingNames)
+	nameSet := make(map[string]struct{}, len(existingNames))
+	for _, n := range existingNames {
+		nameSet[n] = struct{}{}
+	}
+
+	// 增量写入：仅插入不存在的规则
+	imported := 0
+	for _, r := range rulesFile.Rules {
+		if _, exists := nameSet[r.Name]; exists {
+			continue
+		}
+		rule := model.DetectionRule{
+			Name:        r.Name,
+			Expression:  r.Expression,
+			Severity:    r.Severity,
+			Category:    r.Category,
+			MitreID:     r.MitreID,
+			Description: r.Description,
+			DataTypes:   model.StringArray(r.DataTypes),
+			Enabled:     true,
+		}
+		if err := db.Create(&rule).Error; err != nil {
+			logger.Warn("导入内置规则失败", zap.String("name", r.Name), zap.Error(err))
+			continue
+		}
+		imported++
+	}
+
+	if imported > 0 {
+		logger.Info("内置检测规则增量导入完成", zap.Int("new", imported), zap.Int("existing", len(existingNames)))
+	} else {
+		logger.Debug("内置检测规则已是最新", zap.Int("total", len(existingNames)))
+	}
+	return nil
+}
+
+// initDefaultComponents 初始化默认组件列表
+// 确保所有预期组件在 components 表中存在，不存在则创建
+func initDefaultComponents(db *gorm.DB, logger *zap.Logger) error {
+	type componentDef struct {
+		Name        string
+		Category    model.ComponentCategory
+		Description string
+	}
+
+	components := []componentDef{
+		{Name: "agent", Category: model.ComponentCategoryAgent, Description: "矩阵云安全平台主机安全 Agent"},
+		{Name: "baseline", Category: model.ComponentCategoryPlugin, Description: "Linux 基线安全检查插件，执行操作系统安全配置检查"},
+		{Name: "collector", Category: model.ComponentCategoryPlugin, Description: "资产采集插件，采集主机进程、端口、用户等信息"},
+		{Name: "fim", Category: model.ComponentCategoryPlugin, Description: "文件完整性监控插件，基于 AIDE 检测文件变更"},
+		{Name: "scanner", Category: model.ComponentCategoryPlugin, Description: "病毒查杀插件，基于 ClamAV + YARA-X 双引擎检测恶意文件"},
+		{Name: "sensor", Category: model.ComponentCategoryPlugin, Description: "eBPF 实时监控插件，基于 Tetragon 采集进程/文件/网络事件"},
+		{Name: "virus-database", Category: model.ComponentCategoryPlugin, Description: "ClamAV 病毒特征库，由 freshclam 自动更新"},
+		{Name: "tetragon", Category: model.ComponentCategoryDependency, Description: "Cilium Tetragon eBPF 运行时安全引擎"},
+	}
+
+	for _, c := range components {
+		var existing model.Component
+		err := db.Where("name = ?", c.Name).First(&existing).Error
+		if err == nil {
+			// 已存在，跳过
+			continue
+		}
+		if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("检查组件 %s 失败: %w", c.Name, err)
+		}
+
+		comp := model.Component{
+			Name:        c.Name,
+			Category:    c.Category,
+			Description: c.Description,
+			CreatedBy:   "system",
+		}
+		if err := db.Create(&comp).Error; err != nil {
+			return fmt.Errorf("创建组件 %s 失败: %w", c.Name, err)
+		}
+		logger.Info("初始化组件成功", zap.String("name", c.Name), zap.String("category", string(c.Category)))
+	}
+
+	return nil
+}
+
+// depFileNamePattern 解析 {name}-v{version}-{arch}.tar.gz
+var depFileNamePattern = regexp.MustCompile(`^([a-zA-Z0-9_-]+)-v([0-9][0-9a-zA-Z.\-]*)-(amd64|arm64)\.tar\.gz$`)
+
+// migrateDepFiles 将 data/deps/ 下的旧依赖 tar.gz 文件迁移到 Component/Version/Package 模型
+// 幂等：仅当 DB 中该版本的包记录不存在时才插入
+func migrateDepFiles(db *gorm.DB, logger *zap.Logger) error {
+	depsRoot := filepath.Join("data", "deps")
+	if _, err := os.Stat(depsRoot); os.IsNotExist(err) {
+		return nil
+	}
+
+	entries, err := os.ReadDir(depsRoot)
+	if err != nil {
+		return fmt.Errorf("读取 data/deps 失败: %w", err)
+	}
+
+	uploadsRoot := "uploads"
+	migrated := 0
+
+	for _, dirEntry := range entries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		depName := dirEntry.Name()
+
+		// 查找对应的依赖组件
+		var component model.Component
+		if err := db.Where("name = ? AND category = ?", depName, model.ComponentCategoryDependency).First(&component).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				logger.Info("跳过未登记的依赖目录", zap.String("name", depName))
+				continue
+			}
+			logger.Warn("查询依赖组件失败", zap.String("name", depName), zap.Error(err))
+			continue
+		}
+
+		depDir := filepath.Join(depsRoot, depName)
+		files, err := os.ReadDir(depDir)
+		if err != nil {
+			logger.Warn("读取依赖目录失败", zap.String("dir", depDir), zap.Error(err))
+			continue
+		}
+
+		// 按版本号组织 {version} -> []{arch, srcPath, fileName}
+		type pkgItem struct {
+			arch     string
+			srcPath  string
+			fileName string
+		}
+		versionMap := make(map[string][]pkgItem)
+
+		for _, f := range files {
+			if f.IsDir() {
+				continue
+			}
+			m := depFileNamePattern.FindStringSubmatch(f.Name())
+			if m == nil {
+				continue
+			}
+			name, ver, arch := m[1], m[2], m[3]
+			if name != depName {
+				continue
+			}
+			versionMap[ver] = append(versionMap[ver], pkgItem{
+				arch:     arch,
+				srcPath:  filepath.Join(depDir, f.Name()),
+				fileName: f.Name(),
+			})
+		}
+
+		if len(versionMap) == 0 {
+			continue
+		}
+
+		// 创建版本和包记录
+		for ver, items := range versionMap {
+			var compVersion model.ComponentVersion
+			err := db.Where("component_id = ? AND version = ?", component.ID, ver).First(&compVersion).Error
+			if err == gorm.ErrRecordNotFound {
+				compVersion = model.ComponentVersion{
+					ComponentID: component.ID,
+					Version:     ver,
+					Changelog:   "从 data/deps 自动迁移",
+					IsLatest:    true,
+					CreatedBy:   "system",
+				}
+				if err := db.Create(&compVersion).Error; err != nil {
+					logger.Warn("创建依赖版本失败",
+						zap.String("name", depName), zap.String("version", ver), zap.Error(err))
+					continue
+				}
+			} else if err != nil {
+				logger.Warn("查询依赖版本失败", zap.Error(err))
+				continue
+			}
+
+			// 准备目标目录
+			dstDir := filepath.Join(uploadsRoot, "packages", depName, ver)
+			if err := os.MkdirAll(dstDir, 0755); err != nil {
+				logger.Warn("创建目标目录失败", zap.String("dir", dstDir), zap.Error(err))
+				continue
+			}
+
+			for _, it := range items {
+				// 检查是否已存在相同包记录
+				var existing model.ComponentPackage
+				err := db.Where("version_id = ? AND pkg_type = ? AND arch = ?",
+					compVersion.ID, string(model.PackageTypeTGZ), it.arch).First(&existing).Error
+				if err == nil {
+					// 已有记录：确保文件路径存在即可，不重复操作
+					continue
+				}
+				if err != gorm.ErrRecordNotFound {
+					logger.Warn("查询依赖包失败", zap.Error(err))
+					continue
+				}
+
+				dstFile := filepath.Join(dstDir, it.fileName)
+
+				// 移动文件
+				if err := os.Rename(it.srcPath, dstFile); err != nil {
+					// 跨设备失败时尝试复制
+					if copyErr := copyFile(it.srcPath, dstFile); copyErr != nil {
+						logger.Warn("迁移文件失败", zap.String("src", it.srcPath), zap.Error(copyErr))
+						continue
+					}
+					_ = os.Remove(it.srcPath)
+				}
+
+				// 计算 SHA256 与 大小
+				sum, size, err := hashAndSize(dstFile)
+				if err != nil {
+					logger.Warn("计算文件哈希失败", zap.String("file", dstFile), zap.Error(err))
+					continue
+				}
+
+				pkg := model.ComponentPackage{
+					VersionID:  compVersion.ID,
+					OS:         "linux",
+					Arch:       it.arch,
+					PkgType:    model.PackageTypeTGZ,
+					FilePath:   dstFile,
+					FileName:   it.fileName,
+					FileSize:   size,
+					SHA256:     sum,
+					Enabled:    true,
+					UploadedBy: "system",
+				}
+				if err := db.Create(&pkg).Error; err != nil {
+					logger.Warn("创建依赖包记录失败", zap.Error(err))
+					continue
+				}
+				migrated++
+				logger.Info("迁移依赖包成功",
+					zap.String("name", depName),
+					zap.String("version", ver),
+					zap.String("arch", it.arch),
+					zap.String("dst", dstFile),
+				)
+			}
+		}
+
+		// 尝试清理空的目录
+		if remain, _ := os.ReadDir(depDir); len(remain) == 0 {
+			_ = os.Remove(depDir)
+		}
+	}
+
+	// 如果 data/deps 整个空了，顺便清理
+	if remain, _ := os.ReadDir(depsRoot); len(remain) == 0 {
+		_ = os.Remove(depsRoot)
+	}
+
+	if migrated > 0 {
+		logger.Info("依赖文件迁移完成", zap.Int("migrated_packages", migrated))
+	}
+	return nil
+}
+
+// hashAndSize 计算文件 SHA256 和大小
+func hashAndSize(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), size, nil
+}
+
+// copyFile 复制文件内容
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
 	return nil
 }

@@ -56,10 +56,10 @@
       <a-tab-pane key="baseline" :tab="`基线风险(${baselineCount})`">
         <BaselineRisk :host-id="hostId" />
       </a-tab-pane>
-      <a-tab-pane key="runtime" :tab="`运行时安全告警(0)`">
+      <a-tab-pane key="runtime" :tab="`运行时安全告警(${runtimeAlertCount})`">
         <RuntimeAlerts :host-id="hostId" />
       </a-tab-pane>
-      <a-tab-pane key="antivirus" :tab="`病毒查杀(0)`">
+      <a-tab-pane key="antivirus" :tab="`病毒查杀(${antivirusCount})`">
         <AntivirusScan :host-id="hostId" />
       </a-tab-pane>
       <a-tab-pane key="performance" tab="性能监控">
@@ -77,6 +77,8 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
+import { alertsApi } from '@/api/alerts'
+import { antivirusApi } from '@/api/antivirus'
 import type { HostDetail, BaselineScore } from '@/api/types'
 import HostOverview from './components/HostOverview.vue'
 import SecurityAlerts from './components/SecurityAlerts.vue'
@@ -101,6 +103,8 @@ const hostId = ref('')
 const alertCount = ref(0)
 const vulnerabilityCount = ref(0)
 const baselineCount = ref(0)
+const runtimeAlertCount = ref(0)
+const antivirusCount = ref(0)
 
 const loadHostDetail = async () => {
   const id = route.params.hostId as string
@@ -110,9 +114,12 @@ const loadHostDetail = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const [hostData, scoreResult] = await Promise.all([
+    const [hostData, scoreResult, riskStats, runtimeRes, antivirusRes] = await Promise.all([
       hostsApi.get(id),
       hostsApi.getScore(id).catch(() => null),
+      hostsApi.getRiskStatistics(id).catch(() => null),
+      alertsApi.list({ host_id: id, alert_type: 'detection_rule' as any, page: 1, page_size: 1 }).catch(() => null),
+      antivirusApi.listResults({ host_id: id, page: 1, page_size: 1 }).catch(() => null),
     ])
     host.value = hostData
     scoreData.value = scoreResult
@@ -122,7 +129,16 @@ const loadHostDetail = async () => {
       baselineCount.value = scoreResult.fail_count
     }
 
-    // TODO: 加载告警和漏洞数量
+    if (riskStats) {
+      alertCount.value = riskStats.alerts.total
+      vulnerabilityCount.value = riskStats.vulnerabilities.total
+      if (!scoreResult) {
+        baselineCount.value = riskStats.baseline.total
+      }
+    }
+
+    runtimeAlertCount.value = runtimeRes?.total ?? 0
+    antivirusCount.value = antivirusRes?.total ?? 0
   } catch (error: any) {
     console.error('加载主机详情失败:', error)
     loadError.value = error?.response?.data?.message || error?.message || '网络请求失败，请检查网络连接'

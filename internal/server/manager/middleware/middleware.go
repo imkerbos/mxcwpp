@@ -18,6 +18,10 @@ func Logger(logger *zap.Logger) gin.HandlerFunc {
 
 		c.Next()
 
+		if path == "/health" {
+			return
+		}
+
 		latency := time.Since(start)
 		logger.Info("HTTP Request",
 			zap.Int("status", c.Writer.Status()),

@@ -57,6 +57,70 @@
           </a-descriptions>
         </a-card>
 
+        <!-- 事件详情卡片（仅运行时告警） -->
+        <template v-if="isRuntimeAlert && eventDetail">
+          <a-card title="事件详情" :bordered="false" class="info-card">
+            <a-descriptions bordered :column="2">
+              <a-descriptions-item label="事件类型">
+                <a-tag color="blue">{{ eventDetail.event_type }}</a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="时间">
+                {{ formatDateTime(eventDetail.timestamp) }}
+              </a-descriptions-item>
+            </a-descriptions>
+
+            <!-- 进程信息 -->
+            <a-card v-if="eventDetail.exe" title="进程信息" size="small" style="margin-top: 12px">
+              <a-descriptions bordered :column="2" size="small">
+                <a-descriptions-item label="可执行文件">
+                  <code>{{ eventDetail.exe }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item label="命令行">
+                  <code>{{ eventDetail.cmdline }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item label="PID">{{ eventDetail.pid }}</a-descriptions-item>
+                <a-descriptions-item label="PPID">{{ eventDetail.ppid }}</a-descriptions-item>
+                <a-descriptions-item label="父进程">
+                  <code>{{ eventDetail.parent_exe }}</code>
+                </a-descriptions-item>
+                <a-descriptions-item label="UID">{{ eventDetail.uid }}</a-descriptions-item>
+              </a-descriptions>
+            </a-card>
+
+            <!-- 网络信息 -->
+            <a-card v-if="eventDetail.remote_addr" title="网络信息" size="small" style="margin-top: 12px">
+              <a-descriptions bordered :column="2" size="small">
+                <a-descriptions-item label="远程地址">{{ eventDetail.remote_addr }}</a-descriptions-item>
+                <a-descriptions-item label="远程端口">{{ eventDetail.remote_port }}</a-descriptions-item>
+                <a-descriptions-item label="本地地址">{{ eventDetail.local_addr }}</a-descriptions-item>
+                <a-descriptions-item label="本地端口">{{ eventDetail.local_port }}</a-descriptions-item>
+                <a-descriptions-item label="协议">
+                  <a-tag>{{ eventDetail.protocol }}</a-tag>
+                </a-descriptions-item>
+              </a-descriptions>
+            </a-card>
+
+            <!-- 文件信息 -->
+            <a-card v-if="eventDetail.file_path" title="文件信息" size="small" style="margin-top: 12px">
+              <a-descriptions bordered :column="1" size="small">
+                <a-descriptions-item label="文件路径">
+                  <code>{{ eventDetail.file_path }}</code>
+                </a-descriptions-item>
+              </a-descriptions>
+            </a-card>
+
+            <!-- 主机信息 -->
+            <a-card title="触发主机" size="small" style="margin-top: 12px">
+              <a-descriptions bordered :column="2" size="small">
+                <a-descriptions-item label="主机名">{{ eventDetail.hostname }}</a-descriptions-item>
+                <a-descriptions-item label="Agent ID">
+                  <span class="agent-id">{{ eventDetail.agent_id }}</span>
+                </a-descriptions-item>
+              </a-descriptions>
+            </a-card>
+          </a-card>
+        </template>
+
         <!-- 修复建议卡片 -->
         <a-card title="修复建议" :bordered="false" class="info-card" v-if="alert.fix_suggestion">
           <div class="fix-suggestion">
@@ -135,7 +199,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
@@ -154,6 +218,17 @@ const alert = ref<Alert | null>(null)
 const resolveModalVisible = ref(false)
 const ignoreModalVisible = ref(false)
 const resolveReason = ref('')
+
+const isRuntimeAlert = computed(() => alert.value?.rule_id?.startsWith('cel-'))
+
+const eventDetail = computed(() => {
+  if (!isRuntimeAlert.value || !alert.value?.actual) return null
+  try {
+    return JSON.parse(alert.value.actual)
+  } catch {
+    return null
+  }
+})
 
 const loadAlert = async () => {
   const alertId = Number(route.params.alertId)
@@ -321,5 +396,11 @@ onMounted(() => {
 
 .text-muted {
   color: #999;
+}
+
+.agent-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: #666;
 }
 </style>

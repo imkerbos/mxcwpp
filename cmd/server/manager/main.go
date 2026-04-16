@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -37,8 +38,21 @@ func main() {
 	}
 	defer services.Cleanup()
 
+	// 根 context，用于控制后台 goroutine 生命周期
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动 AC 服务发现主动探测
+	services.ACRegistry.Start(ctx)
+
+	// 启动 Manager 侧任务调度器（持 Redis 锁，多实例安全）
+	go services.TaskScheduler.Start(ctx)
+
+	// 启动病毒库自动更新器
+	go services.VirusDBUpdater.Start(ctx)
+
 	// 设置路由
-	httpRouter := router.Setup(services.DB, services.Logger, services.Config, services.ScoreCache, services.MetricsService)
+	httpRouter := router.Setup(services.DB, services.Logger, services.Config, services.ScoreCache, services.MetricsService, services.ACRegistry, services.ACDispatcher, services.CHConn, services.Redis, services.PrometheusClient, services.VirusDBUpdater)
 
 	// 创建 HTTP Server
 	server := &http.Server{
@@ -63,15 +77,16 @@ func main() {
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
 	services.Logger.Info("Manager HTTP API Server 运行中，等待关闭信号...")
-
-	// 等待信号
 	sig := <-signalCh
 	services.Logger.Info("收到关闭信号", zap.String("signal", sig.String()))
 
-	// 优雅关闭
-	services.Logger.Info("正在关闭 Manager HTTP API Server...")
-	// TODO: 实现优雅关闭（使用 context 和 server.Shutdown）
-
+	// 优雅关闭 HTTP Server
+	cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		services.Logger.Error("HTTP Server 关闭异常", zap.Error(err))
+	}
 	services.Logger.Info("Manager HTTP API Server 已关闭")
 }
 

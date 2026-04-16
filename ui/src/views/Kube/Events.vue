@@ -38,7 +38,7 @@
               <a-tag :color="severityColorMap[record.severity]" :bordered="false">{{ severityTextMap[record.severity] }}</a-tag>
             </template>
             <template v-if="column.key === 'eventType'">
-              <a-tag :bordered="false" color="purple">{{ record.eventType }}</a-tag>
+              <a-tag :bordered="false" :color="eventTypeColorMap[record.eventType] || 'purple'">{{ eventTypeTextMap[record.eventType] || record.eventType }}</a-tag>
             </template>
             <template v-if="column.key === 'status'">
               <a-tag :color="record.status === 'unhandled' ? 'orange' : 'green'" :bordered="false">
@@ -62,7 +62,7 @@
         <a-descriptions :column="2" bordered size="small">
           <a-descriptions-item label="事件 ID">{{ detailRecord.id }}</a-descriptions-item>
           <a-descriptions-item label="集群">{{ detailRecord.clusterName }}</a-descriptions-item>
-          <a-descriptions-item label="事件类型"><a-tag :bordered="false" color="purple">{{ detailRecord.eventType }}</a-tag></a-descriptions-item>
+          <a-descriptions-item label="事件类型"><a-tag :bordered="false" :color="eventTypeColorMap[detailRecord.eventType] || 'purple'">{{ eventTypeTextMap[detailRecord.eventType] || detailRecord.eventType }}</a-tag></a-descriptions-item>
           <a-descriptions-item label="严重级别"><a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false">{{ severityTextMap[detailRecord.severity] }}</a-tag></a-descriptions-item>
           <a-descriptions-item label="Namespace">{{ detailRecord.namespace }}</a-descriptions-item>
           <a-descriptions-item label="Pod">{{ detailRecord.podName }}</a-descriptions-item>
@@ -104,6 +104,26 @@ const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: tr
 
 const severityColorMap: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold', low: 'blue' }
 const severityTextMap: Record<string, string> = { critical: '紧急', high: '高危', medium: '中危', low: '低危' }
+const eventTypeTextMap: Record<string, string> = {
+  audit: '审计事件',
+  container_escape: '容器逃逸',
+  abnormal_process: '异常进程',
+  abnormal_network: '异常网络',
+  file_tamper: '文件篡改',
+  privilege_escalation: '权限提升',
+  reverse_shell: '反弹 Shell',
+  crypto_mining: '挖矿行为',
+}
+const eventTypeColorMap: Record<string, string> = {
+  audit: 'blue',
+  container_escape: 'red',
+  abnormal_process: 'orange',
+  abnormal_network: 'purple',
+  file_tamper: 'gold',
+  privilege_escalation: 'red',
+  reverse_shell: 'red',
+  crypto_mining: 'volcano',
+}
 
 const columns = [
   { title: '事件时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
@@ -111,8 +131,8 @@ const columns = [
   { title: '事件类型', key: 'eventType', width: 120 },
   { title: '集群', dataIndex: 'clusterName', key: 'clusterName', width: 140 },
   { title: 'Namespace', dataIndex: 'namespace', key: 'namespace', width: 120 },
-  { title: 'Pod', dataIndex: 'podName', key: 'podName', width: 200 },
-  { title: '描述', dataIndex: 'message', key: 'message', ellipsis: true },
+  { title: '描述', dataIndex: 'title', key: 'title', ellipsis: true },
+  { title: '详情', dataIndex: 'message', key: 'message', ellipsis: true },
   { title: '状态', key: 'status', width: 100 },
   { title: '操作', key: 'action', width: 130 },
 ]
@@ -133,7 +153,14 @@ const handleTableChange = (pag: any) => { pagination.value.current = pag.current
 const showEventDetail = (record: any) => { detailRecord.value = record; showDetail.value = true }
 const handleEvent = async (record: any) => { try { await apiClient.post(`/kube/events/${record.id}/handle`); message.success('已处理'); loadEvents() } catch { message.error('操作失败') } }
 
-onMounted(() => { loadEvents() })
+const loadClusters = async () => {
+  try {
+    const res = await apiClient.get<any>('/kube/clusters', { params: { page_size: 100 } })
+    clusterOptions.value = (res.items ?? []).map((c: any) => ({ value: String(c.id), label: c.name }))
+  } catch { /* ignore */ }
+}
+
+onMounted(() => { loadClusters(); loadEvents() })
 </script>
 
 <style scoped>

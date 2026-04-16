@@ -2,7 +2,7 @@ import apiClient from './client'
 import type { PaginatedResponse } from './types'
 
 // 通知类别
-export type NotifyCategory = 'baseline_alert' | 'agent_offline'
+export type NotifyCategory = 'baseline_alert' | 'agent_offline' | 'vulnerability_alert' | 'virus_alert' | 'fim_alert' | 'runtime_alert' | 'kube_alert'
 
 export interface Notification {
   id: number
@@ -73,6 +73,7 @@ export interface TestNotificationRequest {
   }
   frontend_url?: string // 可选，用于测试跳转链接
   notification_id?: number // 可选，如果提供则使用完整的告警模板
+  notify_category?: NotifyCategory // 可选，指定测试的通知类别
 }
 
 export const notificationsApi = {

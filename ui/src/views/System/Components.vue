@@ -78,10 +78,18 @@
       </div>
     </div>
 
+    <!-- 分类 Tab -->
+    <a-tabs v-model:activeKey="activeCategory" class="category-tabs">
+      <a-tab-pane key="all" tab="全部" />
+      <a-tab-pane key="agent" tab="Agent" />
+      <a-tab-pane key="plugin" tab="插件" />
+      <a-tab-pane key="dependency" tab="依赖" />
+    </a-tabs>
+
     <!-- 组件列表表格 -->
     <a-table
       :columns="columns"
-      :data-source="components"
+      :data-source="filteredComponents"
       :loading="loading"
       row-key="id"
       :pagination="false"
@@ -90,7 +98,7 @@
         <!-- 组件名称 -->
         <template v-if="column.key === 'name'">
           <a-tag :color="getCategoryColor(record.category)">
-            {{ record.category === 'agent' ? 'Agent' : 'Plugin' }}
+            {{ getCategoryLabel(record.category) }}
           </a-tag>
           <span style="margin-left: 8px; font-weight: 500">{{ record.name }}</span>
         </template>
@@ -147,7 +155,7 @@
       <a-form layout="vertical">
         <a-alert
           message="提示"
-          description="将推送最新版本的 Agent 到所有在线主机。如果主机已是最新版本，默认会跳过更新。"
+          description="将推送最新版本的 Agent 到所有在线主机。如果主机已是最新版本，默认会跳过更新。容器环境（Docker/K8s）主机将被自动跳过，请通过重建镜像更新。"
           type="info"
           show-icon
           style="margin-bottom: 16px"
@@ -179,20 +187,35 @@
         layout="vertical"
         @finish="handleCreate"
       >
-        <a-form-item label="组件名称" name="name">
-          <a-select v-model:value="createForm.name" placeholder="请选择组件" @change="onComponentNameChange">
+        <a-form-item label="组件分类" name="category">
+          <a-select v-model:value="createForm.category" placeholder="请选择组件分类" @change="onCategoryChange">
             <a-select-option value="agent">Agent (主程序)</a-select-option>
-            <a-select-option value="baseline">Baseline (基线检查插件)</a-select-option>
-            <a-select-option value="collector">Collector (资产采集插件)</a-select-option>
-            <a-select-option value="fim">FIM (文件完整性监控插件)</a-select-option>
+            <a-select-option value="plugin">Plugin (插件)</a-select-option>
+            <a-select-option value="dependency">Dependency (第三方依赖)</a-select-option>
           </a-select>
         </a-form-item>
 
-        <a-form-item label="组件分类" name="category">
-          <a-select v-model:value="createForm.category" placeholder="请选择组件分类" disabled>
-            <a-select-option value="agent">Agent (主程序)</a-select-option>
-            <a-select-option value="plugin">Plugin (插件)</a-select-option>
+        <a-form-item label="组件名称" name="name">
+          <a-select
+            v-if="createForm.category !== 'dependency'"
+            v-model:value="createForm.name"
+            placeholder="请选择组件"
+            @change="onComponentNameChange"
+          >
+            <a-select-option v-if="createForm.category === 'agent'" value="agent">Agent (主程序)</a-select-option>
+            <template v-else>
+              <a-select-option value="baseline">Baseline (基线检查插件)</a-select-option>
+              <a-select-option value="collector">Collector (资产采集插件)</a-select-option>
+              <a-select-option value="fim">FIM (文件完整性监控插件)</a-select-option>
+              <a-select-option value="scanner">Scanner (病毒查杀插件)</a-select-option>
+              <a-select-option value="sensor">Sensor (运行时检测插件)</a-select-option>
+            </template>
           </a-select>
+          <a-input
+            v-else
+            v-model:value="createForm.name"
+            placeholder="请输入依赖组件名称（如 tetragon）"
+          />
         </a-form-item>
 
         <a-form-item label="描述" name="description">
@@ -319,6 +342,50 @@
               </div>
             </template>
 
+            <!-- Dependency 类型：显示 tar.gz 上传 -->
+            <template v-else-if="selectedComponent?.category === 'dependency'">
+              <div class="upload-item">
+                <div class="upload-header">
+                  <span class="upload-label">* TGZ amd64</span>
+                  <a-upload
+                    v-model:fileList="releaseForm.files.tgz_amd64"
+                    :before-upload="() => false"
+                    :max-count="1"
+                    accept=".tar.gz,.tgz"
+                    :showUploadList="false"
+                  >
+                    <a-button type="primary" size="small">
+                      <template #icon><UploadOutlined /></template>
+                      选择文件
+                    </a-button>
+                  </a-upload>
+                </div>
+                <div class="upload-file" v-if="releaseForm.files.tgz_amd64.length">
+                  <PaperClipOutlined /> {{ releaseForm.files.tgz_amd64[0]?.name }}
+                </div>
+              </div>
+              <div class="upload-item">
+                <div class="upload-header">
+                  <span class="upload-label">* TGZ arm64</span>
+                  <a-upload
+                    v-model:fileList="releaseForm.files.tgz_arm64"
+                    :before-upload="() => false"
+                    :max-count="1"
+                    accept=".tar.gz,.tgz"
+                    :showUploadList="false"
+                  >
+                    <a-button type="primary" size="small">
+                      <template #icon><UploadOutlined /></template>
+                      选择文件
+                    </a-button>
+                  </a-upload>
+                </div>
+                <div class="upload-file" v-if="releaseForm.files.tgz_arm64.length">
+                  <PaperClipOutlined /> {{ releaseForm.files.tgz_arm64[0]?.name }}
+                </div>
+              </div>
+            </template>
+
             <!-- Plugin 类型：只显示二进制文件 -->
             <template v-else>
               <div class="upload-item">
@@ -425,7 +492,7 @@
                   <a-tag
                     v-for="pkg in record.packages"
                     :key="pkg.id"
-                    :color="pkg.pkg_type === 'binary' ? 'purple' : pkg.pkg_type === 'rpm' ? 'blue' : 'orange'"
+                    :color="getPackageTagColor(pkg.pkg_type)"
                   >
                     {{ pkg.arch }}/{{ pkg.pkg_type }}
                   </a-tag>
@@ -630,7 +697,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   PlusOutlined,
@@ -682,6 +749,13 @@ const components = ref<Component[]>([])
 const pluginStatuses = ref<PluginSyncStatus[]>([])
 const broadcasting = ref(false)
 
+// 分类筛选
+const activeCategory = ref<'all' | 'agent' | 'plugin' | 'dependency'>('all')
+const filteredComponents = computed(() => {
+  if (activeCategory.value === 'all') return components.value
+  return components.value.filter((c) => c.category === activeCategory.value)
+})
+
 // 推送 Agent 更新
 const showAgentUpdateModal = ref(false)
 const pushingAgentUpdate = ref(false)
@@ -706,11 +780,19 @@ const createRules = {
 
 // 组件名称变化时自动设置分类
 const onComponentNameChange = (name: string) => {
+  if (createForm.category === 'dependency') {
+    return
+  }
   if (name === 'agent') {
     createForm.category = 'agent'
   } else {
     createForm.category = 'plugin'
   }
+}
+
+// 分类变化时清空名称（避免不匹配的选项残留）
+const onCategoryChange = () => {
+  createForm.name = ''
 }
 
 // 发布版本
@@ -730,6 +812,8 @@ const releaseForm = reactive({
     deb_arm64: [] as any[],
     binary_amd64: [] as any[],
     binary_arm64: [] as any[],
+    tgz_amd64: [] as any[],
+    tgz_arm64: [] as any[],
   },
 })
 
@@ -790,10 +874,13 @@ const handleBroadcastPluginConfigs = async () => {
   broadcasting.value = true
   try {
     const result = await componentsApi.broadcastPluginConfigs()
-    message.success(
-      `推送成功！已触发更新通知到 ${result.online_agent_count} 个在线 Agent，` +
+    const skippedContainer = result.skipped_container ?? 0
+    let broadcastMsg = `推送成功！已触发更新通知到 ${result.online_agent_count} 个在线 Agent，` +
       `包含 ${result.plugin_count} 个插件配置。将在 30 秒内完成推送。`
-    )
+    if (skippedContainer > 0) {
+      broadcastMsg += `（已跳过 ${skippedContainer} 台容器主机）`
+    }
+    message.success(broadcastMsg)
     // 刷新插件状态
     await loadPluginStatus()
 
@@ -814,10 +901,11 @@ const handlePushAgentUpdate = async () => {
       force: agentUpdateForm.force,
     })
 
-    message.success(
-      `推送成功！已向 ${result.total} 台主机推送 Agent 更新` +
-      `（需要更新: ${result.need_update} 台）`
-    )
+    let successMsg = `推送成功！已向 ${result.total} 台主机推送 Agent 更新（需要更新: ${result.need_update} 台）`
+    if (result.skipped_container > 0) {
+      successMsg += `，已跳过 ${result.skipped_container} 台容器主机`
+    }
+    message.success(successMsg)
 
     // 关闭对话框
     showAgentUpdateModal.value = false
@@ -843,7 +931,7 @@ const handleCreate = async () => {
   try {
     await componentsApi.create({
       name: createForm.name,
-      category: createForm.category as 'agent' | 'plugin',
+      category: createForm.category as 'agent' | 'plugin' | 'dependency',
       description: createForm.description,
     })
     message.success('创建成功')
@@ -901,6 +989,8 @@ const handleRelease = async () => {
       { files: releaseForm.files.deb_arm64, pkgType: 'deb', arch: 'arm64' },
       { files: releaseForm.files.binary_amd64, pkgType: 'binary', arch: 'amd64' },
       { files: releaseForm.files.binary_arm64, pkgType: 'binary', arch: 'arm64' },
+      { files: releaseForm.files.tgz_amd64, pkgType: 'tgz', arch: 'amd64' },
+      { files: releaseForm.files.tgz_arm64, pkgType: 'tgz', arch: 'arm64' },
     ]
 
     for (const { files, pkgType, arch } of fileMapping) {
@@ -948,6 +1038,8 @@ const resetReleaseForm = () => {
     deb_arm64: [],
     binary_amd64: [],
     binary_arm64: [],
+    tgz_amd64: [],
+    tgz_arm64: [],
   }
   releaseFormRef.value?.resetFields()
 }
@@ -1014,7 +1106,33 @@ const formatDate = (dateStr: string): string => {
 
 // 获取分类颜色
 const getCategoryColor = (category: string): string => {
-  return category === 'agent' ? 'blue' : 'green'
+  switch (category) {
+    case 'agent': return 'blue'
+    case 'plugin': return 'green'
+    case 'dependency': return 'orange'
+    default: return 'default'
+  }
+}
+
+// 获取分类显示文本
+const getCategoryLabel = (category: string): string => {
+  switch (category) {
+    case 'agent': return 'Agent'
+    case 'plugin': return 'Plugin'
+    case 'dependency': return '依赖'
+    default: return category
+  }
+}
+
+// 获取包类型 Tag 颜色
+const getPackageTagColor = (pkgType: string): string => {
+  switch (pkgType) {
+    case 'binary': return 'purple'
+    case 'rpm': return 'blue'
+    case 'deb': return 'orange'
+    case 'tgz': return 'gold'
+    default: return 'default'
+  }
 }
 
 // 获取名称颜色
@@ -1024,6 +1142,8 @@ const getNameColor = (name: string): string => {
     baseline: 'green',
     collector: 'purple',
     fim: 'orange',
+    scanner: 'red',
+    sensor: 'cyan',
   }
   return colors[name] || 'default'
 }
@@ -1267,6 +1387,10 @@ onMounted(() => {
 .empty-status {
   padding: 20px;
   text-align: center;
+}
+
+.category-tabs {
+  margin-bottom: 12px;
 }
 
 /* 上传表单样式 */

@@ -1,14 +1,23 @@
 package biz
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
+
+// notificationThrottleWindow 同指纹告警的最小通知间隔
+// 首次触发立即通知，重复触发在窗口内不重复通知
+const notificationThrottleWindow = time.Hour
 
 // KubeAlarmService 告警服务，负责告警创建与白名单过滤
 type KubeAlarmService struct {
@@ -21,8 +30,18 @@ func NewKubeAlarmService(db *gorm.DB, logger *zap.Logger) *KubeAlarmService {
 	return &KubeAlarmService{db: db, logger: logger}
 }
 
-// CreateAlarmWithFilter 创建告警前检查白名单，命中则跳过并更新 hit_count
-// 返回 (created bool, err error)
+// generateFingerprint 生成告警指纹：cluster_id|rule_id|namespace|target → SHA256 前 16 字节 hex
+// 同一安全事件在不同时间触发会生成相同的指纹，用于去重
+func generateFingerprint(alarm *model.KubeAlarm) string {
+	raw := fmt.Sprintf("%d|%s|%s|%s",
+		alarm.ClusterID, alarm.RuleID, alarm.Namespace, alarm.Target)
+	hash := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(hash[:16]) // 32 字符
+}
+
+// CreateAlarmWithFilter 创建告警前检查白名单，命中则跳过
+// 命中同指纹 pending 告警则 UPSERT（count++、更新 last_seen_at），否则创建新告警
+// 返回 (created bool, err error)：created=true 表示新建了告警行（非重复告警）
 func (s *KubeAlarmService) CreateAlarmWithFilter(alarm *model.KubeAlarm) (bool, error) {
 	if s.matchWhitelist(alarm) {
 		s.logger.Info("告警命中白名单，已跳过",
@@ -34,11 +53,104 @@ func (s *KubeAlarmService) CreateAlarmWithFilter(alarm *model.KubeAlarm) (bool, 
 		return false, nil
 	}
 
-	if err := s.db.Create(alarm).Error; err != nil {
-		s.logger.Error("创建告警失败", zap.Error(err))
+	// 生成指纹用于去重
+	alarm.Fingerprint = generateFingerprint(alarm)
+
+	created := false
+	shouldNotify := false
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.KubeAlarm
+		err := tx.Where("fingerprint = ? AND status = ?",
+			alarm.Fingerprint, model.KubeAlarmStatusPending).
+			First(&existing).Error
+
+		now := model.LocalTime(time.Now())
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 未找到同指纹 pending 告警 → 创建新告警
+			alarm.Count = 1
+			alarm.FirstSeenAt = now
+			alarm.LastSeenAt = now
+			nowCopy := now
+			alarm.LastNotifiedAt = &nowCopy
+			if time.Time(alarm.CreatedAt).IsZero() {
+				alarm.CreatedAt = now
+			}
+			if cerr := tx.Create(alarm).Error; cerr != nil {
+				return cerr
+			}
+			created = true
+			shouldNotify = true
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		// 找到同指纹 pending 告警 → UPSERT count+1 / last_seen_at
+		updates := map[string]interface{}{
+			"count":         gorm.Expr("count + 1"),
+			"last_seen_at":  now,
+			"severity":      alarm.Severity,
+			"message":       alarm.Message,
+			"cluster_name":  alarm.ClusterName,
+			"pod_name":      alarm.PodName,
+			"node_name":     alarm.NodeName,
+			"container_id":  alarm.ContainerID,
+			"image_name":    alarm.ImageName,
+			"raw_data":      alarm.RawData,
+		}
+
+		// 通知限流：距上次通知超过 throttle 窗口才再次通知
+		if existing.LastNotifiedAt == nil ||
+			time.Since(existing.LastNotifiedAt.Time()) >= notificationThrottleWindow {
+			nowCopy := now
+			updates["last_notified_at"] = &nowCopy
+			shouldNotify = true
+		}
+
+		if uerr := tx.Model(&model.KubeAlarm{}).
+			Where("id = ?", existing.ID).
+			Updates(updates).Error; uerr != nil {
+			return uerr
+		}
+		// 回填已有 ID 到入参 alarm，方便调用侧使用
+		alarm.ID = existing.ID
+		alarm.Count = existing.Count + 1
+		alarm.FirstSeenAt = existing.FirstSeenAt
+		alarm.LastSeenAt = now
+		return nil
+	})
+
+	if err != nil {
+		s.logger.Error("创建/更新告警失败",
+			zap.String("fingerprint", alarm.Fingerprint),
+			zap.Error(err))
 		return false, err
 	}
-	return true, nil
+
+	if shouldNotify {
+		go s.sendAlarmNotification(alarm)
+	}
+
+	return created, nil
+}
+
+// sendAlarmNotification 异步发送 K8s 告警通知
+func (s *KubeAlarmService) sendAlarmNotification(alarm *model.KubeAlarm) {
+	ns := NewNotificationService(s.db, s.logger)
+	if err := ns.SendKubeAlertNotification(&KubeAlertData{
+		ClusterName: alarm.ClusterName,
+		Severity:    alarm.Severity,
+		AlarmType:   string(alarm.AlarmType),
+		Title:       alarm.Title,
+		Description: alarm.Description,
+		Message:     alarm.Message,
+		Namespace:   alarm.Namespace,
+		Target:      alarm.Target,
+	}); err != nil {
+		s.logger.Error("发送 K8s 告警通知失败", zap.Error(err))
+	}
 }
 
 // BatchCreateAlarmsWithFilter 批量创建告警（带白名单过滤）

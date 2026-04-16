@@ -261,6 +261,333 @@ export interface ExecutiveTaskReport {
   recommendation: ManagementRecommendation
 }
 
+// ============================================================
+// 分类报告 - 病毒查杀 / 漏洞管理 / 容器安全 / 运行时检测
+// ============================================================
+
+// 病毒查杀报告
+export interface AntivirusReport {
+  summary: {
+    totalTasks: number
+    totalThreats: number
+    detectedThreats: number
+    quarantinedThreats: number
+    affectedHosts: number
+  }
+  severityDistribution: Record<string, number>
+  threatTypeDistribution: Record<string, number>
+  actionDistribution: Record<string, number>
+  topThreats: Array<{
+    threatName: string
+    count: number
+    severity: string
+    affectedHosts: number
+  }>
+  topAffectedHosts: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    threatCount: number
+  }>
+}
+
+// 漏洞管理报告
+export interface VulnerabilityReport {
+  summary: {
+    totalVulns: number
+    unpatchedVulns: number
+    fixedVulns: number
+    ignoredVulns: number
+    affectedHosts: number
+  }
+  severityDistribution: Record<string, number>
+  componentDistribution: Array<{ component: string; count: number }>
+  topVulns: Array<{
+    cveId: string
+    severity: string
+    cvssScore: number
+    component: string
+    affectedHosts: number
+    status: string
+  }>
+  topAffectedHosts: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    vulnCount: number
+    criticalCount: number
+    highCount: number
+  }>
+}
+
+// 容器安全报告
+export interface KubeReport {
+  summary: {
+    totalAlarms: number
+    pendingAlarms: number
+    processedAlarms: number
+    ignoredAlarms: number
+    clusterCount: number
+  }
+  severityDistribution: Record<string, number>
+  alarmTypeDistribution: Record<string, number>
+  clusterDistribution: Array<{ clusterName: string; count: number }>
+  topNamespaces: Array<{ namespace: string; clusterName: string; count: number }>
+  topTargets: Array<{ target: string; namespace: string; count: number; severity: string }>
+}
+
+// 运行时检测报告
+export interface RuntimeReport {
+  summary: {
+    totalAlerts: number
+    activeAlerts: number
+    resolvedAlerts: number
+    todayAlerts: number
+    affectedHosts: number
+  }
+  severityDistribution: Record<string, number>
+  categoryDistribution: Array<{ category: string; count: number }>
+  mitreDistribution: Array<{ mitreId: string; count: number }>
+  topRules: Array<{
+    ruleId: string
+    ruleName: string
+    count: number
+    severity: string
+  }>
+  topAffectedHosts: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    alertCount: number
+    criticalCount: number
+  }>
+}
+
+// 分类报告查询参数
+export interface CategoryReportParams {
+  start_time?: string
+  end_time?: string
+}
+
+// ============================================================
+// Executive Report 类型（可导出 PDF 的专业报告）
+// ============================================================
+
+// 病毒查杀 Executive 报告
+export interface AntivirusExecutiveReport {
+  meta: {
+    reportId: string
+    reportTitle: string
+    generatedAt: string
+    companyName: string
+    scanType: string
+    checkTarget: string
+  }
+  summary: {
+    overallConclusion: string
+    threatOverview: string
+    hasCriticalThreat: boolean
+    hasHighThreat: boolean
+  }
+  taskInfo: {
+    taskId: number
+    taskName: string
+    scanType: string
+    hostCount: number
+    scannedHosts: number
+    threatCount: number
+    startedAt: string
+    finishedAt: string
+  }
+  statistics: {
+    totalThreats: number
+    detectedThreats: number
+    quarantinedThreats: number
+    deletedThreats: number
+    ignoredThreats: number
+    bySeverity: Record<string, number>
+    byThreatType: Record<string, number>
+    byAction: Record<string, number>
+  }
+  hostDetails: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    threatCount: number
+    criticalCount: number
+    highCount: number
+  }>
+  topThreats: Array<{
+    threatName: string
+    count: number
+    severity: string
+    affectedHosts: number
+    filePaths: string[]
+  }>
+  recommendation: {
+    overallAssessment: string
+    actionSuggestions: string[]
+    disclaimer: string
+  }
+}
+
+// 漏洞管理 Executive 报告
+export interface VulnerabilityExecutiveReport {
+  meta: {
+    reportId: string
+    reportTitle: string
+    generatedAt: string
+    companyName: string
+    reportPeriod: string
+    checkTarget: string
+  }
+  summary: {
+    overallConclusion: string
+    vulnOverview: string
+    hasCriticalVuln: boolean
+    hasHighVuln: boolean
+    complianceRate: number
+  }
+  statistics: {
+    totalVulns: number
+    unpatchedVulns: number
+    fixedVulns: number
+    ignoredVulns: number
+    affectedHosts: number
+    bySeverity: Record<string, number>
+    byComponent: Array<{ component: string; count: number }>
+  }
+  hostDetails: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    vulnCount: number
+    criticalCount: number
+    highCount: number
+  }>
+  topVulns: Array<{
+    cveId: string
+    severity: string
+    cvssScore: number
+    component: string
+    affectedHosts: number
+    description: string
+  }>
+  recommendation: {
+    overallAssessment: string
+    actionSuggestions: string[]
+    disclaimer: string
+  }
+}
+
+// 容器安全 Executive 报告
+export interface KubeExecutiveReport {
+  meta: {
+    reportId: string
+    reportTitle: string
+    generatedAt: string
+    companyName: string
+    reportPeriod: string
+    checkTarget: string
+  }
+  summary: {
+    overallConclusion: string
+    alarmOverview: string
+    baselineOverview: string
+    hasCriticalAlarm: boolean
+  }
+  alarmStatistics: {
+    totalAlarms: number
+    pendingAlarms: number
+    processedAlarms: number
+    ignoredAlarms: number
+    bySeverity: Record<string, number>
+    byAlarmType: Record<string, number>
+    byCluster: Array<{ clusterName: string; count: number }>
+  }
+  baselineStatistics: {
+    totalChecks: number
+    passed: number
+    failed: number
+    warning: number
+    bySeverity: Record<string, number>
+    byCategory: Record<string, number>
+  }
+  clusterDetails: Array<{
+    clusterName: string
+    alarmCount: number
+    baselinePassRate: number
+  }>
+  topAlarms: Array<{
+    namespace: string
+    target: string
+    alarmType: string
+    count: number
+  }>
+  recommendation: {
+    overallAssessment: string
+    actionSuggestions: string[]
+    disclaimer: string
+  }
+}
+
+// 运行时检测 Executive 报告
+export interface RuntimeExecutiveReport {
+  meta: {
+    reportId: string
+    reportTitle: string
+    generatedAt: string
+    companyName: string
+    reportPeriod: string
+    checkTarget: string
+  }
+  summary: {
+    overallConclusion: string
+    alertOverview: string
+    hasCriticalAlert: boolean
+    hasHighAlert: boolean
+  }
+  statistics: {
+    totalAlerts: number
+    activeAlerts: number
+    resolvedAlerts: number
+    todayAlerts: number
+    affectedHosts: number
+    bySeverity: Record<string, number>
+    byCategory: Array<{ category: string; count: number }>
+    byMitre: Array<{ mitreId: string; count: number }>
+  }
+  hostDetails: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    alertCount: number
+    criticalCount: number
+    highCount: number
+  }>
+  topRules: Array<{
+    ruleId: string
+    ruleName: string
+    count: number
+    severity: string
+  }>
+  recommendation: {
+    overallAssessment: string
+    actionSuggestions: string[]
+    disclaimer: string
+  }
+}
+
+// 已保存的报告记录
+export interface GeneratedReportItem {
+  id: number
+  report_type: string
+  title: string
+  report_id: string
+  period: string
+  created_at: string
+}
+
 export const reportsApi = {
   // 获取报表统计数据
   getStats: async (params?: {
@@ -325,5 +652,55 @@ export const reportsApi = {
   // 获取 Top 风险主机
   getTopRiskHosts: async (limit?: number): Promise<TopRiskHost[]> => {
     return apiClient.get('/reports/top-risk-hosts', { params: { limit } })
+  },
+
+  // 获取病毒查杀报告
+  getAntivirusReport: async (params?: CategoryReportParams): Promise<AntivirusReport> => {
+    return apiClient.get('/reports/antivirus', { params })
+  },
+
+  // 获取漏洞管理报告
+  getVulnerabilityReport: async (params?: CategoryReportParams): Promise<VulnerabilityReport> => {
+    return apiClient.get('/reports/vulnerability', { params })
+  },
+
+  // 获取容器安全报告
+  getKubeReport: async (params?: CategoryReportParams): Promise<KubeReport> => {
+    return apiClient.get('/reports/kube', { params })
+  },
+
+  // 获取运行时检测报告
+  getRuntimeReport: async (params?: CategoryReportParams): Promise<RuntimeReport> => {
+    return apiClient.get('/reports/runtime', { params })
+  },
+
+  // Executive 报告（可导出 PDF）
+  getAntivirusExecutiveReport: async (taskId: number): Promise<AntivirusExecutiveReport> => {
+    return apiClient.get(`/reports/antivirus/${taskId}/executive`)
+  },
+
+  getVulnerabilityExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<VulnerabilityExecutiveReport> => {
+    return apiClient.get('/reports/vulnerability/executive', { params })
+  },
+
+  getKubeExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<KubeExecutiveReport> => {
+    return apiClient.get('/reports/kube/executive', { params })
+  },
+
+  getRuntimeExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<RuntimeExecutiveReport> => {
+    return apiClient.get('/reports/runtime/executive', { params })
+  },
+
+  // 已保存的报告
+  listGeneratedReports: async (reportType?: string): Promise<{ items: GeneratedReportItem[]; total: number }> => {
+    return apiClient.get('/reports/generated', { params: { report_type: reportType } })
+  },
+
+  getGeneratedReport: async (id: number): Promise<any> => {
+    return apiClient.get(`/reports/generated/${id}`)
+  },
+
+  deleteGeneratedReport: async (id: number): Promise<void> => {
+    return apiClient.delete(`/reports/generated/${id}`)
   },
 }

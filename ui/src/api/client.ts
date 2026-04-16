@@ -59,6 +59,10 @@ axiosInstance.interceptors.request.use(
  */
 axiosInstance.interceptors.response.use(
   (response) => {
+    // 文件下载请求（responseType=blob）直接返回 Blob，跳过业务响应解析
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     const res = response.data as ApiResponse
     if (res.code !== 0) {
       // 处理业务错误
@@ -137,6 +141,10 @@ const apiClient = {
 
   patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return axiosInstance.patch(url, data, config) as Promise<T>
+  },
+
+  download(url: string, params?: Record<string, unknown>): Promise<Blob> {
+    return axiosInstance.get(url, { params, responseType: 'blob' }) as Promise<Blob>
   },
 }
 

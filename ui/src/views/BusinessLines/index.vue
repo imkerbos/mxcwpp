@@ -342,7 +342,7 @@ const handleViewHosts = (record: BusinessLine) => {
   router.push({
     path: '/hosts',
     query: {
-      business_line: record.name,
+      business_line: record.code,
     },
   })
 }

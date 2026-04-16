@@ -85,7 +85,7 @@ func (h *BusinessLinesHandler) ListBusinessLines(c *gin.Context) {
 	items := make([]BusinessLineListItem, 0, len(businessLines))
 	for _, bl := range businessLines {
 		var hostCount int64
-		h.db.Model(&model.Host{}).Where("business_line = ?", bl.Name).Count(&hostCount)
+		h.db.Model(&model.Host{}).Where("business_line = ?", bl.Code).Count(&hostCount)
 
 		items = append(items, BusinessLineListItem{
 			BusinessLine: bl,
@@ -134,7 +134,7 @@ func (h *BusinessLinesHandler) GetBusinessLine(c *gin.Context) {
 
 	// 计算主机数量
 	var hostCount int64
-	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Name).Count(&hostCount)
+	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Code).Count(&hostCount)
 	businessLine.HostCount = int(hostCount)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -338,7 +338,7 @@ func (h *BusinessLinesHandler) DeleteBusinessLine(c *gin.Context) {
 
 	// 检查是否有主机关联
 	var hostCount int64
-	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Name).Count(&hostCount)
+	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Code).Count(&hostCount)
 	if hostCount > 0 {
 		c.JSON(http.StatusConflict, gin.H{
 			"code":    409,

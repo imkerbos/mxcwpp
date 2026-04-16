@@ -9,7 +9,7 @@
           format="YYYY-MM-DD"
           @change="handleDateRangeChange"
         />
-        <a-button type="primary" @click="refreshData" :loading="loading">
+        <a-button type="primary" @click="handleRefresh" :loading="loading">
           <template #icon>
             <ReloadOutlined />
           </template>
@@ -18,6 +18,15 @@
       </div>
     </div>
 
+    <a-tabs v-model:activeKey="activeTab" class="reports-tabs">
+      <a-tab-pane key="overview" tab="安全总览" />
+      <a-tab-pane key="antivirus" tab="病毒查杀" />
+      <a-tab-pane key="vulnerability" tab="漏洞管理" />
+      <a-tab-pane key="kube" tab="容器安全" />
+      <a-tab-pane key="runtime" tab="运行时检测" />
+    </a-tabs>
+
+    <template v-if="activeTab === 'overview'">
     <!-- 统计概览卡片 -->
     <a-row :gutter="[16, 16]" class="stats-overview">
       <a-col :xs="24" :sm="12" :md="6" :lg="6">
@@ -279,6 +288,28 @@
         </a-card>
       </a-col>
     </a-row>
+    </template>
+
+    <AntivirusReport
+      v-else-if="activeTab === 'antivirus'"
+      ref="antivirusRef"
+      :date-range="dateRange"
+    />
+    <VulnerabilityReport
+      v-else-if="activeTab === 'vulnerability'"
+      ref="vulnerabilityRef"
+      :date-range="dateRange"
+    />
+    <KubeReport
+      v-else-if="activeTab === 'kube'"
+      ref="kubeRef"
+      :date-range="dateRange"
+    />
+    <RuntimeReport
+      v-else-if="activeTab === 'runtime'"
+      ref="runtimeRef"
+      :date-range="dateRange"
+    />
   </div>
 </template>
 
@@ -305,6 +336,10 @@ import { hostsApi } from '@/api/hosts'
 import { dashboardApi } from '@/api/dashboard'
 import type { HostStatusDistribution } from '@/api/hosts'
 import type { EChartsOption } from 'echarts'
+import AntivirusReport from './reports/AntivirusReport.vue'
+import VulnerabilityReport from './reports/VulnerabilityReport.vue'
+import KubeReport from './reports/KubeReport.vue'
+import RuntimeReport from './reports/RuntimeReport.vue'
 
 // 报表专用风险分布接口
 interface ReportRiskDistribution {
@@ -318,10 +353,17 @@ interface ReportRiskDistribution {
 const router = useRouter()
 const loading = ref(false)
 const loadingTopLists = ref(false)
+const activeTab = ref<string>('overview')
 const dateRange = ref<[Dayjs, Dayjs]>([
   dayjs().subtract(7, 'day'),
   dayjs()
 ])
+
+// 子组件 ref
+const antivirusRef = ref<InstanceType<typeof AntivirusReport> | null>(null)
+const vulnerabilityRef = ref<InstanceType<typeof VulnerabilityReport> | null>(null)
+const kubeRef = ref<InstanceType<typeof KubeReport> | null>(null)
+const runtimeRef = ref<InstanceType<typeof RuntimeReport> | null>(null)
 
 const datePresets = [
   { label: '最近7天', value: [dayjs().subtract(7, 'day'), dayjs()] },
@@ -776,8 +818,25 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
   ],
 }))
 
+const handleRefresh = () => {
+  if (activeTab.value === 'overview') {
+    refreshData()
+  } else if (activeTab.value === 'antivirus') {
+    antivirusRef.value?.refresh()
+  } else if (activeTab.value === 'vulnerability') {
+    vulnerabilityRef.value?.refresh()
+  } else if (activeTab.value === 'kube') {
+    kubeRef.value?.refresh()
+  } else if (activeTab.value === 'runtime') {
+    runtimeRef.value?.refresh()
+  }
+}
+
 const handleDateRangeChange = () => {
-  refreshData()
+  if (activeTab.value === 'overview') {
+    refreshData()
+  }
+  // 子组件通过 watch dateRange 自动刷新
 }
 
 // 辅助函数
@@ -957,6 +1016,10 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+.reports-tabs {
+  margin-bottom: 16px;
 }
 
 .stats-overview {

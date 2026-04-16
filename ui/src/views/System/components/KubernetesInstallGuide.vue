@@ -58,7 +58,7 @@
           :filter-option="filterBusinessLineOption"
           style="width: 300px;"
         >
-          <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.name">
+          <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
             {{ bl.name }} ({{ bl.code }})
           </a-select-option>
         </a-select>

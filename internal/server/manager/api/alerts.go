@@ -38,10 +38,14 @@ type ListAlertsRequest struct {
 	HostID    string `form:"host_id"`
 	RuleID    string `form:"rule_id"`
 	Category  string `form:"category"`
-	AlertType   string `form:"alert_type"`   // baseline, agent_offline
-	Keyword     string `form:"keyword"`      // 搜索标题或描述
-	ResultID    string `form:"result_id"`    // 根据 result_id 查询
-	RuntimeType string `form:"runtime_type"` // vm, docker, k8s
+	AlertType     string `form:"alert_type"`     // baseline, runtime, agent_offline
+	Keyword       string `form:"keyword"`        // 搜索标题或描述
+	ResultID      string `form:"result_id"`      // 根据 result_id 查询
+	RuntimeType   string `form:"runtime_type"`   // vm, docker, k8s
+	BusinessLine  string `form:"business_line"`  // 按业务线过滤
+	MitreID       string `form:"mitre_id"`       // 按 MITRE ATT&CK ID 过滤
+	StartTime     string `form:"start_time"`     // 时间范围起 (RFC3339)
+	EndTime       string `form:"end_time"`       // 时间范围止 (RFC3339)
 }
 
 // ListAlerts 获取告警列表
@@ -91,8 +95,10 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	if req.AlertType != "" {
 		if req.AlertType == "agent_offline" {
 			query = query.Where("category = ?", "agent_offline")
+		} else if req.AlertType == "runtime" {
+			query = query.Where("rule_id LIKE ?", "cel-%")
 		} else if req.AlertType == "baseline" {
-			query = query.Where("category != ?", "agent_offline")
+			query = query.Where("category != ? AND (rule_id NOT LIKE ? OR rule_id = '')", "agent_offline", "cel-%")
 		}
 	}
 	if req.ResultID != "" {
@@ -101,9 +107,29 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	if req.Keyword != "" {
 		query = query.Where("title LIKE ? OR description LIKE ?", "%"+req.Keyword+"%", "%"+req.Keyword+"%")
 	}
-	if req.RuntimeType != "" {
-		query = query.Joins("JOIN hosts ON hosts.host_id = alerts.host_id").
-			Where("hosts.runtime_type = ?", req.RuntimeType)
+	// hosts JOIN：当 runtime_type 或 business_line 有值时合并为一次 JOIN
+	if req.RuntimeType != "" || req.BusinessLine != "" {
+		query = query.Joins("JOIN hosts ON hosts.host_id = alerts.host_id")
+		if req.RuntimeType != "" {
+			query = query.Where("hosts.runtime_type = ?", req.RuntimeType)
+		}
+		if req.BusinessLine != "" {
+			query = query.Where("hosts.business_line = ?", req.BusinessLine)
+		}
+	}
+	if req.MitreID != "" {
+		query = query.Joins("JOIN detection_rules ON CONCAT('cel-', detection_rules.id) = alerts.rule_id").
+			Where("detection_rules.mitre_id = ?", req.MitreID)
+	}
+	if req.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.StartTime); err == nil {
+			query = query.Where("last_seen_at >= ?", t)
+		}
+	}
+	if req.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, req.EndTime); err == nil {
+			query = query.Where("last_seen_at <= ?", t)
+		}
 	}
 
 	// 获取总数
@@ -291,6 +317,7 @@ func (h *AlertsHandler) IgnoreAlert(c *gin.Context) {
 
 // GetAlertStatistics 获取告警统计
 // GET /api/v1/alerts/statistics
+// 优化：2 条 GROUP BY 替代 8 条独立 COUNT
 func (h *AlertsHandler) GetAlertStatistics(c *gin.Context) {
 	var stats struct {
 		Total    int64 `json:"total"`
@@ -303,17 +330,114 @@ func (h *AlertsHandler) GetAlertStatistics(c *gin.Context) {
 		Low      int64 `json:"low"`
 	}
 
-	// 总数统计
-	h.db.Model(&model.Alert{}).Count(&stats.Total)
-	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Count(&stats.Active)
-	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusResolved).Count(&stats.Resolved)
-	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusIgnored).Count(&stats.Ignored)
+	// 按状态聚合
+	var statusRows []struct {
+		Status string
+		Cnt    int64
+	}
+	h.db.Model(&model.Alert{}).Select("status, COUNT(*) AS cnt").Group("status").Scan(&statusRows)
+	for _, r := range statusRows {
+		stats.Total += r.Cnt
+		switch r.Status {
+		case string(model.AlertStatusActive):
+			stats.Active = r.Cnt
+		case string(model.AlertStatusResolved):
+			stats.Resolved = r.Cnt
+		case string(model.AlertStatusIgnored):
+			stats.Ignored = r.Cnt
+		}
+	}
 
-	// 严重级别统计（只统计活跃告警）
-	h.db.Model(&model.Alert{}).Where("status = ? AND severity = ?", model.AlertStatusActive, "critical").Count(&stats.Critical)
-	h.db.Model(&model.Alert{}).Where("status = ? AND severity = ?", model.AlertStatusActive, "high").Count(&stats.High)
-	h.db.Model(&model.Alert{}).Where("status = ? AND severity = ?", model.AlertStatusActive, "medium").Count(&stats.Medium)
-	h.db.Model(&model.Alert{}).Where("status = ? AND severity = ?", model.AlertStatusActive, "low").Count(&stats.Low)
+	// 按严重级别聚合（只统计活跃告警）
+	var severityRows []struct {
+		Severity string
+		Cnt      int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) AS cnt").
+		Where("status = ?", model.AlertStatusActive).
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		switch r.Severity {
+		case "critical":
+			stats.Critical = r.Cnt
+		case "high":
+			stats.High = r.Cnt
+		case "medium":
+			stats.Medium = r.Cnt
+		case "low":
+			stats.Low = r.Cnt
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": stats,
+	})
+}
+
+// GetRuntimeAlertStatistics 获取运行时告警统计
+// GET /api/v1/alerts/runtime-statistics
+func (h *AlertsHandler) GetRuntimeAlertStatistics(c *gin.Context) {
+	runtimeCondition := "rule_id LIKE 'cel-%'"
+
+	var stats struct {
+		Total    int64 `json:"total"`
+		Active   int64 `json:"active"`
+		Today    int64 `json:"today"`
+		Critical int64 `json:"critical"`
+		High     int64 `json:"high"`
+		Medium   int64 `json:"medium"`
+		Low      int64 `json:"low"`
+	}
+
+	// 按状态聚合
+	var statusRows []struct {
+		Status string
+		Cnt    int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("status, COUNT(*) AS cnt").
+		Where(runtimeCondition).
+		Group("status").
+		Scan(&statusRows)
+	for _, r := range statusRows {
+		stats.Total += r.Cnt
+		if r.Status == string(model.AlertStatusActive) {
+			stats.Active = r.Cnt
+		}
+	}
+
+	// 今日新增（活跃状态 + 今天 last_seen_at）
+	h.db.Model(&model.Alert{}).
+		Where(runtimeCondition).
+		Where("status = ? AND DATE(last_seen_at) = CURDATE()", model.AlertStatusActive).
+		Count(&stats.Today)
+
+	// 按严重级别聚合（只统计活跃告警）
+	var severityRows []struct {
+		Severity string
+		Cnt      int64
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) AS cnt").
+		Where(runtimeCondition).
+		Where("status = ?", model.AlertStatusActive).
+		Group("severity").
+		Scan(&severityRows)
+	for _, r := range severityRows {
+		switch r.Severity {
+		case "critical":
+			stats.Critical = r.Cnt
+		case "high":
+			stats.High = r.Cnt
+		case "medium":
+			stats.Medium = r.Cnt
+		case "low":
+			stats.Low = r.Cnt
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,

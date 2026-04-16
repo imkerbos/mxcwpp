@@ -14,6 +14,22 @@ export interface ServiceStatus {
   // 基线检查插件在 Agent 端运行，Server 端无法直接检查其状态
 }
 
+export interface AlertTrendItem {
+  date: string
+  critical: number
+  high: number
+  medium: number
+  low: number
+}
+
+export interface LatestAlert {
+  id: number
+  title: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  hostname: string
+  last_seen_at: string
+}
+
 export interface DashboardStats {
   hosts: number
   clusters: number
@@ -39,6 +55,8 @@ export interface DashboardStats {
   runtimeAlertPercent?: number
   virusHostPercent?: number
   serviceStatus?: ServiceStatus
+  alertTrend?: AlertTrendItem[]
+  latestAlerts?: LatestAlert[]
 }
 
 export const dashboardApi = {

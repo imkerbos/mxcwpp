@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/common/signing"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
@@ -25,9 +26,10 @@ import (
 type ComponentsHandler struct {
 	db        *gorm.DB
 	logger    *zap.Logger
-	cfg       *config.Config // Server 配置
-	uploadDir string         // 上传文件存储目录
-	urlPrefix string         // 文件访问 URL 前缀
+	cfg       *config.Config  // Server 配置
+	uploadDir string          // 上传文件存储目录
+	urlPrefix string          // 文件访问 URL 前缀
+	signer    *signing.Signer // Ed25519 签名器（可选）
 }
 
 // NewComponentsHandler 创建组件管理处理器
@@ -41,13 +43,26 @@ func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, cfg *config.Config, u
 	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
 		logger.Error("创建插件上传目录失败", zap.Error(err))
 	}
-	return &ComponentsHandler{
+	handler := &ComponentsHandler{
 		db:        db,
 		logger:    logger,
 		cfg:       cfg,
 		uploadDir: uploadDir,
 		urlPrefix: urlPrefix,
 	}
+
+	// 初始化签名器（如果配置了私钥）
+	if cfg != nil && cfg.Plugins.SignPrivateKey != "" {
+		signer, err := signing.NewSignerFromFile(cfg.Plugins.SignPrivateKey)
+		if err != nil {
+			logger.Error("初始化插件签名器失败", zap.String("key_path", cfg.Plugins.SignPrivateKey), zap.Error(err))
+		} else {
+			handler.signer = signer
+			logger.Info("插件签名器初始化成功")
+		}
+	}
+
+	return handler
 }
 
 // ==================== 组件管理 API ====================
@@ -81,10 +96,10 @@ func (h *ComponentsHandler) CreateComponent(c *gin.Context) {
 	}
 
 	// 验证分类
-	if req.Category != "agent" && req.Category != "plugin" {
+	if req.Category != "agent" && req.Category != "plugin" && req.Category != "dependency" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": "无效的组件分类，支持: agent, plugin",
+			"message": "无效的组件分类，支持: agent, plugin, dependency",
 		})
 		return
 	}
@@ -677,10 +692,10 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		return
 	}
 
-	if pkgType != "rpm" && pkgType != "deb" && pkgType != "binary" {
+	if pkgType != "rpm" && pkgType != "deb" && pkgType != "binary" && pkgType != "tgz" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
-			"message": "无效的包类型，支持: rpm, deb, binary",
+			"message": "无效的包类型，支持: rpm, deb, binary, tgz",
 		})
 		return
 	}
@@ -703,10 +718,28 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	}
 
 	// Agent 必须是 rpm/deb，插件可以是 binary
-	if component.Category == model.ComponentCategoryAgent && pkgType == "binary" {
+	if component.Category == model.ComponentCategoryAgent && pkgType != "rpm" && pkgType != "deb" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
 			"message": "Agent 包类型必须是 rpm 或 deb",
+		})
+		return
+	}
+
+	// Plugin 只允许 binary
+	if component.Category == model.ComponentCategoryPlugin && pkgType != "binary" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "插件包类型必须是 binary",
+		})
+		return
+	}
+
+	// Dependency 只允许 tgz
+	if component.Category == model.ComponentCategoryDependency && pkgType != "tgz" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "依赖包类型必须是 tgz",
 		})
 		return
 	}
@@ -795,6 +828,16 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		})
 		return
 	}
+	if pkgType == "tgz" {
+		lowerName := strings.ToLower(header.Filename)
+		if !strings.HasSuffix(lowerName, ".tar.gz") && !strings.HasSuffix(lowerName, ".tgz") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"message": "tar.gz 包文件扩展名必须是 .tar.gz 或 .tgz",
+			})
+			return
+		}
+	}
 
 	// 生成存储路径
 	var filePath, fileName string
@@ -812,6 +855,20 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		// 文件名格式：{name}_{arch}（例如 baseline_amd64）
 		fileName = fmt.Sprintf("%s_%s", component.Name, arch)
 		filePath = filepath.Join(pluginsDir, fileName)
+	} else if pkgType == "tgz" {
+		// tar.gz 依赖包存储到 uploads/packages/{component}/{version}/ 目录
+		packagesDir := filepath.Join(h.uploadDir, "packages", component.Name, version.Version)
+		if err := os.MkdirAll(packagesDir, 0755); err != nil {
+			h.logger.Error("创建依赖包目录失败", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "保存文件失败",
+			})
+			return
+		}
+		// 文件名: {name}-v{version}-{arch}.tar.gz
+		fileName = fmt.Sprintf("%s-v%s-%s.tar.gz", component.Name, version.Version, arch)
+		filePath = filepath.Join(packagesDir, fileName)
 	} else {
 		// RPM/DEB 包存储到 uploads/packages/{component}/{version}/ 目录
 		packagesDir := filepath.Join(h.uploadDir, "packages", component.Name, version.Version)
@@ -1425,6 +1482,23 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 		)
 	}
 
+	// 对 SHA256 进行签名（如果配置了签名器）
+	var pluginSignature string
+	if h.signer != nil && pkg.SHA256 != "" {
+		sig, err := h.signer.SignSHA256(pkg.SHA256)
+		if err != nil {
+			h.logger.Error("插件签名失败",
+				zap.String("name", componentName),
+				zap.String("sha256", pkg.SHA256),
+				zap.Error(err))
+		} else {
+			pluginSignature = sig
+			h.logger.Info("插件签名成功",
+				zap.String("name", componentName),
+				zap.String("sha256", pkg.SHA256))
+		}
+	}
+
 	// 查找或创建插件配置
 	var pluginConfig model.PluginConfig
 	err := h.db.Where("name = ?", componentName).First(&pluginConfig).Error
@@ -1436,6 +1510,7 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 			Type:    pluginType,
 			Version: version.Version,
 			SHA256:  pkg.SHA256,
+			Signature: pluginSignature,
 			DownloadURLs: model.StringArray{
 				downloadURL,
 			},
@@ -1461,8 +1536,11 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 		updates := map[string]interface{}{
 			"version":       version.Version,
 			"sha256":        pkg.SHA256,
+			"signature":     pluginSignature,
 			"download_urls": model.StringArray{downloadURL},
+			"runtime_types": runtimeTypesForPlugin(componentName),
 			"detail":        fmt.Sprintf(`{"updated_at": "%s"}`, time.Now().Format(time.RFC3339)),
+			"enabled":       true,
 			"description":   fmt.Sprintf("%s 插件 v%s", componentName, version.Version),
 		}
 		if err := h.db.Model(&pluginConfig).Updates(updates).Error; err != nil {
@@ -1543,9 +1621,9 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		return
 	}
 
-	// 查询需要更新的主机
+	// 查询需要更新的主机（排除容器环境，容器应通过重建镜像更新）
 	var hosts []model.Host
-	query := h.db.Where("status = ?", model.HostStatusOnline)
+	query := h.db.Where("status = ? AND is_container = ?", model.HostStatusOnline, false)
 	if len(req.HostIDs) > 0 {
 		query = query.Where("host_id IN ?", req.HostIDs)
 	}
@@ -1558,15 +1636,28 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		return
 	}
 
+	// 统计被跳过的容器主机数量
+	var containerCount int64
+	containerQuery := h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", model.HostStatusOnline, true)
+	if len(req.HostIDs) > 0 {
+		containerQuery = containerQuery.Where("host_id IN ?", req.HostIDs)
+	}
+	containerQuery.Count(&containerCount)
+
 	if len(hosts) == 0 {
+		msg := "没有需要更新的在线主机"
+		if containerCount > 0 {
+			msg = fmt.Sprintf("没有需要更新的在线主机（已跳过 %d 台容器主机，容器环境请通过重建镜像更新）", containerCount)
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"code":    0,
-			"message": "没有需要更新的在线主机",
+			"message": msg,
 			"data": gin.H{
-				"total":          0,
-				"success":        0,
-				"failed":         0,
-				"latest_version": latestVersion.Version,
+				"total":             0,
+				"success":           0,
+				"failed":            0,
+				"skipped_container": containerCount,
+				"latest_version":    latestVersion.Version,
 			},
 		})
 		return
@@ -1624,17 +1715,24 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		zap.Uint("record_id", pushRecord.ID),
 		zap.Int("total_hosts", len(hosts)),
 		zap.Int("need_update", needUpdateCount),
+		zap.Int64("skipped_container", containerCount),
 		zap.String("latest_version", latestVersion.Version),
 		zap.Bool("force", req.Force))
 
+	msg := "推送任务已创建，AgentCenter 将在 30 秒内开始推送"
+	if containerCount > 0 {
+		msg = fmt.Sprintf("推送任务已创建，AgentCenter 将在 30 秒内开始推送（已跳过 %d 台容器主机）", containerCount)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
-		"message": "推送任务已创建，AgentCenter 将在 30 秒内开始推送",
+		"message": msg,
 		"data": gin.H{
-			"record_id":      pushRecord.ID,
-			"total":          len(hosts),
-			"need_update":    needUpdateCount,
-			"latest_version": latestVersion.Version,
+			"record_id":         pushRecord.ID,
+			"total":             len(hosts),
+			"need_update":       needUpdateCount,
+			"skipped_container": containerCount,
+			"latest_version":    latestVersion.Version,
 		},
 	})
 }
@@ -1894,9 +1992,9 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 		return
 	}
 
-	// 获取在线 Agent 数量和主机列表
+	// 获取在线 Agent 数量和主机列表（排除容器环境）
 	var onlineHosts []model.Host
-	if err := h.db.Where("status = ?", model.HostStatusOnline).Find(&onlineHosts).Error; err != nil {
+	if err := h.db.Where("status = ? AND is_container = ?", model.HostStatusOnline, false).Find(&onlineHosts).Error; err != nil {
 		h.logger.Error("查询在线主机失败", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -1906,8 +2004,13 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 	}
 	onlineCount := len(onlineHosts)
 
+	// 统计被跳过的容器主机
+	var containerCount int64
+	h.db.Model(&model.Host{}).Where("status = ? AND is_container = ?", model.HostStatusOnline, true).Count(&containerCount)
+
 	h.logger.Info("查询到在线主机",
 		zap.Int("online_count", onlineCount),
+		zap.Int64("skipped_container", containerCount),
 		zap.Int("plugin_count", len(pluginConfigs)))
 
 	// 为每个插件创建推送记录
@@ -1995,12 +2098,18 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 		zap.Int64("updated_rows", result.RowsAffected),
 		zap.Int("push_records", len(pushRecords)))
 
+	broadcastMsg := "广播触发成功，将在30秒内推送到所有在线Agent"
+	if containerCount > 0 {
+		broadcastMsg = fmt.Sprintf("广播触发成功，将在30秒内推送到所有在线Agent（已跳过 %d 台容器主机）", containerCount)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
-		"message": "广播触发成功，将在30秒内推送到所有在线Agent",
+		"message": broadcastMsg,
 		"data": gin.H{
 			"plugin_count":       len(pluginConfigs),
 			"online_agent_count": onlineCount,
+			"skipped_container":  containerCount,
 			"plugins":            pluginConfigsToNames(pluginConfigs),
 		},
 	})
@@ -2028,4 +2137,71 @@ func runtimeTypesForPlugin(name string) model.StringArray {
 		// baseline, fim 及其他插件默认仅适用于 VM
 		return model.StringArray{"vm"}
 	}
+}
+
+// DownloadDependencyPackage 下载第三方依赖包（无需认证，Agent 直接下载）
+// GET /api/v1/dependency/download/:name?arch=amd64
+// 从 DB 查询 category=dependency 的组件 → 最新版本 → 对应 arch 的 tgz 包
+func (h *ComponentsHandler) DownloadDependencyPackage(c *gin.Context) {
+	name := c.Param("name")
+	arch := c.DefaultQuery("arch", "amd64")
+
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少参数"})
+		return
+	}
+	if arch != "amd64" && arch != "arm64" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "无效的架构，支持: amd64, arm64"})
+		return
+	}
+
+	// 查找依赖组件
+	var component model.Component
+	if err := h.db.Where("name = ? AND category = ?", name, model.ComponentCategoryDependency).First(&component).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 不存在", name)})
+		return
+	}
+
+	// 查找最新版本
+	var latestVersion model.ComponentVersion
+	if err := h.db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&latestVersion).Error; err != nil {
+		if err := h.db.Where("component_id = ?", component.ID).
+			Order("created_at DESC").First(&latestVersion).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 没有可用版本", name)})
+			return
+		}
+	}
+
+	// 查找对应架构的 tgz 包
+	var pkg model.ComponentPackage
+	if err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
+		latestVersion.ID, "tgz", arch, true).First(&pkg).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 没有 %s 架构的包", name, arch)})
+		return
+	}
+
+	// 检查文件是否存在
+	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
+		h.logger.Error("依赖包文件不存在", zap.String("path", pkg.FilePath))
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "文件不存在"})
+		return
+	}
+
+	// 设置下载响应头
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", pkg.FileName))
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Length", strconv.FormatInt(pkg.FileSize, 10))
+	c.Header("X-Dependency-Name", name)
+	c.Header("X-Dependency-Version", latestVersion.Version)
+	c.Header("X-Dependency-SHA256", pkg.SHA256)
+
+	// 发送文件
+	c.File(pkg.FilePath)
+
+	h.logger.Info("依赖包下载",
+		zap.String("name", name),
+		zap.String("version", latestVersion.Version),
+		zap.String("arch", arch),
+		zap.String("client_ip", c.ClientIP()),
+	)
 }

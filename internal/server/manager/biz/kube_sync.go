@@ -138,5 +138,8 @@ func (s *KubeSyncService) createNodeNotReadyAlarm(cluster model.KubeCluster, nod
 		Status:      model.KubeAlarmStatusPending,
 	}
 
-	s.alarmService.CreateAlarmWithFilter(&alarm)
+	if _, err := s.alarmService.CreateAlarmWithFilter(&alarm); err != nil {
+		s.logger.Error("创建节点 NotReady 告警失败",
+			zap.String("node", nodeName), zap.Error(err))
+	}
 }

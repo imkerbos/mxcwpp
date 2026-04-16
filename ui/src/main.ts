@@ -9,12 +9,14 @@ import {
   BarChart,
   LineChart,
   PieChart,
+  RadarChart,
 } from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
   LegendComponent,
   GridComponent,
+  RadarComponent,
 } from 'echarts/components'
 
 // 注册 ECharts 组件（只注册需要的组件）
@@ -23,10 +25,12 @@ use([
   BarChart,
   LineChart,
   PieChart,
+  RadarChart,
   TitleComponent,
   TooltipComponent,
   LegendComponent,
   GridComponent,
+  RadarComponent,
 ])
 
 import './styles/global.less'
