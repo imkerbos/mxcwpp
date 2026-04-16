@@ -1,6 +1,6 @@
 # 生产环境部署方案
 
-本文档补齐 README 中的旧链接入口，内容以当前仓库中的 [服务端部署](server.md)、[快速部署指南](quick-start.md) 和 [`deploy/README.md`](../../deploy/README.md) 为准。
+本文档补齐 README 中的旧链接入口，内容以当前仓库中的 [服务端部署](server.md)、[快速部署指南](quick-start.md)、[`deploy/README.md`](../../deploy/README.md) 和 [生产集群自动化部署](prod-cluster-deployment.md) 为准。
 
 ## 适用场景
 
@@ -33,12 +33,22 @@
 
 ## 推荐部署流程
 
-1. 在构建机构建镜像或打包部署包。
-2. 在目标服务器准备 `.env`。
-3. 用 `deploy/config/server.yaml.tpl` 渲染服务端配置。
-4. 生成 mTLS 证书。
-5. 启动 `docker compose`，生产建议显式指定控制面副本数。
-6. 验证 `health`、登录接口和 Agent 接入。
+生产环境现在推荐按两条路径实施：
+
+1. **All-in-One**
+   - 在构建机构建镜像或打包部署包
+   - 在目标服务器准备 `.env`
+   - 用 `deploy/config/server.yaml.tpl` 渲染服务端配置
+   - 生成 mTLS 证书
+   - 启动 `docker compose`
+2. **Cluster**
+   - 先编译 `mxctl`
+   - 再准备 `cluster.yaml`
+   - 先执行 `mxctl check`
+   - 再执行 `mxctl preflight`
+   - 最后执行 `mxctl deploy`
+
+多机生产部署的具体步骤见：`docs/deployment/prod-cluster-deployment.md`
 
 ## 关键文件
 
