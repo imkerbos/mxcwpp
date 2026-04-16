@@ -2,238 +2,192 @@
 
 ## 1. 概述
 
-矩阵云安全平台是 Linux 基线合规性检查平台，采用 Agent + Plugin + Server 架构（参考 Elkeid）。
+矩阵云安全平台当前采用 **Agent + Plugin + Manager/AgentCenter/Consumer** 的 V2 架构。相比 V1 的单体式直写数据库模式，V2 将控制面拆分为接入层、管理层、消息层、消费层和分层存储，目标是让控制面具备多实例、高吞吐和更清晰的职责边界。
 
-**技术栈**: Go 1.21+ (Gin/gRPC/Gorm/Zap), Vue 3 + TS (Pinia/Ant Design Vue), Docker, Protobuf
+当前实际能力边界：
 
-## 2. 架构图
+- 应用层已支持 `Manager / AgentCenter / Consumer` 多实例部署
+- Agent 侧已支持 Manager 服务发现和多 AC 接入
+- Kafka / Consumer / ClickHouse 异步链路已纳入当前项目主架构
+- 默认部署下存储层仍以单节点为主，MySQL / Redis / ClickHouse 的主从与容灾需在生产环境单独加固
+
+**技术栈**: Go 1.21+ (Gin/gRPC/Gorm/Zap), Vue 3 + TS, Protobuf, Kafka, Redis, MySQL, ClickHouse, Prometheus
+
+## 2. 总体拓扑
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                         Server 端                             │
-│                                                              │
-│  ┌──────────┐     ┌──────────┐          ┌──────────────┐    │
-│  │ UI/Nginx │────>│ Manager  │          │ AgentCenter  │    │
-│  │ Vue3+TS  │HTTP │ Gin:8080 │          │  gRPC:6751   │    │
-│  └──────────┘     └────┬─────┘          └──────┬───────┘    │
-│                        │                       │             │
-│              ┌─────────┴───────────────────────┘             │
-│              │        共享数据库                                │
-│       ┌──────▼──────┐ ┌───────┐ ┌────────────┐ ┌────────┐  │
-│       │ MySQL 8.0+  │ │ Redis │ │ ClickHouse │ │ Kafka  │  │
-│       └─────────────┘ └───────┘ └────────────┘ └────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                         │ gRPC + mTLS
-┌──────────────────────────────────────────────────────────────┐
-│                    Agent 端 (每台主机)                         │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │           mxsec-agent (systemd daemon)                │   │
-│  │  Heartbeat | Transport(gRPC) | PluginManager | mTLS  │   │
-│  └──────────────────────┬───────────────────────────────┘   │
-│                         │ Pipe + Protobuf                    │
-│  ┌──────────┐  ┌───────────┐  ┌─────┐                      │
-│  │ baseline │  │ collector │  │ fim │  ← Plugin 子进程       │
-│  └──────────┘  └───────────┘  └─────┘                      │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                               控制面                                     │
+│                                                                          │
+│  浏览器 ── HTTPS ──► Nginx ──► Manager × N                               │
+│                                  │                                       │
+│                                  ├─ MySQL / Redis / ClickHouse           │
+│                                  ├─ Prometheus 查询                      │
+│                                  └─ AC 服务发现 / 任务路由               │
+│                                                                          │
+│  Agent ── gRPC(mTLS) ──► AgentCenter × N ──► Kafka ──► Consumer × N      │
+│                          │                        │                       │
+│                          ├─ HTTP 管理接口         ├─ MySQL               │
+│                          ├─ 连接池 / 命令下发     ├─ ClickHouse          │
+│                          └─ Kafka 失败降级队列    └─ Redis(agent:ac)     │
+└──────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                              端点层                                      │
+│                                                                          │
+│  mxsec-agent + plugins                                                   │
+│  ├─ baseline   基线检查 / 修复                                            │
+│  ├─ collector  资产采集                                                   │
+│  ├─ fim        文件完整性监控                                             │
+│  ├─ scanner    病毒查杀 / 隔离                                            │
+│  └─ sensor     Tetragon eBPF 运行时事件采集                               │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**通信方式**:
-
-| 路径 | 协议 | 认证 |
-|------|------|------|
-| UI ↔ Manager | HTTP REST | JWT |
-| Agent ↔ AgentCenter | gRPC 双向流 | mTLS |
-| Agent ↔ Plugin | OS Pipe + Protobuf | 无（父子进程） |
-
-## 3. 组件说明
+## 3. 组件职责
 
 ### Agent
 
-轻量守护进程，root 权限运行。管理插件生命周期，通过 gRPC 与 AgentCenter 通信，定时上报心跳（60s），透传插件数据。
+部署在目标主机上的轻量守护进程，负责：
 
-- 入口: `cmd/agent/main.go`
-- 核心: `internal/agent/`
+- 管理插件生命周期
+- 通过 gRPC 双向流与 AgentCenter 通信
+- 使用 mTLS 与控制面建立安全连接
+- 通过服务发现或静态地址列表选择可用 AC
+- 透传插件数据，不承担复杂业务存储逻辑
+
+入口：`cmd/agent/main.go`
 
 ### AgentCenter
 
-gRPC 服务端。接收心跳/检测结果/资产数据，下发任务和插件配置。
+Agent 接入层，当前定位为 **无状态连接管理 + 数据转发层**。
 
-- 入口: `cmd/server/agentcenter/main.go`
-- 核心: `internal/server/agentcenter/`
+- 维护 Agent 连接池和在线状态
+- 通过 gRPC 下发命令和插件任务
+- 通过 HTTP 暴露 `/health`、`/conn/stat`、`/conn/list`、`/command`、`/command/batch`
+- 将 Agent 上报数据按 DataType 路由到 Kafka
+- Kafka 不可用时使用内存降级队列暂存
+- 启动后向 Manager 注册，运行中周期性心跳
+
+入口：`cmd/server/agentcenter/main.go`
 
 ### Manager
 
-HTTP API 服务端。策略/任务/结果管理，Dashboard 数据，JWT 认证。
+管理面服务，当前定位为 **无状态 API + 调度 + 服务发现**。
 
-- 入口: `cmd/server/manager/main.go`
-- 核心: `internal/server/manager/`
+- 提供前端 REST API 和 JWT 认证
+- 管理策略、规则、任务、告警、报告、组件、用户等业务对象
+- 内嵌 AC Registry / SD 模块，负责 AC 注册、探测、发现
+- 调用 Redis `agent:ac` 映射对任务做精准路由
+- 查询 MySQL / ClickHouse / Redis / Prometheus 聚合前端所需数据
 
-### Plugins
+入口：`cmd/server/manager/main.go`
 
-独立子进程，通过 Pipe + Protobuf 与 Agent 通信：
+### Consumer
 
-| 插件 | 职责 | DataType |
-|------|------|----------|
-| baseline | 基线合规检查 | 8000 |
-| collector | 资产采集（进程/端口/账户等） | 5050-5064 |
-| fim | 文件完整性监控（基于 AIDE） | 6001-6002 |
+异步消费服务，负责将 Kafka 数据可靠写入存储。
 
-## 4. 数据模型
+- 消费 Kafka 多 Topic 数据
+- 按 DataType 路由到 MySQL / ClickHouse
+- 执行幂等写入
+- 写入失败时投递到 DLQ
+- 在消费心跳时维护 `agent:ac:{agentID}` 映射
 
-```
-Policy 1───N Rule
-  │                 │
-  ▼                 ▼
-ScanTask N───N Host ───N ScanResult
-                │
-                ├── FIMEvent
-                └── HostMetric
-```
+入口：`cmd/server/consumer/main.go`
 
-**核心表**:
+## 4. 高可用能力
 
-| 表 | 说明 | 写入方 |
-|---|---|---|
-| hosts | 主机信息 (host_id, hostname, os_family, status) | AgentCenter |
-| policies | 策略集 (id, name, os_family, enabled) | Manager |
-| rules | 基线规则 (rule_id, policy_id, category, severity, check_config) | Manager |
-| scan_tasks | 扫描任务 (task_id, policy_id, status) | Manager |
-| scan_results | 检测结果 (host_id, rule_id, status:pass/fail/error) | AgentCenter |
-| fim_events | FIM 变更事件 (host_id, file_path, change_type, severity) | AgentCenter |
-| host_metrics | 主机监控指标 (cpu/mem/disk/network) | AgentCenter |
+### 已具备的控制面 HA 能力
 
-## 5. 数据流
+- `Manager` 支持多实例，无状态，前置 Nginx 负载均衡
+- `AgentCenter` 支持多实例，向 Manager SD 注册并接受主动健康探测
+- `Consumer` 支持多实例，通过 Kafka Consumer Group 自动分摊分区
+- Agent 支持通过服务发现接口获取健康 AC 列表，并具备静态地址回退
+- 任务调度已使用 Redis 分布式锁避免多副本重复分发
 
-### 基线扫描
+### 当前高可用边界
 
-```
-UI 创建任务 → Manager 写入 scan_tasks(pending)
-→ AgentCenter 调度: 读取 pending 任务, gRPC 下发到 Agent
-→ Agent 路由到 baseline Plugin
-→ Plugin 执行检查, 逐条上报 Record(DataType=8000) → Pipe → Agent
-→ Agent gRPC 透传 → AgentCenter 写入 scan_results
-→ UI 查询 GET /api/v1/results
-```
+- `MySQL` 默认仍为单实例业务主存储
+- `ClickHouse` 默认仍为单实例事件/时序分析存储
+- `Redis` 在项目中承担共享缓存与同步状态，Sentinel/主从切换仍属于后续生产加固项
+- 因此当前更准确的说法是：**控制面高可用已落地，存储层完整容灾需按生产环境独立建设**
 
-### 心跳
+## 5. 数据链路
+
+### 上报链路
 
 ```
-Agent 每60s → gRPC PackagedData(DataType=1000)
-→ AgentCenter: 更新 hosts 表 + 写入 host_metrics
+Plugin → mxsec-agent → gRPC(mTLS) → AgentCenter
+      → Kafka(topic by DataType)
+      → Consumer
+      → MySQL / ClickHouse / Redis
 ```
 
-## 6. 安全
-
-### mTLS 证书
+### 下发链路
 
 ```
-deploy/certs/
-├── ca.crt / ca.key       # CA
-├── server.crt / server.key   # AgentCenter 使用
-└── client.crt / client.key   # 下发给 Agent
+用户 / API → Manager
+          → 查询 SD + Redis(agent:ac)
+          → 调用目标 AC 的 HTTP 管理接口
+          → gRPC 下发给 Agent
+          → Agent 路由到对应插件执行
 ```
 
-Agent 首次连接时 AgentCenter 通过 gRPC 下发证书包，Agent 保存到 `/var/lib/mxsec-agent/certs/`。
+## 6. Topic 与存储分层
 
-生成: `scripts/generate-certs.sh`
+### Kafka Topic
 
-### JWT
+按数据特征拆分，而不是所有数据共用一个 Topic：
 
-Manager HTTP API 使用 JWT Token，Secret 通过 `server.yaml` → `jwt_secret` 配置。
+- `mxsec.agent.heartbeat`
+- `mxsec.agent.events`
+- `mxsec.agent.baseline`
+- `mxsec.agent.asset`
+- `mxsec.agent.command-ack`
+- `mxsec.agent.*.dlq`
 
-### gRPC DataType 编码
-
-| DataType | 方向 | 说明 |
-|----------|------|------|
-| 1000 | Agent→Server | 心跳 |
-| 1001 | Agent→Server | 插件状态 |
-| 5050-5064 | Plugin→Server | 资产数据 |
-| 6000 | Server→Plugin | FIM 任务 |
-| 6001 | Plugin→Server | FIM 事件 |
-| 8000 | Plugin→Server | 基线结果 |
-
-## 7. 存储设计
-
-### 当前方案
+### 存储分工
 
 | 组件 | 用途 |
 |------|------|
-| MySQL 8.0+ | 主存储: 所有业务数据 |
-| Redis | 缓存、会话 |
-| ClickHouse (可选) | 大规模扫描结果/监控指标 |
-| Kafka (可选) | Agent 数据异步处理 |
+| MySQL | 任务、策略、主机、告警状态、资产快照等业务主数据 |
+| Redis | SD 同步、`agent:ac` 映射、分布式锁、缓存 |
+| ClickHouse | 指标趋势、FIM 事件、告警时间线、历史归档 |
+| Prometheus | 主机性能指标查询源 |
 
-### 配置 (server.yaml.tpl)
+## 7. 安全与通信
 
-```yaml
-database:
-  mysql:
-    host: "__MYSQL_HOST__"
-    port: __MYSQL_PORT__
-    database: "__MYSQL_DATABASE__"
-    max_open_conns: __DB_MAX_OPEN_CONNS__
+| 路径 | 协议 | 认证 |
+|------|------|------|
+| Browser ↔ Nginx / Manager | HTTPS / HTTP REST | JWT |
+| Agent ↔ AgentCenter | gRPC 双向流 | mTLS |
+| Agent ↔ Plugin | OS Pipe + Protobuf | 父子进程 |
+| Manager ↔ AgentCenter | HTTP 内部接口 | 内网管理调用 |
 
-redis:
-  addr: "__REDIS_ADDR__"
+证书生成与分发流程仍保持不变，见 `scripts/generate-certs.sh`。
 
-clickhouse:
-  enabled: __CLICKHOUSE_ENABLED__
-  addrs: ["__CLICKHOUSE_ADDR__"]
+## 8. 部署形态
 
-kafka:
-  enabled: __KAFKA_ENABLED__
-  brokers: ["__KAFKA_BROKERS__"]
-```
+| 环境 | 拓扑特征 |
+|------|---------|
+| `dev` | 单机联调，控制面可简化，适合功能开发 |
+| `pret / perf` | 多副本控制面 + 3 节点 Kafka，适合压测与预发验证 |
+| `prod` | 推荐启用 Manager/AC/Consumer 多副本，Kafka/ClickHouse/Redis/MySQL 需结合实际做容灾 |
 
-## 8. Agent 配置
+## 9. 相关代码路径
 
-构建时嵌入（推荐）:
-
-```bash
-go build -ldflags "-X main.serverHost=10.0.0.1:6751 -X main.buildVersion=1.0.0"
-```
-
-配置文件 (`/etc/mxsec-agent/agent.yaml`):
-
-```yaml
-agent:
-  id_file: "/var/lib/mxsec-agent/agent_id"    # UUID, 首次自动生成
-  work_dir: "/var/lib/mxsec-agent"
-server:
-  agent_center:
-    private_host: "agentcenter:6751"
-tls:
-  ca_file: "/var/lib/mxsec-agent/certs/ca.crt"
-  cert_file: "/var/lib/mxsec-agent/certs/client.crt"
-  key_file: "/var/lib/mxsec-agent/certs/client.key"
-heartbeat:
-  interval: 60s
-log:
-  level: "info"
-  file: "/var/log/mxsec-agent/agent.log"
-```
-
-## 9. 项目目录
-
-```
+```text
 mxsec-platform/
-├── cmd/agent/                  # Agent 入口
-├── cmd/server/agentcenter/     # AgentCenter 入口
-├── cmd/server/manager/         # Manager 入口
-├── internal/agent/             # Agent 核心
-├── internal/server/agentcenter/ # AgentCenter 核心
-├── internal/server/manager/    # Manager (api/biz)
-├── internal/server/model/      # 数据库模型
-├── plugins/baseline/           # 基线检查插件
-├── plugins/collector/          # 资产采集插件
-├── plugins/fim/                # FIM 插件
-├── plugins/lib/go/             # 插件 SDK
-├── api/proto/                  # Protobuf 定义
-├── ui/                         # Vue 3 前端
-├── deploy/                     # 部署配置
-├── configs/                    # 配置文件
-├── scripts/                    # 构建/部署脚本
-├── tools/                      # 工具（baseline-fixer）
-└── docs/                       # 文档
+├── cmd/server/manager/          # Manager 入口
+├── cmd/server/agentcenter/      # AgentCenter 入口
+├── cmd/server/consumer/         # Consumer 入口
+├── internal/server/manager/sd/  # AC 服务发现与注册中心
+├── internal/server/common/kafka/# Kafka Topic / Producer 封装
+├── internal/server/consumer/    # Consumer 路由 / Writer / DLQ
+├── internal/server/database/    # MySQL / Redis / ClickHouse 客户端
+├── internal/agent/              # Agent 连接、传输、插件管理
+├── plugins/scanner/             # 病毒查杀插件
+├── plugins/sensor/              # 运行时检测插件
+└── plugins/fim/                 # 文件完整性监控插件
 ```

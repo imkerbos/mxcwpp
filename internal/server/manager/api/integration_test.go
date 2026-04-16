@@ -111,7 +111,7 @@ func setupTestRouter(db *gorm.DB) *gin.Engine {
 
 	// 创建基线得分缓存
 	scoreCache := biz.NewBaselineScoreCache(db, logger, 5*time.Minute)
-	metricsService := biz.NewMetricsService(db, nil, logger)
+	metricsService := biz.NewMetricsService(db, nil, nil, logger)
 
 	// 注册 API
 	hostsHandler := NewHostsHandler(db, logger, scoreCache, metricsService)
@@ -586,9 +586,9 @@ func TestCreatePolicyAPI_NoCheckConfig(t *testing.T) {
 
 	// 故意不提供 check_config，测试 API 是否能接受
 	createPolicyReq := map[string]interface{}{
-		"id":        "POLICY_NO_CONFIG",
-		"name":      "无配置的策略",
-		"enabled":   true,
+		"id":      "POLICY_NO_CONFIG",
+		"name":    "无配置的策略",
+		"enabled": true,
 		"rules": []map[string]interface{}{
 			{
 				"rule_id": "RULE_NO_CONFIG",
@@ -615,9 +615,9 @@ func TestRunTaskAPI_Running(t *testing.T) {
 
 	// 创建策略
 	policy := &model.Policy{
-		ID:          "POLICY_RUN_TEST",
-		Name:        "运行测试策略",
-		Enabled:     true,
+		ID:      "POLICY_RUN_TEST",
+		Name:    "运行测试策略",
+		Enabled: true,
 	}
 	db.Create(policy)
 

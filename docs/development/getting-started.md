@@ -20,7 +20,7 @@ deploy/                 # 部署配置
 configs/                # 配置文件
 scripts/                # 脚本工具
 docs/                   # 文档
-tools/                  # 工具（baseline-fixer）
+tests/                  # 集成测试与性能测试
 ```
 
 ## 方式一: Docker 开发环境（推荐）
@@ -30,6 +30,8 @@ make dev-docker-up       # 启动（带热更新）
 make dev-docker-logs     # 查看日志
 make dev-docker-down     # 停止
 ```
+
+当前开发环境使用单节点 Kafka KRaft；压测环境使用 3 节点 Kafka KRaft。
 
 ## 方式二: 本地开发
 
