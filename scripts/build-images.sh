@@ -53,6 +53,7 @@ fi
 IMAGES=(
     "mxsec-agentcenter"
     "mxsec-manager"
+    "mxsec-consumer"
     "mxsec-ui"
 )
 
@@ -66,7 +67,7 @@ cd "$PROJECT_ROOT"
 
 # 构建 AgentCenter
 echo ""
-echo "[1/3] 构建 AgentCenter..."
+echo "[1/4] 构建 AgentCenter..."
 docker build \
     --network=host \
     --build-arg VERSION="${VERSION}" \
@@ -77,7 +78,7 @@ docker build \
 
 # 构建 Manager
 echo ""
-echo "[2/3] 构建 Manager..."
+echo "[2/4] 构建 Manager..."
 docker build \
     --network=host \
     --build-arg VERSION="${VERSION}" \
@@ -86,9 +87,19 @@ docker build \
     -t "${PREFIX}mxsec-manager:latest" \
     .
 
+echo ""
+echo "[3/4] 构建 Consumer..."
+docker build \
+    --network=host \
+    --build-arg VERSION="${VERSION}" \
+    -f deploy/docker/Dockerfile.consumer \
+    -t "${PREFIX}mxsec-consumer:${VERSION}" \
+    -t "${PREFIX}mxsec-consumer:latest" \
+    .
+
 # 构建 UI
 echo ""
-echo "[3/3] 构建 UI..."
+echo "[4/4] 构建 UI..."
 docker build \
     --network=host \
     --build-arg VERSION="${VERSION}" \
