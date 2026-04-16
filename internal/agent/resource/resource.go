@@ -13,12 +13,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// diskIOSnapshot 记录某一时刻的磁盘 I/O 累计值（用于计算两次采样间的 delta）
+type diskIOSnapshot struct {
+	SectorsRead    uint64
+	SectorsWritten uint64
+}
+
 // Monitor 是资源监控器
 type Monitor struct {
-	logger     *zap.Logger
-	lastCPU    CPUStat
-	lastNet    NetStat
-	lastUpdate time.Time
+	logger      *zap.Logger
+	lastCPU     CPUStat
+	lastNet     NetStat
+	lastDiskIO  map[string]diskIOSnapshot
+	lastUpdate  time.Time
 }
 
 // CPUStat 是 CPU 统计信息
@@ -58,18 +65,21 @@ type NetStat struct {
 
 // ResourceMetrics 是资源指标
 type ResourceMetrics struct {
-	CPUUsage     float64 // CPU 使用率（%）
-	MemUsage     float64 // 内存使用率（%）
-	DiskUsage    float64 // 磁盘使用率（%）
-	NetBytesSent uint64  // 网络发送字节数（累计）
-	NetBytesRecv uint64  // 网络接收字节数（累计）
-	Timestamp    int64   // 时间戳
+	CPUUsage      float64 // CPU 使用率（%）
+	MemUsage      float64 // 内存使用率（%）
+	DiskUsage     float64 // 磁盘使用率（%）
+	DiskReadBytes uint64  // 距上次采样的磁盘读取字节数
+	DiskWriteBytes uint64 // 距上次采样的磁盘写入字节数
+	NetBytesSent  uint64  // 网络发送字节数（累计）
+	NetBytesRecv  uint64  // 网络接收字节数（累计）
+	Timestamp     int64   // 时间戳
 }
 
 // NewMonitor 创建新的资源监控器
 func NewMonitor(logger *zap.Logger) *Monitor {
 	return &Monitor{
 		logger:     logger,
+		lastDiskIO: make(map[string]diskIOSnapshot),
 		lastUpdate: time.Now(),
 	}
 }
@@ -102,6 +112,15 @@ func (m *Monitor) Collect() (*ResourceMetrics, error) {
 		m.logger.Warn("failed to collect disk usage", zap.Error(err))
 	} else {
 		metrics.DiskUsage = diskUsage
+	}
+
+	// 采集磁盘 I/O（距上次采样的 delta 字节数）
+	diskReadBytes, diskWriteBytes, err := m.collectDiskIO()
+	if err != nil {
+		m.logger.Warn("failed to collect disk I/O", zap.Error(err))
+	} else {
+		metrics.DiskReadBytes = diskReadBytes
+		metrics.DiskWriteBytes = diskWriteBytes
 	}
 
 	// 采集网络统计
@@ -230,6 +249,79 @@ func (m *Monitor) collectDisk() (float64, error) {
 
 	usage := 100.0 * float64(used) / float64(total)
 	return usage, nil
+}
+
+// collectDiskIO 从 /proc/diskstats 采集磁盘 I/O 速率
+// 返回距上次采样期间的累计读取/写入字节数
+// 只统计物理磁盘（sd、vd、nvme、xvd 前缀），过滤 loop、dm-、ram 等虚拟设备
+func (m *Monitor) collectDiskIO() (readBytes, writeBytes uint64, err error) {
+	file, err := os.Open("/proc/diskstats")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer file.Close()
+
+	current := make(map[string]diskIOSnapshot)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 14 {
+			continue
+		}
+		name := fields[2]
+		// 只保留物理磁盘，过滤分区（如 sda1）和虚拟设备
+		if !isPhysicalDisk(name) {
+			continue
+		}
+		sectorsRead, _ := strconv.ParseUint(fields[5], 10, 64)
+		sectorsWritten, _ := strconv.ParseUint(fields[9], 10, 64)
+		current[name] = diskIOSnapshot{
+			SectorsRead:    sectorsRead,
+			SectorsWritten: sectorsWritten,
+		}
+	}
+
+	// 计算与上次快照的 delta
+	for name, snap := range current {
+		if prev, ok := m.lastDiskIO[name]; ok {
+			var dr, dw uint64
+			if snap.SectorsRead >= prev.SectorsRead {
+				dr = snap.SectorsRead - prev.SectorsRead
+			}
+			if snap.SectorsWritten >= prev.SectorsWritten {
+				dw = snap.SectorsWritten - prev.SectorsWritten
+			}
+			readBytes += dr * 512
+			writeBytes += dw * 512
+		}
+	}
+
+	m.lastDiskIO = current
+	return readBytes, writeBytes, nil
+}
+
+// isPhysicalDisk 判断设备名是否为物理磁盘（排除分区和虚拟设备）
+func isPhysicalDisk(name string) bool {
+	prefixes := []string{"sd", "vd", "xvd", "hd"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(name, p) {
+			// 排除分区（如 sda1、sdb2），只保留整盘（如 sda、sdb）
+			suffix := strings.TrimPrefix(name, p)
+			allAlpha := true
+			for _, c := range suffix {
+				if c < 'a' || c > 'z' {
+					allAlpha = false
+					break
+				}
+			}
+			return allAlpha
+		}
+	}
+	// nvme 磁盘：nvme0n1 是整盘，nvme0n1p1 是分区
+	if strings.HasPrefix(name, "nvme") {
+		return !strings.Contains(name, "p")
+	}
+	return false
 }
 
 // collectNetwork 采集网络统计（累计值）

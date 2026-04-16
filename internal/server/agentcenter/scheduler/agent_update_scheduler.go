@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -120,6 +121,21 @@ func (s *AgentUpdateScheduler) buildDownloadURL(pkgType model.PackageType, arch 
 	return fullURL
 }
 
+func (s *AgentUpdateScheduler) isAutoUpdateCandidate(host model.Host) bool {
+	version := strings.TrimSpace(strings.ToLower(host.AgentVersion))
+	return version != "dev"
+}
+
+func (s *AgentUpdateScheduler) packageFileExists(pkg model.ComponentPackage) bool {
+	if pkg.FilePath == "" {
+		return false
+	}
+	if info, err := os.Stat(pkg.FilePath); err == nil && !info.IsDir() {
+		return true
+	}
+	return false
+}
+
 // Start 启动 Agent 更新调度器
 func (s *AgentUpdateScheduler) Start(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second) // 每 30 秒检查一次
@@ -208,6 +224,13 @@ func (s *AgentUpdateScheduler) processPushRecord(ctx context.Context, pushRecord
 	var failedHostIDs []string
 
 	for _, host := range hosts {
+		if !pushRecord.Force && !s.isAutoUpdateCandidate(host) {
+			s.logger.Debug("跳过 dev 版本 Agent 自动更新",
+				zap.String("host_id", host.HostID),
+				zap.String("agent_version", host.AgentVersion))
+			continue
+		}
+
 		// 检查是否需要更新（考虑 force 标志）
 		if !pushRecord.Force && host.AgentVersion != "" && host.AgentVersion == latestVersion.Version {
 			// 版本相同且不强制更新，跳过
@@ -229,6 +252,15 @@ func (s *AgentUpdateScheduler) processPushRecord(ctx context.Context, pushRecord
 				zap.String("pkg_type", string(pkgType)),
 				zap.String("arch", arch),
 				zap.Error(err))
+			failedCount++
+			failedHostIDs = append(failedHostIDs, host.HostID)
+			continue
+		}
+		if !s.packageFileExists(pkg) {
+			s.logger.Warn("Agent 更新包文件不存在，跳过推送",
+				zap.String("host_id", host.HostID),
+				zap.String("version", latestVersion.Version),
+				zap.String("path", pkg.FilePath))
 			failedCount++
 			failedHostIDs = append(failedHostIDs, host.HostID)
 			continue
@@ -342,6 +374,10 @@ func (s *AgentUpdateScheduler) autoCheckAndPushUpdates(ctx context.Context) {
 	var failedHostIDs []string
 
 	for _, host := range hosts {
+		if !s.isAutoUpdateCandidate(host) {
+			continue
+		}
+
 		// 如果主机没有版本信息，或者版本不同，则推送更新
 		if host.AgentVersion == "" || host.AgentVersion != latestVersion.Version {
 			targetHostIDs = append(targetHostIDs, host.HostID)
@@ -362,6 +398,14 @@ func (s *AgentUpdateScheduler) autoCheckAndPushUpdates(ctx context.Context) {
 					zap.String("pkg_type", string(pkgType)),
 					zap.String("arch", arch),
 					zap.Error(err))
+				failedHostIDs = append(failedHostIDs, host.HostID)
+				continue
+			}
+			if !s.packageFileExists(pkg) {
+				s.logger.Debug("Agent 更新包文件不存在，跳过自动推送",
+					zap.String("host_id", host.HostID),
+					zap.String("version", latestVersion.Version),
+					zap.String("path", pkg.FilePath))
 				failedHostIDs = append(failedHostIDs, host.HostID)
 				continue
 			}
@@ -502,6 +546,14 @@ func (s *AgentUpdateScheduler) TriggerUpdate(ctx context.Context, hostIDs []stri
 				zap.String("host_id", host.HostID),
 				zap.String("pkg_type", string(pkgType)),
 				zap.String("arch", arch))
+			continue
+		}
+		if !s.packageFileExists(pkg) {
+			failedAgents = append(failedAgents, host.HostID)
+			s.logger.Warn("Agent 更新包文件不存在",
+				zap.String("host_id", host.HostID),
+				zap.String("version", latestVersion.Version),
+				zap.String("path", pkg.FilePath))
 			continue
 		}
 

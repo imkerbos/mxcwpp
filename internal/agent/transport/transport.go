@@ -12,12 +12,31 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 
+	grpcLib "google.golang.org/grpc"
+
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/agent/buffer"
 	"github.com/imkerbos/mxsec-platform/internal/agent/cache"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	_ "github.com/imkerbos/mxsec-platform/internal/common/compressor" // 注册 Snappy 压缩器
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
+	"github.com/imkerbos/mxsec-platform/internal/agent/dependency"
 )
+
+// sendInterval 批量发送间隔（与 Elkeid 一致）
+const sendInterval = 100 * time.Millisecond
+
+// agentMetadata 缓存 Agent 元信息（由心跳更新，sendData 构建 PackagedData 时使用）
+type agentMetadata struct {
+	hostname     string
+	intranetIPv4 []string
+	extranetIPv4 []string
+	intranetIPv6 []string
+	extranetIPv6 []string
+	version      string
+	product      string
+}
 
 // Manager 是传输管理器
 type Manager struct {
@@ -25,7 +44,7 @@ type Manager struct {
 	logger         *zap.Logger
 	connMgr        *connection.Manager
 	agentID        string
-	sendBuffer     chan *grpc.PackagedData
+	ringBuffer     *buffer.RingBuffer                               // 环形缓冲区（替代 channel）
 	pluginConfigCh chan []*grpc.Config                              // 插件配置通道
 	agentUpdateCh  chan *grpc.AgentUpdate                           // Agent 更新通道
 	taskCh         chan *grpc.Task                                  // 任务通道（兼容旧代码）
@@ -33,6 +52,9 @@ type Manager struct {
 	taskChMu       sync.RWMutex                                     // 任务通道锁
 	onConfigUpdate func(*grpc.AgentConfig, *grpc.CertificateBundle) // 配置更新回调 (agentConfig, certBundle)
 	cacheMgr       *cache.Manager                                   // 缓存管理器
+	depMgr         *dependency.Manager                               // 依赖管理器
+	agentMeta      agentMetadata                                    // Agent 元信息缓存
+	agentMetaMu    sync.RWMutex                                     // 元信息读写锁
 	mu             sync.RWMutex
 	isConnected    bool // 连接状态
 	connectedMu    sync.RWMutex
@@ -52,12 +74,13 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 		logger:         logger,
 		connMgr:        connMgr,
 		agentID:        agentID,
-		sendBuffer:     make(chan *grpc.PackagedData, 2048),
+		ringBuffer:     buffer.New(),
 		pluginConfigCh: make(chan []*grpc.Config, 10),
 		agentUpdateCh:  make(chan *grpc.AgentUpdate, 10),
 		taskCh:         make(chan *grpc.Task, 100),
 		taskChannels:   make(map[string]chan *grpc.Task),
 		cacheMgr:       cacheMgr,
+		depMgr:         dependency.NewManager(logger),
 		isConnected:    false,
 	}, nil
 }
@@ -129,10 +152,10 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 			retryDelay = 1 * time.Second
 			mgr.logger.Debug("connection obtained successfully")
 
-			// 创建 gRPC 客户端
-			mgr.logger.Debug("creating gRPC Transfer client")
+			// 创建 gRPC 客户端（启用 Snappy 流压缩）
+			mgr.logger.Debug("creating gRPC Transfer client with snappy compression")
 			client := grpc.NewTransferClient(conn)
-			stream, err := client.Transfer(ctx)
+			stream, err := client.Transfer(ctx, grpcLib.UseCompressor("snappy"))
 			if err != nil {
 				mgr.setConnected(false)
 				retryCount++
@@ -195,36 +218,49 @@ func (m *Manager) sendWithTimeout(stream grpc.Transfer_TransferClient, data *grp
 	}
 }
 
-// sendData 发送数据到 Server
+// sendData 定时批量发送数据到 Server（100ms ticker 驱动）
 func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.Transfer_TransferClient) {
 	defer wg.Done()
 
-	m.logger.Debug("sendData goroutine started, waiting for data to send...")
+	m.logger.Debug("sendData goroutine started (ticker mode)",
+		zap.Duration("interval", sendInterval),
+	)
 
 	sendTimeout := 30 * time.Second
+	ticker := time.NewTicker(sendInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			m.logger.Debug("sendData goroutine stopping (context canceled)")
 			return
-		case data := <-m.sendBuffer:
-			m.logger.Debug("sending data to server",
+		case <-ticker.C:
+			records := m.ringBuffer.ReadAll()
+			if len(records) == 0 {
+				continue
+			}
+
+			// 批量构建 PackagedData，附加缓存的 Agent 元信息
+			data := m.buildPackagedData(records)
+
+			m.logger.Debug("sending batched data to server",
 				zap.String("agent_id", data.AgentId),
-				zap.String("hostname", data.Hostname),
 				zap.Int("record_count", len(data.Records)),
 			)
+
 			if err := m.sendWithTimeout(stream, data, sendTimeout); err != nil {
-				m.logger.Error("failed to send data, dropping stale buffer data",
+				m.logger.Error("failed to send data, clearing buffer",
 					zap.Error(err),
 					zap.String("error_type", fmt.Sprintf("%T", err)),
 					zap.Int("record_count", len(data.Records)),
 				)
-				// 发送失败，丢弃 buffer 中的旧数据（状态快照类数据重连后会发最新的）
-				m.drainSendBuffer()
+				// 发送失败，清空缓冲区（状态快照类数据重连后会发最新的）
+				m.ringBuffer.Clear()
 				return
 			}
-			m.logger.Debug("data sent successfully",
+
+			m.logger.Debug("batched data sent successfully",
 				zap.Int("record_count", len(data.Records)),
 				zap.String("agent_id", data.AgentId),
 			)
@@ -232,19 +268,22 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 	}
 }
 
-// drainSendBuffer 清空 sendBuffer 中的剩余数据（状态快照类数据无需缓存，重连后会发最新的）
-func (m *Manager) drainSendBuffer() {
-	drained := 0
-	for {
-		select {
-		case <-m.sendBuffer:
-			drained++
-		default:
-			if drained > 0 {
-				m.logger.Debug("drained stale data from send buffer", zap.Int("count", drained))
-			}
-			return
-		}
+// buildPackagedData 使用缓存的 Agent 元信息构建批量 PackagedData
+func (m *Manager) buildPackagedData(records []*grpc.EncodedRecord) *grpc.PackagedData {
+	m.agentMetaMu.RLock()
+	meta := m.agentMeta
+	m.agentMetaMu.RUnlock()
+
+	return &grpc.PackagedData{
+		Records:      records,
+		AgentId:      m.agentID,
+		Hostname:     meta.hostname,
+		IntranetIpv4: meta.intranetIPv4,
+		ExtranetIpv4: meta.extranetIPv4,
+		IntranetIpv6: meta.intranetIPv6,
+		ExtranetIpv6: meta.extranetIPv6,
+		Version:      meta.version,
+		Product:      meta.product,
 	}
 }
 
@@ -356,6 +395,18 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 				}()
 			}
 
+			// 处理依赖安装命令
+			if cmd.DependencyInstall != nil {
+				di := cmd.DependencyInstall
+				m.logger.Info("received dependency install command",
+					zap.String("name", di.Name),
+					zap.String("action", di.Action),
+					zap.String("version", di.Version),
+					zap.String("request_id", di.RequestId),
+					zap.String("download_url", di.DownloadUrl))
+				go m.handleDependencyInstall(di)
+			}
+
 			// 处理任务（按插件名称分发到对应通道）
 			if len(cmd.Tasks) > 0 {
 				m.logger.Info("received tasks from server", zap.Int("count", len(cmd.Tasks)))
@@ -395,6 +446,7 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 }
 
 // SendHeartbeat 发送心跳数据
+// 将心跳记录写入 ringBuffer（内部数据，满溢时覆盖最旧数据），同时缓存 Agent 元信息
 func (m *Manager) SendHeartbeat(data *grpc.PackagedData) error {
 	// 检查连接状态
 	if !m.IsConnected() {
@@ -405,30 +457,25 @@ func (m *Manager) SendHeartbeat(data *grpc.PackagedData) error {
 		return nil
 	}
 
-	// 连接已建立，尝试发送到缓冲区
-	select {
-	case m.sendBuffer <- data:
-		return nil
-	default:
-		// 缓冲区满，丢弃最旧的一条，保留最新心跳（心跳时效性强，新的比旧的有价值）
-		select {
-		case <-m.sendBuffer:
-			m.logger.Warn("send buffer full, dropped oldest data to make room for new heartbeat",
-				zap.String("agent_id", data.AgentId),
-			)
-		default:
-		}
-		// 再次尝试放入
-		select {
-		case m.sendBuffer <- data:
-			return nil
-		default:
-			m.logger.Warn("send buffer still full after drop, discarding heartbeat",
-				zap.String("agent_id", data.AgentId),
-			)
-			return fmt.Errorf("send buffer full, heartbeat discarded")
-		}
+	// 缓存 Agent 元信息（sendData 构建 PackagedData 时使用）
+	m.agentMetaMu.Lock()
+	m.agentMeta = agentMetadata{
+		hostname:     data.Hostname,
+		intranetIPv4: data.IntranetIpv4,
+		extranetIPv4: data.ExtranetIpv4,
+		intranetIPv6: data.IntranetIpv6,
+		extranetIPv6: data.ExtranetIpv6,
+		version:      data.Version,
+		product:      data.Product,
 	}
+	m.agentMetaMu.Unlock()
+
+	// 将心跳记录写入 ringBuffer（使用 WriteRecord，满溢时覆盖 buf[0]）
+	for _, rec := range data.Records {
+		m.ringBuffer.WriteRecord(rec)
+	}
+
+	return nil
 }
 
 // GetPluginConfigChannel 获取插件配置通道
@@ -442,6 +489,7 @@ func (m *Manager) GetAgentUpdateChannel() <-chan *grpc.AgentUpdate {
 }
 
 // SendPluginData 发送插件数据到 Server
+// 序列化为 EncodedRecord 后写入 ringBuffer（插件数据，满溢时丢弃新数据）
 func (m *Manager) SendPluginData(pluginName string, record *bridge.Record) error {
 	// 序列化 Record
 	recordData, err := proto.Marshal(record)
@@ -449,27 +497,18 @@ func (m *Manager) SendPluginData(pluginName string, record *bridge.Record) error
 		return fmt.Errorf("failed to marshal plugin record: %w", err)
 	}
 
-	// 构建 PackagedData
-	packagedData := &grpc.PackagedData{
-		Records: []*grpc.EncodedRecord{
-			{
-				DataType:  record.DataType,
-				Timestamp: record.Timestamp,
-				Data:      recordData,
-			},
-		},
-		AgentId: m.agentID,
+	// 构建 EncodedRecord 并写入 ringBuffer
+	encodedRecord := &grpc.EncodedRecord{
+		DataType:  record.DataType,
+		Timestamp: record.Timestamp,
+		Data:      recordData,
 	}
 
-	// 发送到缓冲区
-	select {
-	case m.sendBuffer <- packagedData:
-		return nil
-	default:
-		// 缓冲区满，丢弃（资产数据是状态快照，下次采集会重新上报）
-		m.logger.Warn("send buffer full, dropping plugin data (will re-collect next cycle)", zap.String("plugin", pluginName))
-		return nil
+	if !m.ringBuffer.WriteEncodedRecord(encodedRecord) {
+		m.logger.Warn("ring buffer full, dropping plugin data (will re-collect next cycle)", zap.String("plugin", pluginName))
 	}
+
+	return nil
 }
 
 // sendCachedData 连接建立后清空旧缓存（心跳和资产数据都是状态快照，旧数据无价值，重放会导致旧版本号覆盖 DB）
@@ -607,5 +646,45 @@ func (m *Manager) SendTaskToPlugin(pluginName string, task *grpc.Task) error {
 		return nil
 	default:
 		return fmt.Errorf("task channel full for plugin: %s", pluginName)
+	}
+}
+
+// DataType 常量：依赖安装结果
+const dataTypeDependencyInstallResult int32 = 9100
+
+// handleDependencyInstall 处理依赖安装命令并上报结果
+func (m *Manager) handleDependencyInstall(di *grpc.DependencyInstall) {
+	m.depMgr.BackendURL = di.DownloadUrl
+	result := m.depMgr.Execute(di.Name, di.Action, di.Version)
+
+	m.logger.Info("dependency install result",
+		zap.String("name", di.Name),
+		zap.String("action", di.Action),
+		zap.Bool("success", result.Success),
+		zap.String("message", result.Message))
+
+	// 构建上报数据
+	reportResult := &grpc.DependencyInstallResult{
+		RequestId: di.RequestId,
+		Name:      di.Name,
+		Success:   result.Success,
+		Message:   result.Message,
+		Version:   result.Version,
+	}
+
+	data, err := proto.Marshal(reportResult)
+	if err != nil {
+		m.logger.Error("failed to marshal dependency install result", zap.Error(err))
+		return
+	}
+
+	record := &grpc.EncodedRecord{
+		DataType:  dataTypeDependencyInstallResult,
+		Timestamp: time.Now().UnixNano(),
+		Data:      data,
+	}
+
+	if !m.ringBuffer.WriteEncodedRecord(record) {
+		m.logger.Warn("ring buffer full, dropping dependency install result")
 	}
 }

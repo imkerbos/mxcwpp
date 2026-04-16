@@ -17,6 +17,7 @@ type Config struct {
 	Local        LocalConfig  `mapstructure:"local"`
 	Remote       RemoteConfig // 由 Server 下发，初始为空
 	BuildVersion string       // 构建时嵌入的版本（优先级最高）
+	SignPublicKey string      // Ed25519 公钥（base64），构建时嵌入
 }
 
 // LocalConfig 是本地配置（最小配置）
@@ -61,8 +62,9 @@ type ServiceDiscoveryConfig struct {
 
 // AgentCenterConfig 是 AgentCenter 配置
 type AgentCenterConfig struct {
-	PrivateHost string `mapstructure:"private_host"`
-	PublicHost  string `mapstructure:"public_host"`
+	PrivateHost string   `mapstructure:"private_host"`
+	PublicHost  string   `mapstructure:"public_host"`
+	Addresses   []string `mapstructure:"addresses"` // 静态 AC 地址列表（SD 不可用时轮转）
 }
 
 // TLSConfig 是 TLS 配置

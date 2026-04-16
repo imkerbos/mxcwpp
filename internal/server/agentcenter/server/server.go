@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
+	_ "github.com/imkerbos/mxsec-platform/internal/common/compressor" // 注册 Snappy 解压器（Agent 端压缩，Server 端解压）
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 )
 

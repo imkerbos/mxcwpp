@@ -18,9 +18,12 @@ tmp/
 /agent
 /agentcenter
 /manager
+/consumer
 /baseline
 /baseline-plugin
 /collector-plugin
+/stress
+/migrate-metrics
 
 # ======================
 # Go
@@ -126,6 +129,7 @@ deploy/.env
 # Data volumes
 # ======================
 deploy/data/
+deploy/data-perf/
 uploads/
 
 # ======================
@@ -154,8 +158,19 @@ Elkeid/
 *.sock
 
 # ======================
-# ai
+# AI
 # ======================
 CLAUDE.md
+CODEX.md
 .claude/
-.vscode/
+memory/
+
+# ======================
+# Local data
+# ======================
+data/
+
+# ======================
+# Legacy tools (root level only, not cmd/tools/)
+# ======================
+/tools/

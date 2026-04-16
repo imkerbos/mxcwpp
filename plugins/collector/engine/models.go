@@ -60,6 +60,7 @@ type SoftwareAsset struct {
 	PackageType  string `json:"package_type"`           // 包类型（rpm、deb、pip、npm、jar 等）
 	Vendor       string `json:"vendor,omitempty"`       // 供应商
 	InstallTime  string `json:"install_time,omitempty"` // 安装时间
+	PURL         string `json:"purl,omitempty"`         // Package URL (用于漏洞匹配)
 }
 
 // ContainerAsset 是容器资产数据
@@ -89,12 +90,16 @@ type AppAsset struct {
 // NetInterfaceAsset 是网络接口资产数据
 type NetInterfaceAsset struct {
 	Asset
-	InterfaceName string   `json:"interface_name"` // 接口名称（eth0、ens33 等）
-	MACAddress    string   `json:"mac_address"`    // MAC 地址
-	IPv4Addresses []string `json:"ipv4_addresses"` // IPv4 地址列表
-	IPv6Addresses []string `json:"ipv6_addresses"` // IPv6 地址列表
-	MTU           int      `json:"mtu"`            // MTU
-	State         string   `json:"state"`          // 状态（up、down）
+	InterfaceName string   `json:"interface_name"`          // 接口名称（eth0、ens33 等）
+	MACAddress    string   `json:"mac_address"`             // MAC 地址
+	IPv4Addresses []string `json:"ipv4_addresses"`          // IPv4 地址列表
+	IPv6Addresses []string `json:"ipv6_addresses"`          // IPv6 地址列表
+	MTU           int      `json:"mtu"`                     // MTU
+	State         string   `json:"state"`                   // 状态（up、down）
+	BytesRecv     uint64   `json:"bytes_recv,omitempty"`    // 累计接收字节数（/proc/net/dev）
+	BytesSent     uint64   `json:"bytes_sent,omitempty"`    // 累计发送字节数
+	PacketsDrop   uint64   `json:"packets_drop,omitempty"` // 接收丢包数
+	PacketsError  uint64   `json:"packets_error,omitempty"` // 接收错误数
 }
 
 // VolumeAsset 是磁盘资产数据

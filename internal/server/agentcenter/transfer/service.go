@@ -22,7 +22,9 @@ import (
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/metrics"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
@@ -47,12 +49,14 @@ type Connection struct {
 // Service 是 Transfer 服务实现
 type Service struct {
 	grpcProto.UnimplementedTransferServer
-	db               *gorm.DB
-	logger           *zap.Logger
-	cfg              *config.Config
-	assetService     *service.AssetService
-	metricsBuffer    *service.MetricsBuffer
-	prometheusClient *service.PrometheusClient
+	db            *gorm.DB
+	logger        *zap.Logger
+	cfg           *config.Config
+	assetService  *service.AssetService
+	metricsBuffer *service.MetricsBuffer
+
+	// Kafka 生产者（可选）：启用时 EncodedRecord 路由到 Kafka，不写 MySQL
+	kafkaProducer kafka.Producer
 
 	// 连接管理
 	connections map[string]*Connection
@@ -62,69 +66,36 @@ type Service struct {
 	shutdownFlag atomic.Bool
 }
 
+// SetKafkaProducer 注入 Kafka 生产者（在 AgentCenter 启动后调用）
+func (s *Service) SetKafkaProducer(p kafka.Producer) {
+	s.kafkaProducer = p
+}
+
 // NewService 创建 Transfer 服务实例
 func NewService(db *gorm.DB, logger *zap.Logger, cfg *config.Config) *Service {
 	// 初始化资产服务
 	assetService := service.NewAssetService(db, logger)
 
-	var metricsBuffer *service.MetricsBuffer
-	var prometheusClient *service.PrometheusClient
-
-	// 根据配置初始化监控存储（二选一：MySQL 或 Prometheus）
-	if cfg.Metrics.Prometheus.Enabled {
-		// 验证 Prometheus 配置
-		if cfg.Metrics.Prometheus.RemoteWriteURL == "" && cfg.Metrics.Prometheus.PushgatewayURL == "" {
-			logger.Warn("Prometheus 已启用但未配置 URL，将回退到 MySQL 存储",
-				zap.String("hint", "请配置 remote_write_url 或 pushgateway_url"),
-			)
-			// 回退到 MySQL 存储
-			metricsBuffer = service.NewMetricsBuffer(
-				db,
-				logger,
-				cfg.Metrics.MySQL.BatchSize,
-				cfg.Metrics.MySQL.FlushInterval,
-			)
-			logger.Info("MySQL 监控指标存储已启用（Prometheus 配置无效，已回退）",
-				zap.Int("retention_days", cfg.Metrics.MySQL.RetentionDays),
-			)
-		} else {
-			// 启用 Prometheus：只使用 Prometheus，不使用 MySQL
-			prometheusClient = service.NewPrometheusClient(
-				cfg.Metrics.Prometheus.RemoteWriteURL,
-				cfg.Metrics.Prometheus.PushgatewayURL,
-				cfg.Metrics.Prometheus.JobName,
-				cfg.Metrics.Prometheus.Timeout,
-				logger,
-			)
-			logger.Info("Prometheus 监控指标存储已启用（MySQL 已禁用）",
-				zap.String("remote_write_url", cfg.Metrics.Prometheus.RemoteWriteURL),
-				zap.String("pushgateway_url", cfg.Metrics.Prometheus.PushgatewayURL),
-				zap.String("job_name", cfg.Metrics.Prometheus.JobName),
-				zap.String("note", "需要配置外部 Prometheus 服务，本项目不自动拉起"),
-			)
-		}
-	} else {
-		// 默认：使用 MySQL 存储
-		metricsBuffer = service.NewMetricsBuffer(
-			db,
-			logger,
-			cfg.Metrics.MySQL.BatchSize,
-			cfg.Metrics.MySQL.FlushInterval,
-		)
-		logger.Info("MySQL 监控指标存储已启用（默认）",
-			zap.Int("retention_days", cfg.Metrics.MySQL.RetentionDays),
-			zap.Int("batch_size", cfg.Metrics.MySQL.BatchSize),
-		)
+	// in-process Gauge 路径：AgentCenter 作为 Prometheus Exporter，直接暴露 /metrics 端点。
+	// MySQL buffer 保留为降级路径（Prometheus 不可用时仍可查询历史数据）。
+	batchSize := cfg.Metrics.MySQL.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
 	}
+	flushInterval := cfg.Metrics.MySQL.FlushInterval
+	if flushInterval <= 0 {
+		flushInterval = 5 * time.Second
+	}
+	metricsBuffer := service.NewMetricsBuffer(db, logger, batchSize, flushInterval)
+	logger.Info("监控指标存储已启用", zap.Bool("prometheus_gauge", true), zap.Bool("mysql_fallback", true))
 
 	return &Service{
-		db:               db,
-		logger:           logger,
-		cfg:              cfg,
-		assetService:     assetService,
-		metricsBuffer:    metricsBuffer,
-		prometheusClient: prometheusClient,
-		connections:      make(map[string]*Connection),
+		db:            db,
+		logger:        logger,
+		cfg:           cfg,
+		assetService:  assetService,
+		metricsBuffer: metricsBuffer,
+		connections:   make(map[string]*Connection),
 	}
 }
 
@@ -667,6 +638,8 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 			status = model.HostPluginStatusStopped
 		case "error":
 			status = model.HostPluginStatusError
+		case "dormant":
+			status = model.HostPluginStatusDormant
 		default:
 			status = model.HostPluginStatusRunning
 		}
@@ -733,100 +706,67 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 }
 
 // storeHostMetrics 存储主机监控指标
-func (s *Service) storeHostMetrics(ctx context.Context, hostID string, record *grpcProto.EncodedRecord) error {
-	// 解析 bridge.Record
+// 优先写入 Prometheus in-process Gauge（由 Prometheus Server 抓取），
+// 不可用时降级写 MySQL。
+func (s *Service) storeHostMetrics(_ context.Context, hostID string, record *grpcProto.EncodedRecord) error {
 	var bridgeRecord bridge.Record
 	if err := proto.Unmarshal(record.Data, &bridgeRecord); err != nil {
 		return fmt.Errorf("failed to unmarshal bridge record: %w", err)
 	}
-
-	// 提取资源指标字段
-	fields := bridgeRecord.Data.Fields
-	if fields == nil {
-		return nil // 没有监控数据，跳过
+	if bridgeRecord.Data == nil || bridgeRecord.Data.Fields == nil {
+		return nil
 	}
+	fields := bridgeRecord.Data.Fields
 
-	// 检查是否有资源监控数据
-	hasMetrics := false
 	metric := &model.HostMetric{
 		HostID:      hostID,
 		CollectedAt: model.ToLocalTime(time.Unix(0, record.Timestamp)),
 	}
+	gaugeMap := make(map[string]float64)
 
-	// 解析 CPU 使用率
-	if cpuUsageStr := fields["cpu_usage_detailed"]; cpuUsageStr != "" {
-		if cpuUsage := parseFloat(cpuUsageStr); cpuUsage != nil {
-			metric.CPUUsage = cpuUsage
-			hasMetrics = true
-		}
+	if v := parseFloat(fields["cpu_usage"]); v != nil {
+		metric.CPUUsage = v
+		gaugeMap["cpu_usage"] = *v
+	}
+	if v := parseFloat(fields["mem_usage"]); v != nil {
+		metric.MemUsage = v
+		gaugeMap["mem_usage"] = *v
+	}
+	if v := parseFloat(fields["disk_usage"]); v != nil {
+		metric.DiskUsage = v
+		gaugeMap["disk_usage"] = *v
+	}
+	if v := parseFloat(fields["net_in"]); v != nil {
+		u := uint64(*v)
+		metric.NetBytesRecv = &u
+		gaugeMap["net_in"] = *v
+	}
+	if v := parseFloat(fields["net_out"]); v != nil {
+		u := uint64(*v)
+		metric.NetBytesSent = &u
+		gaugeMap["net_out"] = *v
+	}
+	if v := parseFloat(fields["disk_read_bytes"]); v != nil {
+		gaugeMap["disk_read_bytes"] = *v
+	}
+	if v := parseFloat(fields["disk_write_bytes"]); v != nil {
+		gaugeMap["disk_write_bytes"] = *v
 	}
 
-	// 解析内存使用率
-	if memUsageStr := fields["mem_usage_detailed"]; memUsageStr != "" {
-		if memUsage := parseFloat(memUsageStr); memUsage != nil {
-			metric.MemUsage = memUsage
-			hasMetrics = true
-		}
+	if len(gaugeMap) == 0 {
+		return nil
 	}
 
-	// 解析磁盘使用率
-	if diskUsageStr := fields["disk_usage"]; diskUsageStr != "" {
-		if diskUsage := parseFloat(diskUsageStr); diskUsage != nil {
-			metric.DiskUsage = diskUsage
-			hasMetrics = true
-		}
-	}
+	// 取 hostname（尽量携带，label 更易读）
+	hostname := fields["hostname"]
 
-	// 解析网络统计
-	if netBytesSentStr := fields["net_bytes_sent"]; netBytesSentStr != "" {
-		if netBytesSent := parseInt(netBytesSentStr); netBytesSent != nil {
-			metric.NetBytesSent = netBytesSent
-			hasMetrics = true
-		}
-	}
+	// 更新 Prometheus Gauge（in-process，Prometheus Server 抓取 /metrics）
+	metrics.Update(hostID, hostname, gaugeMap)
 
-	if netBytesRecvStr := fields["net_bytes_recv"]; netBytesRecvStr != "" {
-		if netBytesRecv := parseInt(netBytesRecvStr); netBytesRecv != nil {
-			metric.NetBytesRecv = netBytesRecv
-			hasMetrics = true
-		}
-	}
-
-	// 存储监控数据（二选一：MySQL 或 Prometheus）
-	if hasMetrics {
-		var err error
-
-		// 优先使用 Prometheus（如果启用），否则使用 MySQL
-		if s.prometheusClient != nil {
-			// 写入 Prometheus
-			metricsMap := make(map[string]float64)
-			if metric.CPUUsage != nil {
-				metricsMap["cpu_usage"] = *metric.CPUUsage
-			}
-			if metric.MemUsage != nil {
-				metricsMap["mem_usage"] = *metric.MemUsage
-			}
-			if metric.DiskUsage != nil {
-				metricsMap["disk_usage"] = *metric.DiskUsage
-			}
-			if metric.NetBytesSent != nil {
-				metricsMap["net_bytes_sent"] = float64(*metric.NetBytesSent)
-			}
-			if metric.NetBytesRecv != nil {
-				metricsMap["net_bytes_recv"] = float64(*metric.NetBytesRecv)
-			}
-
-			if len(metricsMap) > 0 {
-				err = s.prometheusClient.WriteMetrics(ctx, hostID, metricsMap, metric.CollectedAt.Time())
-			}
-		} else if s.metricsBuffer != nil {
-			// 写入 MySQL（默认）
-			err = s.metricsBuffer.Add(metric)
-		}
-
-		// 如果有错误，记录日志但不返回错误（避免影响心跳处理）
-		if err != nil {
-			s.logger.Warn("监控数据存储失败",
+	// 同时写 MySQL（供无 Prometheus 环境降级使用）
+	if s.metricsBuffer != nil {
+		if err := s.metricsBuffer.Add(metric); err != nil {
+			s.logger.Warn("监控数据写 MySQL 失败",
 				zap.String("host_id", hostID),
 				zap.Error(err),
 			)
@@ -855,11 +795,36 @@ func parseInt(s string) *uint64 {
 }
 
 // handleEncodedRecord 处理 EncodedRecord
+// 若 Kafka 生产者已注入，则将记录发布到对应 Topic（异步解耦，μs 级返回）；
+// 否则回退到直接写 MySQL（向后兼容）。
 func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
-	// 根据 data_type 路由到不同的处理器
+	// ---- Kafka 路径 ----
+	if s.kafkaProducer != nil {
+		msg := &kafka.MQMessage{
+			DataType:     record.DataType,
+			AgentID:      conn.AgentID,
+			Body:         record.Data,
+			AgentTime:    record.Timestamp / int64(time.Second), // Timestamp 是纳秒，转成 Unix 秒
+			SvrTime:      time.Now().Unix(),
+			Hostname:     conn.Hostname,
+			IntranetIPv4: strings.Join(conn.IPv4, ","),
+			Version:      conn.Version,
+			ACID:         s.cfg.Server.InstanceID,
+		}
+		topic := kafka.RouteDataType(record.DataType, s.cfg.Kafka.TopicPrefix)
+		if err := s.kafkaProducer.Send(topic, conn.AgentID, msg); err != nil {
+			s.logger.Warn("Kafka 发送失败，消息已入降级队列或丢弃",
+				zap.String("agent_id", conn.AgentID),
+				zap.Int32("data_type", record.DataType),
+				zap.Error(err),
+			)
+		}
+		return nil
+	}
+
+	// ---- MySQL 直写路径（向后兼容，Kafka 未启用时） ----
 	switch record.DataType {
 	case 1000: // Agent 心跳（已在 handleHeartbeat 中处理）
-		// 心跳数据通常不在这里处理，因为已经在 handleHeartbeat 中处理了
 		return nil
 
 	case 8000: // 基线检查结果
@@ -883,6 +848,15 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 	case 5050, 5051, 5052, 5053, 5054, 5055, 5056, 5057, 5058, 5059, 5060:
 		// 资产数据
 		return s.assetService.HandleAssetData(conn.AgentID, record.DataType, record.Data)
+
+	case 7001: // Scanner 扫描结果
+		return s.handleScanResult(ctx, record, conn)
+
+	case 7002: // Scanner 任务完成
+		return s.handleScanTaskComplete(ctx, record, conn)
+
+	case 7004: // Scanner 隔离/删除结果
+		return s.handleQuarantineResult(ctx, record, conn)
 
 	default:
 		s.logger.Debug("未知数据类型",
@@ -1655,6 +1629,12 @@ func (s *Service) unregisterConnection(agentID string, connToRemove *Connection)
 	// 更新主机状态为离线
 	s.db.Model(&model.Host{}).Where("host_id = ?", agentID).Update("status", model.HostStatusOffline)
 
+	// 清理 Prometheus Gauge（避免 stale 指标残留）
+	var offlineHost model.Host
+	if err := s.db.Select("hostname").First(&offlineHost, "host_id = ?", agentID).Error; err == nil {
+		metrics.Delete(agentID, offlineHost.Hostname)
+	}
+
 	// 创建 Agent 离线告警
 	s.createAgentOfflineAlert(agentID)
 
@@ -1819,19 +1799,15 @@ func (s *Service) buildPluginDownloadURLs(originalURLs []string, pluginName stri
 			continue
 		}
 
-		// 如果是 file:// URL（开发环境遗留），提取路径并转换为HTTP URL
-		var relativePath string
 		if strings.HasPrefix(urlStr, "file://") {
-			// file:///workspace/dist/plugins/baseline -> /api/v1/plugins/download/baseline
-			relativePath = fmt.Sprintf("/api/v1/plugins/download/%s", pluginName)
-			s.logger.Info("转换开发环境 file:// URL 为 HTTP URL",
+			s.logger.Warn("检测到已废弃的 file:// 插件下载地址，跳过下发",
 				zap.String("plugin_name", pluginName),
-				zap.String("old_url", urlStr),
-				zap.String("new_path", relativePath))
-		} else {
-			// 相对路径
-			relativePath = urlStr
+				zap.String("download_url", urlStr))
+			continue
 		}
+
+		// 相对路径
+		relativePath := urlStr
 
 		// 构建完整 URL（使用相对路径）
 		// 优先级：1.系统配置的 backend_url > 2.gRPC Host > 3.localhost
@@ -1887,6 +1863,69 @@ func (s *Service) buildPluginDownloadURLs(originalURLs []string, pluginName stri
 	return downloadURLs
 }
 
+func (s *Service) pluginConfigUsesManagerDownload(pc model.PluginConfig, downloadURLs []string) bool {
+	managerPath := fmt.Sprintf("/api/v1/plugins/download/%s", pc.Name)
+	for _, urlStr := range downloadURLs {
+		if strings.HasPrefix(urlStr, "/") {
+			return true
+		}
+		if strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") {
+			if strings.Contains(urlStr, managerPath) {
+				return true
+			}
+			if s.cfg != nil && s.cfg.Plugins.BaseURL != "" {
+				expectedPrefix := strings.TrimRight(s.cfg.Plugins.BaseURL, "/") + "/"
+				if strings.HasPrefix(urlStr, expectedPrefix) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (s *Service) pluginPackageExists(pc model.PluginConfig) bool {
+	if strings.TrimSpace(pc.Version) == "" {
+		return false
+	}
+
+	var component model.Component
+	if err := s.db.Where("name = ? AND category = ?", pc.Name, model.ComponentCategoryPlugin).First(&component).Error; err != nil {
+		return false
+	}
+
+	var version model.ComponentVersion
+	if err := s.db.Where("component_id = ? AND version = ?", component.ID, pc.Version).First(&version).Error; err != nil {
+		return false
+	}
+
+	var pkg model.ComponentPackage
+	if err := s.db.Where("version_id = ? AND pkg_type = ? AND enabled = ?", version.ID, model.PackageTypeBinary, true).
+		Order("CASE WHEN arch = 'amd64' THEN 0 ELSE 1 END").
+		First(&pkg).Error; err != nil {
+		return false
+	}
+
+	info, err := os.Stat(pkg.FilePath)
+	return err == nil && !info.IsDir()
+}
+
+func (s *Service) resolvePluginDelivery(pc model.PluginConfig) ([]string, string) {
+	downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+	if len(downloadURLs) == 0 {
+		return nil, pc.SHA256
+	}
+
+	if s.pluginConfigUsesManagerDownload(pc, downloadURLs) && !s.pluginPackageExists(pc) {
+		s.logger.Warn("插件组件包不存在，跳过下发插件配置",
+			zap.String("plugin", pc.Name),
+			zap.String("version", pc.Version))
+		return nil, ""
+	}
+
+	return downloadURLs, pc.SHA256
+}
+
 // sendPluginConfigsIfNeeded 下发插件配置给 Agent
 func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connection, runtimeType model.RuntimeType) error {
 	// 从数据库查询启用的插件配置
@@ -1913,14 +1952,16 @@ func (s *Service) sendPluginConfigsIfNeeded(ctx context.Context, conn *Connectio
 			continue
 		}
 
-		// 使用辅助函数构建下载URL
-		downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+		downloadURLs, sha256 := s.resolvePluginDelivery(pc)
+		if len(downloadURLs) == 0 {
+			continue
+		}
 
 		config := &grpcProto.Config{
 			Name:         pc.Name,
 			Type:         string(pc.Type),
 			Version:      pc.Version,
-			Sha256:       pc.SHA256,
+			Sha256:       sha256,
 			Signature:    pc.Signature,
 			DownloadUrls: downloadURLs,
 			Detail:       pc.Detail,
@@ -1975,6 +2016,20 @@ func (s *Service) SendCommand(agentID string, cmd *grpcProto.Command) error {
 	}
 }
 
+// SendDependencyInstall 向指定 Agent 发送依赖安装命令
+func (s *Service) SendDependencyInstall(agentID string, name, action, version, requestID, downloadURL string) error {
+	cmd := &grpcProto.Command{
+		DependencyInstall: &grpcProto.DependencyInstall{
+			Name:        name,
+			Action:      action,
+			Version:     version,
+			RequestId:   requestID,
+			DownloadUrl: downloadURL,
+		},
+	}
+	return s.SendCommand(agentID, cmd)
+}
+
 // BroadcastPluginConfigs 向所有在线 Agent 广播插件配置（用于推送更新）
 // 返回成功发送的 Agent 数量和失败的 Agent 列表
 func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, error) {
@@ -2022,14 +2077,16 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 				continue
 			}
 
-			// 使用辅助函数构建下载URL
-			downloadURLs := s.buildPluginDownloadURLs([]string(pc.DownloadURLs), pc.Name)
+			downloadURLs, sha256 := s.resolvePluginDelivery(pc)
+			if len(downloadURLs) == 0 {
+				continue
+			}
 
 			config := &grpcProto.Config{
 				Name:         pc.Name,
 				Type:         string(pc.Type),
 				Version:      pc.Version,
-				Sha256:       pc.SHA256,
+				Sha256:       sha256,
 				Signature:    pc.Signature,
 				DownloadUrls: downloadURLs,
 				Detail:       pc.Detail,
@@ -2097,6 +2154,38 @@ func (s *Service) GetOnlineAgentIDs() []string {
 		ids = append(ids, agentID)
 	}
 	return ids
+}
+
+// AgentDetail 是 /conn/list 返回的单个 Agent 连接信息
+type AgentDetail struct {
+	AgentID  string   `json:"agent_id"`
+	Hostname string   `json:"hostname"`
+	IPv4     []string `json:"ipv4"`
+	IPv6     []string `json:"ipv6"`
+	Version  string   `json:"version"`
+	LastSeen string   `json:"last_seen"` // RFC3339
+}
+
+// GetOnlineAgentDetails 获取所有在线 Agent 的详细连接信息
+func (s *Service) GetOnlineAgentDetails() []AgentDetail {
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+
+	details := make([]AgentDetail, 0, len(s.connections))
+	for _, conn := range s.connections {
+		conn.mu.RLock()
+		d := AgentDetail{
+			AgentID:  conn.AgentID,
+			Hostname: conn.Hostname,
+			IPv4:     conn.IPv4,
+			IPv6:     conn.IPv6,
+			Version:  conn.Version,
+			LastSeen: conn.LastSeen.Format(time.RFC3339),
+		}
+		conn.mu.RUnlock()
+		details = append(details, d)
+	}
+	return details
 }
 
 // handleFixResult 处理基线修复结果
@@ -2500,7 +2589,7 @@ func (s *Service) handleFIMTaskCompletion(ctx context.Context, record *grpcProto
 
 	hostUpdates := map[string]interface{}{
 		"status":        hostStatus,
-		"total_entries":  totalEntries,
+		"total_entries": totalEntries,
 		"added_count":   addedCount,
 		"removed_count": removedCount,
 		"changed_count": changedCount,
@@ -2577,6 +2666,107 @@ func containsString(slice []string, target string) bool {
 	return false
 }
 
+// handleScanResult 处理 Scanner 扫描结果（DataType 7001，MySQL 直写路径）
+func (s *Service) handleScanResult(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 Scanner 结果失败: %w", err)
+	}
+	fields := bridgeRecord.Data.Fields
+
+	var taskID uint
+	if v, err := strconv.ParseUint(fields["task_id"], 10, 64); err == nil {
+		taskID = uint(v)
+	}
+	fileSize, _ := strconv.ParseInt(fields["file_size"], 10, 64)
+
+	result := &model.AntivirusScanResult{
+		TaskID:     taskID,
+		HostID:     conn.AgentID,
+		Hostname:   conn.Hostname,
+		IP:         strings.Join(conn.IPv4, ","),
+		FilePath:   fields["file_path"],
+		ThreatName: fields["threat_name"],
+		ThreatType: fields["threat_type"],
+		Severity:   fields["severity"],
+		FileHash:   fields["file_hash"],
+		FileSize:   fileSize,
+		Action:     "detected",
+		DetectedAt: model.LocalTime(time.Now()),
+	}
+
+	if err := s.db.Create(result).Error; err != nil {
+		return fmt.Errorf("写入扫描结果失败: %w", err)
+	}
+
+	s.db.Model(&model.AntivirusScanTask{}).
+		Where("id = ?", taskID).
+		UpdateColumn("threat_count", gorm.Expr("threat_count + 1"))
+
+	return nil
+}
+
+// handleScanTaskComplete 处理 Scanner 任务完成（DataType 7002，MySQL 直写路径）
+func (s *Service) handleScanTaskComplete(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 Scanner 完成信号失败: %w", err)
+	}
+	fields := bridgeRecord.Data.Fields
+
+	var taskID uint
+	if v, err := strconv.ParseUint(fields["task_id"], 10, 64); err == nil {
+		taskID = uint(v)
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.AntivirusScanTask{}).
+			Where("id = ?", taskID).
+			UpdateColumn("scanned_hosts", gorm.Expr("scanned_hosts + 1")).Error; err != nil {
+			return err
+		}
+
+		var task model.AntivirusScanTask
+		if err := tx.First(&task, taskID).Error; err != nil {
+			return err
+		}
+
+		if task.ScannedHosts >= task.TotalHosts && task.Status != "completed" {
+			now := model.LocalTime(time.Now())
+			return tx.Model(&task).Updates(map[string]interface{}{
+				"status":      "completed",
+				"finished_at": &now,
+			}).Error
+		}
+		return nil
+	})
+}
+
+// handleQuarantineResult 处理 Scanner 隔离/删除结果（DataType 7004，MySQL 直写路径）
+func (s *Service) handleQuarantineResult(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析隔离结果失败: %w", err)
+	}
+	fields := bridgeRecord.Data.Fields
+
+	if fields["action"] == "quarantine" && fields["status"] == "success" {
+		file := &model.QuarantineFile{
+			HostID:         conn.AgentID,
+			Hostname:       conn.Hostname,
+			IP:             strings.Join(conn.IPv4, ","),
+			OriginalPath:   fields["file_path"],
+			QuarantinePath: fields["quarantine_path"],
+			FilePermission: fields["file_permission"],
+			FileOwner:      fields["file_owner"],
+			Status:         "quarantined",
+			QuarantinedAt:  model.LocalTime(time.Now()),
+		}
+		return s.db.Create(file).Error
+	}
+	return nil
+}
+
 // getAgentRuntimeType 获取 Agent 的运行时类型
 func (s *Service) getAgentRuntimeType(agentID string) model.RuntimeType {
 	var host model.Host
@@ -2586,4 +2776,3 @@ func (s *Service) getAgentRuntimeType(agentID string) model.RuntimeType {
 	}
 	return host.RuntimeType
 }
-

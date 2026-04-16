@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -112,6 +113,9 @@ func (h *SoftwareHandler) collectRPMPackages(ctx context.Context) ([]interface{}
 			pkg.InstallTime = parts[4]
 		}
 
+		// 生成 PURL: pkg:rpm/{vendor}/{name}@{version}?arch={arch}
+		pkg.PURL = buildRPMPURL(pkg.Name, pkg.Version, pkg.Architecture, pkg.Vendor)
+
 		packages = append(packages, pkg)
 	}
 
@@ -166,8 +170,49 @@ func (h *SoftwareHandler) collectDEBPackages(ctx context.Context) ([]interface{}
 			PackageType:  "deb",
 		}
 
+		// 生成 PURL: pkg:deb/debian/{name}@{version}?arch={arch}
+		pkg.PURL = buildDEBPURL(pkg.Name, pkg.Version, pkg.Architecture)
+
 		packages = append(packages, pkg)
 	}
 
 	return packages, nil
+}
+
+// buildRPMPURL 生成 RPM 包的 Package URL
+// 格式: pkg:rpm/{namespace}/{name}@{version}?arch={arch}
+func buildRPMPURL(name, version, arch, vendor string) string {
+	namespace := "redhat"
+	if vendor != "" {
+		ns := strings.ToLower(vendor)
+		switch {
+		case strings.Contains(ns, "centos"):
+			namespace = "centos"
+		case strings.Contains(ns, "fedora"):
+			namespace = "fedora"
+		case strings.Contains(ns, "suse") || strings.Contains(ns, "opensuse"):
+			namespace = "opensuse"
+		case strings.Contains(ns, "amazon"):
+			namespace = "amazon"
+		case strings.Contains(ns, "oracle"):
+			namespace = "oracle"
+		case strings.Contains(ns, "red hat") || strings.Contains(ns, "redhat"):
+			namespace = "redhat"
+		}
+	}
+	purl := fmt.Sprintf("pkg:rpm/%s/%s@%s", namespace, url.PathEscape(name), url.PathEscape(version))
+	if arch != "" && arch != "(none)" {
+		purl += "?arch=" + url.QueryEscape(arch)
+	}
+	return purl
+}
+
+// buildDEBPURL 生成 DEB 包的 Package URL
+// 格式: pkg:deb/debian/{name}@{version}?arch={arch}
+func buildDEBPURL(name, version, arch string) string {
+	purl := fmt.Sprintf("pkg:deb/debian/%s@%s", url.PathEscape(name), url.PathEscape(version))
+	if arch != "" {
+		purl += "?arch=" + url.QueryEscape(arch)
+	}
+	return purl
 }

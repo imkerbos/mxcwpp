@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"time"
 
@@ -57,7 +58,7 @@ func (s *PluginUpdateScheduler) checkAndBroadcast(ctx context.Context) {
 	defer s.mu.Unlock()
 
 	// 查询最近更新的插件配置
-	var latestUpdate time.Time
+	var latestUpdate sql.NullTime
 	err := s.db.Model(&model.PluginConfig{}).
 		Select("MAX(updated_at)").
 		Where("enabled = ?", true).
@@ -68,11 +69,15 @@ func (s *PluginUpdateScheduler) checkAndBroadcast(ctx context.Context) {
 		return
 	}
 
+	if !latestUpdate.Valid {
+		return
+	}
+
 	// 如果有更新且更新时间比上次检查时间新
-	if !latestUpdate.IsZero() && latestUpdate.After(s.lastCheckTime) {
+	if latestUpdate.Time.After(s.lastCheckTime) {
 		s.logger.Info("检测到插件配置更新，开始广播",
 			zap.Time("last_check", s.lastCheckTime),
-			zap.Time("latest_update", latestUpdate))
+			zap.Time("latest_update", latestUpdate.Time))
 
 		successCount, failedAgents, err := s.transferService.BroadcastPluginConfigs(ctx)
 		if err != nil {

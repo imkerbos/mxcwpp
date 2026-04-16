@@ -3,17 +3,25 @@ package setup
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/httptrans"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/scheduler"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/sdclient"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/server"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/transfer"
+	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
@@ -26,12 +34,15 @@ type AgentCenterServices struct {
 	Logger                 *zap.Logger
 	DB                     *gorm.DB
 	GRPCServer             *grpc.Server
+	HTTPServer             *http.Server   // HTTP 管理端口（健康探测、命令下发）
 	TransferService        *transfer.Service
 	TaskService            *service.TaskService
 	TaskStatusUpdater      *service.TaskStatusUpdater
 	PluginUpdateScheduler  *scheduler.PluginUpdateScheduler
 	AgentUpdateScheduler   *scheduler.AgentUpdateScheduler
 	AgentRestartScheduler  *scheduler.AgentRestartScheduler
+	KafkaProducer          kafka.Producer    // 可选，Kafka 未启用时为 nil
+	SDClient               *sdclient.Client  // 可选，manager_addr 未配置时为 nil
 	StatusCtx              context.Context
 	StatusCancel           context.CancelFunc
 	Listener               net.Listener
@@ -77,6 +88,22 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	transferService := transfer.NewService(db, logger, cfg)
 	grpcProto.RegisterTransferServer(grpcServer, transferService)
 
+	// 6.1 初始化 Kafka 生产者（可选）
+	var kafkaProducer kafka.Producer
+	if cfg.Kafka.Enabled {
+		kp, err := kafka.NewAsyncProducer(cfg.Kafka, logger)
+		if err != nil {
+			logger.Warn("Kafka 生产者初始化失败，降级为直写 MySQL", zap.Error(err))
+		} else {
+			kafkaProducer = kp
+			transferService.SetKafkaProducer(kp)
+			logger.Info("Kafka 生产者已启用",
+				zap.Strings("brokers", cfg.Kafka.Brokers),
+				zap.String("topic_prefix", cfg.Kafka.TopicPrefix),
+			)
+		}
+	}
+
 	// 7. 创建任务服务
 	taskService := service.NewTaskService(db, logger)
 
@@ -93,6 +120,34 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	// 11. 创建 Agent 重启调度器
 	agentRestartScheduler := scheduler.NewAgentRestartScheduler(db, transferService, logger)
 
+	// 11.1 创建 SD 客户端（向 Manager 注册自身，可选）
+	var sdClient *sdclient.Client
+	if cfg.Server.ManagerAddr != "" {
+		// 若 HTTP host 是 0.0.0.0（监听所有网卡），需要探测出口 IP 作为对外可路由地址。
+		// 参考 Elkeid GetOutboundIP：向默认路由目标发 UDP，内核自动选择出口网卡，
+		// 无需实际发包，适用于 Docker / K8s Pod / VM 各场景。
+		advertiseIP := getOutboundIP()
+
+		advertiseHTTPAddr := cfg.Server.HTTP.Address()
+		if (cfg.Server.HTTP.Host == "0.0.0.0" || cfg.Server.HTTP.Host == "") && advertiseIP != "" {
+			advertiseHTTPAddr = fmt.Sprintf("%s:%d", advertiseIP, cfg.Server.HTTP.Port)
+		}
+
+		advertiseGRPCAddr := cfg.Server.GRPC.Address()
+		if (cfg.Server.GRPC.Host == "0.0.0.0" || cfg.Server.GRPC.Host == "") && advertiseIP != "" {
+			advertiseGRPCAddr = fmt.Sprintf("%s:%d", advertiseIP, cfg.Server.GRPC.Port)
+		}
+
+		sdClient = sdclient.NewClient(
+			cfg.Server.ManagerAddr,
+			cfg.Server.InstanceID,
+			advertiseGRPCAddr,
+			advertiseHTTPAddr,
+			transferService.GetOnlineAgentCount,
+			logger,
+		)
+	}
+
 	// 12. 创建网络监听器
 	listener, err := net.Listen("tcp", cfg.Server.GRPC.Address())
 	if err != nil {
@@ -101,17 +156,33 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		return nil, err
 	}
 
+	// 13. 构建 HTTP 管理服务器（供 Manager SD 健康探测和命令下发）
+	gin.SetMode(gin.ReleaseMode)
+	httpRouter := gin.New()
+	httpRouter.Use(gin.Recovery())
+	mgmtHandler := httptrans.NewHandler(transferService, logger)
+	mgmtHandler.RegisterRoutes(httpRouter.Group("/"))
+	httpRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	httpServer := &http.Server{
+		Addr:    cfg.Server.HTTP.Address(),
+		Handler: httpRouter,
+	}
+	logger.Info("AC HTTP 管理接口已就绪", zap.String("addr", cfg.Server.HTTP.Address()))
+
 	return &AgentCenterServices{
 		Config:                cfg,
 		Logger:                logger,
 		DB:                    db,
 		GRPCServer:            grpcServer,
+		HTTPServer:            httpServer,
 		TransferService:       transferService,
 		TaskService:           taskService,
 		TaskStatusUpdater:     taskStatusUpdater,
 		PluginUpdateScheduler: pluginUpdateScheduler,
-		AgentUpdateScheduler:   agentUpdateScheduler,
+		AgentUpdateScheduler:  agentUpdateScheduler,
 		AgentRestartScheduler: agentRestartScheduler,
+		KafkaProducer:         kafkaProducer,
+		SDClient:              sdClient,
 		StatusCtx:             ctx,
 		StatusCancel:          cancel,
 		Listener:              listener,
@@ -120,8 +191,22 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 
 // StartBackgroundServices 启动后台服务（任务调度器和状态更新器）
 func (s *AgentCenterServices) StartBackgroundServices() {
-	// 启动任务调度器（定期分发待执行任务）
-	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.Logger)
+	// 向 Manager SD 注册并启动心跳（非阻塞，ctx 取消时自动注销）
+	if s.SDClient != nil {
+		s.SDClient.Start(s.StatusCtx)
+	}
+
+	// 启动 HTTP 管理端口（非阻塞）
+	if s.HTTPServer != nil {
+		go func() {
+			if err := s.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.Logger.Error("AC HTTP 管理服务异常退出", zap.Error(err))
+			}
+		}()
+	}
+
+	// 注意：任务调度（DispatchPendingTasks）已迁移至 Manager 侧（TaskScheduler + ACDispatcher）
+	// AC 只保留超时检查，不再主动轮询分发，防止多 AC 实例重复下发
 
 	// 启动任务超时调度器（检查超时任务）
 	go scheduler.StartTaskTimeoutScheduler(s.DB, s.Logger)
@@ -140,6 +225,9 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 
 	// 启动 Agent 重启调度器（检查重启记录并下发命令）
 	go s.AgentRestartScheduler.Start(s.StatusCtx)
+
+	// 启动心跳超时检测调度器（覆盖网络分区等 gRPC 未正常断开的场景）
+	go scheduler.StartHeartbeatTimeoutScheduler(s.DB, s.Logger)
 }
 
 // Cleanup 清理资源
@@ -160,14 +248,37 @@ func (s *AgentCenterServices) Cleanup() {
 	if s.Logger != nil {
 		s.Logger.Sync()
 	}
+	if s.HTTPServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.HTTPServer.Shutdown(ctx)
+	}
+	if s.KafkaProducer != nil {
+		if err := s.KafkaProducer.Close(); err != nil {
+			if s.Logger != nil {
+				s.Logger.Error("关闭 Kafka 生产者失败", zap.Error(err))
+			}
+		}
+	}
 	if s.DB != nil {
 		if err := database.Close(); err != nil {
 			if s.Logger != nil {
 				s.Logger.Error("关闭数据库连接失败", zap.Error(err))
 			} else {
-				// 如果 logger 已经关闭，使用标准输出
 				os.Stderr.WriteString("关闭数据库连接失败: " + err.Error() + "\n")
 			}
 		}
 	}
+}
+
+// getOutboundIP 探测本机对外可路由 IP（无需实际发包）。
+// 原理：向任意外部地址发 UDP 连接，内核根据路由表选择出口网卡，从 LocalAddr 读取 IP。
+// 适用于 Docker 容器、K8s Pod、VM 等各类部署场景。
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).IP.String()
 }

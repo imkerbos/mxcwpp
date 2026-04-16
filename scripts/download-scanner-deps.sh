@@ -1,0 +1,217 @@
+#!/bin/bash
+# 下载 Scanner 插件依赖的预编译二进制（ClamAV + YARA-X）
+# 按架构下载，缓存到 build/deps/ 避免重复下载
+#
+# 用法: ./scripts/download-scanner-deps.sh [amd64|arm64|all]
+#
+# 环境变量:
+#   CLAMAV_VERSION    ClamAV 版本 (默认: 1.4.2)
+#   YARAX_VERSION     YARA-X 版本 (默认: 0.11.0)
+#   MIRROR_URL        自建镜像地址 (可选，优先使用)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# 版本配置
+CLAMAV_VERSION="${CLAMAV_VERSION:-1.4.2}"
+YARAX_VERSION="${YARAX_VERSION:-0.11.0}"
+
+# 缓存目录
+DEPS_DIR="$PROJECT_ROOT/build/deps"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log() { echo -e "${GREEN}[deps]${NC} $*"; }
+warn() { echo -e "${YELLOW}[deps]${NC} $*"; }
+err() { echo -e "${RED}[deps]${NC} $*" >&2; }
+
+# 下载文件（带缓存检查）
+download() {
+    local url="$1"
+    local dest="$2"
+
+    if [ -f "$dest" ]; then
+        log "已缓存: $(basename "$dest")"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+    log "下载: $url"
+    if ! curl -fSL --progress-bar -o "$dest.tmp" "$url"; then
+        rm -f "$dest.tmp"
+        return 1
+    fi
+    mv "$dest.tmp" "$dest"
+}
+
+# 下载 ClamAV 静态编译版
+# ClamAV 官方提供静态编译的 Linux 二进制包
+download_clamav() {
+    local arch="$1"
+
+    local clamav_arch
+    case "$arch" in
+        amd64) clamav_arch="x86_64" ;;
+        arm64) clamav_arch="aarch64" ;;
+        *) err "不支持的架构: $arch"; return 1 ;;
+    esac
+
+    local dest_dir="$DEPS_DIR/clamav-${CLAMAV_VERSION}-${arch}"
+    local clamscan_bin="$dest_dir/clamscan"
+
+    if [ -f "$clamscan_bin" ]; then
+        log "ClamAV clamscan 已就绪: $arch"
+        return 0
+    fi
+
+    mkdir -p "$dest_dir"
+
+    # 优先使用镜像
+    local tarball="$DEPS_DIR/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+    local url=""
+
+    if [ -n "${MIRROR_URL:-}" ]; then
+        url="${MIRROR_URL}/clamav/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+    else
+        url="https://www.clamav.net/downloads/production/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+    fi
+
+    if ! download "$url" "$tarball"; then
+        err "ClamAV 下载失败: $arch"
+        err "请手动下载并放置到: $tarball"
+        err "或设置 MIRROR_URL 环境变量指向自建镜像"
+        return 1
+    fi
+
+    # 从 tarball 中提取 clamscan 二进制
+    log "提取 clamscan ($arch)..."
+    tar -xzf "$tarball" -C "$dest_dir" --strip-components=1 \
+        --wildcards '*/bin/clamscan' '*/lib/*clamav*' '*/lib/*json*' 2>/dev/null || \
+    tar -xzf "$tarball" -C "$dest_dir" --strip-components=1 2>/dev/null
+
+    # 查找 clamscan
+    local found=""
+    for candidate in "$dest_dir/bin/clamscan" "$dest_dir/clamscan"; do
+        if [ -f "$candidate" ]; then
+            found="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$found" ]; then
+        err "未在 tarball 中找到 clamscan 二进制"
+        return 1
+    fi
+
+    # 移动到目标位置
+    if [ "$found" != "$clamscan_bin" ]; then
+        cp "$found" "$clamscan_bin"
+    fi
+    chmod +x "$clamscan_bin"
+
+    log "ClamAV clamscan 就绪: $arch"
+}
+
+# 下载 YARA-X 预编译二进制
+# YARA-X 官方 GitHub Release 提供预编译包
+download_yarax() {
+    local arch="$1"
+
+    local yarax_arch
+    case "$arch" in
+        amd64) yarax_arch="x86_64" ;;
+        arm64) yarax_arch="aarch64" ;;
+        *) err "不支持的架构: $arch"; return 1 ;;
+    esac
+
+    local dest_dir="$DEPS_DIR/yarax-${YARAX_VERSION}-${arch}"
+    local yr_bin="$dest_dir/yr"
+
+    if [ -f "$yr_bin" ]; then
+        log "YARA-X yr 已就绪: $arch"
+        return 0
+    fi
+
+    mkdir -p "$dest_dir"
+
+    local tarball="$DEPS_DIR/yarax-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+    local url=""
+
+    if [ -n "${MIRROR_URL:-}" ]; then
+        url="${MIRROR_URL}/yarax/yr-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+    else
+        url="https://github.com/VirusTotal/yara-x/releases/download/v${YARAX_VERSION}/yr-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+    fi
+
+    if ! download "$url" "$tarball"; then
+        err "YARA-X 下载失败: $arch"
+        err "请手动下载并放置到: $tarball"
+        err "或设置 MIRROR_URL 环境变量指向自建镜像"
+        return 1
+    fi
+
+    # 提取 yr 二进制
+    log "提取 yr ($arch)..."
+    tar -xzf "$tarball" -C "$dest_dir" 2>/dev/null
+
+    # 查找 yr
+    local found=""
+    for candidate in "$dest_dir/yr" "$dest_dir/bin/yr"; do
+        if [ -f "$candidate" ]; then
+            found="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$found" ]; then
+        err "未在 tarball 中找到 yr 二进制"
+        return 1
+    fi
+
+    if [ "$found" != "$yr_bin" ]; then
+        cp "$found" "$yr_bin"
+    fi
+    chmod +x "$yr_bin"
+
+    log "YARA-X yr 就绪: $arch"
+}
+
+# 主逻辑
+main() {
+    local target_arch="${1:-amd64}"
+
+    local archs
+    if [ "$target_arch" = "all" ]; then
+        archs="amd64 arm64"
+    else
+        archs="$target_arch"
+    fi
+
+    log "=== 下载 Scanner 依赖 ==="
+    log "ClamAV: v${CLAMAV_VERSION}"
+    log "YARA-X: v${YARAX_VERSION}"
+    log "架构: $archs"
+    log "缓存目录: $DEPS_DIR"
+    echo ""
+
+    local failed=0
+    for arch in $archs; do
+        download_clamav "$arch" || { warn "ClamAV ($arch) 下载失败，继续..."; failed=1; }
+        download_yarax "$arch" || { warn "YARA-X ($arch) 下载失败，继续..."; failed=1; }
+    done
+
+    echo ""
+    if [ "$failed" -eq 0 ]; then
+        log "=== 所有依赖下载完成 ==="
+    else
+        warn "=== 部分依赖下载失败，请检查上方日志 ==="
+        exit 1
+    fi
+}
+
+main "$@"

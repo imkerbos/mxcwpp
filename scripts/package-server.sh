@@ -178,7 +178,7 @@ description: |
   Matrix Cloud Security Platform Server
   Includes AgentCenter (gRPC) and Manager (HTTP API) services.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxsec-platform/mxsec-platform
+homepage: https://github.com/imkerbos/mxsec-platform
 license: Apache-2.0
 contents:
   - src: ${TEMP_DIR}/usr/bin/mxsec-agentcenter
@@ -244,7 +244,7 @@ description: |
   Matrix Cloud Security Platform Server
   Includes AgentCenter (gRPC) and Manager (HTTP API) services.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxsec-platform/mxsec-platform
+homepage: https://github.com/imkerbos/mxsec-platform
 license: Apache-2.0
 contents:
   - src: ${TEMP_DIR}/usr/bin/mxsec-agentcenter

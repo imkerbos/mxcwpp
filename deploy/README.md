@@ -1,5 +1,7 @@
 # Matrix Cloud Security Platform - 生产环境部署
 
+当前部署包面向 V2 控制面，核心拓扑为 `UI + Manager + AgentCenter + Consumer + MySQL + Redis + Kafka + ClickHouse`。应用层支持多副本部署，建议在生产环境显式使用 `--scale` 启动 `manager / agentcenter / consumer`；MySQL、Redis、ClickHouse 的主从与容灾需按实际生产标准额外建设。默认 compose 通过 `ui` 暴露 Web/API 入口，`agentcenter` 的 gRPC 入口需要按生产环境额外做端口映射或接入四层负载均衡。
+
 ## 部署流程
 
 ### 1. 开发机：构建镜像
@@ -35,8 +37,16 @@ cd /opt
 tar -xzf mxsec-platform-v1.0.0.tar.gz
 cd mxsec-platform-v1.0.0
 
-# 交互式部署
+# 交互式初始化（首次部署，生成 .env / 证书 / 配置）
 ./deploy.sh
+
+# 生产高可用启动（推荐）：显式指定控制面副本数
+docker compose --env-file .env up -d \
+  --scale manager=2 \
+  --scale agentcenter=2 \
+  --scale consumer=2
+
+# 单机/功能验证：./deploy.sh start（单副本，不直接暴露 AgentCenter gRPC）
 ```
 
 ---
@@ -48,10 +58,12 @@ mxsec-platform-v1.0.0/
 ├── deploy.sh           # 部署脚本
 ├── docker-compose.yml  # 服务编排
 ├── init.sql            # 数据库初始化
+├── init-clickhouse.sql # ClickHouse 初始化
 ├── config/
 │   ├── server.yaml     # Server 配置（模板）
 │   ├── nginx.conf      # Nginx 配置
-│   └── mysql.cnf       # MySQL 配置
+│   ├── mysql.cnf       # MySQL 配置
+│   └── clickhouse.xml  # ClickHouse 配置
 └── certs/              # 证书目录（部署时生成）
 ```
 
@@ -76,8 +88,12 @@ mxsec-platform-v1.0.0/
 
 | 端口 | 服务 |
 |------|------|
-| 80 | Web 控制台 |
-| 6751 | AgentCenter (gRPC) |
+| 80 / 443 | Web 控制台 + API 代理入口 |
+| 6751 | AgentCenter gRPC（默认 compose 不直接暴露，需额外配置） |
+| 13306 | MySQL |
+| 16379 | Redis |
+| 9092 / 9094 / 9095 | Kafka Broker |
+| 8123 / 9000 | ClickHouse |
 
 ---
 
@@ -101,15 +117,33 @@ DB_MAX_IDLE_CONNS=20           # 最大空闲连接数
 DB_MAX_OPEN_CONNS=200          # 最大打开连接数
 DB_CONN_MAX_LIFETIME=1h        # 连接最大生命周期
 
+# ============ Redis ============
+REDIS_ADDR=redis:6379          # Redis 地址
+REDIS_PASSWORD=                # Redis 密码
+
+# ============ Kafka ============
+KAFKA_ENABLED=true
+KAFKA_BROKER_1=kafka-1:9092
+KAFKA_BROKER_2=kafka-2:9092
+KAFKA_BROKER_3=kafka-3:9092
+
+# ============ ClickHouse ============
+CLICKHOUSE_ENABLED=true
+CLICKHOUSE_ADDR=clickhouse:9000
+
+# ============ Prometheus ============
+PROMETHEUS_ENABLED=true
+PROMETHEUS_QUERY_URL=http://prometheus:9090
+
 # ============ 数据目录 ============
 DATA_DIR=/data/mxsec           # 持久化数据根目录
 
 # ============ 网络 ============
 SERVER_IP=10.0.0.1             # 服务器 IP（用于生成插件下载 URL）
-GRPC_PORT=6751                 # AgentCenter gRPC 端口
+GRPC_PORT=6751                 # AgentCenter 容器内 gRPC 端口
 HTTP_PORT=80                   # Web 控制台端口
 HTTPS_PORT=443                 # HTTPS 端口
-MANAGER_PORT=8080              # Manager API 端口
+MANAGER_PORT=8080              # Manager / AgentCenter HTTP 管理口（容器内）
 
 # ============ 日志 ============
 LOG_LEVEL=info                 # 日志级别: debug, info, warn, error
@@ -125,7 +159,12 @@ VERSION=v1.0.0
 TZ=Asia/Shanghai
 ```
 
-修改 `.env` 后运行 `./deploy.sh restart` 即可生效（会自动从模板重新生成 `server.yaml`）。
+修改 `.env` 后的生效方式分两种情况：
+
+- **仅 `server.yaml` 内部配置类改动**（日志级别、业务开关、Kafka/ClickHouse 地址等，会被模板重新渲染进 `server.yaml`）：运行 `./deploy.sh restart` 即可，脚本会先重新渲染 `server.yaml`，再执行 `docker compose restart`。
+- **Compose 级变更**（镜像版本 `VERSION`、端口映射、volume、网络、副本数等）：`restart` 不会重建容器，必须执行 `docker compose --env-file .env up -d`（必要时加 `--scale` / `--force-recreate`）才能生效。
+
+**注意**：`SERVER_HOST` 不是服务端 `.env` 配置项——它是 Agent 构建参数（通过 `make package-agent-all SERVER_HOST=<AC外部入口>` 编译时嵌入），决定 Agent 连接哪个 AC gRPC 地址。`.env` 中服务端侧使用的是 `SERVER_IP`（宿主机 IP）和 `GRPC_PORT`（容器内端口）。多副本部署请始终使用显式 `--scale` 保持副本数一致。
 
 ### server.yaml
 
@@ -150,8 +189,12 @@ Nginx 反向代理配置，修改后执行 `./deploy.sh restart ui` 生效。
 # 1. 上传新版本镜像（或推送到私有仓库）
 # 2. 执行升级命令
 ./deploy.sh upgrade
-# 脚本会自动: 备份数据库 → 更新版本号 → 重新生成配置 → 拉取新镜像 → 重启服务
+# 脚本会自动: 备份数据库 → 更新版本号 → 重新生成配置 → 拉取新镜像 → 按 .env 副本数重建服务
 ```
+
+**副本数一致性**：`upgrade` 会读取 `.env` 里的 `MANAGER_REPLICAS / AGENTCENTER_REPLICAS / CONSUMER_REPLICAS`（默认各 1），显式以 `--scale` 启动，确保升级前后副本数一致，不再依赖当前 Compose 运行状态。生产 HA 部署请确保这三个变量为 2+。
+
+如需在升级过程中同步切换副本数（例如 1→2 扩到 HA），请先在 `.env` 中调整这三个变量，再运行 `./deploy.sh upgrade`。
 
 ---
 
@@ -163,6 +206,7 @@ Nginx 反向代理配置，修改后执行 `./deploy.sh restart ui` 生效。
 $DATA_DIR/logs/
 ├── agentcenter/    # AgentCenter 日志（按天轮转）
 ├── manager/        # Manager API 日志（按天轮转）
+├── consumer/       # Consumer 日志
 ├── nginx/          # Nginx 访问/错误日志
 └── mysql/          # MySQL 慢查询日志
 ```

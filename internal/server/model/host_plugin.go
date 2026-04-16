@@ -13,6 +13,7 @@ const (
 	HostPluginStatusStopped  HostPluginStatus = "stopped"  // 已停止
 	HostPluginStatusError    HostPluginStatus = "error"    // 错误
 	HostPluginStatusUpdating HostPluginStatus = "updating" // 更新中
+	HostPluginStatusDormant  HostPluginStatus = "dormant"  // 依赖不可用，定期探测
 )
 
 // HostPlugin 主机插件状态表

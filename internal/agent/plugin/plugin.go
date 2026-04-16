@@ -2,7 +2,9 @@
 package plugin
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -24,6 +26,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
+	"github.com/imkerbos/mxsec-platform/internal/common/signing"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 	"google.golang.org/protobuf/proto"
 )
@@ -53,8 +56,11 @@ type Plugin struct {
 	startTime time.Time      // 启动时间
 	lastPong  time.Time      // 最后一次收到插件 pong 的时间（用于健康检查）
 	pingCh    chan struct{}   // 通知 sendTask 发送 ping
-	stopCh    chan struct{}   // 停止信号
-	logger    *zap.Logger
+	stopCh       chan struct{}   // 停止信号
+	logger       *zap.Logger
+	restartCount int            // 连续重启计数（稳定运行 10min 后重置）
+	dormantSince time.Time      // 进入休眠的时间
+	exitCode     int            // 最后退出码
 }
 
 // Status 是插件状态
@@ -66,6 +72,14 @@ const (
 	StatusRunning  Status = "running"
 	StatusStopping Status = "stopping"
 	StatusError    Status = "error"
+	StatusDormant  Status = "dormant" // 依赖不可用，定期探测
+)
+
+// 插件退出码约定
+const (
+	ExitCodeNormal         = 0  // 正常退出
+	ExitCodeCrash          = 1  // 崩溃（应重启）
+	ExitCodeDepUnavailable = 10 // 依赖不可用（进入休眠）
 )
 
 // 心跳 DataType 常量
@@ -190,6 +204,12 @@ func (m *Manager) SyncPlugins(ctx context.Context, configs []*grpc.Config) error
 				m.logger.Info("updating plugin", zap.String("name", cfg.Name),
 					zap.String("old_version", plugin.Config.Version),
 					zap.String("new_version", cfg.Version))
+				// 备份旧二进制
+				backupPath, backupErr := m.backupPlugin(cfg.Name)
+				if backupErr != nil {
+					m.logger.Warn("failed to backup plugin before update",
+						zap.String("name", cfg.Name), zap.Error(backupErr))
+				}
 				// 停止旧插件
 				if err := m.stopPlugin(plugin); err != nil {
 					m.logger.Error("failed to stop old plugin", zap.String("name", cfg.Name), zap.Error(err))
@@ -204,14 +224,40 @@ func (m *Manager) SyncPlugins(ctx context.Context, configs []*grpc.Config) error
 				newPlugin, err := m.loadPlugin(ctx, cfg)
 				if err != nil {
 					m.logger.Error("failed to load updated plugin", zap.String("name", cfg.Name), zap.Error(err))
-					// 更新失败，尝试回滚（重新启动旧版本）
-					if oldPlugin, err := m.loadPlugin(ctx, plugin.Config); err == nil {
+					// 更新失败，尝试从备份恢复二进制再回滚
+					if backupPath != "" {
+						if restoreErr := m.restoreFromBackup(cfg.Name); restoreErr != nil {
+							m.logger.Error("failed to restore plugin from backup",
+								zap.String("name", cfg.Name), zap.Error(restoreErr))
+							continue
+						}
+					}
+					if oldPlugin, loadErr := m.loadPlugin(ctx, plugin.Config); loadErr == nil {
 						m.logger.Info("rolled back to previous plugin version", zap.String("name", cfg.Name))
 						m.plugins[cfg.Name] = oldPlugin
+					} else {
+						m.logger.Error("failed to rollback plugin",
+							zap.String("name", cfg.Name), zap.Error(loadErr))
 					}
 					continue
 				}
 				m.plugins[cfg.Name] = newPlugin
+			} else {
+				// 不需要更新，检查是否 dormant 需要唤醒
+				plugin.mu.RLock()
+				isDormant := plugin.status == StatusDormant
+				plugin.mu.RUnlock()
+				if isDormant {
+					m.logger.Info("waking dormant plugin during sync", zap.String("name", cfg.Name))
+					newPlugin, err := m.loadPlugin(ctx, cfg)
+					if err != nil {
+						plugin.mu.Lock()
+						plugin.dormantSince = time.Now()
+						plugin.mu.Unlock()
+					} else {
+						m.plugins[cfg.Name] = newPlugin
+					}
+				}
 			}
 		}
 	}
@@ -298,8 +344,10 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		Setpgid: true, // 创建新的进程组
 	}
 
-	// 设置环境变量（可选）
-	cmd.Env = os.Environ()
+	// 设置环境变量（注入 PLUGIN_DIR 供插件查找内置二进制）
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PLUGIN_DIR=%s", workDir),
+	)
 
 	if err := cmd.Start(); err != nil {
 		logWriter.Close()
@@ -313,6 +361,10 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	// 关闭子进程端不需要的文件描述符
 	tx_r.Close()
 	rx_w.Close()
+
+	// 6.5 应用资源限制（prlimit）
+	limits := parseResourceLimits(cfg.Detail)
+	m.applyResourceLimits(cmd.Process.Pid, limits)
 
 	// 7. 创建插件实例
 	now := time.Now()
@@ -339,6 +391,18 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	// 等待一小段时间，确认插件启动成功
 	time.Sleep(100 * time.Millisecond)
 	if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		// 检查退出码：exit(10) = 依赖不可用，进入休眠而非报错
+		exitCode := cmd.ProcessState.ExitCode()
+		if exitCode == ExitCodeDepUnavailable {
+			plugin.mu.Lock()
+			plugin.status = StatusDormant
+			plugin.dormantSince = time.Now()
+			plugin.exitCode = exitCode
+			plugin.mu.Unlock()
+			plugin.logger.Warn("plugin dependency unavailable, entering dormant mode",
+				zap.String("plugin", cfg.Name), zap.Int("exit_code", exitCode))
+			return plugin, nil // 返回 plugin 以便存入 map，后续 watchPlugins 定期探测
+		}
 		return nil, fmt.Errorf("plugin exited immediately")
 	}
 
@@ -371,6 +435,7 @@ func (m *Manager) validatePluginConfig(cfg *grpc.Config) error {
 }
 
 // downloadPlugin 下载插件并验证 SHA256
+// 支持两种格式：单个二进制文件 或 tar.gz 包（通过文件头 magic bytes 自动识别）
 func (m *Manager) downloadPlugin(cfg *grpc.Config, workDir string) (string, error) {
 	execPath := filepath.Join(workDir, cfg.Name)
 
@@ -429,47 +494,192 @@ func (m *Manager) downloadPlugin(cfg *grpc.Config, workDir string) (string, erro
 			zap.String("url", url),
 			zap.String("version", cfg.Version))
 
-		if err := m.downloadFromURL(url, execPath); err != nil {
+		// 下载到临时文件
+		tmpPath := execPath + ".download"
+		if err := m.downloadFromURL(url, tmpPath); err != nil {
 			lastErr = err
 			m.logger.Warn("failed to download from URL", zap.String("url", url), zap.Error(err))
+			os.Remove(tmpPath)
 			continue
 		}
 
-		// 验证 SHA256
-		if cfg.Sha256 != "" {
-			actualSHA256, err := m.calculateSHA256(execPath)
-			if err != nil {
-				lastErr = fmt.Errorf("failed to calculate SHA256: %w", err)
-				os.Remove(execPath)
-				continue
-			}
-
-			if actualSHA256 != cfg.Sha256 {
-				lastErr = fmt.Errorf("SHA256 mismatch: expected %s, got %s", cfg.Sha256, actualSHA256)
-				m.logger.Error("SHA256 verification failed",
-					zap.String("expected", cfg.Sha256),
-					zap.String("actual", actualSHA256))
-				os.Remove(execPath)
-				continue
-			}
-
-			m.logger.Info("SHA256 verification passed", zap.String("sha256", cfg.Sha256))
+		// 检测文件格式：gzip magic bytes = 0x1f 0x8b
+		isArchive, err := isGzipFile(tmpPath)
+		if err != nil {
+			lastErr = err
+			os.Remove(tmpPath)
+			continue
 		}
 
-		// 设置可执行权限
-		if err := os.Chmod(execPath, 0755); err != nil {
-			lastErr = fmt.Errorf("failed to set executable permission: %w", err)
-			os.Remove(execPath)
-			continue
+		if isArchive {
+			// tar.gz 格式：解压到工作目录
+			m.logger.Info("detected tar.gz archive, extracting",
+				zap.String("name", cfg.Name))
+			os.Remove(tmpPath + ".sha256check")
+
+			// 验证 SHA256（对 tar.gz 整体校验）
+			if cfg.Sha256 != "" {
+				actualSHA256, err := m.calculateSHA256(tmpPath)
+				if err != nil {
+					lastErr = fmt.Errorf("failed to calculate SHA256: %w", err)
+					os.Remove(tmpPath)
+					continue
+				}
+				if actualSHA256 != cfg.Sha256 {
+					lastErr = fmt.Errorf("SHA256 mismatch: expected %s, got %s", cfg.Sha256, actualSHA256)
+					m.logger.Error("SHA256 verification failed",
+						zap.String("expected", cfg.Sha256),
+						zap.String("actual", actualSHA256))
+					os.Remove(tmpPath)
+					continue
+				}
+				m.logger.Info("SHA256 verification passed", zap.String("sha256", cfg.Sha256))
+			}
+
+			// 签名验证
+			if err := m.verifySignature(cfg.Sha256, cfg.Signature); err != nil {
+				lastErr = err
+				m.logger.Error("plugin signature verification failed",
+					zap.String("name", cfg.Name), zap.Error(err))
+				os.Remove(tmpPath)
+				continue
+			}
+
+			// 解压
+			if err := extractTarGz(tmpPath, workDir); err != nil {
+				lastErr = fmt.Errorf("failed to extract tar.gz: %w", err)
+				os.Remove(tmpPath)
+				continue
+			}
+			os.Remove(tmpPath)
+
+			// 设置可执行权限
+			if err := os.Chmod(execPath, 0755); err != nil {
+				lastErr = fmt.Errorf("failed to set executable permission: %w", err)
+				continue
+			}
+		} else {
+			// 单个二进制文件：直接移动
+			// 验证 SHA256
+			if cfg.Sha256 != "" {
+				actualSHA256, err := m.calculateSHA256(tmpPath)
+				if err != nil {
+					lastErr = fmt.Errorf("failed to calculate SHA256: %w", err)
+					os.Remove(tmpPath)
+					continue
+				}
+				if actualSHA256 != cfg.Sha256 {
+					lastErr = fmt.Errorf("SHA256 mismatch: expected %s, got %s", cfg.Sha256, actualSHA256)
+					m.logger.Error("SHA256 verification failed",
+						zap.String("expected", cfg.Sha256),
+						zap.String("actual", actualSHA256))
+					os.Remove(tmpPath)
+					continue
+				}
+				m.logger.Info("SHA256 verification passed", zap.String("sha256", cfg.Sha256))
+			}
+
+			// 签名验证
+			if err := m.verifySignature(cfg.Sha256, cfg.Signature); err != nil {
+				lastErr = err
+				m.logger.Error("plugin signature verification failed",
+					zap.String("name", cfg.Name), zap.Error(err))
+				os.Remove(tmpPath)
+				continue
+			}
+
+			// 移动到最终路径
+			if err := os.Rename(tmpPath, execPath); err != nil {
+				lastErr = fmt.Errorf("failed to rename plugin: %w", err)
+				os.Remove(tmpPath)
+				continue
+			}
+
+			// 设置可执行权限
+			if err := os.Chmod(execPath, 0755); err != nil {
+				lastErr = fmt.Errorf("failed to set executable permission: %w", err)
+				os.Remove(execPath)
+				continue
+			}
 		}
 
 		m.logger.Info("plugin downloaded successfully",
 			zap.String("name", cfg.Name),
-			zap.String("path", execPath))
+			zap.String("path", execPath),
+			zap.Bool("archive", isArchive))
 		return execPath, nil
 	}
 
 	return "", fmt.Errorf("failed to download plugin from all URLs: %w", lastErr)
+}
+
+// isGzipFile 检测文件是否为 gzip 格式（通过 magic bytes 0x1f 0x8b）
+func isGzipFile(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	magic := make([]byte, 2)
+	n, err := f.Read(magic)
+	if err != nil || n < 2 {
+		return false, nil
+	}
+	return magic[0] == 0x1f && magic[1] == 0x8b, nil
+}
+
+// extractTarGz 解压 tar.gz 到目标目录
+func extractTarGz(archivePath, destDir string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read: %w", err)
+		}
+
+		// 安全检查：防止路径穿越
+		target := filepath.Join(destDir, hdr.Name)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+			return fmt.Errorf("tar entry attempts path traversal: %s", hdr.Name)
+		}
+
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, tr); err != nil {
+				out.Close()
+				return err
+			}
+			out.Close()
+		}
+	}
+	return nil
 }
 
 // downloadFromURL 从 URL 下载文件（支持 http://, https://, file:// 协议）
@@ -554,6 +764,76 @@ func (m *Manager) copyFile(srcPath, destPath string) error {
 	return nil
 }
 
+// verifySignature 验证插件签名
+func (m *Manager) verifySignature(sha256Hex, signature string) error {
+	// 签名为空 → 向后兼容，warn + 跳过
+	if signature == "" {
+		m.logger.Warn("plugin signature is empty, skipping verification (backward compatible)")
+		return nil
+	}
+	// 公钥为空 → 未配置签名验证，warn + 跳过
+	if m.cfg.SignPublicKey == "" {
+		m.logger.Warn("sign public key not configured, skipping signature verification")
+		return nil
+	}
+
+	if err := signing.VerifySHA256(m.cfg.SignPublicKey, sha256Hex, signature); err != nil {
+		return fmt.Errorf("plugin signature verification failed: %w", err)
+	}
+	m.logger.Info("plugin signature verification passed", zap.String("sha256", sha256Hex))
+	return nil
+}
+
+// backupPlugin 备份插件二进制文件（保留最近一个备份）
+func (m *Manager) backupPlugin(name string) (string, error) {
+	workDir := filepath.Join(m.cfg.GetWorkDir(), "plugins", name)
+	execPath := filepath.Join(workDir, name)
+
+	// 文件不存在，无需备份
+	if _, err := os.Stat(execPath); os.IsNotExist(err) {
+		return "", nil
+	}
+
+	backupDir := filepath.Join(workDir, "backup")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create backup dir: %w", err)
+	}
+
+	backupPath := filepath.Join(backupDir, name)
+	if err := m.copyFile(execPath, backupPath); err != nil {
+		return "", fmt.Errorf("failed to backup plugin: %w", err)
+	}
+
+	m.logger.Info("plugin binary backed up",
+		zap.String("name", name),
+		zap.String("backup_path", backupPath))
+	return backupPath, nil
+}
+
+// restoreFromBackup 从备份恢复插件二进制
+func (m *Manager) restoreFromBackup(name string) error {
+	workDir := filepath.Join(m.cfg.GetWorkDir(), "plugins", name)
+	backupPath := filepath.Join(workDir, "backup", name)
+	execPath := filepath.Join(workDir, name)
+
+	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+		return fmt.Errorf("backup file not found: %s", backupPath)
+	}
+
+	if err := m.copyFile(backupPath, execPath); err != nil {
+		return fmt.Errorf("failed to restore from backup: %w", err)
+	}
+
+	if err := os.Chmod(execPath, 0755); err != nil {
+		return fmt.Errorf("failed to set executable permission: %w", err)
+	}
+
+	m.logger.Info("plugin restored from backup",
+		zap.String("name", name),
+		zap.String("backup_path", backupPath))
+	return nil
+}
+
 // calculateSHA256 计算文件的 SHA256 校验和
 func (m *Manager) calculateSHA256(filePath string) (string, error) {
 	file, err := os.Open(filePath)
@@ -570,44 +850,144 @@ func (m *Manager) calculateSHA256(filePath string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-// waitProcess 等待插件进程退出
+// waitProcess 等待插件进程退出，根据退出码决定后续行为
 func (m *Manager) waitProcess(plugin *Plugin) {
 	err := plugin.cmd.Wait()
 
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
 	plugin.mu.Lock()
 	wasRunning := plugin.status == StatusRunning
+	plugin.exitCode = exitCode
 	if plugin.status == StatusStopping {
 		plugin.status = StatusStopped
+	} else if exitCode == ExitCodeDepUnavailable {
+		plugin.status = StatusDormant
+		plugin.dormantSince = time.Now()
 	} else {
 		plugin.status = StatusError
 	}
 	plugin.mu.Unlock()
 
 	if err != nil {
-		plugin.logger.Error("plugin process exited with error", zap.Error(err))
+		plugin.logger.Error("plugin process exited with error",
+			zap.Error(err), zap.Int("exit_code", exitCode))
 	} else {
-		plugin.logger.Info("plugin process exited")
+		plugin.logger.Info("plugin process exited", zap.Int("exit_code", exitCode))
 	}
 
-	// 关闭管道
 	plugin.rx.Close()
 	plugin.tx.Close()
-
-	// 关闭日志文件
 	if plugin.logWriter != nil {
 		plugin.logWriter.Close()
 	}
-
-	// 通知停止
 	close(plugin.stopCh)
 
-	// 如果插件是意外退出（不是主动停止），尝试重启
-	if wasRunning && err != nil {
-		plugin.logger.Warn("plugin crashed unexpectedly, will attempt to restart",
-			zap.String("plugin", plugin.Config.Name),
-			zap.Error(err))
-		go m.restartPlugin(plugin)
+	switch {
+	case !wasRunning:
+		// 非 Running 状态退出，不重启
+	case exitCode == ExitCodeDepUnavailable:
+		plugin.logger.Warn("plugin dependency unavailable, entering dormant mode",
+			zap.String("plugin", plugin.Config.Name))
+	case err != nil:
+		plugin.logger.Warn("plugin crashed, will restart with backoff",
+			zap.String("plugin", plugin.Config.Name), zap.Int("exit_code", exitCode))
+		go m.restartPluginWithBackoff(plugin)
+	default:
+		// exit(0) 但非主动停止
+		plugin.logger.Warn("plugin exited unexpectedly (code 0), will restart",
+			zap.String("plugin", plugin.Config.Name))
+		go m.restartPluginWithBackoff(plugin)
 	}
+}
+
+// 退避重启常量
+const (
+	maxRestartCount  = 5
+	baseRestartDelay = 3 * time.Second
+	maxRestartDelay  = 5 * time.Minute
+)
+
+// restartPluginWithBackoff 退避重启崩溃的插件
+func (m *Manager) restartPluginWithBackoff(oldPlugin *Plugin) {
+	oldPlugin.mu.RLock()
+	count := oldPlugin.restartCount
+	oldPlugin.mu.RUnlock()
+
+	if count >= maxRestartCount {
+		oldPlugin.logger.Warn("restart count exceeded, entering dormant mode",
+			zap.String("plugin", oldPlugin.Config.Name),
+			zap.Int("restart_count", count))
+		oldPlugin.mu.Lock()
+		oldPlugin.status = StatusDormant
+		oldPlugin.dormantSince = time.Now()
+		oldPlugin.mu.Unlock()
+		return
+	}
+
+	// 计算退避延迟：baseRestartDelay × 2^count
+	delay := baseRestartDelay
+	for i := 0; i < count; i++ {
+		delay *= 2
+		if delay > maxRestartDelay {
+			delay = maxRestartDelay
+			break
+		}
+	}
+
+	oldPlugin.logger.Info("waiting before restart",
+		zap.String("plugin", oldPlugin.Config.Name),
+		zap.Duration("delay", delay),
+		zap.Int("restart_count", count+1))
+	time.Sleep(delay)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 检查插件是否还在管理列表中
+	currentPlugin, exists := m.plugins[oldPlugin.Config.Name]
+	if !exists || currentPlugin != oldPlugin {
+		m.logger.Info("plugin already removed or replaced, skip restart",
+			zap.String("plugin", oldPlugin.Config.Name))
+		return
+	}
+
+	newPlugin, err := m.loadPlugin(m.ctx, oldPlugin.Config)
+	if err != nil {
+		m.logger.Error("failed to restart plugin with backoff",
+			zap.String("plugin", oldPlugin.Config.Name),
+			zap.Error(err))
+		oldPlugin.mu.Lock()
+		oldPlugin.restartCount = count + 1
+		oldPlugin.mu.Unlock()
+		// 超限则进入 dormant
+		if count+1 >= maxRestartCount {
+			oldPlugin.mu.Lock()
+			oldPlugin.status = StatusDormant
+			oldPlugin.dormantSince = time.Now()
+			oldPlugin.mu.Unlock()
+			m.logger.Warn("restart count exceeded after failure, entering dormant mode",
+				zap.String("plugin", oldPlugin.Config.Name))
+		}
+		return
+	}
+
+	// 继承重启计数
+	newPlugin.mu.Lock()
+	newPlugin.restartCount = count + 1
+	newPlugin.mu.Unlock()
+
+	m.plugins[oldPlugin.Config.Name] = newPlugin
+	m.logger.Info("plugin restarted successfully with backoff",
+		zap.String("plugin", oldPlugin.Config.Name),
+		zap.Int("restart_count", count+1))
 }
 
 // restartPlugin 重启崩溃的插件
@@ -669,8 +1049,31 @@ func (m *Manager) watchPlugins() {
 				lastPong := plugin.lastPong
 				plugin.mu.RUnlock()
 
+				// 休眠插件：定期探测（1 小时间隔）
+				if status == StatusDormant {
+					const dormantRetryInterval = 1 * time.Hour
+					plugin.mu.RLock()
+					ds := plugin.dormantSince
+					plugin.mu.RUnlock()
+					if time.Since(ds) >= dormantRetryInterval {
+						m.logger.Info("attempting to wake dormant plugin", zap.String("plugin", name))
+						go m.wakeDormantPlugin(name)
+					}
+					continue
+				}
+
 				if status != StatusRunning {
 					continue
+				}
+
+				// 运行稳定超过 10 分钟，重置重启计数
+				plugin.mu.RLock()
+				rc := plugin.restartCount
+				plugin.mu.RUnlock()
+				if rc > 0 && time.Since(plugin.startTime) > 10*time.Minute {
+					plugin.mu.Lock()
+					plugin.restartCount = 0
+					plugin.mu.Unlock()
 				}
 
 				// 检查进程是否还存活（signal 0 不会杀进程，只检测是否存在）
@@ -704,6 +1107,36 @@ func (m *Manager) watchPlugins() {
 			m.mu.RUnlock()
 		}
 	}
+}
+
+// wakeDormantPlugin 尝试唤醒休眠的插件
+func (m *Manager) wakeDormantPlugin(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	oldPlugin, exists := m.plugins[name]
+	if !exists {
+		return
+	}
+	oldPlugin.mu.RLock()
+	isDormant := oldPlugin.status == StatusDormant
+	oldPlugin.mu.RUnlock()
+	if !isDormant {
+		return
+	}
+
+	m.logger.Info("waking dormant plugin", zap.String("plugin", name))
+	newPlugin, err := m.loadPlugin(m.ctx, oldPlugin.Config)
+	if err != nil {
+		m.logger.Warn("failed to wake dormant plugin",
+			zap.String("plugin", name), zap.Error(err))
+		oldPlugin.mu.Lock()
+		oldPlugin.dormantSince = time.Now() // 重置计时器
+		oldPlugin.mu.Unlock()
+		return
+	}
+	m.plugins[name] = newPlugin
+	m.logger.Info("dormant plugin woke up", zap.String("plugin", name))
 }
 
 // forceRestartPlugin 强制重启指定插件
@@ -995,6 +1428,7 @@ func (m *Manager) GetPluginStatus(name string) (Status, error) {
 }
 
 // GetAllPluginStats 获取所有插件状态（用于心跳上报）
+// 包含进程资源指标（CPU/RSS/FD），借鉴 Elkeid DataType=1001 的设计
 func (m *Manager) GetAllPluginStats() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1002,15 +1436,57 @@ func (m *Manager) GetAllPluginStats() map[string]interface{} {
 	stats := make(map[string]interface{})
 	for name, plugin := range m.plugins {
 		plugin.mu.RLock()
-		stats[name] = map[string]interface{}{
-			"status":     string(plugin.status),
-			"version":    plugin.Config.Version,
-			"start_time": plugin.startTime.Unix(),
+		stat := map[string]interface{}{
+			"status":        string(plugin.status),
+			"version":       plugin.Config.Version,
+			"start_time":    plugin.startTime.Unix(),
+			"restart_count": plugin.restartCount,
+			"exit_code":     plugin.exitCode,
 		}
+		if plugin.status == StatusDormant {
+			stat["dormant_since"] = plugin.dormantSince.Unix()
+		}
+
+		// 采集运行中插件的进程资源指标
+		if plugin.status == StatusRunning && plugin.cmd != nil && plugin.cmd.Process != nil {
+			pid := plugin.cmd.Process.Pid
+			stat["pid"] = pid
+			if rss, err := getProcessRSS(pid); err == nil {
+				stat["rss"] = rss // 内存占用（字节）
+			}
+			if nfd, err := getProcessFDCount(pid); err == nil {
+				stat["nfd"] = nfd // 文件描述符数量
+			}
+		}
+
 		plugin.mu.RUnlock()
+		stats[name] = stat
 	}
 
 	return stats
+}
+
+// getProcessRSS 从 /proc/[pid]/statm 读取进程 RSS（单位：字节）
+func getProcessRSS(pid int) (uint64, error) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
+	if err != nil {
+		return 0, err
+	}
+	var size, resident uint64
+	_, err = fmt.Sscanf(string(data), "%d %d", &size, &resident)
+	if err != nil {
+		return 0, err
+	}
+	return resident * 4096, nil // 页面大小通常为 4096 字节
+}
+
+// getProcessFDCount 读取进程打开的文件描述符数量
+func getProcessFDCount(pid int) (int, error) {
+	entries, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
+	if err != nil {
+		return 0, err
+	}
+	return len(entries), nil
 }
 
 // retryPendingTasks 重新分发未完成的任务

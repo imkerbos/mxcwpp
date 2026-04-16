@@ -44,6 +44,7 @@ message Command {
   CertificateBundle certificate_bundle = 5;  // 证书包（首次连接时下发）
   AgentUpdate agent_update = 6;          // Agent 更新命令（新版本推送）
   bool agent_restart = 7;               // Agent 重启命令
+  DependencyInstall dependency_install = 8;  // 依赖安装命令
 }
 
 // AgentUpdate 是 Agent 更新命令
@@ -115,4 +116,23 @@ message FileUploadResponse {
 // FileExt 服务：文件上传扩展服务
 service FileExt {
   rpc Upload(stream FileUploadRequest) returns (FileUploadResponse);
+}
+
+// DependencyInstall 是依赖安装命令（Server → Agent）
+message DependencyInstall {
+  string name = 1;         // 依赖名称（如 "tetragon"）
+  string version = 2;      // 指定版本（空则使用默认版本）
+  string action = 3;       // 操作：install / uninstall / status
+  string request_id = 4;   // 请求 ID（用于结果关联）
+  string download_url = 5; // 后台下载基础地址（优先从此下载依赖包）
+}
+
+// DependencyInstallResult 是依赖安装结果（Agent → Server，通过 DataType 上报）
+// DataType = 9100
+message DependencyInstallResult {
+  string request_id = 1;  // 关联请求 ID
+  string name = 2;        // 依赖名称
+  bool success = 3;       // 是否成功
+  string message = 4;     // 结果消息
+  string version = 5;     // 安装后的版本
 }

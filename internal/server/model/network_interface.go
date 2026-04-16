@@ -11,6 +11,10 @@ type NetInterface struct {
 	IPv6Addresses StringArray `gorm:"column:ipv6_addresses;type:text" json:"ipv6_addresses"` // JSON 数组
 	MTU           int         `gorm:"column:mtu;type:int" json:"mtu"`
 	State         string      `gorm:"column:state;type:varchar(20)" json:"state"` // up、down
+	BytesRecv     uint64      `gorm:"column:bytes_recv;type:bigint unsigned;default:0" json:"bytes_recv"`       // 累计接收字节数
+	BytesSent     uint64      `gorm:"column:bytes_sent;type:bigint unsigned;default:0" json:"bytes_sent"`       // 累计发送字节数
+	PacketsDrop   uint64      `gorm:"column:packets_drop;type:bigint unsigned;default:0" json:"packets_drop"`   // 接收丢包数
+	PacketsError  uint64      `gorm:"column:packets_error;type:bigint unsigned;default:0" json:"packets_error"` // 接收错误数
 	CollectedAt   LocalTime   `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 

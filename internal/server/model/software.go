@@ -11,6 +11,7 @@ type Software struct {
 	PackageType  string    `gorm:"column:package_type;type:varchar(50);not null" json:"package_type"` // rpm、deb、pip、npm、jar 等
 	Vendor       string    `gorm:"column:vendor;type:varchar(255)" json:"vendor"`
 	InstallTime  string    `gorm:"column:install_time;type:varchar(50)" json:"install_time"`
+	PURL         string    `gorm:"column:purl;type:varchar(500);index" json:"purl"`
 	CollectedAt  LocalTime `gorm:"column:collected_at;type:timestamp;not null;index" json:"collected_at"`
 }
 

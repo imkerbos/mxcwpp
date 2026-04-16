@@ -262,6 +262,7 @@ func (s *AssetService) handleSoftwareData(hostID, jsonData string) error {
 			PackageType:  asset.PackageType,
 			Vendor:       asset.Vendor,
 			InstallTime:  asset.InstallTime,
+			PURL:         asset.PURL,
 			CollectedAt:  model.ToLocalTime(asset.CollectedAt),
 		}
 
@@ -388,6 +389,10 @@ func (s *AssetService) handleNetInterfaceData(hostID, jsonData string) error {
 			IPv6Addresses: model.StringArray(asset.IPv6Addresses),
 			MTU:           asset.MTU,
 			State:         asset.State,
+			BytesRecv:     asset.BytesRecv,
+			BytesSent:     asset.BytesSent,
+			PacketsDrop:   asset.PacketsDrop,
+			PacketsError:  asset.PacketsError,
 			CollectedAt:   model.ToLocalTime(asset.CollectedAt),
 		}
 

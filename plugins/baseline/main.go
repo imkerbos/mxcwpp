@@ -230,7 +230,8 @@ func handleBaselineTask(ctx context.Context, taskData map[string]interface{}, ch
 			Timestamp: time.Now().UnixNano(),
 			Data: &bridge.Payload{
 				Fields: map[string]string{
-					"task_id":        taskID,   // 添加 task_id
+					"result_id":      taskID + "_" + result.RuleID, // Consumer 幂等写入依赖此字段
+					"task_id":        taskID,
 					"rule_id":        result.RuleID,
 					"policy_id":      result.PolicyID,
 					"status":         string(result.Status),

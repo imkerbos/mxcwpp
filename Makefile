@@ -1,4 +1,4 @@
-.PHONY: proto test clean help build-server package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart
+.PHONY: proto test clean help build-server build-consumer package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart pret-docker-up pret-docker-up-d pret-docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -30,22 +30,34 @@ proto:
 
 dev-docker-up:
 	@echo "Starting Docker development environment..."
-	@cd deploy && docker compose up --build
+	@./scripts/dev-docker-start.sh
 
 dev-docker-up-d:
 	@echo "Starting Docker development environment in background..."
-	@cd deploy && docker compose up -d --build
+	@./scripts/dev-docker-start.sh --detach
 
 dev-docker-down:
 	@echo "Stopping Docker development environment..."
-	@cd deploy && docker compose down
+	@cd deploy && docker compose -f docker-compose.dev.yml down
 
 dev-docker-logs:
-	@cd deploy && docker compose logs -f
+	@cd deploy && docker compose -f docker-compose.dev.yml logs -f
 
 dev-docker-restart:
 	@echo "Restarting services..."
-	@cd deploy && docker compose restart manager ui
+	@cd deploy && docker compose -f docker-compose.dev.yml restart manager ui
+
+pret-docker-up:
+	@echo "Starting Docker pret environment..."
+	@./scripts/pret-docker-start.sh --foreground
+
+pret-docker-up-d:
+	@echo "Starting Docker pret environment in background..."
+	@./scripts/pret-docker-start.sh --detach
+
+pret-docker-down:
+	@echo "Stopping Docker pret environment..."
+	@cd deploy && docker compose -f docker-compose.pret.yml down --remove-orphans
 
 # ============ 构建打包 ============
 
@@ -55,6 +67,12 @@ build-server:
 	@go build -ldflags "-s -w" -o dist/server/agentcenter ./cmd/server/agentcenter
 	@go build -ldflags "-s -w" -o dist/server/manager ./cmd/server/manager
 	@echo "Server binaries built: dist/server/"
+
+build-consumer:
+	@echo "Building consumer..."
+	@mkdir -p dist/server
+	@go build -ldflags "-s -w" -o dist/server/consumer ./cmd/server/consumer
+	@echo "Consumer binary built: dist/server/consumer"
 
 package-agent:
 	@./scripts/build.sh agent --arch=$(GOARCH) --version=$(VERSION) --server=$(SERVER_HOST)
@@ -118,6 +136,9 @@ help:
 	@echo "  make dev-docker-down        - 停止开发环境"
 	@echo "  make dev-docker-logs        - 查看日志"
 	@echo "  make dev-docker-restart     - 重启服务 (manager + ui)"
+	@echo "  make pret-docker-up         - 启动压测环境 (前台, 带日志)"
+	@echo "  make pret-docker-up-d       - 启动压测环境 (后台)"
+	@echo "  make pret-docker-down       - 停止压测环境"
 	@echo ""
 	@echo "构建打包:"
 	@echo "  make build-server           - 构建 Server 二进制 (本地开发)"

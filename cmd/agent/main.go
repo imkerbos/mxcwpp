@@ -35,9 +35,10 @@ var (
 // Server 在部署时生成配置，编译时嵌入到 Agent 二进制
 // 示例: go build -ldflags "-X main.serverHost=10.0.0.1:6751 -X main.buildVersion=1.0.0" ./cmd/agent
 var (
-	serverHost   string // Server 地址（构建时嵌入，必须）
-	buildVersion string // 构建版本（构建时嵌入）
-	buildTime    string // 构建时间（构建时嵌入）
+	serverHost    string // Server 地址（构建时嵌入，必须）
+	buildVersion  string // 构建版本（构建时嵌入）
+	buildTime     string // 构建时间（构建时嵌入）
+	signPublicKey string // Plugin 签名验证公钥（base64，构建时嵌入）
 )
 
 func main() {
@@ -81,6 +82,8 @@ func main() {
 	if buildVersion != "" {
 		cfg.BuildVersion = buildVersion
 	}
+	// 设置构建时嵌入的插件签名公钥
+	cfg.SignPublicKey = signPublicKey
 
 	// 3. 初始化日志（默认配置：按天轮转，保留7天）
 	log, err := logger.Init(logger.LogConfig{

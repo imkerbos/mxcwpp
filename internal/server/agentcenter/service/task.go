@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -749,10 +750,12 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			)
 			continue
 		}
-		// 只保留需要修复的规则
+		// 只保留需要修复且启用的规则
 		var filteredRules []model.Rule
 		for _, rule := range policyRulesMap[policyID] {
-			filteredRules = append(filteredRules, *rule)
+			if rule.Enabled {
+				filteredRules = append(filteredRules, *rule)
+			}
 		}
 		policy.Rules = filteredRules
 		policies = append(policies, policy)
@@ -1114,4 +1117,108 @@ func (s *TaskService) sendFIMToHosts(task *model.FIMTask, hosts []model.Host, po
 	}
 
 	return successCount
+}
+
+// DispatchPendingAntivirusTasks 分发待执行的病毒扫描任务
+func (s *TaskService) DispatchPendingAntivirusTasks(transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	var tasks []model.AntivirusScanTask
+	if err := s.db.Where("status = ?", "pending").Find(&tasks).Error; err != nil {
+		return fmt.Errorf("查询待执行病毒扫描任务失败: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	s.logger.Info("发现待执行病毒扫描任务", zap.Int("count", len(tasks)))
+
+	for i := range tasks {
+		if err := s.dispatchAntivirusTask(&tasks[i], transferService); err != nil {
+			s.logger.Error("分发病毒扫描任务失败",
+				zap.Uint("task_id", tasks[i].ID),
+				zap.Error(err),
+			)
+			continue
+		}
+	}
+
+	return nil
+}
+
+// dispatchAntivirusTask 分发单个病毒扫描任务
+func (s *TaskService) dispatchAntivirusTask(task *model.AntivirusScanTask, transferService interface {
+	SendCommand(agentID string, cmd *grpcProto.Command) error
+}) error {
+	// 查询目标主机（仅在线主机）
+	var hosts []model.Host
+	if len(task.HostIDs) > 0 {
+		if err := s.db.Where("host_id IN ? AND status = ?", []string(task.HostIDs), model.HostStatusOnline).
+			Find(&hosts).Error; err != nil {
+			return fmt.Errorf("查询目标主机失败: %w", err)
+		}
+	} else {
+		// 未指定主机时，扫描所有在线 VM 主机
+		if err := s.db.Where("status = ? AND (runtime_type = ? OR runtime_type = '' OR runtime_type IS NULL)",
+			model.HostStatusOnline, model.RuntimeTypeVM).
+			Find(&hosts).Error; err != nil {
+			return fmt.Errorf("查询在线主机失败: %w", err)
+		}
+	}
+
+	if len(hosts) == 0 {
+		s.logger.Warn("没有匹配的在线主机，任务保持 pending",
+			zap.Uint("task_id", task.ID))
+		return nil
+	}
+
+	// 构建扫描任务数据
+	taskData := map[string]interface{}{
+		"task_id":   fmt.Sprintf("%d", task.ID),
+		"scan_type": task.ScanType,
+		"paths":     []string(task.ScanPaths),
+	}
+	taskJSON, _ := json.Marshal(taskData)
+
+	now := model.LocalTime(time.Now())
+	successCount := 0
+
+	for _, host := range hosts {
+		grpcTask := &grpcProto.Task{
+			DataType:   7000, // Scanner 扫描任务
+			ObjectName: "scanner",
+			Data:       string(taskJSON),
+			Token:      fmt.Sprintf("%d", task.ID),
+		}
+		cmd := &grpcProto.Command{
+			Tasks: []*grpcProto.Task{grpcTask},
+		}
+
+		if err := transferService.SendCommand(host.HostID, cmd); err != nil {
+			s.logger.Error("下发病毒扫描任务失败",
+				zap.Uint("task_id", task.ID),
+				zap.String("host_id", host.HostID),
+				zap.Error(err),
+			)
+			continue
+		}
+		successCount++
+	}
+
+	if successCount > 0 {
+		s.db.Model(task).Updates(map[string]interface{}{
+			"status":      "running",
+			"started_at":  &now,
+			"total_hosts": successCount,
+		})
+	}
+
+	s.logger.Info("病毒扫描任务已下发",
+		zap.Uint("task_id", task.ID),
+		zap.Int("dispatched", successCount),
+		zap.Int("total_hosts", len(hosts)),
+	)
+
+	return nil
 }

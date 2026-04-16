@@ -1,6 +1,6 @@
 [Unit]
 Description=Matrix Cloud Security Platform AgentCenter (gRPC Server)
-Documentation=https://github.com/mxsec-platform/mxsec-platform
+Documentation=https://github.com/imkerbos/mxsec-platform
 After=network.target mysql.service
 Wants=mysql.service
 

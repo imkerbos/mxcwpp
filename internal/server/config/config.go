@@ -24,6 +24,14 @@ type Config struct {
 	Agent      AgentConfig      `mapstructure:"agent"`
 	Metrics    MetricsConfig    `mapstructure:"metrics"`
 	Plugins    PluginsConfig    `mapstructure:"plugins"`
+	LLM        LLMConfig        `mapstructure:"llm"`
+}
+
+// LLMConfig LLM 服务配置
+type LLMConfig struct {
+	APIURL string `mapstructure:"api_url"` // LLM API 地址
+	APIKey string `mapstructure:"api_key"` // API Key
+	Model  string `mapstructure:"model"`   // 模型名称
 }
 
 // PluginsConfig 是插件配置
@@ -32,15 +40,19 @@ type PluginsConfig struct {
 	Dir string `mapstructure:"dir"`
 	// 插件下载基础 URL（Agent 用于下载插件的 URL 前缀）
 	// 例如: http://192.168.8.140:8080/api/v1/plugins/download
-	// 如果为空，则使用 file:// 协议（仅限开发环境）
+	// 如果为空，则下发相对 HTTP 路径，由 Agent 结合当前管理面地址访问
 	BaseURL string `mapstructure:"base_url"`
+	// Ed25519 签名私钥文件路径（用于对插件 SHA256 签名）
+	SignPrivateKey string `mapstructure:"sign_private_key"`
 }
 
 // ServerConfig 是服务器配置
 type ServerConfig struct {
-	GRPC      GRPCConfig `mapstructure:"grpc"`
-	HTTP      HTTPConfig `mapstructure:"http"`
-	JWTSecret string     `mapstructure:"jwt_secret"` // JWT 密钥，用于生成和验证 Token
+	GRPC        GRPCConfig `mapstructure:"grpc"`
+	HTTP        HTTPConfig `mapstructure:"http"`
+	JWTSecret   string     `mapstructure:"jwt_secret"`   // JWT 密钥，用于生成和验证 Token
+	ManagerAddr string     `mapstructure:"manager_addr"` // AC 向 Manager SD 注册的 Manager HTTP 地址（如 http://manager:8080）
+	InstanceID  string     `mapstructure:"instance_id"`  // AC 实例唯一 ID（多实例部署时区分，留空则用 hostname）
 }
 
 // GRPCConfig 是 gRPC 服务配置
@@ -123,11 +135,16 @@ func (c PostgresConfig) DSN() string {
 
 // RedisConfig 是 Redis 配置
 type RedisConfig struct {
-	// 单节点模式
+	// 单节点模式（默认）
 	Addr     string `mapstructure:"addr"`
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
-	// 集群模式（生产）
+	// Sentinel 模式（生产 HA 推荐）
+	// sentinel: true 时启用；MasterName 默认 "mymaster"
+	Sentinel      bool     `mapstructure:"sentinel"`
+	SentinelAddrs []string `mapstructure:"sentinel_addrs"` // 如 ["redis-sentinel-1:26379","redis-sentinel-2:26379","redis-sentinel-3:26379"]
+	MasterName    string   `mapstructure:"master_name"`    // 默认 "mymaster"
+	// 集群模式（预留，当前未实现）
 	Cluster      bool     `mapstructure:"cluster"`
 	ClusterAddrs []string `mapstructure:"cluster_addrs"`
 	// 连接池
@@ -150,7 +167,7 @@ type KafkaConfig struct {
 
 // KafkaProducerConfig 是 Kafka 生产者配置
 type KafkaProducerConfig struct {
-	RequiredAcks    int           `mapstructure:"required_acks"`    // 0=NoResponse,1=WaitForLocal,-1=WaitForAll
+	RequiredAcks    int           `mapstructure:"required_acks"`     // 0=NoResponse,1=WaitForLocal,-1=WaitForAll
 	MaxMessageBytes int           `mapstructure:"max_message_bytes"` // 默认 1MB
 	FlushMessages   int           `mapstructure:"flush_messages"`
 	FlushFrequency  time.Duration `mapstructure:"flush_frequency"`
@@ -393,7 +410,7 @@ func setDefaults(cfg *Config, logFileSet bool) {
 		cfg.Kafka.Brokers = []string{"kafka:9092"}
 	}
 	if cfg.Kafka.Producer.RequiredAcks == 0 {
-		cfg.Kafka.Producer.RequiredAcks = 1
+		cfg.Kafka.Producer.RequiredAcks = -1
 	}
 	if cfg.Kafka.Producer.MaxMessageBytes == 0 {
 		cfg.Kafka.Producer.MaxMessageBytes = 1 * 1024 * 1024
@@ -447,7 +464,7 @@ func setDefaults(cfg *Config, logFileSet bool) {
 	if cfg.Plugins.Dir == "" {
 		cfg.Plugins.Dir = "/opt/mxsec-platform/plugins"
 	}
-	// BaseURL 为空时，表示使用 file:// 协议（开发环境）
+	// BaseURL 为空时，由 Manager 下发相对 HTTP 下载路径。
 }
 
 // Validate 验证配置
@@ -471,8 +488,8 @@ func (c *Config) Validate() error {
 
 	// 验证 Prometheus 配置
 	if c.Metrics.Prometheus.Enabled {
-		if c.Metrics.Prometheus.RemoteWriteURL == "" && c.Metrics.Prometheus.PushgatewayURL == "" {
-			return fmt.Errorf("Prometheus 已启用但未配置 URL，请配置 remote_write_url 或 pushgateway_url")
+		if c.Metrics.Prometheus.QueryURL == "" && c.Metrics.Prometheus.RemoteWriteURL == "" && c.Metrics.Prometheus.PushgatewayURL == "" {
+			return fmt.Errorf("Prometheus 已启用但未配置 URL，请配置 query_url 或 remote_write_url")
 		}
 	}
 

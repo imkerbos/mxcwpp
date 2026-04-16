@@ -1,6 +1,6 @@
 [Unit]
 Description=Matrix Cloud Security Platform Agent
-Documentation=https://github.com/mxsec-platform/mxsec-platform
+Documentation=https://github.com/imkerbos/mxsec-platform
 After=network.target
 
 [Service]
@@ -17,7 +17,7 @@ SyslogIdentifier=mxsec-agent
 # 资源限制
 LimitNOFILE=65536
 LimitNPROC=4096
-MemoryLimit=1G
+MemoryMax=1G
 CPUQuota=100%
 
 # 环境变量

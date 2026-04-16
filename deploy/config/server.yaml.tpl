@@ -5,11 +5,13 @@
 server:
   grpc:
     host: "0.0.0.0"
-    port: 6751
+    port: __GRPC_PORT__
   http:
     host: "0.0.0.0"
-    port: 8080
+    port: __SERVER_HTTP_PORT__
   jwt_secret: "__JWT_SECRET__"
+  manager_addr: "__MANAGER_ADDR__"
+  instance_id: "__INSTANCE_ID__"
 
 database:
   type: "mysql"
@@ -27,16 +29,29 @@ database:
     conn_max_lifetime: "__DB_CONN_MAX_LIFETIME__"
 
 redis:
+  # 单节点模式（sentinel: false 时生效）
   addr: "__REDIS_ADDR__"
   password: "__REDIS_PASSWORD__"
   db: __REDIS_DB__
   pool_size: __REDIS_POOL_SIZE__
+  # Sentinel 模式（生产 HA）：将 sentinel 设为 true 并填写 sentinel_addrs
+  sentinel: __REDIS_SENTINEL__
+  master_name: "__REDIS_MASTER_NAME__"
+  sentinel_addrs:
+    - "__REDIS_SENTINEL_ADDR_1__"
+    - "__REDIS_SENTINEL_ADDR_2__"
+    - "__REDIS_SENTINEL_ADDR_3__"
 
 kafka:
   enabled: __KAFKA_ENABLED__
+  # KRaft 模式：dev 默认单 broker，pret/生产默认 3 broker
   brokers:
-    - "__KAFKA_BROKERS__"
+    - "__KAFKA_BROKER_1__"
+    - "__KAFKA_BROKER_2__"
+    - "__KAFKA_BROKER_3__"
   topic_prefix: "__KAFKA_TOPIC_PREFIX__"
+  producer:
+    required_acks: -1
 
 clickhouse:
   enabled: __CLICKHOUSE_ENABLED__
@@ -45,6 +60,15 @@ clickhouse:
   database: "__CLICKHOUSE_DATABASE__"
   username: "__CLICKHOUSE_USER__"
   password: "__CLICKHOUSE_PASSWORD__"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+
+metrics:
+  prometheus:
+    enabled: __PROMETHEUS_ENABLED__
+    query_url: "__PROMETHEUS_QUERY_URL__"
+    timeout: "__PROMETHEUS_TIMEOUT__"
 
 mtls:
   ca_cert: "/etc/mxsec-platform/certs/ca.crt"

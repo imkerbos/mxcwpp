@@ -116,12 +116,15 @@ func (m *Manager) sendHeartbeat() {
 	}
 
 	// 添加资源指标到心跳记录
+	// 字段名与 ClickHouse writer 保持一致：cpu_usage/mem_usage/disk_usage/net_in/net_out/load_*/disk_*_bytes
 	if resourceMetrics != nil {
-		record.Data.Fields["cpu_usage_detailed"] = fmt.Sprintf("%.2f", resourceMetrics.CPUUsage)
-		record.Data.Fields["mem_usage_detailed"] = fmt.Sprintf("%.2f", resourceMetrics.MemUsage)
+		record.Data.Fields["cpu_usage"] = fmt.Sprintf("%.2f", resourceMetrics.CPUUsage)
+		record.Data.Fields["mem_usage"] = fmt.Sprintf("%.2f", resourceMetrics.MemUsage)
 		record.Data.Fields["disk_usage"] = fmt.Sprintf("%.2f", resourceMetrics.DiskUsage)
-		record.Data.Fields["net_bytes_sent"] = fmt.Sprintf("%d", resourceMetrics.NetBytesSent)
-		record.Data.Fields["net_bytes_recv"] = fmt.Sprintf("%d", resourceMetrics.NetBytesRecv)
+		record.Data.Fields["disk_read_bytes"] = fmt.Sprintf("%d", resourceMetrics.DiskReadBytes)
+		record.Data.Fields["disk_write_bytes"] = fmt.Sprintf("%d", resourceMetrics.DiskWriteBytes)
+		record.Data.Fields["net_out"] = fmt.Sprintf("%d", resourceMetrics.NetBytesSent)
+		record.Data.Fields["net_in"] = fmt.Sprintf("%d", resourceMetrics.NetBytesRecv)
 	}
 
 	// 采集硬件和系统信息
@@ -144,6 +147,12 @@ func (m *Manager) sendHeartbeat() {
 		}
 		if hardwareInfo.SystemLoad != "" {
 			record.Data.Fields["system_load"] = hardwareInfo.SystemLoad
+			// 将 "1.0, 5.0, 15.0" 解析为独立字段，供 ClickHouse writer 使用
+			if loads := strings.Split(hardwareInfo.SystemLoad, ", "); len(loads) >= 3 {
+				record.Data.Fields["load_1"] = loads[0]
+				record.Data.Fields["load_5"] = loads[1]
+				record.Data.Fields["load_15"] = loads[2]
+			}
 		}
 	}
 

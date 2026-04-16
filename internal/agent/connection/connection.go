@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -22,9 +25,11 @@ import (
 
 // Manager 是连接管理器
 type Manager struct {
-	cfg    *config.Config
-	logger *zap.Logger
-	conn   *grpc.ClientConn
+	cfg              *config.Config
+	logger           *zap.Logger
+	conn             *grpc.ClientConn
+	mtlsFailCount    int  // mTLS 连续失败次数
+	insecureFallback bool // 是否已降级到不安全模式
 }
 
 // NewManager 创建新的连接管理器
@@ -61,21 +66,35 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 	m.logger.Info("server address discovered", zap.String("address", serverAddr))
 
 	// 加载 TLS 配置（包含证书验证和 ServerName）
-	m.logger.Info("loading TLS configuration",
-		zap.String("ca_file", m.cfg.Local.TLS.CAFile),
-		zap.String("cert_file", m.cfg.Local.TLS.CertFile),
-		zap.String("key_file", m.cfg.Local.TLS.KeyFile),
-		zap.String("server_addr", serverAddr),
-	)
-	tlsConfig, err := m.loadTLSConfig(serverAddr)
-	if err != nil {
-		m.logger.Error("failed to load TLS config", zap.Error(err))
-		return nil, fmt.Errorf("failed to load TLS config: %w", err)
+	var tlsConfig *tls.Config
+
+	if m.insecureFallback {
+		// 已降级到不安全模式（之前 mTLS 多次失败）
+		m.logger.Warn("使用不安全模式连接（mTLS 多次失败后降级）",
+			zap.Int("previous_failures", m.mtlsFailCount),
+			zap.String("hint", "连接建立后Server会下发新证书，后续连接将恢复mTLS"),
+		)
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+	} else {
+		m.logger.Info("loading TLS configuration",
+			zap.String("ca_file", m.cfg.Local.TLS.CAFile),
+			zap.String("cert_file", m.cfg.Local.TLS.CertFile),
+			zap.String("key_file", m.cfg.Local.TLS.KeyFile),
+			zap.String("server_addr", serverAddr),
+		)
+		var err error
+		tlsConfig, err = m.loadTLSConfig(serverAddr)
+		if err != nil {
+			m.logger.Error("failed to load TLS config", zap.Error(err))
+			return nil, fmt.Errorf("failed to load TLS config: %w", err)
+		}
 	}
 
 	// 检查是否为首次连接（使用不安全模式）
 	if tlsConfig.InsecureSkipVerify {
-		m.logger.Warn("使用不安全模式进行首次连接（证书文件不存在）",
+		m.logger.Warn("使用不安全模式进行连接（证书文件不存在或mTLS降级）",
 			zap.String("hint", "连接建立后Server会下发证书，后续连接将使用正式证书"),
 		)
 	} else {
@@ -107,6 +126,21 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		}),
 	)
 	if err != nil {
+		// 如果使用 mTLS 连接失败，增加失败计数
+		if !tlsConfig.InsecureSkipVerify {
+			m.mtlsFailCount++
+			m.logger.Warn("mTLS connection failed",
+				zap.Int("fail_count", m.mtlsFailCount),
+				zap.Error(err),
+			)
+			// 连续失败 3 次后降级到不安全模式，让 Server 重新下发证书
+			if m.mtlsFailCount >= 3 {
+				m.logger.Warn("mTLS 连续失败 3 次，降级到不安全模式以获取新证书",
+					zap.String("hint", "可能是证书已更新，需要Server重新下发"),
+				)
+				m.insecureFallback = true
+			}
+		}
 		if connectCtx.Err() == context.DeadlineExceeded {
 			m.logger.Error("connection timeout",
 				zap.String("server", serverAddr),
@@ -121,6 +155,13 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		)
 		return nil, fmt.Errorf("failed to dial server: %w", err)
 	}
+
+	// 连接成功，重置失败计数和降级状态
+	if m.insecureFallback {
+		m.logger.Info("不安全模式连接成功，等待Server下发新证书后恢复mTLS")
+	}
+	m.mtlsFailCount = 0
+	m.insecureFallback = false
 
 	// 等待连接就绪（最多等待 5 秒）
 	readyCtx, readyCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -310,27 +351,100 @@ func (m *Manager) loadTLSConfig(serverAddr string) (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// discoverServer 通过服务发现获取 Server 地址
-// 目前简化实现：直接使用配置中的地址
-// TODO: 实现完整的服务发现逻辑（HTTP 请求 ServiceDiscovery）
+// acInstanceInfo 是 Manager SD 返回的 AC 实例信息（仅解析需要的字段）
+type acInstanceInfo struct {
+	GRPCAddr  string `json:"grpc_addr"`
+	ConnCount int64  `json:"conn_count"`
+	Healthy   bool   `json:"healthy"`
+}
+
+// discoverServer 通过服务发现获取 Server 地址，优先级：
+// 1. Manager SD HTTP 接口（动态发现，power-of-two-choices 负载均衡）
+// 2. 静态地址列表 Addresses（轮转）
+// 3. PrivateHost / PublicHost（向后兼容）
 func (m *Manager) discoverServer(ctx context.Context) (string, error) {
-	// 简化实现：直接返回配置的地址
-	// 后续可以实现 HTTP 请求 ServiceDiscovery 获取可用 Server 列表
-	m.logger.Debug("discovering server address",
-		zap.String("private_host", m.cfg.Local.Server.AgentCenter.PrivateHost),
-		zap.String("public_host", m.cfg.Local.Server.AgentCenter.PublicHost),
-	)
+	// 1. 尝试 Manager SD 服务发现
+	if url := m.cfg.Local.Server.ServiceDiscovery.URL; url != "" {
+		if addr, err := m.fetchFromSD(ctx, url); err == nil {
+			m.logger.Info("通过 Manager SD 发现 AC 地址", zap.String("address", addr))
+			return addr, nil
+		} else {
+			m.logger.Warn("Manager SD 发现失败，降级到静态地址", zap.Error(err))
+		}
+	}
+
+	// 2. 静态地址列表轮转
+	if addrs := m.cfg.Local.Server.AgentCenter.Addresses; len(addrs) > 0 {
+		addr := addrs[rand.Intn(len(addrs))]
+		m.logger.Info("使用静态地址列表", zap.String("address", addr))
+		return addr, nil
+	}
+
+	// 3. 兼容旧配置
 	addr := m.cfg.Local.Server.AgentCenter.PrivateHost
 	if addr == "" {
 		addr = m.cfg.Local.Server.AgentCenter.PublicHost
 	}
 	if addr == "" {
-		m.logger.Error("no server address configured")
 		return "", fmt.Errorf("no server address configured")
 	}
-
-	m.logger.Info("server address discovered", zap.String("address", addr))
 	return addr, nil
+}
+
+// fetchFromSD 调用 Manager SD 接口获取健康 AC 列表，用 power-of-two-choices 选择
+func (m *Manager) fetchFromSD(ctx context.Context, sdURL string) (string, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, sdURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("SD 返回 %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			Instances []acInstanceInfo `json:"instances"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("解析 SD 响应失败: %w", err)
+	}
+
+	// 过滤健康实例
+	healthy := make([]acInstanceInfo, 0, len(result.Data.Instances))
+	for _, inst := range result.Data.Instances {
+		if inst.Healthy && inst.GRPCAddr != "" {
+			healthy = append(healthy, inst)
+		}
+	}
+	if len(healthy) == 0 {
+		return "", fmt.Errorf("SD 返回 0 个健康实例")
+	}
+
+	return selectByPowerOfTwo(healthy), nil
+}
+
+// selectByPowerOfTwo 随机选两个候选，返回连接数更少的那个（防止新 AC 上线时雪崩）
+func selectByPowerOfTwo(instances []acInstanceInfo) string {
+	if len(instances) == 1 {
+		return instances[0].GRPCAddr
+	}
+	i := rand.Intn(len(instances))
+	j := rand.Intn(len(instances))
+	if instances[j].ConnCount < instances[i].ConnCount {
+		return instances[j].GRPCAddr
+	}
+	return instances[i].GRPCAddr
 }
 
 // extractHostname 从服务器地址中提取主机名（去掉端口）

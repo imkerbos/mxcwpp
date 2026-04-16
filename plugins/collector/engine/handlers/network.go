@@ -2,9 +2,13 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,9 +21,45 @@ type NetInterfaceHandler struct {
 	Logger *zap.Logger
 }
 
-// Collect 采集网络接口信息
+// readProcNetDev 读取 /proc/net/dev，返回 interface_name -> [bytesRecv, packetsErr, packetsDrop, bytesSent]
+func readProcNetDev() map[string][4]uint64 {
+	stats := make(map[string][4]uint64)
+	f, err := os.Open("/proc/net/dev")
+	if err != nil {
+		return stats
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// 跳过前两行标题
+	scanner.Scan()
+	scanner.Scan()
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, ":")
+		if idx < 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[:idx])
+		fields := strings.Fields(line[idx+1:])
+		if len(fields) < 9 {
+			continue
+		}
+		bytesRecv, _ := strconv.ParseUint(fields[0], 10, 64)
+		packetsErr, _ := strconv.ParseUint(fields[2], 10, 64)
+		packetsDrop, _ := strconv.ParseUint(fields[3], 10, 64)
+		bytesSent, _ := strconv.ParseUint(fields[8], 10, 64)
+		stats[name] = [4]uint64{bytesRecv, packetsErr, packetsDrop, bytesSent}
+	}
+	return stats
+}
+
+// Collect 采集网络接口信息（含流量统计）
 func (h *NetInterfaceHandler) Collect(ctx context.Context) ([]interface{}, error) {
 	var interfaces []interface{}
+
+	// 一次性读取 /proc/net/dev 流量统计
+	netDevStats := readProcNetDev()
 
 	// 获取所有网络接口
 	ifaces, err := net.Interfaces()
@@ -65,9 +105,6 @@ func (h *NetInterfaceHandler) Collect(ctx context.Context) ([]interface{}, error
 			}
 		}
 
-		// 获取 MTU
-		mtu := iface.MTU
-
 		// 获取状态
 		state := "down"
 		if iface.Flags&net.FlagUp != 0 {
@@ -82,8 +119,16 @@ func (h *NetInterfaceHandler) Collect(ctx context.Context) ([]interface{}, error
 			MACAddress:    iface.HardwareAddr.String(),
 			IPv4Addresses: ipv4Addrs,
 			IPv6Addresses: ipv6Addrs,
-			MTU:           mtu,
+			MTU:           iface.MTU,
 			State:         state,
+		}
+
+		// 补充 /proc/net/dev 流量统计
+		if s, ok := netDevStats[iface.Name]; ok {
+			netInterface.BytesRecv = s[0]
+			netInterface.PacketsError = s[1]
+			netInterface.PacketsDrop = s[2]
+			netInterface.BytesSent = s[3]
 		}
 
 		interfaces = append(interfaces, netInterface)

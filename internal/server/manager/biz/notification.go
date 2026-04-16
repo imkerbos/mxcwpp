@@ -1341,3 +1341,641 @@ func (s *NotificationService) buildWebhookAgentOnline(onlineData *AgentOnlineDat
 		"offline_since": onlineData.OfflineSince.Format(time.RFC3339),
 	}
 }
+
+// ============================================================
+// 通用辅助方法
+// ============================================================
+
+// matchScopeByHostID 根据主机ID匹配主机范围（通用版，不依赖 AlertData）
+func (s *NotificationService) matchScopeByHostID(notification *model.Notification, hostID string) bool {
+	switch notification.Scope {
+	case model.NotificationScopeGlobal:
+		return true
+	case model.NotificationScopeHostTags:
+		return true // TODO: 标签匹配
+	case model.NotificationScopeBusinessLine:
+		var scopeValue model.ScopeValueData
+		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
+			return false
+		}
+		var host model.Host
+		if err := s.db.First(&host, "host_id = ?", hostID).Error; err != nil {
+			return false
+		}
+		for _, bl := range scopeValue.BusinessLines {
+			if host.BusinessLine == bl {
+				return true
+			}
+		}
+		return false
+	case model.NotificationScopeSpecified:
+		var scopeValue model.ScopeValueData
+		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
+			return false
+		}
+		for _, hid := range scopeValue.HostIDs {
+			if hid == hostID {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// postWebhook 发送 Webhook POST 请求（通用）
+func (s *NotificationService) postWebhook(webhookURL string, message map[string]interface{}) error {
+	body, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("序列化消息失败: %v", err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(webhookURL, "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("发送请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyStr := string(bodyBytes)
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..."
+		}
+		return fmt.Errorf("服务器返回状态码: %d，响应: %s", resp.StatusCode, bodyStr)
+	}
+	return nil
+}
+
+// buildLarkCardMessage 构建 Lark 卡片消息框架（通用）
+func (s *NotificationService) buildLarkCardMessage(
+	notification *model.Notification,
+	title, template string,
+	elements []map[string]interface{},
+) map[string]interface{} {
+	card := map[string]interface{}{
+		"config": map[string]interface{}{"wide_screen_mode": true},
+		"header": map[string]interface{}{
+			"title":    map[string]interface{}{"tag": "plain_text", "content": title},
+			"template": template,
+		},
+		"elements": elements,
+	}
+	message := map[string]interface{}{"msg_type": "interactive", "card": card}
+	if notification.Config.Secret != "" {
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		sign, err := s.generateLarkSign(notification.Config.Secret, timestamp)
+		if err == nil {
+			message["timestamp"] = timestamp
+			message["sign"] = sign
+		}
+	}
+	return message
+}
+
+// larkActionButton 构建 Lark 跳转按钮元素
+func larkActionButton(text, url string) map[string]interface{} {
+	return map[string]interface{}{
+		"tag": "action",
+		"actions": []map[string]interface{}{
+			{
+				"tag":  "button",
+				"text": map[string]interface{}{"tag": "plain_text", "content": text},
+				"type": "primary",
+				"multi_url": map[string]interface{}{
+					"url": url, "android_url": url, "ios_url": url, "pc_url": url,
+				},
+			},
+		},
+	}
+}
+
+// larkTextDiv 构建 Lark lark_md 文本 div
+func larkTextDiv(content string) map[string]interface{} {
+	return map[string]interface{}{
+		"tag":  "div",
+		"text": map[string]interface{}{"tag": "lark_md", "content": content},
+	}
+}
+
+// larkHR 分割线
+func larkHR() map[string]interface{} {
+	return map[string]interface{}{"tag": "hr"}
+}
+
+// ============================================================
+// 漏洞告警通知
+// ============================================================
+
+// VulnerabilityAlertData 漏洞告警数据
+type VulnerabilityAlertData struct {
+	HostID         string
+	Hostname       string
+	IP             string
+	CveID          string
+	Severity       string
+	CvssScore      float64
+	Component      string
+	CurrentVersion string
+	FixedVersion   string
+	Description    string
+	AffectedHosts  int
+	FrontendURL    string
+}
+
+// SendVulnerabilityAlertNotification 发送漏洞告警通知
+func (s *NotificationService) SendVulnerabilityAlertNotification(data *VulnerabilityAlertData) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryVulnerabilityAlert).Find(&notifications).Error; err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
+			continue
+		}
+		if !s.matchScopeByHostID(&n, data.HostID) {
+			continue
+		}
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkVulnerabilityCard(&n, data)
+		} else {
+			msg = s.buildWebhookVulnerability(data)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送漏洞告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *NotificationService) buildLarkVulnerabilityCard(notification *model.Notification, data *VulnerabilityAlertData) map[string]interface{} {
+	desc := fmt.Sprintf(
+		"矩阵云安全平台检测到漏洞风险，请及时处理。\n\n"+
+			"**漏洞编号：** %s\n"+
+			"**CVSS 评分：** %.1f\n"+
+			"**主机名称：** %s\n"+
+			"**主机 IP：** %s\n"+
+			"**受影响组件：** %s\n"+
+			"**当前版本：** %s\n"+
+			"**修复版本：** %s\n"+
+			"**影响主机数：** %d",
+		data.CveID, data.CvssScore, data.Hostname, data.IP,
+		data.Component, data.CurrentVersion, data.FixedVersion, data.AffectedHosts,
+	)
+	elements := []map[string]interface{}{larkTextDiv(desc)}
+	if data.Description != "" {
+		elements = append(elements, larkHR(), larkTextDiv("**漏洞描述：**\n"+data.Description))
+	}
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/vulnerabilities?cve=%s", strings.TrimSuffix(notification.FrontendURL, "/"), data.CveID)
+		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
+	}
+	return s.buildLarkCardMessage(notification, "🔓 漏洞告警通知", s.getSeverityTemplate(data.Severity), elements)
+}
+
+func (s *NotificationService) buildWebhookVulnerability(data *VulnerabilityAlertData) map[string]interface{} {
+	return map[string]interface{}{
+		"alert_type":      "vulnerability",
+		"host_id":         data.HostID,
+		"hostname":        data.Hostname,
+		"ip":              data.IP,
+		"cve_id":          data.CveID,
+		"severity":        data.Severity,
+		"cvss_score":      data.CvssScore,
+		"component":       data.Component,
+		"current_version": data.CurrentVersion,
+		"fixed_version":   data.FixedVersion,
+		"description":     data.Description,
+		"affected_hosts":  data.AffectedHosts,
+	}
+}
+
+// ============================================================
+// 病毒查杀告警通知
+// ============================================================
+
+// VirusAlertData 病毒告警数据
+type VirusAlertData struct {
+	HostID     string
+	Hostname   string
+	IP         string
+	FilePath   string
+	ThreatName string
+	ThreatType string // virus, trojan, worm, ransomware, rootkit, miner, backdoor
+	Severity   string
+	FileHash   string
+	Action     string // detected, quarantined, deleted
+	DetectedAt time.Time
+	FrontendURL string
+}
+
+// SendVirusAlertNotification 发送病毒告警通知
+func (s *NotificationService) SendVirusAlertNotification(data *VirusAlertData) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryVirusAlert).Find(&notifications).Error; err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
+			continue
+		}
+		if !s.matchScopeByHostID(&n, data.HostID) {
+			continue
+		}
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkVirusCard(&n, data)
+		} else {
+			msg = s.buildWebhookVirus(data)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送病毒告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// threatTypeText 威胁类型中文
+func threatTypeText(t string) string {
+	m := map[string]string{
+		"virus": "病毒", "trojan": "木马", "worm": "蠕虫", "ransomware": "勒索软件",
+		"rootkit": "Rootkit", "miner": "挖矿程序", "backdoor": "后门", "other": "其他威胁",
+	}
+	if v, ok := m[t]; ok {
+		return v
+	}
+	return t
+}
+
+func (s *NotificationService) buildLarkVirusCard(notification *model.Notification, data *VirusAlertData) map[string]interface{} {
+	desc := fmt.Sprintf(
+		"矩阵云安全平台在您的主机上检测到恶意文件，请及时处理。\n\n"+
+			"**威胁名称：** %s\n"+
+			"**威胁类型：** %s\n"+
+			"**主机名称：** %s\n"+
+			"**主机 IP：** %s\n"+
+			"**文件路径：** %s\n"+
+			"**文件哈希：** %s\n"+
+			"**处置状态：** %s\n"+
+			"**检测时间：** %s",
+		data.ThreatName, threatTypeText(data.ThreatType),
+		data.Hostname, data.IP, data.FilePath, data.FileHash,
+		data.Action, data.DetectedAt.Format("2006-01-02 15:04:05"),
+	)
+	elements := []map[string]interface{}{larkTextDiv(desc)}
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/virus/scan", strings.TrimSuffix(notification.FrontendURL, "/"))
+		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
+	}
+	return s.buildLarkCardMessage(notification, "🦠 病毒查杀告警", s.getSeverityTemplate(data.Severity), elements)
+}
+
+func (s *NotificationService) buildWebhookVirus(data *VirusAlertData) map[string]interface{} {
+	return map[string]interface{}{
+		"alert_type":  "virus",
+		"host_id":     data.HostID,
+		"hostname":    data.Hostname,
+		"ip":          data.IP,
+		"file_path":   data.FilePath,
+		"threat_name": data.ThreatName,
+		"threat_type": data.ThreatType,
+		"severity":    data.Severity,
+		"file_hash":   data.FileHash,
+		"action":      data.Action,
+		"detected_at": data.DetectedAt.Format(time.RFC3339),
+	}
+}
+
+// ============================================================
+// 文件完整性告警通知
+// ============================================================
+
+// FIMAlertData 文件完整性告警数据
+type FIMAlertData struct {
+	HostID     string
+	Hostname   string
+	IP         string
+	FilePath   string
+	ChangeType string // added, removed, changed
+	Category   string // binary, config, auth, log
+	Severity   string
+	DetectedAt time.Time
+	FrontendURL string
+}
+
+// SendFIMAlertNotification 发送文件完整性告警通知
+func (s *NotificationService) SendFIMAlertNotification(data *FIMAlertData) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryFIMAlert).Find(&notifications).Error; err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
+			continue
+		}
+		if !s.matchScopeByHostID(&n, data.HostID) {
+			continue
+		}
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkFIMCard(&n, data)
+		} else {
+			msg = s.buildWebhookFIM(data)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送 FIM 告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// changeTypeText 变更类型中文
+func changeTypeText(t string) string {
+	m := map[string]string{"added": "新增", "removed": "删除", "changed": "变更"}
+	if v, ok := m[t]; ok {
+		return v
+	}
+	return t
+}
+
+// fimCategoryText 文件类别中文
+func fimCategoryText(c string) string {
+	m := map[string]string{"binary": "二进制文件", "config": "配置文件", "auth": "认证文件", "log": "日志文件", "other": "其他"}
+	if v, ok := m[c]; ok {
+		return v
+	}
+	return c
+}
+
+func (s *NotificationService) buildLarkFIMCard(notification *model.Notification, data *FIMAlertData) map[string]interface{} {
+	desc := fmt.Sprintf(
+		"矩阵云安全平台检测到关键文件变更，请确认是否为合法操作。\n\n"+
+			"**主机名称：** %s\n"+
+			"**主机 IP：** %s\n"+
+			"**文件路径：** %s\n"+
+			"**变更类型：** %s\n"+
+			"**文件类别：** %s\n"+
+			"**检测时间：** %s",
+		data.Hostname, data.IP, data.FilePath,
+		changeTypeText(data.ChangeType), fimCategoryText(data.Category),
+		data.DetectedAt.Format("2006-01-02 15:04:05"),
+	)
+	elements := []map[string]interface{}{larkTextDiv(desc)}
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/fim?host_id=%s", strings.TrimSuffix(notification.FrontendURL, "/"), data.HostID)
+		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
+	}
+	return s.buildLarkCardMessage(notification, "📁 文件完整性告警", s.getSeverityTemplate(data.Severity), elements)
+}
+
+func (s *NotificationService) buildWebhookFIM(data *FIMAlertData) map[string]interface{} {
+	return map[string]interface{}{
+		"alert_type":  "fim",
+		"host_id":     data.HostID,
+		"hostname":    data.Hostname,
+		"ip":          data.IP,
+		"file_path":   data.FilePath,
+		"change_type": data.ChangeType,
+		"category":    data.Category,
+		"severity":    data.Severity,
+		"detected_at": data.DetectedAt.Format(time.RFC3339),
+	}
+}
+
+// ============================================================
+// 运行时检测告警通知
+// ============================================================
+
+// RuntimeAlertData 运行时检测告警数据
+type RuntimeAlertData struct {
+	HostID      string
+	Hostname    string
+	IP          string
+	RuleName    string
+	Severity    string
+	Category    string
+	MitreID     string
+	Description string
+	DetectedAt  time.Time
+	FrontendURL string
+}
+
+// SendRuntimeAlertNotification 发送运行时检测告警通知
+func (s *NotificationService) SendRuntimeAlertNotification(data *RuntimeAlertData) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryRuntimeAlert).Find(&notifications).Error; err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
+			continue
+		}
+		if !s.matchScopeByHostID(&n, data.HostID) {
+			continue
+		}
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkRuntimeCard(&n, data)
+		} else {
+			msg = s.buildWebhookRuntime(data)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送运行时告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *NotificationService) buildLarkRuntimeCard(notification *model.Notification, data *RuntimeAlertData) map[string]interface{} {
+	mitreInfo := ""
+	if data.MitreID != "" {
+		mitreInfo = fmt.Sprintf("\n**MITRE ATT&CK：** %s", data.MitreID)
+	}
+	desc := fmt.Sprintf(
+		"矩阵云安全平台运行时检测引擎触发安全告警。\n\n"+
+			"**规则名称：** %s\n"+
+			"**告警分类：** %s%s\n"+
+			"**主机名称：** %s\n"+
+			"**主机 IP：** %s\n"+
+			"**检测时间：** %s",
+		data.RuleName, data.Category, mitreInfo,
+		data.Hostname, data.IP,
+		data.DetectedAt.Format("2006-01-02 15:04:05"),
+	)
+	elements := []map[string]interface{}{larkTextDiv(desc)}
+	if data.Description != "" {
+		elements = append(elements, larkHR(), larkTextDiv("**规则说明：**\n"+data.Description))
+	}
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/detection/alerts?host_id=%s", strings.TrimSuffix(notification.FrontendURL, "/"), data.HostID)
+		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
+	}
+	return s.buildLarkCardMessage(notification, "🛡️ 运行时检测告警", s.getSeverityTemplate(data.Severity), elements)
+}
+
+func (s *NotificationService) buildWebhookRuntime(data *RuntimeAlertData) map[string]interface{} {
+	return map[string]interface{}{
+		"alert_type":  "runtime_detection",
+		"host_id":     data.HostID,
+		"hostname":    data.Hostname,
+		"ip":          data.IP,
+		"rule_name":   data.RuleName,
+		"severity":    data.Severity,
+		"category":    data.Category,
+		"mitre_id":    data.MitreID,
+		"description": data.Description,
+		"detected_at": data.DetectedAt.Format(time.RFC3339),
+	}
+}
+
+// ============================================================
+// K8s 安全告警通知
+// ============================================================
+
+// KubeAlertData K8s 安全告警数据
+type KubeAlertData struct {
+	ClusterName string
+	Severity    string
+	AlarmType   string // container_escape, abnormal_process, privilege_escalation, reverse_shell
+	Title       string // [K8S-001] kubectl exec 进入容器
+	Description string
+	Message     string // 可读的告警摘要
+	Namespace   string
+	Target      string
+	FrontendURL string
+}
+
+// alarmTypeText K8s 告警类型中文
+func alarmTypeText(t string) string {
+	m := map[string]string{
+		"container_escape":     "容器逃逸",
+		"abnormal_process":     "异常进程",
+		"abnormal_network":     "异常网络",
+		"file_tamper":          "文件篡改",
+		"privilege_escalation": "权限提升",
+		"reverse_shell":        "反弹 Shell",
+		"crypto_mining":        "挖矿行为",
+	}
+	if v, ok := m[t]; ok {
+		return v
+	}
+	return t
+}
+
+// SendKubeAlertNotification 发送 K8s 安全告警通知
+func (s *NotificationService) SendKubeAlertNotification(data *KubeAlertData) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryKubeAlert).Find(&notifications).Error; err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
+			continue
+		}
+		// K8s 告警不按主机维度过滤，只检查 scope=global
+		// 如果将来有多集群可以按集群名过滤
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkKubeCard(&n, data)
+		} else {
+			msg = s.buildWebhookKube(data)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送 K8s 告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+func (s *NotificationService) buildLarkKubeCard(notification *model.Notification, data *KubeAlertData) map[string]interface{} {
+	nsInfo := ""
+	if data.Namespace != "" {
+		nsInfo = fmt.Sprintf("\n**Namespace：** %s", data.Namespace)
+	}
+	targetInfo := ""
+	if data.Target != "" {
+		targetInfo = fmt.Sprintf("\n**影响对象：** %s", data.Target)
+	}
+	desc := fmt.Sprintf(
+		"矩阵云安全平台 K8s 审计检测引擎触发安全告警。\n\n"+
+			"**告警标题：** %s\n"+
+			"**告警类型：** %s\n"+
+			"**集群：** %s%s%s",
+		data.Title, alarmTypeText(data.AlarmType),
+		data.ClusterName, nsInfo, targetInfo,
+	)
+	elements := []map[string]interface{}{larkTextDiv(desc)}
+	if data.Message != "" {
+		elements = append(elements, larkHR(), larkTextDiv("**告警详情：**\n"+data.Message))
+	}
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/kube/alarms", strings.TrimSuffix(notification.FrontendURL, "/"))
+		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
+	}
+	return s.buildLarkCardMessage(notification, "☸️ K8s 安全告警", s.getSeverityTemplate(data.Severity), elements)
+}
+
+func (s *NotificationService) buildWebhookKube(data *KubeAlertData) map[string]interface{} {
+	return map[string]interface{}{
+		"alert_type":   "kube_alarm",
+		"cluster_name": data.ClusterName,
+		"severity":     data.Severity,
+		"alarm_type":   data.AlarmType,
+		"title":        data.Title,
+		"description":  data.Description,
+		"message":      data.Message,
+		"namespace":    data.Namespace,
+		"target":       data.Target,
+	}
+}
+
+// ============================================================
+// 测试通知辅助方法（公开，供 API 层调用）
+// ============================================================
+
+// BuildTestLarkCard 构建测试用的飞书卡片（根据通知类别选择不同模板）
+func (s *NotificationService) BuildTestLarkCard(notification *model.Notification, category model.NotifyCategory) map[string]interface{} {
+	now := time.Now()
+	switch category {
+	case model.NotifyCategoryVulnerabilityAlert:
+		return s.buildLarkVulnerabilityCard(notification, &VulnerabilityAlertData{
+			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
+			CveID: "CVE-2024-1234", Severity: "critical", CvssScore: 9.8,
+			Component: "openssl", CurrentVersion: "1.1.1k", FixedVersion: "1.1.1w",
+			Description: "OpenSSL 远程代码执行漏洞", AffectedHosts: 5,
+			FrontendURL: notification.FrontendURL,
+		})
+	case model.NotifyCategoryVirusAlert:
+		return s.buildLarkVirusCard(notification, &VirusAlertData{
+			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
+			FilePath: "/tmp/malware.elf", ThreatName: "Trojan.Linux.Generic",
+			ThreatType: "trojan", Severity: "high", FileHash: "a1b2c3d4e5f6...",
+			Action: "quarantined", DetectedAt: now, FrontendURL: notification.FrontendURL,
+		})
+	case model.NotifyCategoryFIMAlert:
+		return s.buildLarkFIMCard(notification, &FIMAlertData{
+			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
+			FilePath: "/etc/passwd", ChangeType: "changed", Category: "auth",
+			Severity: "high", DetectedAt: now, FrontendURL: notification.FrontendURL,
+		})
+	case model.NotifyCategoryRuntimeAlert:
+		return s.buildLarkRuntimeCard(notification, &RuntimeAlertData{
+			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
+			RuleName: "检测可疑进程执行", Severity: "high", Category: "process",
+			MitreID: "T1059", Description: "检测到可疑的命令执行行为",
+			DetectedAt: now, FrontendURL: notification.FrontendURL,
+		})
+	case model.NotifyCategoryKubeAlert:
+		return s.buildLarkKubeCard(notification, &KubeAlertData{
+			ClusterName: "测试集群", Severity: "critical",
+			AlarmType: "container_escape", Title: "[K8S-005] 创建特权容器",
+			Description: "检测到创建特权容器", Namespace: "default",
+			Message: "用户 admin 在命名空间 default 中创建了特权容器 Pod test-pod",
+			Target: "pods/test-pod", FrontendURL: notification.FrontendURL,
+		})
+	default:
+		// baseline_alert 和 agent_offline 使用原有逻辑
+		return nil
+	}
+}

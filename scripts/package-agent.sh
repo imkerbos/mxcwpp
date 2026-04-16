@@ -67,8 +67,6 @@ else
             NFPM_CMD="$HOME/go/bin/nfpm"
         elif [ -n "$GOPATH" ] && [ -f "$GOPATH/bin/nfpm" ]; then
             NFPM_CMD="$GOPATH/bin/nfpm"
-        elif [ -f "/Users/kerbos/Workspaces/go/bin/nfpm" ]; then
-            NFPM_CMD="/Users/kerbos/Workspaces/go/bin/nfpm"
         elif command -v nfpm &> /dev/null; then
             NFPM_CMD="nfpm"
         else
@@ -193,7 +191,7 @@ description: |
   Matrix Cloud Security Platform Agent
   A lightweight agent for baseline security checks on Linux hosts.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxsec-platform/mxsec-platform
+homepage: https://github.com/imkerbos/mxsec-platform
 license: Apache-2.0
 contents:
   - src: ${TEMP_DIR}/usr/bin/mxsec-agent
@@ -273,7 +271,7 @@ description: |
   Matrix Cloud Security Platform Agent
   A lightweight agent for baseline security checks on Linux hosts.
 vendor: Matrix Cloud Security Platform
-homepage: https://github.com/mxsec-platform/mxsec-platform
+homepage: https://github.com/imkerbos/mxsec-platform
 license: Apache-2.0
 contents:
   - src: ${TEMP_DIR}/usr/bin/mxsec-agent

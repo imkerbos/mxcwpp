@@ -165,7 +165,6 @@ init_env() {
 # 修改后运行 ./deploy.sh restart 生效
 
 # ============ General ============
-COMPOSE_PROFILES=
 VERSION=$VERSION
 TZ=Asia/Shanghai
 
@@ -187,18 +186,30 @@ REDIS_ADDR=redis:6379
 REDIS_PASSWORD=$REDIS_PASSWORD
 REDIS_DB=0
 REDIS_POOL_SIZE=100
+REDIS_SENTINEL=false
+REDIS_MASTER_NAME=mymaster
+REDIS_SENTINEL_ADDR_1=redis-sentinel-1:26379
+REDIS_SENTINEL_ADDR_2=redis-sentinel-2:26379
+REDIS_SENTINEL_ADDR_3=redis-sentinel-3:26379
 
-# ============ Kafka (需设置 COMPOSE_PROFILES=full) ============
-KAFKA_ENABLED=false
-KAFKA_BROKERS=kafka:9092
+# ============ Kafka ============
+KAFKA_ENABLED=true
+KAFKA_BROKER_1=kafka-1:9092
+KAFKA_BROKER_2=kafka-2:9092
+KAFKA_BROKER_3=kafka-3:9092
 KAFKA_TOPIC_PREFIX=
 
-# ============ ClickHouse (需设置 COMPOSE_PROFILES=full) ============
-CLICKHOUSE_ENABLED=false
+# ============ ClickHouse ============
+CLICKHOUSE_ENABLED=true
 CLICKHOUSE_ADDR=clickhouse:9000
 CLICKHOUSE_DATABASE=mxsec
 CLICKHOUSE_USER=default
 CLICKHOUSE_PASSWORD=
+
+# ============ Prometheus ============
+PROMETHEUS_ENABLED=true
+PROMETHEUS_QUERY_URL=http://prometheus:9090
+PROMETHEUS_TIMEOUT=10s
 
 # ============ 数据目录 ============
 DATA_DIR=$DATA_DIR
@@ -206,9 +217,19 @@ DATA_DIR=$DATA_DIR
 # ============ 网络 ============
 SERVER_IP=$SERVER_IP
 GRPC_PORT=$GRPC_PORT
+SERVER_HTTP_PORT=8080
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=443
 MANAGER_PORT=$MANAGER_PORT
+MANAGER_ADDR=http://manager:8080
+INSTANCE_ID=
+
+# ============ 控制面副本数 ============
+# deploy.sh 的 start/upgrade 会按此值显式生成 --scale 参数
+# 默认 1 = 单机/功能验证；生产建议 2+ 实现 HA
+MANAGER_REPLICAS=1
+AGENTCENTER_REPLICAS=1
+CONSUMER_REPLICAS=1
 
 # ============ 日志 ============
 LOG_LEVEL=info
@@ -240,7 +261,7 @@ init_dirs() {
     log_step "创建数据目录..."
     sudo mkdir -p "$DATA_DIR"/{mysql,redis,logs/{agentcenter,manager,nginx,mysql},plugins,uploads}
     # 可选服务目录（即使不启用也创建，避免挂载失败）
-    sudo mkdir -p "$DATA_DIR"/{zookeeper,kafka,clickhouse}
+    sudo mkdir -p "$DATA_DIR"/{kafka-1,kafka-2,kafka-3,clickhouse}
     sudo chown -R $(id -u):$(id -g) "$DATA_DIR" 2>/dev/null || true
     # MySQL 日志目录需要 mysql 用户可写（容器内 uid=999）
     sudo chmod 777 "$DATA_DIR/logs/mysql" 2>/dev/null || true
@@ -296,10 +317,21 @@ init_config() {
     fi
     cp "$SCRIPT_DIR/config/server.yaml.tpl" "$SCRIPT_DIR/config/server.yaml"
 
-    # 替换所有占位符
+    local kafka1 kafka2 kafka3
+    kafka1="${KAFKA_BROKER_1:-}"
+    kafka2="${KAFKA_BROKER_2:-}"
+    kafka3="${KAFKA_BROKER_3:-}"
+    if [ -z "$kafka1" ] && [ -n "${KAFKA_BROKERS:-}" ]; then
+        IFS=',' read -r kafka1 kafka2 kafka3 <<< "${KAFKA_BROKERS}"
+    fi
+    kafka1="${kafka1:-kafka-1:9092}"
+    kafka2="${kafka2:-$kafka1}"
+    kafka3="${kafka3:-$kafka2}"
     local PLUGINS_URL="${PLUGINS_BASE_URL:-http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download}"
 
     sed -i.bak \
+        -e "s|__GRPC_PORT__|${GRPC_PORT:-6751}|g" \
+        -e "s|__SERVER_HTTP_PORT__|${SERVER_HTTP_PORT:-8080}|g" \
         -e "s|__MYSQL_HOST__|${MYSQL_HOST:-mysql}|g" \
         -e "s|__MYSQL_PORT__|${MYSQL_PORT:-3306}|g" \
         -e "s|__MYSQL_USER__|${MYSQL_USER:-mxsec_user}|g" \
@@ -312,14 +344,24 @@ init_config() {
         -e "s|__REDIS_PASSWORD__|${REDIS_PASSWORD:-}|g" \
         -e "s|__REDIS_DB__|${REDIS_DB:-0}|g" \
         -e "s|__REDIS_POOL_SIZE__|${REDIS_POOL_SIZE:-100}|g" \
-        -e "s|__KAFKA_ENABLED__|${KAFKA_ENABLED:-false}|g" \
-        -e "s|__KAFKA_BROKERS__|${KAFKA_BROKERS:-kafka:9092}|g" \
+        -e "s|__REDIS_SENTINEL__|${REDIS_SENTINEL:-false}|g" \
+        -e "s|__REDIS_MASTER_NAME__|${REDIS_MASTER_NAME:-mymaster}|g" \
+        -e "s|__REDIS_SENTINEL_ADDR_1__|${REDIS_SENTINEL_ADDR_1:-redis-sentinel-1:26379}|g" \
+        -e "s|__REDIS_SENTINEL_ADDR_2__|${REDIS_SENTINEL_ADDR_2:-redis-sentinel-2:26379}|g" \
+        -e "s|__REDIS_SENTINEL_ADDR_3__|${REDIS_SENTINEL_ADDR_3:-redis-sentinel-3:26379}|g" \
+        -e "s|__KAFKA_ENABLED__|${KAFKA_ENABLED:-true}|g" \
+        -e "s|__KAFKA_BROKER_1__|${kafka1}|g" \
+        -e "s|__KAFKA_BROKER_2__|${kafka2}|g" \
+        -e "s|__KAFKA_BROKER_3__|${kafka3}|g" \
         -e "s|__KAFKA_TOPIC_PREFIX__|${KAFKA_TOPIC_PREFIX:-}|g" \
-        -e "s|__CLICKHOUSE_ENABLED__|${CLICKHOUSE_ENABLED:-false}|g" \
+        -e "s|__CLICKHOUSE_ENABLED__|${CLICKHOUSE_ENABLED:-true}|g" \
         -e "s|__CLICKHOUSE_ADDR__|${CLICKHOUSE_ADDR:-clickhouse:9000}|g" \
         -e "s|__CLICKHOUSE_DATABASE__|${CLICKHOUSE_DATABASE:-mxsec}|g" \
         -e "s|__CLICKHOUSE_USER__|${CLICKHOUSE_USER:-default}|g" \
         -e "s|__CLICKHOUSE_PASSWORD__|${CLICKHOUSE_PASSWORD:-}|g" \
+        -e "s|__PROMETHEUS_ENABLED__|${PROMETHEUS_ENABLED:-true}|g" \
+        -e "s|__PROMETHEUS_QUERY_URL__|${PROMETHEUS_QUERY_URL:-http://prometheus:9090}|g" \
+        -e "s|__PROMETHEUS_TIMEOUT__|${PROMETHEUS_TIMEOUT:-10s}|g" \
         -e "s|__LOG_LEVEL__|${LOG_LEVEL:-info}|g" \
         -e "s|__LOG_FORMAT__|${LOG_FORMAT:-json}|g" \
         -e "s|__LOG_MAX_AGE__|${LOG_MAX_AGE:-7}|g" \
@@ -327,6 +369,8 @@ init_config() {
         -e "s|__PLUGINS_DIR__|${PLUGINS_DIR:-/opt/mxsec-platform/plugins}|g" \
         -e "s|__PLUGINS_BASE_URL__|${PLUGINS_URL}|g" \
         -e "s|__JWT_SECRET__|${JWT_SECRET:-change-me-in-production}|g" \
+        -e "s|__MANAGER_ADDR__|${MANAGER_ADDR:-http://manager:8080}|g" \
+        -e "s|__INSTANCE_ID__|${INSTANCE_ID:-}|g" \
         "$SCRIPT_DIR/config/server.yaml"
 
     rm -f "$SCRIPT_DIR/config/server.yaml.bak"
@@ -356,26 +400,47 @@ build() {
     fi
 }
 
+# 根据 .env 中的 *_REPLICAS 变量生成 --scale 参数数组
+# 使用方式：
+#   read -a SCALE_ARGS < <(scale_args); dc up -d "${SCALE_ARGS[@]}"
+# 默认值：每个控制面服务 1 副本（单机/功能验证）；生产建议 2+
+scale_args() {
+    source "$ENV_FILE"
+    local m="${MANAGER_REPLICAS:-1}"
+    local a="${AGENTCENTER_REPLICAS:-1}"
+    local c="${CONSUMER_REPLICAS:-1}"
+    echo "--scale manager=${m} --scale agentcenter=${a} --scale consumer=${c}"
+}
+
 start() {
     if [ ! -f "$ENV_FILE" ]; then
         log_error "请先运行 ./deploy.sh 初始化环境"
         exit 1
     fi
 
+    source "$ENV_FILE"
+    local m="${MANAGER_REPLICAS:-1}"
+    local a="${AGENTCENTER_REPLICAS:-1}"
+    local c="${CONSUMER_REPLICAS:-1}"
+
     log_step "启动服务..."
-    dc up -d
+    log_info "控制面副本数: manager=${m} agentcenter=${a} consumer=${c} （源自 .env 的 *_REPLICAS 变量）"
+    if [ "$m" -lt 2 ] || [ "$a" -lt 2 ] || [ "$c" -lt 2 ]; then
+        log_warn "当前为单副本（非 HA），仅供单机或功能验证。生产建议在 .env 中将 MANAGER_REPLICAS/AGENTCENTER_REPLICAS/CONSUMER_REPLICAS 调整为 2+。"
+    fi
+    # shellcheck disable=SC2046
+    dc up -d $(scale_args)
 
     log_info "等待服务就绪..."
     sleep 10
 
     status
 
-    source "$ENV_FILE"
     echo ""
     log_info "部署完成!"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     log_info "Web 控制台: http://$SERVER_IP:$HTTP_PORT"
-    log_info "AgentCenter: $SERVER_IP:$GRPC_PORT"
+    log_info "AgentCenter gRPC: 默认 compose 不直接暴露 ${GRPC_PORT}，需额外做端口映射或接入四层负载均衡"
     log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -391,6 +456,8 @@ restart() {
     if [ -f "$SCRIPT_DIR/config/server.yaml.tpl" ] && [ -f "$ENV_FILE" ]; then
         init_config
     fi
+    log_warn "restart 仅重启容器并重载 server.yaml 内部配置，不会重建容器。"
+    log_warn "如修改了镜像版本 / 端口映射 / scale / volume / 网络等 Compose 级变更，请改用: docker compose --env-file .env up -d （必要时加 --scale / --force-recreate）"
     dc restart "$@"
 }
 
@@ -458,11 +525,21 @@ upgrade() {
 
     # 4. 重新构建并启动
     log_step "[4/4] 构建镜像并重启..."
+    source "$ENV_FILE"
+    local m="${MANAGER_REPLICAS:-1}"
+    local a="${AGENTCENTER_REPLICAS:-1}"
+    local c="${CONSUMER_REPLICAS:-1}"
+    log_info "保持控制面副本数: manager=${m} agentcenter=${a} consumer=${c} （源自 .env，升级前后一致）"
+    if [ "$m" -lt 2 ] || [ "$a" -lt 2 ] || [ "$c" -lt 2 ]; then
+        log_warn "当前为单副本（非 HA）。如需在升级中一并切到 HA，请先在 .env 将 MANAGER_REPLICAS/AGENTCENTER_REPLICAS/CONSUMER_REPLICAS 调整为 2+ 再运行 upgrade。"
+    fi
     if [ -f "$PROJECT_ROOT/go.mod" ]; then
-        dc up -d --build
+        # shellcheck disable=SC2046
+        dc up -d --build $(scale_args)
     else
         dc pull 2>/dev/null || log_warn "拉取镜像失败，尝试使用本地镜像"
-        dc up -d
+        # shellcheck disable=SC2046
+        dc up -d $(scale_args)
     fi
 
     sleep 10
