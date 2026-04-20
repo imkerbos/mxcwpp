@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # 版本配置
-CLAMAV_VERSION="${CLAMAV_VERSION:-1.4.2}"
+CLAMAV_VERSION="${CLAMAV_VERSION:-1.5.2}"
 YARAX_VERSION="${YARAX_VERSION:-1.15.0}"
 
 # 缓存目录
@@ -49,8 +49,8 @@ download() {
     mv "$dest.tmp" "$dest"
 }
 
-# 下载 ClamAV 静态编译版
-# ClamAV 官方提供静态编译的 Linux 二进制包
+# 下载 ClamAV 并提取 clamscan 二进制
+# ClamAV >= 1.0 只提供 RPM/DEB 包，从 GitHub releases 下载后提取
 download_clamav() {
     local arch="$1"
 
@@ -71,49 +71,60 @@ download_clamav() {
 
     mkdir -p "$dest_dir"
 
-    # 优先使用镜像
-    local tarball="$DEPS_DIR/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+    # 从 GitHub releases 下载 RPM 包
+    local rpm_file="$DEPS_DIR/clamav-${CLAMAV_VERSION}.${clamav_arch}.rpm"
     local url=""
 
     if [ -n "${MIRROR_URL:-}" ]; then
-        url="${MIRROR_URL}/clamav/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+        url="${MIRROR_URL}/clamav/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.rpm"
     else
-        url="https://www.clamav.net/downloads/production/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.tar.gz"
+        url="https://github.com/Cisco-Talos/clamav/releases/download/clamav-${CLAMAV_VERSION}/clamav-${CLAMAV_VERSION}.linux.${clamav_arch}.rpm"
     fi
 
-    if ! download "$url" "$tarball"; then
-        err "ClamAV 下载失败: $arch"
-        err "请手动下载并放置到: $tarball"
+    if ! download "$url" "$rpm_file"; then
+        err "ClamAV RPM 下载失败: $arch"
+        err "请手动下载并放置到: $rpm_file"
+        err "下载地址: https://github.com/Cisco-Talos/clamav/releases"
         err "或设置 MIRROR_URL 环境变量指向自建镜像"
         return 1
     fi
 
-    # 从 tarball 中提取 clamscan 二进制
-    log "提取 clamscan ($arch)..."
-    tar -xzf "$tarball" -C "$dest_dir" --strip-components=1 \
-        --wildcards '*/bin/clamscan' '*/lib/*clamav*' '*/lib/*json*' 2>/dev/null || \
-    tar -xzf "$tarball" -C "$dest_dir" --strip-components=1 2>/dev/null
+    # 从 RPM 提取 clamscan 二进制
+    log "从 RPM 提取 clamscan ($arch)..."
+    local extract_dir="$dest_dir/_rpm_extract"
+    mkdir -p "$extract_dir"
 
-    # 查找 clamscan
-    local found=""
-    for candidate in "$dest_dir/bin/clamscan" "$dest_dir/clamscan"; do
-        if [ -f "$candidate" ]; then
-            found="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$found" ]; then
-        err "未在 tarball 中找到 clamscan 二进制"
+    # 优先用 bsdtar/tar（macOS + Linux 通用），回退到 rpm2cpio
+    if tar -xf "$rpm_file" -C "$extract_dir" 2>/dev/null; then
+        true
+    elif command -v rpm2cpio &>/dev/null; then
+        (cd "$extract_dir" && rpm2cpio "$rpm_file" | cpio -idm 2>/dev/null)
+    else
+        err "无法解压 RPM：tar 不支持且 rpm2cpio 未安装"
+        err "macOS: brew install rpm2cpio | Linux: dnf install rpm-tools"
+        rm -rf "$extract_dir"
         return 1
     fi
 
-    # 移动到目标位置
-    if [ "$found" != "$clamscan_bin" ]; then
-        cp "$found" "$clamscan_bin"
+    # 查找 clamscan
+    local found=""
+    found=$(find "$extract_dir" -name "clamscan" -type f | head -1)
+
+    if [ -z "$found" ]; then
+        err "未在 RPM 中找到 clamscan 二进制"
+        rm -rf "$extract_dir"
+        return 1
     fi
+
+    cp "$found" "$clamscan_bin"
     chmod +x "$clamscan_bin"
 
+    # 复制依赖的共享库
+    find "$extract_dir" \( -name "libclamav*" -o -name "libfreshclam*" -o -name "libjson-c*" \) -type f | while read -r lib; do
+        cp "$lib" "$dest_dir/" 2>/dev/null || true
+    done
+
+    rm -rf "$extract_dir"
     log "ClamAV clamscan 就绪: $arch"
 }
 
@@ -155,9 +166,12 @@ download_yarax() {
         return 1
     fi
 
-    # 解压 .gz 文件（单文件压缩，不是 tar）
+    # 解压 .tar.gz（包含单个 yr 二进制）
     log "提取 yr ($arch)..."
-    gunzip -c "$archive" > "$yr_bin" 2>/dev/null || gzip -dc "$archive" > "$yr_bin"
+    if ! tar -xzf "$archive" -C "$dest_dir" 2>/dev/null; then
+        # 回退：尝试单文件 gzip
+        gunzip -c "$archive" > "$yr_bin" 2>/dev/null || gzip -dc "$archive" > "$yr_bin"
+    fi
 
     if [ ! -s "$yr_bin" ]; then
         err "解压 yr 失败"

@@ -266,7 +266,7 @@ build_scanner() {
     "$SCRIPT_DIR/download-scanner-deps.sh" "$arch"
 
     # 3. 复制 clamscan
-    local clamav_dir="build/deps/clamav-${CLAMAV_VERSION:-1.4.2}-${arch}"
+    local clamav_dir="build/deps/clamav-${CLAMAV_VERSION:-1.5.2}-${arch}"
     if [ -f "$clamav_dir/clamscan" ]; then
         cp "$clamav_dir/clamscan" "$staging/bin/clamscan"
         chmod +x "$staging/bin/clamscan"
