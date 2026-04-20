@@ -37,23 +37,33 @@ func DeployCluster(cfg *Config, render *RenderResult, opts DeployOptions) error 
 		})
 	}
 
+	fmt.Println("[1/5] 准备远端节点...")
 	for _, item := range nodes {
+		fmt.Printf("  -> %s (%s)\n", item.Node.Name, item.Node.Host)
 		if err := prepareRemoteNode(cfg, item, opts); err != nil {
 			return err
 		}
 	}
 
+	fmt.Println("[2/5] 启动 Kafka...")
 	for _, item := range filterNodes(nodes, func(n deployedNode) bool { return n.Node.HasRole(RoleKafka) }) {
+		fmt.Printf("  -> %s (%s)\n", item.Node.Name, item.Node.Host)
 		if err := runRemote(item.Node, opts.ConfigDir, remoteUpKafka(item)); err != nil {
 			return fmt.Errorf("启动 kafka 节点 %s 失败: %w", item.Node.Name, err)
 		}
 	}
+
+	fmt.Println("[3/5] 启动 Storage (MySQL/Redis/ClickHouse)...")
 	for _, item := range filterNodes(nodes, func(n deployedNode) bool { return n.Node.HasRole(RoleStorage) }) {
+		fmt.Printf("  -> %s (%s)\n", item.Node.Name, item.Node.Host)
 		if err := runRemote(item.Node, opts.ConfigDir, remoteUpStorage(item)); err != nil {
 			return fmt.Errorf("启动 storage 节点 %s 失败: %w", item.Node.Name, err)
 		}
 	}
+
+	fmt.Println("[4/5] 启动 Control (Manager/AgentCenter/Consumer/UI)...")
 	for _, item := range filterNodes(nodes, func(n deployedNode) bool { return n.Node.HasRole(RoleControl) }) {
+		fmt.Printf("  -> %s (%s)\n", item.Node.Name, item.Node.Host)
 		if err := runRemote(item.Node, opts.ConfigDir, remoteUpControl(item)); err != nil {
 			return fmt.Errorf("启动 control 节点 %s 失败: %w", item.Node.Name, err)
 		}
@@ -62,7 +72,9 @@ func DeployCluster(cfg *Config, render *RenderResult, opts DeployOptions) error 
 	if opts.SkipHealthCheck {
 		return nil
 	}
+	fmt.Println("[5/5] 健康检查...")
 	for _, item := range nodes {
+		fmt.Printf("  -> %s (%s)\n", item.Node.Name, item.Node.Host)
 		if err := runRemote(item.Node, opts.ConfigDir, remoteHealthCheck(cfg, item)); err != nil {
 			return fmt.Errorf("节点 %s 健康检查失败: %w", item.Node.Name, err)
 		}
@@ -72,6 +84,7 @@ func DeployCluster(cfg *Config, render *RenderResult, opts DeployOptions) error 
 
 func prepareRemoteNode(cfg *Config, node deployedNode, opts DeployOptions) error {
 	// 创建 release 目录并确保 SSH 用户有写入权限（scp 不能用 sudo）
+	fmt.Printf("    创建远端目录 %s\n", node.RemoteRelease)
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", shQuote(node.RemoteRelease))
 	if node.Node.SSHUser != "root" {
 		mkdirCmd += fmt.Sprintf(" && chown -R %s:%s %s", shQuote(node.Node.SSHUser), shQuote(node.Node.SSHUser), shQuote(node.Node.InstallDir))
@@ -79,18 +92,22 @@ func prepareRemoteNode(cfg *Config, node deployedNode, opts DeployOptions) error
 	if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, mkdirCmd)); err != nil {
 		return fmt.Errorf("创建远端目录失败(%s): %w", node.Node.Name, err)
 	}
+	fmt.Printf("    上传 bundle...\n")
 	if err := copyBundle(node.Node, opts.ConfigDir, node.BundleDir, node.RemoteRelease); err != nil {
 		return fmt.Errorf("上传 bundle 失败(%s): %w", node.Node.Name, err)
 	}
+	fmt.Printf("    切换 current 软链\n")
 	if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, fmt.Sprintf("mkdir -p %s && ln -sfn %s %s", shQuote(node.Node.InstallDir), shQuote(node.RemoteRelease), shQuote(node.RemoteCurrent)))); err != nil {
 		return fmt.Errorf("切换 current 软链失败(%s): %w", node.Node.Name, err)
 	}
 	if !opts.SkipInstall {
+		fmt.Printf("    安装远端依赖...\n")
 		if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, fmt.Sprintf("bash %s/scripts/install-deps.sh", shQuote(node.RemoteCurrent)))); err != nil {
 			return fmt.Errorf("安装依赖失败(%s): %w", node.Node.Name, err)
 		}
 	}
 	if cfg.Registry.Domain != "" && cfg.Registry.Username != "" && cfg.Registry.Password != "" {
+		fmt.Printf("    Docker login %s\n", cfg.Registry.Domain)
 		cmd := fmt.Sprintf("docker login %s -u %s -p %s", shQuote(cfg.Registry.Domain), shQuote(cfg.Registry.Username), shQuote(cfg.Registry.Password))
 		if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, cmd)); err != nil {
 			return fmt.Errorf("docker login 失败(%s): %w", node.Node.Name, err)

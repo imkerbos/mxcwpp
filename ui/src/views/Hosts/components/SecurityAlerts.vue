@@ -203,7 +203,7 @@ const loadAlerts = async () => {
       host_id: props.hostId,
       alert_type: 'baseline',
       keyword: keyword.value || undefined,
-      severity: filterSeverity.value || undefined,
+      severity: (filterSeverity.value || undefined) as 'critical' | 'high' | 'medium' | 'low' | undefined,
       status: filterStatus.value as any || undefined,
     })
     alerts.value = res.items ?? []
