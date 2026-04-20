@@ -123,6 +123,12 @@ func (u *VirusDBUpdater) GetSyncHistory(dbType string, page, pageSize int) ([]mo
 
 // runOnce 执行一次病毒库更新
 func (u *VirusDBUpdater) runOnce(ctx context.Context) {
+	// 前置检查：freshclam 不存在则跳过，不报错
+	if _, err := exec.LookPath("freshclam"); err != nil {
+		u.logger.Warn("freshclam 未安装，跳过病毒库更新（如需启用请在容器中安装 clamav）")
+		return
+	}
+
 	if !u.acquireLock(ctx) {
 		return
 	}

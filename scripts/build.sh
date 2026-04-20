@@ -276,7 +276,7 @@ build_scanner() {
     fi
 
     # 4. 复制 yr
-    local yarax_dir="build/deps/yarax-${YARAX_VERSION:-0.11.0}-${arch}"
+    local yarax_dir="build/deps/yarax-${YARAX_VERSION:-1.15.0}-${arch}"
     if [ -f "$yarax_dir/yr" ]; then
         cp "$yarax_dir/yr" "$staging/bin/yr"
         chmod +x "$staging/bin/yr"
@@ -327,8 +327,8 @@ case "$TARGET" in
             build_plugin baseline $arch
             build_plugin collector $arch
             build_plugin fim $arch
-            build_scanner $arch
             build_plugin sensor $arch
+            build_scanner $arch || echo -e "${YELLOW}[WARN] scanner 构建失败（依赖下载问题），已跳过。可单独执行: $0 scanner${NC}"
         done
         ;;
     all)
@@ -337,8 +337,8 @@ case "$TARGET" in
             build_plugin baseline $arch
             build_plugin collector $arch
             build_plugin fim $arch
-            build_scanner $arch
             build_plugin sensor $arch
+            build_scanner $arch || echo -e "${YELLOW}[WARN] scanner 构建失败（依赖下载问题），已跳过。可单独执行: $0 scanner${NC}"
         done
         ;;
     *)

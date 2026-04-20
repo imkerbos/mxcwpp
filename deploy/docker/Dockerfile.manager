@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata curl
+RUN apk add --no-cache ca-certificates tzdata curl clamav
 
 COPY --from=builder /app/manager /usr/bin/manager
 COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/policies

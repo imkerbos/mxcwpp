@@ -16,7 +16,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # 版本配置
 CLAMAV_VERSION="${CLAMAV_VERSION:-1.4.2}"
-YARAX_VERSION="${YARAX_VERSION:-0.11.0}"
+YARAX_VERSION="${YARAX_VERSION:-1.15.0}"
 
 # 缓存目录
 DEPS_DIR="$PROJECT_ROOT/build/deps"
@@ -139,43 +139,32 @@ download_yarax() {
 
     mkdir -p "$dest_dir"
 
-    local tarball="$DEPS_DIR/yarax-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+    local archive="$DEPS_DIR/yara-x-v${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.gz"
     local url=""
 
     if [ -n "${MIRROR_URL:-}" ]; then
-        url="${MIRROR_URL}/yarax/yr-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+        url="${MIRROR_URL}/yarax/yara-x-v${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.gz"
     else
-        url="https://github.com/VirusTotal/yara-x/releases/download/v${YARAX_VERSION}/yr-${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.tar.gz"
+        url="https://github.com/VirusTotal/yara-x/releases/download/v${YARAX_VERSION}/yara-x-v${YARAX_VERSION}-${yarax_arch}-unknown-linux-gnu.gz"
     fi
 
-    if ! download "$url" "$tarball"; then
+    if ! download "$url" "$archive"; then
         err "YARA-X 下载失败: $arch"
-        err "请手动下载并放置到: $tarball"
+        err "请手动下载并放置到: $archive"
         err "或设置 MIRROR_URL 环境变量指向自建镜像"
         return 1
     fi
 
-    # 提取 yr 二进制
+    # 解压 .gz 文件（单文件压缩，不是 tar）
     log "提取 yr ($arch)..."
-    tar -xzf "$tarball" -C "$dest_dir" 2>/dev/null
+    gunzip -c "$archive" > "$yr_bin" 2>/dev/null || gzip -dc "$archive" > "$yr_bin"
 
-    # 查找 yr
-    local found=""
-    for candidate in "$dest_dir/yr" "$dest_dir/bin/yr"; do
-        if [ -f "$candidate" ]; then
-            found="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$found" ]; then
-        err "未在 tarball 中找到 yr 二进制"
+    if [ ! -s "$yr_bin" ]; then
+        err "解压 yr 失败"
+        rm -f "$yr_bin"
         return 1
     fi
 
-    if [ "$found" != "$yr_bin" ]; then
-        cp "$found" "$yr_bin"
-    fi
     chmod +x "$yr_bin"
 
     log "YARA-X yr 就绪: $arch"
