@@ -164,7 +164,7 @@ func copyBundle(node Node, configDir, localDir, remoteDir string) error {
 
 func runRemote(node Node, configDir, remoteCmd string) error {
 	args := sshBaseArgs(node, configDir)
-	args = append(args, sshTarget(node), "sh", "-lc", remoteCmd)
+	args = append(args, sshTarget(node), remoteCmd)
 	cmd := exec.Command("ssh", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
