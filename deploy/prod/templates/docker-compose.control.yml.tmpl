@@ -11,6 +11,7 @@ services:
       - {{ .DataRoot }}/logs/manager:/var/log/mxsec-platform
       - {{ .DataRoot }}/plugins:/opt/mxsec-platform/plugins
       - {{ .DataRoot }}/uploads:/opt/mxsec-platform/uploads
+      - {{ .DataRoot }}/data:/opt/mxsec-platform/data
     environment:
       TZ: {{ .Timezone }}
     healthcheck:

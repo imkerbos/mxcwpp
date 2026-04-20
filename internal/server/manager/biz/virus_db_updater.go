@@ -153,7 +153,24 @@ func (u *VirusDBUpdater) runOnce(ctx context.Context) {
 		return
 	}
 
-	// 2. 打包病毒库文件
+	// 2. 检查是否有病毒库文件（首次下载可能需要较长时间）
+	patterns := []string{"*.cvd", "*.cld"}
+	var hasDBFiles bool
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(filepath.Join(u.dataDir, pattern))
+		if len(matches) > 0 {
+			hasDBFiles = true
+			break
+		}
+	}
+	if !hasDBFiles {
+		err := fmt.Errorf("freshclam 执行成功但未产生病毒库文件，请检查网络连接或 DNS 解析（database.clamav.net）")
+		u.logger.Error("病毒库文件缺失", zap.String("data_dir", u.dataDir), zap.Error(err))
+		u.finishRecord(&record, "", 0, "", startedAt, err)
+		return
+	}
+
+	// 3. 打包病毒库文件
 	archivePath, version, err := u.packageVirusDB()
 	if err != nil {
 		u.logger.Error("打包病毒库失败", zap.Error(err))
@@ -226,7 +243,7 @@ func (u *VirusDBUpdater) runFreshclam(ctx context.Context) error {
 		return fmt.Errorf("freshclam failed: %w", err)
 	}
 
-	u.logger.Debug("freshclam 更新成功", zap.String("output", string(output)))
+	u.logger.Info("freshclam 更新成功", zap.String("output", string(output)))
 	return nil
 }
 
@@ -237,8 +254,7 @@ func (u *VirusDBUpdater) ensureFreshclamConf(absDataDir string) string {
 		return confPath
 	}
 
-	// 生成最小配置，不写 UpdateLogFile 避免权限问题
-	conf := fmt.Sprintf("DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nForeground yes\nConnectTimeout 30\nReceiveTimeout 60\n", absDataDir)
+	conf := fmt.Sprintf("DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nConnectTimeout 30\nReceiveTimeout 300\n", absDataDir)
 	if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
 		u.logger.Warn("生成 freshclam.conf 失败，使用默认配置", zap.Error(err))
 		return "/etc/clamav/freshclam.conf"
