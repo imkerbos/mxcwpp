@@ -209,10 +209,10 @@ func shQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-// sudoWrap 在非 root 用户时为命令添加 sudo 前缀。
+// sudoWrap 在非 root 用户时用 sudo sh -c 包裹整个命令。
 func sudoWrap(node Node, cmd string) string {
 	if node.SSHUser == "root" {
 		return cmd
 	}
-	return "sudo " + cmd
+	return fmt.Sprintf("sudo sh -c %s", shQuote(cmd))
 }
