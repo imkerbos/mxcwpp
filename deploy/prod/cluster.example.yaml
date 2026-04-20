@@ -79,7 +79,6 @@ control_plane:
   manager_replicas: 1
   agentcenter_replicas: 1
   consumer_replicas: 1
-  expose_haproxy: true
 
 nodes:
   - name: node1-control

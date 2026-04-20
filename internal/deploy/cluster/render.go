@@ -47,7 +47,6 @@ type nodeTemplateData struct {
 	AgentCenterImage string
 	ConsumerImage    string
 	UIImage          string
-	HAProxyImage     string
 	MySQLImage       string
 	RedisImage       string
 	ClickHouseImage  string
@@ -243,7 +242,6 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		AgentCenterImage: cfg.ImageRef("mxsec-agentcenter"),
 		ConsumerImage:    cfg.ImageRef("mxsec-consumer"),
 		UIImage:          cfg.ImageRef("mxsec-ui"),
-		HAProxyImage:     "haproxy:2.9-alpine",
 		MySQLImage:       "mysql:8.0",
 		RedisImage:       "redis:7-alpine",
 		ClickHouseImage:  "clickhouse/clickhouse-server:24-alpine",
@@ -289,11 +287,6 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		}
 		if err := copyFile(filepath.Join(repoRoot, "deploy", "config", "nginx.conf"), filepath.Join(bundleDir, "config", "nginx.conf"), 0o644); err != nil {
 			return err
-		}
-		if cfg.ControlPlane.ExposeHAProxy {
-			if err := copyFile(filepath.Join(repoRoot, "deploy", "config", "haproxy-agentcenter.cfg"), filepath.Join(bundleDir, "config", "haproxy-agentcenter.cfg"), 0o644); err != nil {
-				return err
-			}
 		}
 		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment); err != nil {
 			return err

@@ -126,10 +126,9 @@ type Kafka struct {
 }
 
 type ControlPlane struct {
-	ManagerReplicas     int  `yaml:"manager_replicas"`
-	AgentCenterReplicas int  `yaml:"agentcenter_replicas"`
-	ConsumerReplicas    int  `yaml:"consumer_replicas"`
-	ExposeHAProxy       bool `yaml:"expose_haproxy"`
+	ManagerReplicas     int `yaml:"manager_replicas"`
+	AgentCenterReplicas int `yaml:"agentcenter_replicas"`
+	ConsumerReplicas    int `yaml:"consumer_replicas"`
 }
 
 type Node struct {
@@ -346,11 +345,6 @@ func (c *Config) Validate() error {
 	}
 	if _, err := c.KafkaNode(); err != nil {
 		return err
-	}
-	for _, assignment := range c.RoleAssignments() {
-		if assignment.AgentCenterReplicas > 1 && !c.ControlPlane.ExposeHAProxy {
-			return fmt.Errorf("节点 %s 分配了 %d 个 agentcenter 副本，必须启用 control_plane.expose_haproxy", assignment.Node.Name, assignment.AgentCenterReplicas)
-		}
 	}
 	return nil
 }

@@ -24,10 +24,8 @@ services:
   agentcenter:
     image: {{ .AgentCenterImage }}
     restart: always
-{{- if not .ControlPlane.ExposeHAProxy }}
     ports:
       - "{{ .App.GRPCPort }}:6751"
-{{- end }}
     volumes:
       - {{ .InstallDir }}/current/config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - {{ .InstallDir }}/current/certs:/etc/mxsec-platform/certs:ro
@@ -50,6 +48,7 @@ services:
     restart: always
     volumes:
       - {{ .InstallDir }}/current/config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - {{ .InstallDir }}/current/certs:/etc/mxsec-platform/certs:ro
       - {{ .DataRoot }}/logs/consumer:/var/log/mxsec-platform
     environment:
       TZ: {{ .Timezone }}
@@ -59,21 +58,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-control
-{{- end }}
-
-{{- if .ControlPlane.ExposeHAProxy }}
-  haproxy-agentcenter:
-    image: {{ .HAProxyImage }}
-    restart: always
-    depends_on:
-      agentcenter:
-        condition: service_started
-    ports:
-      - "{{ .App.GRPCPort }}:6751"
-    volumes:
-      - {{ .InstallDir }}/current/config/haproxy-agentcenter.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks:
       - mxsec-control
 {{- end }}
