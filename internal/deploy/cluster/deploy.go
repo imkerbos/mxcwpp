@@ -152,7 +152,7 @@ func filterNodes(nodes []deployedNode, fn func(deployedNode) bool) []deployedNod
 
 func copyBundle(node Node, configDir, localDir, remoteDir string) error {
 	target := fmt.Sprintf("%s:%s/", sshTarget(node), remoteDir)
-	args := sshBaseArgs(node, configDir)
+	args := scpBaseArgs(node, configDir)
 	args = append(args, "-r", filepath.Clean(localDir)+string(filepath.Separator)+".", target)
 	cmd := exec.Command("scp", args...)
 	output, err := cmd.CombinedOutput()
@@ -175,6 +175,18 @@ func runRemote(node Node, configDir, remoteCmd string) error {
 
 func sshBaseArgs(node Node, configDir string) []string {
 	args := []string{"-p", fmt.Sprintf("%d", node.SSHPort), "-o", "StrictHostKeyChecking=accept-new"}
+	if node.SSHKeyPath != "" {
+		resolved, err := expandPath(node.SSHKeyPath, configDir)
+		if err == nil && resolved != "" {
+			args = append(args, "-i", resolved)
+		}
+	}
+	return args
+}
+
+// scpBaseArgs 与 sshBaseArgs 类似，但 scp 用大写 -P 指定端口。
+func scpBaseArgs(node Node, configDir string) []string {
+	args := []string{"-P", fmt.Sprintf("%d", node.SSHPort), "-o", "StrictHostKeyChecking=accept-new"}
 	if node.SSHKeyPath != "" {
 		resolved, err := expandPath(node.SSHKeyPath, configDir)
 		if err == nil && resolved != "" {
