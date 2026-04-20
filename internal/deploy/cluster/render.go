@@ -187,9 +187,21 @@ func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
 		return nil, err
 	}
 
-	certs, err := GenerateCertificates(cfg)
+	// 优先复用 deploy/certs/ 下的已有证书，避免每次 render 都重新生成
+	certsDir := filepath.Join(opts.RepoRoot, "deploy", "certs")
+	certs, err := LoadCertificatesFromDir(certsDir)
 	if err != nil {
 		return nil, err
+	}
+	if certs == nil {
+		// 首次生成
+		certs, err = GenerateCertificates(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if err := SaveCertificatesToDir(certsDir, certs); err != nil {
+			return nil, fmt.Errorf("保存证书到 deploy/certs 失败: %w", err)
+		}
 	}
 
 	result := &RenderResult{ClusterDir: clusterDir}

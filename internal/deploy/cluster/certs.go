@@ -9,8 +9,68 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
+
+// LoadCertificatesFromDir 从目录加载已有证书。
+// 如果目录不存在或证书不完整，返回 nil, nil。
+func LoadCertificatesFromDir(dir string) (*CertificateBundle, error) {
+	required := []string{"ca.crt", "ca.key", "server.crt", "server.key", "agent.crt", "agent.key", "client.crt", "client.key"}
+	for _, name := range required {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return nil, nil // 不完整，返回 nil 表示需要重新生成
+		}
+	}
+	bundle := &CertificateBundle{}
+	files := map[string]*[]byte{
+		"ca.crt":     &bundle.CACert,
+		"ca.key":     &bundle.CAKey,
+		"server.crt": &bundle.ServerCert,
+		"server.key": &bundle.ServerKey,
+		"agent.crt":  &bundle.AgentCert,
+		"agent.key":  &bundle.AgentKey,
+		"client.crt": &bundle.ClientCert,
+		"client.key": &bundle.ClientKey,
+	}
+	for name, dst := range files {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("读取证书文件 %s 失败: %w", name, err)
+		}
+		*dst = data
+	}
+	return bundle, nil
+}
+
+// SaveCertificatesToDir 将证书写入目录，供后续复用。
+func SaveCertificatesToDir(dir string, bundle *CertificateBundle) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	files := map[string][]byte{
+		"ca.crt":     bundle.CACert,
+		"ca.key":     bundle.CAKey,
+		"server.crt": bundle.ServerCert,
+		"server.key": bundle.ServerKey,
+		"agent.crt":  bundle.AgentCert,
+		"agent.key":  bundle.AgentKey,
+		"client.crt": bundle.ClientCert,
+		"client.key": bundle.ClientKey,
+	}
+	for name, content := range files {
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(name, ".key") {
+			mode = 0o600
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), content, mode); err != nil {
+			return fmt.Errorf("写入证书 %s 失败: %w", name, err)
+		}
+	}
+	return nil
+}
 
 type CertificateBundle struct {
 	CACert     []byte
