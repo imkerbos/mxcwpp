@@ -12,6 +12,7 @@ services:
       - {{ .DataRoot }}/plugins:/opt/mxsec-platform/plugins
       - {{ .DataRoot }}/uploads:/opt/mxsec-platform/uploads
       - {{ .DataRoot }}/data:/opt/mxsec-platform/data
+      - {{ .DataRoot }}/clamav:/var/lib/clamav
     environment:
       TZ: {{ .Timezone }}
     healthcheck:

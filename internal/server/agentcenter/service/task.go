@@ -955,7 +955,7 @@ func (s *TaskService) DispatchPendingFIMTasks(transferService interface {
 		return nil
 	}
 
-	s.logger.Info("发现待执行 FIM 任务", zap.Int("count", len(tasks)))
+	s.logger.Debug("发现待执行 FIM 任务", zap.Int("count", len(tasks)))
 
 	for _, task := range tasks {
 		if err := s.dispatchFIMTask(&task, transferService); err != nil {
@@ -996,7 +996,7 @@ func (s *TaskService) dispatchFIMTask(task *model.FIMTask, transferService inter
 	}
 
 	if len(hosts) == 0 {
-		s.logger.Warn("没有匹配的在线主机，FIM 任务保持 pending",
+		s.logger.Debug("没有匹配的在线主机，FIM 任务保持 pending",
 			zap.String("task_id", task.TaskID),
 		)
 		return nil

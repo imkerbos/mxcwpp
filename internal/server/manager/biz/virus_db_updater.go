@@ -44,10 +44,13 @@ type VirusDBUpdater struct {
 func NewVirusDBUpdater(db *gorm.DB, redisClient *redis.Client, logger *zap.Logger, dataDir, uploadDir, pluginsBaseURL string) *VirusDBUpdater {
 	absDataDir, _ := filepath.Abs(dataDir)
 	absUploadDir, _ := filepath.Abs(uploadDir)
-	dbDir := filepath.Join(absDataDir, "clamav-db")
+	// freshclam 在 Alpine 下固定写入 /var/lib/clamav，直接使用该目录
+	dbDir := "/var/lib/clamav"
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		logger.Error("创建病毒库目录失败", zap.Error(err))
 	}
+	// 保留 absDataDir 用于 uploads 等其他用途
+	_ = absDataDir
 	return &VirusDBUpdater{
 		db:             db,
 		redisClient:    redisClient,
@@ -155,7 +158,7 @@ func (u *VirusDBUpdater) runOnce(ctx context.Context) {
 		return
 	}
 
-	// 2. 检查是否有病毒库文件（首次下载可能需要较长时间）
+	// 2. 检查是否有病毒库文件
 	patterns := []string{"*.cvd", "*.cld"}
 	var hasDBFiles bool
 	for _, pattern := range patterns {
@@ -166,7 +169,7 @@ func (u *VirusDBUpdater) runOnce(ctx context.Context) {
 		}
 	}
 	if !hasDBFiles {
-		err := fmt.Errorf("freshclam 执行成功但未产生病毒库文件，请检查网络连接或 DNS 解析（database.clamav.net）")
+		err := fmt.Errorf("freshclam 执行成功但 %s 下无 .cvd/.cld 文件", u.dataDir)
 		u.logger.Error("病毒库文件缺失", zap.String("data_dir", u.dataDir), zap.Error(err))
 		u.finishRecord(&record, "", 0, "", startedAt, err)
 		return
@@ -223,22 +226,10 @@ func (u *VirusDBUpdater) runFreshclam(ctx context.Context) error {
 		return fmt.Errorf("freshclam not found in PATH: %w", err)
 	}
 
-	absDataDir, err := filepath.Abs(u.dataDir)
-	if err != nil {
-		return fmt.Errorf("resolve data dir: %w", err)
-	}
-
-	// 确保配置文件存在，让 freshclam 使用我们的数据目录
-	confPath := u.ensureFreshclamConf(absDataDir)
-
-	args := []string{
-		"--config-file", confPath,
-		"--datadir", absDataDir,
-		"--foreground",
-	}
+	// 直接使用 Alpine 默认配置，数据写入 /var/lib/clamav
+	args := []string{"--foreground"}
 
 	cmd := exec.CommandContext(ctx, freshclamBin, args...)
-	cmd.Dir = absDataDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		u.logger.Warn("freshclam 输出", zap.String("output", string(output)))
@@ -247,22 +238,6 @@ func (u *VirusDBUpdater) runFreshclam(ctx context.Context) error {
 
 	u.logger.Info("freshclam 更新成功", zap.String("output", string(output)))
 	return nil
-}
-
-// ensureFreshclamConf 确保 freshclam 配置文件存在
-func (u *VirusDBUpdater) ensureFreshclamConf(absDataDir string) string {
-	confPath := filepath.Join(absDataDir, "freshclam.conf")
-	if _, err := os.Stat(confPath); err == nil {
-		return confPath
-	}
-
-	conf := fmt.Sprintf("DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nConnectTimeout 30\nReceiveTimeout 300\n", absDataDir)
-	if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
-		u.logger.Warn("生成 freshclam.conf 失败，使用默认配置", zap.Error(err))
-		return "/etc/clamav/freshclam.conf"
-	}
-	u.logger.Info("生成 freshclam 配置", zap.String("path", confPath))
-	return confPath
 }
 
 // packageVirusDB 将病毒库文件打包为 tar.gz
