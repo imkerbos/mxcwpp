@@ -259,7 +259,7 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	// 设置环境变量支持
-	v.SetEnvPrefix("BLS_SERVER")
+	v.SetEnvPrefix("MXSEC_SERVER")
 	v.AutomaticEnv()
 
 	// 读取配置文件

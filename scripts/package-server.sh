@@ -12,11 +12,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # 配置
-VERSION="${BLS_VERSION:-1.0.0}"
+VERSION="${MXSEC_VERSION:-1.0.0}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ARCH="${GOARCH:-amd64}"
 OS="${GOOS:-linux}"
-DISTRO="${BLS_DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
+DISTRO="${MXSEC_DISTRO:-}"  # 发行版：centos7, centos8, rocky8, rocky9, debian10, debian11, debian12 等
 
 # 输出目录
 DIST_DIR="dist/server"

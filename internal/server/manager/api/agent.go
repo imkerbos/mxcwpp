@@ -92,7 +92,6 @@ func (h *AgentHandler) InstallScript(c *gin.Context) {
 	// 替换脚本中的占位符
 	// 1. 替换 Agent Server 地址占位符（用于 Agent 连接）
 	scriptContent = strings.ReplaceAll(scriptContent, "AGENT_SERVER_PLACEHOLDER", agentServerHost)
-	scriptContent = strings.ReplaceAll(scriptContent, "${BLS_SERVER_HOST:-localhost:6751}", agentServerHost)
 	scriptContent = strings.ReplaceAll(scriptContent, "${MXSEC_AGENT_SERVER:-AGENT_SERVER_PLACEHOLDER}", agentServerHost)
 
 	// 2. 替换 HTTP Server 地址占位符（用于下载安装包）

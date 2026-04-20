@@ -291,6 +291,10 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment); err != nil {
 			return err
 		}
+		// agentcenter 用独立配置，HTTP 端口避免与 manager 冲突
+		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server-ac.yaml"), cfg.WithACHTTPPort(), assignment); err != nil {
+			return err
+		}
 		if err := writeControlCerts(bundleDir, certs); err != nil {
 			return err
 		}
@@ -329,7 +333,7 @@ func writeServerConfig(path string, cfg *Config, assignment RoleAssignment) erro
 			GRPC:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
 			HTTP:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
 			JWTSecret:   cfg.App.JWTSecret,
-			ManagerAddr: "http://manager:8080",
+			ManagerAddr: fmt.Sprintf("http://localhost:%d", cfg.App.ManagerHTTPPort),
 			InstanceID:  assignment.Node.Name,
 		},
 		Database: databaseDoc{

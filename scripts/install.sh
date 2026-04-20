@@ -31,8 +31,6 @@ NC='\033[0m' # No Color
 # 优先使用环境变量（即使占位符已被后端替换）
 if [ -n "$MXSEC_HTTP_SERVER" ]; then
     SERVER_HOST="$MXSEC_HTTP_SERVER"
-elif [ -n "$BLS_HTTP_SERVER" ]; then
-    SERVER_HOST="$BLS_HTTP_SERVER"
 else
     # 如果环境变量未设置，使用占位符（会被后端替换）
     SERVER_HOST="http://SERVER_HOST_PLACEHOLDER"
@@ -40,8 +38,6 @@ fi
 
 if [ -n "$MXSEC_AGENT_SERVER" ]; then
     AGENT_SERVER_HOST="$MXSEC_AGENT_SERVER"
-elif [ -n "$BLS_SERVER_HOST" ]; then
-    AGENT_SERVER_HOST="$BLS_SERVER_HOST"
 else
     # 如果环境变量未设置，使用占位符（会被后端替换）
     AGENT_SERVER_HOST="AGENT_SERVER_PLACEHOLDER"
@@ -65,9 +61,9 @@ fi
 if [[ "$SERVER_HOST" != http://* ]] && [[ "$SERVER_HOST" != https://* ]]; then
     SERVER_HOST="http://${SERVER_HOST}"
 fi
-BUSINESS_LINE="${MXSEC_BUSINESS_LINE:-${BLS_BUSINESS_LINE:-}}"
-ARCH="${MXSEC_ARCH:-${BLS_ARCH:-$(uname -m)}}"
-OS_TYPE="${MXSEC_OS_TYPE:-${BLS_OS_TYPE:-}}"
+BUSINESS_LINE="${MXSEC_BUSINESS_LINE:-}"
+ARCH="${MXSEC_ARCH:-$(uname -m)}"
+OS_TYPE="${MXSEC_OS_TYPE:-}"
 
 # 检测操作系统类型
 detect_os() {
@@ -251,7 +247,7 @@ configure_business_line() {
         OVERRIDE_FILE="$OVERRIDE_DIR/business-line.conf"
         cat > "$OVERRIDE_FILE" <<EOF
 [Service]
-Environment="BLS_BUSINESS_LINE=${BUSINESS_LINE}"
+Environment="MXSEC_BUSINESS_LINE=${BUSINESS_LINE}"
 EOF
         
         echo -e "${GREEN}Business line configured in ${OVERRIDE_FILE}${NC}"

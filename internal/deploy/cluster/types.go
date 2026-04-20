@@ -80,6 +80,7 @@ type App struct {
 	PrometheusQueryURL string `yaml:"prometheus_query_url"`
 	PrometheusTimeout  string `yaml:"prometheus_timeout"`
 	ManagerHTTPPort    int    `yaml:"manager_http_port"`
+	ACHTTPPort         int    `yaml:"ac_http_port"`
 	GRPCPort           int    `yaml:"grpc_port"`
 	HTTPPort           int    `yaml:"http_port"`
 	HTTPSPort          int    `yaml:"https_port"`
@@ -150,6 +151,14 @@ type RoleAssignment struct {
 	ConsumerReplicas    int
 }
 
+// WithACHTTPPort 返回一个浅拷贝，将 ManagerHTTPPort 替换为 ACHTTPPort，
+// 用于生成 agentcenter 独立的 server.yaml。
+func (c *Config) WithACHTTPPort() *Config {
+	copy := *c
+	copy.App.ManagerHTTPPort = c.App.ACHTTPPort
+	return &copy
+}
+
 func (c *Config) ApplyDefaults() {
 	if c.APIVersion == "" {
 		c.APIVersion = "mxsec.io/v1alpha1"
@@ -193,6 +202,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.App.ManagerHTTPPort == 0 {
 		c.App.ManagerHTTPPort = 8080
+	}
+	if c.App.ACHTTPPort == 0 {
+		c.App.ACHTTPPort = 8081
 	}
 	if c.App.GRPCPort == 0 {
 		c.App.GRPCPort = 6751
