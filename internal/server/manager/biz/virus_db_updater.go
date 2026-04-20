@@ -42,7 +42,9 @@ type VirusDBUpdater struct {
 
 // NewVirusDBUpdater 创建病毒库更新器
 func NewVirusDBUpdater(db *gorm.DB, redisClient *redis.Client, logger *zap.Logger, dataDir, uploadDir, pluginsBaseURL string) *VirusDBUpdater {
-	dbDir := filepath.Join(dataDir, "clamav-db")
+	absDataDir, _ := filepath.Abs(dataDir)
+	absUploadDir, _ := filepath.Abs(uploadDir)
+	dbDir := filepath.Join(absDataDir, "clamav-db")
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		logger.Error("创建病毒库目录失败", zap.Error(err))
 	}
@@ -51,7 +53,7 @@ func NewVirusDBUpdater(db *gorm.DB, redisClient *redis.Client, logger *zap.Logge
 		redisClient:    redisClient,
 		logger:         logger,
 		dataDir:        dbDir,
-		uploadDir:      uploadDir,
+		uploadDir:      absUploadDir,
 		pluginsBaseURL: pluginsBaseURL,
 		triggerCh:      make(chan struct{}, 1),
 	}
