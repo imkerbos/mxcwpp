@@ -33,7 +33,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata curl clamav
+RUN apk add --no-cache ca-certificates tzdata curl clamav && \
+    mkdir -p /var/lib/clamav && \
+    sed -i 's/^DatabaseOwner.*//' /etc/clamav/freshclam.conf 2>/dev/null || true && \
+    echo "DatabaseOwner root" >> /etc/clamav/freshclam.conf
 
 COPY --from=builder /app/manager /usr/bin/manager
 COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/policies
