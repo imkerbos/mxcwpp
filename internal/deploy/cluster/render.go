@@ -285,7 +285,7 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "docker-compose.control.yml.tmpl"), filepath.Join(bundleDir, "compose", "docker-compose.control.yml"), data, 0o644); err != nil {
 			return err
 		}
-		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "nginx.conf.tmpl"), filepath.Join(bundleDir, "config", "nginx.conf"), data, 0o644); err != nil {
+		if err := writeNginxConf(filepath.Join(bundleDir, "config", "nginx.conf"), cfg); err != nil {
 			return err
 		}
 		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment); err != nil {
@@ -481,4 +481,73 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return fmt.Errorf("写入文件失败 %s: %w", dst, err)
 	}
 	return nil
+}
+
+func writeNginxConf(dst string, cfg *Config) error {
+	conf := fmt.Sprintf(`# Manager 后端（host 网络模式，直接连 localhost）
+upstream mxsec-manager {
+    least_conn;
+    server 127.0.0.1:%d;
+    keepalive 32;
+}
+
+server {
+    listen %d;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    client_max_body_size 500M;
+
+    location /health {
+        access_log off;
+        return 200 "ok";
+        add_header Content-Type text/plain;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+
+    location /api {
+        proxy_pass http://mxsec-manager;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /agent {
+        proxy_pass http://mxsec-manager;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(js|css|png|jpg|gif|ico|svg|woff|woff2)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    server_tokens off;
+}
+`, cfg.App.ManagerHTTPPort, cfg.App.HTTPPort)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, []byte(conf), 0o644)
 }
