@@ -212,11 +212,10 @@ func (u *VirusDBUpdater) runFreshclam(ctx context.Context) error {
 	// 确保配置文件存在，让 freshclam 使用我们的数据目录
 	confPath := u.ensureFreshclamConf(absDataDir)
 
-	logPath := filepath.Join(absDataDir, "freshclam.log")
 	args := []string{
 		"--config-file", confPath,
 		"--datadir", absDataDir,
-		"--log", logPath,
+		"--foreground",
 	}
 
 	cmd := exec.CommandContext(ctx, freshclamBin, args...)
@@ -238,8 +237,8 @@ func (u *VirusDBUpdater) ensureFreshclamConf(absDataDir string) string {
 		return confPath
 	}
 
-	// 生成最小配置，确保 DatabaseDirectory 指向我们的目录
-	conf := fmt.Sprintf("DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nConnectTimeout 30\nReceiveTimeout 60\n", absDataDir)
+	// 生成最小配置，不写 UpdateLogFile 避免权限问题
+	conf := fmt.Sprintf("DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nForeground yes\nConnectTimeout 30\nReceiveTimeout 60\n", absDataDir)
 	if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
 		u.logger.Warn("生成 freshclam.conf 失败，使用默认配置", zap.Error(err))
 		return "/etc/clamav/freshclam.conf"
