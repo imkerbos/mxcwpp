@@ -285,7 +285,7 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "docker-compose.control.yml.tmpl"), filepath.Join(bundleDir, "compose", "docker-compose.control.yml"), data, 0o644); err != nil {
 			return err
 		}
-		if err := copyFile(filepath.Join(repoRoot, "deploy", "config", "nginx.conf"), filepath.Join(bundleDir, "config", "nginx.conf"), 0o644); err != nil {
+		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "nginx.conf.tmpl"), filepath.Join(bundleDir, "config", "nginx.conf"), data, 0o644); err != nil {
 			return err
 		}
 		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment); err != nil {
