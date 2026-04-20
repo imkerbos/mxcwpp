@@ -36,6 +36,9 @@ func PreflightCluster(cfg *Config, opts PreflightOptions) error {
 
 func remotePreflightCommand(node Node) string {
 	mkdirCmd := fmt.Sprintf("mkdir -p %s %s", shQuote(node.InstallDir), shQuote(node.DataRoot))
+	if node.SSHUser != "root" {
+		mkdirCmd += fmt.Sprintf(" && chown -R %s:%s %s %s", shQuote(node.SSHUser), shQuote(node.SSHUser), shQuote(node.InstallDir), shQuote(node.DataRoot))
+	}
 	parts := []string{
 		"set -e",
 		"test -f /etc/os-release",

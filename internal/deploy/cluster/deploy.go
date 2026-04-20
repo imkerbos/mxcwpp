@@ -71,7 +71,12 @@ func DeployCluster(cfg *Config, render *RenderResult, opts DeployOptions) error 
 }
 
 func prepareRemoteNode(cfg *Config, node deployedNode, opts DeployOptions) error {
-	if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, fmt.Sprintf("mkdir -p %s", shQuote(node.RemoteRelease)))); err != nil {
+	// 创建 release 目录并确保 SSH 用户有写入权限（scp 不能用 sudo）
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", shQuote(node.RemoteRelease))
+	if node.Node.SSHUser != "root" {
+		mkdirCmd += fmt.Sprintf(" && chown -R %s:%s %s", shQuote(node.Node.SSHUser), shQuote(node.Node.SSHUser), shQuote(node.Node.InstallDir))
+	}
+	if err := runRemote(node.Node, opts.ConfigDir, sudoWrap(node.Node, mkdirCmd)); err != nil {
 		return fmt.Errorf("创建远端目录失败(%s): %w", node.Node.Name, err)
 	}
 	if err := copyBundle(node.Node, opts.ConfigDir, node.BundleDir, node.RemoteRelease); err != nil {
