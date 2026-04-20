@@ -5,17 +5,16 @@ services:
     image: {{ .KafkaImage }}
     container_name: mxsec-kafka-1
     restart: always
-    ports:
-      - "{{ index .KafkaPorts 0 }}:9092"
+    network_mode: host
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:{{ index .KafkaPorts 0 }},CONTROLLER://0.0.0.0:19093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://{{ .KafkaHost }}:{{ index .KafkaPorts 0 }}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:19093,2@localhost:29093,3@localhost:39093
       CLUSTER_ID: {{ .KafkaClusterID }}
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 6
@@ -31,29 +30,26 @@ services:
     volumes:
       - {{ .DataRoot }}/kafka-1:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:{{ index .KafkaPorts 0 }} > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-kafka
 
   kafka-2:
     image: {{ .KafkaImage }}
     container_name: mxsec-kafka-2
     restart: always
-    ports:
-      - "{{ index .KafkaPorts 1 }}:9092"
+    network_mode: host
     environment:
       KAFKA_NODE_ID: 2
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:{{ index .KafkaPorts 1 }},CONTROLLER://0.0.0.0:29093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://{{ .KafkaHost }}:{{ index .KafkaPorts 1 }}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:19093,2@localhost:29093,3@localhost:39093
       CLUSTER_ID: {{ .KafkaClusterID }}
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 6
@@ -69,29 +65,26 @@ services:
     volumes:
       - {{ .DataRoot }}/kafka-2:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:{{ index .KafkaPorts 1 }} > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-kafka
 
   kafka-3:
     image: {{ .KafkaImage }}
     container_name: mxsec-kafka-3
     restart: always
-    ports:
-      - "{{ index .KafkaPorts 2 }}:9092"
+    network_mode: host
     environment:
       KAFKA_NODE_ID: 3
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:{{ index .KafkaPorts 2 }},CONTROLLER://0.0.0.0:39093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://{{ .KafkaHost }}:{{ index .KafkaPorts 2 }}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:19093,2@localhost:29093,3@localhost:39093
       CLUSTER_ID: {{ .KafkaClusterID }}
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 6
@@ -107,14 +100,8 @@ services:
     volumes:
       - {{ .DataRoot }}/kafka-3:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:{{ index .KafkaPorts 2 }} > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-kafka
-
-networks:
-  mxsec-kafka:
-    driver: bridge

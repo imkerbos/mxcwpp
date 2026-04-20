@@ -5,80 +5,69 @@ services:
     image: {{ .MySQLImage }}
     container_name: mxsec-mysql
     restart: always
+    network_mode: host
     environment:
       MYSQL_ROOT_PASSWORD: "{{ .Config.Infrastructure.MySQL.RootPassword }}"
       MYSQL_DATABASE: "{{ .Config.Infrastructure.MySQL.Database }}"
       MYSQL_USER: "{{ .Config.Infrastructure.MySQL.User }}"
       MYSQL_PASSWORD: "{{ .Config.Infrastructure.MySQL.Password }}"
+      MYSQL_TCP_PORT: "{{ .MySQLPort }}"
       TZ: "{{ .Timezone }}"
-    ports:
-      - "{{ .MySQLPort }}:3306"
     volumes:
       - {{ .DataRoot }}/mysql:/var/lib/mysql
       - {{ .InstallDir }}/current/deploy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - {{ .InstallDir }}/current/config/mysql.cnf:/etc/mysql/conf.d/custom.cnf:ro
       - {{ .DataRoot }}/logs/mysql:/var/log/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p{{ .Config.Infrastructure.MySQL.RootPassword }}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "{{ .MySQLPort }}", "-u", "root", "-p{{ .Config.Infrastructure.MySQL.RootPassword }}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    networks:
-      - mxsec-storage
 
   redis:
     image: {{ .RedisImage }}
     container_name: mxsec-redis
     restart: always
+    network_mode: host
     command: >
       sh -c '
         if [ -n "$$REDIS_PASSWORD" ]; then
-          redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+          redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD" --port {{ .RedisPort }}
         else
-          redis-server --appendonly yes
+          redis-server --appendonly yes --port {{ .RedisPort }}
         fi
       '
     environment:
       REDIS_PASSWORD: "{{ .Config.Infrastructure.Redis.Password }}"
-    ports:
-      - "{{ .RedisPort }}:6379"
     volumes:
       - {{ .DataRoot }}/redis:/data
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi"]
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -p {{ .RedisPort }} -a \"$$REDIS_PASSWORD\" ping | grep -q PONG; else redis-cli -p {{ .RedisPort }} ping | grep -q PONG; fi"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks:
-      - mxsec-storage
 
   clickhouse:
     image: {{ .ClickHouseImage }}
     container_name: mxsec-clickhouse
     restart: always
-    ports:
-      - "{{ .ClickHouseHTTP }}:8123"
-      - "{{ .ClickHouseTCP }}:9000"
+    network_mode: host
     environment:
       CLICKHOUSE_DB: "{{ .Config.Infrastructure.ClickHouse.Database }}"
       CLICKHOUSE_USER: "{{ .Config.Infrastructure.ClickHouse.User }}"
       CLICKHOUSE_PASSWORD: "{{ .Config.Infrastructure.ClickHouse.Password }}"
+      CLICKHOUSE_HTTP_PORT: "{{ .ClickHouseHTTP }}"
+      CLICKHOUSE_TCP_PORT: "{{ .ClickHouseTCP }}"
       TZ: "{{ .Timezone }}"
     volumes:
       - {{ .DataRoot }}/clickhouse:/var/lib/clickhouse
       - {{ .InstallDir }}/current/deploy/init-clickhouse.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - {{ .InstallDir }}/current/config/clickhouse.xml:/etc/clickhouse-server/config.d/custom.xml:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:{{ .ClickHouseHTTP }}/ping || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
-    networks:
-      - mxsec-storage
-
-networks:
-  mxsec-storage:
-    driver: bridge

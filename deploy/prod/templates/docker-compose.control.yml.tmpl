@@ -4,6 +4,7 @@ services:
   manager:
     image: {{ .ManagerImage }}
     restart: always
+    network_mode: host
     volumes:
       - {{ .InstallDir }}/current/config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - {{ .InstallDir }}/current/certs:/etc/mxsec-platform/certs:ro
@@ -18,14 +19,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    networks:
-      - mxsec-control
 
   agentcenter:
     image: {{ .AgentCenterImage }}
     restart: always
-    ports:
-      - "{{ .App.GRPCPort }}:6751"
+    network_mode: host
     volumes:
       - {{ .InstallDir }}/current/config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - {{ .InstallDir }}/current/certs:/etc/mxsec-platform/certs:ro
@@ -39,13 +37,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-control
 
 {{- if gt .Assignment.ConsumerReplicas 0 }}
   consumer:
     image: {{ .ConsumerImage }}
     restart: always
+    network_mode: host
     volumes:
       - {{ .InstallDir }}/current/config/server.yaml:/etc/mxsec-platform/server.yaml:ro
       - {{ .InstallDir }}/current/certs:/etc/mxsec-platform/certs:ro
@@ -58,18 +55,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks:
-      - mxsec-control
 {{- end }}
 
   ui:
     image: {{ .UIImage }}
     restart: always
+    network_mode: host
     depends_on:
       manager:
         condition: service_healthy
-    ports:
-      - "{{ .App.HTTPPort }}:80"
     volumes:
       - {{ .InstallDir }}/current/config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - {{ .DataRoot }}/logs/nginx:/var/log/nginx
@@ -80,9 +74,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - mxsec-control
-
-networks:
-  mxsec-control:
-    driver: bridge

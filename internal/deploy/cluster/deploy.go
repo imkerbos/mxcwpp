@@ -118,27 +118,17 @@ func prepareRemoteNode(cfg *Config, node deployedNode, opts DeployOptions) error
 
 func remoteUpKafka(node deployedNode) string {
 	compose := filepath.ToSlash(filepath.Join(node.RemoteCurrent, "compose", "docker-compose.kafka.yml"))
-	return sudoWrap(node.Node, fmt.Sprintf("docker compose -f %s up -d", shQuote(compose)))
+	return sudoWrap(node.Node, fmt.Sprintf("docker compose -f %s up -d --remove-orphans", shQuote(compose)))
 }
 
 func remoteUpStorage(node deployedNode) string {
 	compose := filepath.ToSlash(filepath.Join(node.RemoteCurrent, "compose", "docker-compose.storage.yml"))
-	return sudoWrap(node.Node, fmt.Sprintf("docker compose -f %s up -d", shQuote(compose)))
+	return sudoWrap(node.Node, fmt.Sprintf("docker compose -f %s up -d --remove-orphans", shQuote(compose)))
 }
 
 func remoteUpControl(node deployedNode) string {
 	compose := filepath.ToSlash(filepath.Join(node.RemoteCurrent, "compose", "docker-compose.control.yml"))
-	parts := []string{fmt.Sprintf("docker compose -f %s up -d", shQuote(compose))}
-	if node.Assignment.ManagerReplicas > 0 {
-		parts = append(parts, fmt.Sprintf("--scale manager=%d", node.Assignment.ManagerReplicas))
-	}
-	if node.Assignment.AgentCenterReplicas > 0 {
-		parts = append(parts, fmt.Sprintf("--scale agentcenter=%d", node.Assignment.AgentCenterReplicas))
-	}
-	if node.Assignment.ConsumerReplicas > 0 {
-		parts = append(parts, fmt.Sprintf("--scale consumer=%d", node.Assignment.ConsumerReplicas))
-	}
-	return sudoWrap(node.Node, strings.Join(parts, " "))
+	return sudoWrap(node.Node, fmt.Sprintf("docker compose -f %s up -d --remove-orphans", shQuote(compose)))
 }
 
 func remoteHealthCheck(cfg *Config, node deployedNode) string {
