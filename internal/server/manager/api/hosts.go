@@ -79,10 +79,13 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 		isContainer := isContainerStr == "true"
 		query = query.Where("is_container = ?", isContainer)
 	}
-	// 搜索功能：支持按主机名、host_id 搜索
+	// 搜索功能：支持按主机名、host_id、IP 地址搜索
 	if search != "" {
 		searchPattern := "%" + search + "%"
-		query = query.Where("hostname LIKE ? OR host_id LIKE ?", searchPattern, searchPattern)
+		query = query.Where(
+			"hostname LIKE ? OR host_id LIKE ? OR CAST(ipv4 AS CHAR) LIKE ? OR CAST(public_ipv4 AS CHAR) LIKE ?",
+			searchPattern, searchPattern, searchPattern, searchPattern,
+		)
 	}
 
 	// 计算总数

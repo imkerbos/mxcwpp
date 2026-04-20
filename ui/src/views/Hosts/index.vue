@@ -192,7 +192,7 @@
         </a-select>
         <a-input
           v-model:value="filters.search"
-          placeholder="请输入主机名或ID搜索"
+          placeholder="搜索主机名、ID 或 IP 地址"
           style="width: 300px"
           allow-clear
           @press-enter="handleSearch"
