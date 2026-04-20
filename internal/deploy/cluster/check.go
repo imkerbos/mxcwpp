@@ -35,12 +35,13 @@ func PreflightCluster(cfg *Config, opts PreflightOptions) error {
 }
 
 func remotePreflightCommand(node Node) string {
+	mkdirCmd := fmt.Sprintf("mkdir -p %s %s", shQuote(node.InstallDir), shQuote(node.DataRoot))
 	parts := []string{
 		"set -e",
 		"test -f /etc/os-release",
 		`. /etc/os-release; case "$ID" in ubuntu|debian|rocky|rhel|centos|almalinux|ol) ;; *) echo "unsupported_os=$ID" >&2; exit 21 ;; esac`,
 		"command -v bash >/dev/null 2>&1",
-		fmt.Sprintf("mkdir -p %s %s", shQuote(node.InstallDir), shQuote(node.DataRoot)),
+		sudoWrap(node, mkdirCmd),
 		fmt.Sprintf("echo preflight-ok node=%s", shQuote(node.Name)),
 	}
 	if node.SSHUser != "root" {
