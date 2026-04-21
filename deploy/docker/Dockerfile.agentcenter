@@ -39,6 +39,8 @@ COPY --from=builder /app/agentcenter /usr/bin/agentcenter
 
 RUN mkdir -p /etc/mxsec-platform/certs /var/log/mxsec-platform /opt/mxsec-platform/plugins
 
+WORKDIR /opt/mxsec-platform
+
 EXPOSE 6751
 
 ENTRYPOINT ["/usr/bin/agentcenter"]
