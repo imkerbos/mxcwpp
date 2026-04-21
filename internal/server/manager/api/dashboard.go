@@ -195,9 +195,9 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	} else {
 		stats["vulnHostPercent"] = 0.0
 	}
-	// 运行时安全告警：来自 CEL 规则引擎的告警（type = 'detection_rule'）
+	// 运行时安全告警：来自 CEL 规则引擎的告警（category = 'detection_rule'）
 	var runtimeAlertHostCount int64
-	h.db.Model(&model.Alert{}).Where("status = ? AND alert_type = ?", model.AlertStatusActive, "detection_rule").Distinct("host_id").Count(&runtimeAlertHostCount)
+	h.db.Model(&model.Alert{}).Where("status = ? AND category = ?", model.AlertStatusActive, "detection_rule").Distinct("host_id").Count(&runtimeAlertHostCount)
 	if totalHosts > 0 {
 		stats["runtimeAlertPercent"] = math.Round(float64(runtimeAlertHostCount)/float64(totalHosts)*1000) / 10
 	} else {
@@ -205,7 +205,7 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	}
 	// 病毒主机百分比：扫描结果中有未处理威胁的主机
 	var virusHostCount int64
-	h.db.Model(&model.AntivirusScanResult{}).Where("status != ?", "cleaned").Distinct("host_id").Count(&virusHostCount)
+	h.db.Model(&model.AntivirusScanResult{}).Where("action = ?", "detected").Distinct("host_id").Count(&virusHostCount)
 	if totalHosts > 0 {
 		stats["virusHostPercent"] = math.Round(float64(virusHostCount)/float64(totalHosts)*1000) / 10
 	} else {

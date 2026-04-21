@@ -401,6 +401,7 @@ onUnmounted(() => {
   text-align: center;
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
+  height: 100%;
 }
 
 .stat-card-item:hover {

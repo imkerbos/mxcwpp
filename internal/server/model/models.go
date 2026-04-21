@@ -198,5 +198,6 @@ var (
 		&SecurityDBSyncRecord{},
 		&GeneratedReport{},
 		&MigrationJob{},
+		&ComponentPushHost{},
 	}
 )

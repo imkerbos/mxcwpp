@@ -300,11 +300,11 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		if err := writeNginxConf(filepath.Join(bundleDir, "config", "nginx.conf"), cfg); err != nil {
 			return err
 		}
-		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment); err != nil {
+		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment, cfg.App.ManagerHTTPPort); err != nil {
 			return err
 		}
 		// agentcenter 用独立配置，HTTP 端口避免与 manager 冲突
-		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server-ac.yaml"), cfg.WithACHTTPPort(), assignment); err != nil {
+		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server-ac.yaml"), cfg.WithACHTTPPort(), assignment, cfg.App.ManagerHTTPPort); err != nil {
 			return err
 		}
 		if err := writeControlCerts(bundleDir, certs); err != nil {
@@ -339,13 +339,13 @@ func renderTemplateFile(tmplPath, outputPath string, data any, mode os.FileMode)
 	return nil
 }
 
-func writeServerConfig(path string, cfg *Config, assignment RoleAssignment) error {
+func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, managerHTTPPort int) error {
 	doc := serverConfigDoc{
 		Server: serverDoc{
 			GRPC:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
 			HTTP:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
 			JWTSecret:   cfg.App.JWTSecret,
-			ManagerAddr: fmt.Sprintf("http://localhost:%d", cfg.App.ManagerHTTPPort),
+			ManagerAddr: fmt.Sprintf("http://localhost:%d", managerHTTPPort),
 			InstanceID:  assignment.Node.Name,
 		},
 		Database: databaseDoc{

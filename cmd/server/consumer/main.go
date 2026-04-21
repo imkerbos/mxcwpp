@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -101,10 +102,21 @@ func main() {
 		logger.Info("Consumer Redis 已连接", zap.String("addr", cfg.Redis.Addr))
 	}
 
-	// 6. 初始化 DLQ 生产者（复用 Kafka 生产者）
-	dlqProducer, err := kafka.NewAsyncProducer(cfg.Kafka, logger)
-	if err != nil {
-		logger.Fatal("初始化 DLQ 生产者失败", zap.Error(err))
+	// 6. 初始化 DLQ 生产者（复用 Kafka 生产者，带重试）
+	var dlqProducer *kafka.AsyncProducer
+	for i := 0; i < 10; i++ {
+		dlqProducer, err = kafka.NewAsyncProducer(cfg.Kafka, logger)
+		if err == nil {
+			break
+		}
+		logger.Warn("初始化 DLQ 生产者失败，稍后重试",
+			zap.Int("attempt", i+1),
+			zap.Error(err),
+		)
+		time.Sleep(5 * time.Second)
+	}
+	if dlqProducer == nil {
+		logger.Fatal("初始化 DLQ 生产者失败，已重试 10 次", zap.Error(err))
 	}
 	defer dlqProducer.Close()
 
