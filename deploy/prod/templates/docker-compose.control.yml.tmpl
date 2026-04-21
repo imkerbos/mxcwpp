@@ -32,6 +32,7 @@ services:
       - {{ .DataRoot }}/logs/agentcenter:/var/log/mxsec-platform
       - {{ .DataRoot }}/plugins:/opt/mxsec-platform/plugins
       - {{ .DataRoot }}/data:/opt/mxsec-platform/data:ro
+      - {{ .DataRoot }}/uploads:/opt/mxsec-platform/uploads:ro
     environment:
       TZ: {{ .Timezone }}
     healthcheck:
