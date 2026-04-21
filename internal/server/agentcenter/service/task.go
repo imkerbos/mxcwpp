@@ -831,7 +831,7 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			DataType:   8002,       // 基线修复任务
 			ObjectName: "baseline", // 插件名称
 			Data:       string(taskDataJSON),
-			Token:      fixTask.TaskID, // 使用 fix_task_id 作为 token
+			Token:      fmt.Sprintf("%s-%s", fixTask.TaskID, host.HostID), // 与 taskData["task_id"] 保持一致
 		}
 
 		// 构建 Command

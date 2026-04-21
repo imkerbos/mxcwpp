@@ -1467,20 +1467,8 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 		pluginType = model.PluginType(componentName)
 	}
 
-	// 构建下载 URL
-	// 如果配置了 plugins.base_url，使用配置的值；否则使用相对路径
-	var downloadURL string
-	if h.cfg != nil && h.cfg.Plugins.BaseURL != "" {
-		// 使用配置的基础URL（适用于生产环境）
-		downloadURL = fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.Plugins.BaseURL, "/"), componentName)
-	} else {
-		// 使用相对路径（仅限开发环境或内部网络）
-		downloadURL = fmt.Sprintf("/api/v1/plugins/download/%s", componentName)
-		h.logger.Warn("plugins.base_url 未配置，使用相对路径（仅适用于 Agent 和 Manager 在同一网络的场景）",
-			zap.String("download_url", downloadURL),
-			zap.String("hint", "建议在 server.yaml 中配置 plugins.base_url 为 Manager 的完整URL"),
-		)
-	}
+	// 构建下载 URL（始终使用相对路径，由 AC 端根据 backend_url 动态拼接完整地址）
+	downloadURL := fmt.Sprintf("/api/v1/plugins/download/%s", componentName)
 
 	// 对 SHA256 进行签名（如果配置了签名器）
 	var pluginSignature string

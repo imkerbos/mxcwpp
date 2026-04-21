@@ -374,11 +374,8 @@ func (u *VirusDBUpdater) syncPluginConfig(version, sha256Hash string) error {
 		return fmt.Errorf("query plugin_config: %w", err)
 	}
 
-	// 构造下载 URL
+	// 构造下载 URL（始终使用相对路径，由 AC 端根据 backend_url 动态拼接）
 	downloadURL := "/api/v1/plugins/download/" + virusDBComponentName
-	if u.pluginsBaseURL != "" {
-		downloadURL = u.pluginsBaseURL + "/" + virusDBComponentName
-	}
 
 	if err == gorm.ErrRecordNotFound {
 		pc = model.PluginConfig{

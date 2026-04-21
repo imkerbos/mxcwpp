@@ -84,7 +84,7 @@
         :data-source="filteredHosts"
         :loading="loading"
         :row-selection="rowSelection"
-        :pagination="{ pageSize: 20, showSizeChanger: true, showTotal: (total: number) => `共 ${total} 条` }"
+        :pagination="{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total: number) => `共 ${total} 条` }"
         row-key="host_id"
         size="small"
       >

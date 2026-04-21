@@ -228,6 +228,9 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 
 	// 启动心跳超时检测调度器（覆盖网络分区等 gRPC 未正常断开的场景）
 	go scheduler.StartHeartbeatTimeoutScheduler(s.DB, s.Logger)
+
+	// 启动插件推送超时调度器（检查卡住的推送记录并标记超时）
+	go scheduler.StartPushTimeoutScheduler(s.DB, s.Logger)
 }
 
 // Cleanup 清理资源

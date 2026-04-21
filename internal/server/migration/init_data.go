@@ -520,9 +520,7 @@ func findLatestUploadedPluginPackage(db *gorm.DB, pluginName string) (model.Comp
 }
 
 func buildManagedPluginDownloadURL(pluginsCfg *config.PluginsConfig, pluginName string) string {
-	if pluginsCfg != nil && pluginsCfg.BaseURL != "" {
-		return fmt.Sprintf("%s/%s", strings.TrimRight(pluginsCfg.BaseURL, "/"), pluginName)
-	}
+	// 始终使用相对路径，由 AC 端根据 backend_url 动态拼接完整地址
 	return fmt.Sprintf("/api/v1/plugins/download/%s", pluginName)
 }
 

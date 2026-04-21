@@ -229,7 +229,7 @@ func mustAbs(path string) string {
 }
 
 func usage() {
-	fmt.Println(`mxctl - MxSec 生产集群部署工具
+	fmt.Print(`mxctl - MxSec 生产集群部署工具
 
 用法:
   go build -o ./bin/mxctl ./cmd/tools/mxctl
