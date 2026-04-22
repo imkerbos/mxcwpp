@@ -51,6 +51,7 @@ type nodeTemplateData struct {
 	RedisImage       string
 	ClickHouseImage  string
 	KafkaImage       string
+	PrometheusImage  string
 	MySQLPort        int
 	RedisPort        int
 	ClickHouseHTTP   int
@@ -258,6 +259,7 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		RedisImage:       "redis:7-alpine",
 		ClickHouseImage:  "clickhouse/clickhouse-server:24-alpine",
 		KafkaImage:       "confluentinc/cp-kafka:7.5.0",
+		PrometheusImage:  "prom/prometheus:v2.51.0",
 		MySQLPort:        cfg.Infrastructure.MySQL.Port,
 		RedisPort:        cfg.Infrastructure.Redis.Port,
 		ClickHouseHTTP:   cfg.Infrastructure.ClickHouse.HTTPPort,
@@ -285,6 +287,9 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 			return err
 		}
 		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "docker-compose.storage.yml.tmpl"), filepath.Join(bundleDir, "compose", "docker-compose.storage.yml"), data, 0o644); err != nil {
+			return err
+		}
+		if err := writePrometheusConfig(filepath.Join(bundleDir, "config", "prometheus.yml"), cfg); err != nil {
 			return err
 		}
 	}
@@ -396,7 +401,7 @@ func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, mana
 		Metrics: metricsDoc{
 			Prometheus: prometheusDoc{
 				Enabled:  cfg.App.PrometheusEnabled,
-				QueryURL: cfg.App.PrometheusQueryURL,
+				QueryURL: prometheusQueryURL(cfg),
 				Timeout:  cfg.App.PrometheusTimeout,
 			},
 		},
@@ -562,4 +567,36 @@ server {
 		return err
 	}
 	return os.WriteFile(dst, []byte(conf), 0o644)
+}
+
+func writePrometheusConfig(dst string, cfg *Config) error {
+	// 收集所有 control 节点的 IP，Prometheus 从存储节点跨网络抓取
+	var targets []string
+	for _, node := range cfg.Nodes {
+		if node.HasRole(RoleControl) {
+			targets = append(targets, fmt.Sprintf("%s:%d", node.Host, cfg.App.ACHTTPPort))
+		}
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("未找到 control 节点，无法生成 Prometheus 配置")
+	}
+
+	var buf strings.Builder
+	buf.WriteString("global:\n  scrape_interval: 60s\n  evaluation_interval: 60s\n\nscrape_configs:\n  - job_name: mxsec-agentcenter\n    static_configs:\n      - targets:\n")
+	for _, t := range targets {
+		fmt.Fprintf(&buf, "          - %s\n", t)
+	}
+	return os.WriteFile(dst, []byte(buf.String()), 0o644)
+}
+
+// prometheusQueryURL 从存储节点 IP 自动推导 Prometheus 查询地址
+func prometheusQueryURL(cfg *Config) string {
+	if !cfg.App.PrometheusEnabled {
+		return ""
+	}
+	storageNode, err := cfg.StorageNode()
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("http://%s:9090", storageNode.Host)
 }

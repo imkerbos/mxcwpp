@@ -88,11 +88,14 @@ func (r *Registry) LoadFromRedis() {
 	for id, raw := range data {
 		var inst ACInstance
 		if err := json.Unmarshal([]byte(raw), &inst); err == nil {
+			_, exists := r.instances[id]
 			r.instances[id] = &inst
-			r.logger.Info("从 Redis 恢复 AC 实例", zap.String("id", id),
-				zap.String("http_addr", inst.HTTPAddr),
-				zap.Bool("healthy", inst.Healthy),
-			)
+			if !exists {
+				r.logger.Info("从 Redis 恢复 AC 实例", zap.String("id", id),
+					zap.String("http_addr", inst.HTTPAddr),
+					zap.Bool("healthy", inst.Healthy),
+				)
+			}
 		}
 	}
 }

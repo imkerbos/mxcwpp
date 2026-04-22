@@ -155,10 +155,10 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	var writeErr error
 	switch {
 	case msg.DataType == 1000:
-		// 心跳：upsert hosts 表 + 写 Redis agent:ac: 映射
-		// 性能指标由 AgentCenter 直接写入 Prometheus Gauge，不再走 ClickHouse
+		// 心跳：upsert hosts 表 + 写 Redis agent:ac: 映射 + 写 ClickHouse 指标
 		writeErr = r.mysql.WriteHeartbeat(&msg)
 		r.writeAgentACMapping(&msg)
+		_ = r.ch.WriteHostMetrics(&msg)
 	case msg.DataType == 1001:
 		_ = r.ch.WriteHostMetrics(&msg) // 插件心跳，Phase 4 实现
 

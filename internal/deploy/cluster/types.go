@@ -349,8 +349,10 @@ func (c *Config) Validate() error {
 	if c.ControlPlane.AgentCenterReplicas < controlCount {
 		return fmt.Errorf("control_plane.agentcenter_replicas 不能小于 control 节点数 %d", controlCount)
 	}
-	if c.App.PrometheusEnabled && c.App.PrometheusQueryURL == "" {
-		return fmt.Errorf("启用 Prometheus 时必须配置 app.prometheus_query_url")
+	if c.App.PrometheusEnabled {
+		if _, err := c.StorageNode(); err != nil {
+			return fmt.Errorf("启用 Prometheus 时必须有 storage 节点: %w", err)
+		}
 	}
 	if _, err := c.StorageNode(); err != nil {
 		return err

@@ -63,14 +63,14 @@ func processPeriodicAlerts(db *gorm.DB, logger *zap.Logger) {
 	// 获取告警配置
 	alertConfig := getAlertConfig(db, logger)
 
-	logger.Info("定期告警检查开始",
+	logger.Debug("定期告警检查开始",
 		zap.Bool("enabled", alertConfig.EnablePeriodicSummary),
 		zap.Int("repeat_interval_minutes", alertConfig.RepeatAlertInterval),
 	)
 
 	// 如果未启用定期汇总，直接返回
 	if !alertConfig.EnablePeriodicSummary {
-		logger.Info("定期告警汇总未启用，跳过本次检查")
+		logger.Debug("定期告警汇总未启用，跳过本次检查")
 		return
 	}
 
@@ -87,7 +87,7 @@ func processPeriodicAlerts(db *gorm.DB, logger *zap.Logger) {
 	var totalActiveAlerts int64
 	db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Count(&totalActiveAlerts)
 
-	logger.Info("开始处理定期告警",
+	logger.Debug("开始处理定期告警",
 		zap.Int("interval_minutes", intervalMinutes),
 		zap.Time("cutoff_time", cutoffTime),
 		zap.Int64("total_active_alerts", totalActiveAlerts),
@@ -109,12 +109,12 @@ func processPeriodicAlerts(db *gorm.DB, logger *zap.Logger) {
 	}
 
 	if len(validNotifications) == 0 {
-		logger.Info("没有找到配置了告警等级的基线告警通知配置，跳过定期告警")
+		logger.Debug("没有找到配置了告警等级的基线告警通知配置，跳过定期告警")
 		return
 	}
 	baselineNotifications = validNotifications
 
-	logger.Info("找到可用的基线告警通知配置",
+	logger.Debug("找到可用的基线告警通知配置",
 		zap.Int("count", len(baselineNotifications)),
 	)
 
@@ -125,7 +125,7 @@ func processPeriodicAlerts(db *gorm.DB, logger *zap.Logger) {
 		sentTotal += sent
 	}
 
-	logger.Info("定期告警检查完成",
+	logger.Debug("定期告警检查完成",
 		zap.Int("sent_count", sentTotal),
 	)
 }

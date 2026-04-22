@@ -44,8 +44,8 @@ app:
   log_format: json
   heartbeat_interval: 60
   plugins_base_url: https://sec.example.com/api/v1/plugins/download
-  prometheus_enabled: false
-  prometheus_query_url: ""
+  prometheus_enabled: true
+  prometheus_query_url: http://localhost:9090
   prometheus_timeout: 10s
   manager_http_port: 8080
   grpc_port: 6751

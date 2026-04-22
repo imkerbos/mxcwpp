@@ -371,7 +371,7 @@ func (h *DashboardHandler) queryAvgMetrics() (float64, float64) {
 		return 0, 0
 	}
 	if !isFiniteFloat(avgCPU) || !isFiniteFloat(avgMem) {
-		h.logger.Warn("ClickHouse 返回了非有限 Dashboard 指标",
+		h.logger.Debug("ClickHouse 返回了非有限 Dashboard 指标",
 			zap.Float64("avg_cpu", avgCPU),
 			zap.Float64("avg_mem", avgMem))
 		return 0, 0
