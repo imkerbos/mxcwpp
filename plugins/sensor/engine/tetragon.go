@@ -41,7 +41,12 @@ func NewTetragonClient(sockPath string, logger *zap.Logger) *TetragonClient {
 
 // Available 快速检测 Tetragon 是否可用（tetra CLI 或 socket 存在）
 func (c *TetragonClient) Available() bool {
+	// LookPath 依赖 PATH，systemd 环境下可能不包含 /usr/local/bin
 	if _, err := exec.LookPath("tetra"); err == nil {
+		return true
+	}
+	// 直接检查常见安装路径
+	if _, err := os.Stat("/usr/local/bin/tetra"); err == nil {
 		return true
 	}
 	sockAddr := strings.TrimPrefix(c.sockPath, "unix://")

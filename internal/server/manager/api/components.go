@@ -1231,15 +1231,19 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 		}
 	}
 
-	// 查找对应架构的二进制包
+	// 查找对应架构的二进制包（先查指定架构，再 fallback 到 arch=all）
 	var pkg model.ComponentPackage
 	if err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
 		latestVersion.ID, "binary", arch, true).First(&pkg).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": fmt.Sprintf("插件 %s 没有 %s 架构的包", name, arch),
-		})
-		return
+		// fallback: 查 arch=all（如 virus-database 等不分架构的包）
+		if err2 := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
+			latestVersion.ID, "binary", "all", true).First(&pkg).Error; err2 != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    404,
+				"message": fmt.Sprintf("插件 %s 没有 %s 架构的包", name, arch),
+			})
+			return
+		}
 	}
 
 	// 检查文件是否存在
