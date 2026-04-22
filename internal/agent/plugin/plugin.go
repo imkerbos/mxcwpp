@@ -98,7 +98,7 @@ func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.
 		logger.Warn("failed to create task tracker, task recovery disabled", zap.Error(err))
 	}
 
-	return &Manager{
+	mgr := &Manager{
 		cfg:         cfg,
 		logger:      logger,
 		transport:   transportMgr,
@@ -107,6 +107,13 @@ func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.
 		cancel:      cancel,
 		taskTracker: taskTracker,
 	}
+
+	// 启动定时清理过期任务
+	if taskTracker != nil {
+		go mgr.taskCleanupLoop()
+	}
+
+	return mgr
 }
 
 // Startup 启动插件管理模块（创建新的管理器）
@@ -1515,6 +1522,20 @@ func (m *Manager) retryPendingTasks(plugin *Plugin) {
 			plugin.logger.Info("pending task re-dispatched",
 				zap.String("token", task.Token),
 				zap.Int32("data_type", task.DataType))
+		}
+	}
+}
+
+// taskCleanupLoop 定时清理超过 24 小时的僵尸任务
+func (m *Manager) taskCleanupLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.taskTracker.CleanupOldTasks(24 * time.Hour)
 		}
 	}
 }

@@ -222,7 +222,11 @@ func (t *TaskTracker) loadTasks() error {
 		return fmt.Errorf("failed to read task directory: %w", err)
 	}
 
+	now := time.Now()
+	const maxTaskAge = 24 * time.Hour
+
 	loadedCount := 0
+	cleanedCount := 0
 	for _, file := range files {
 		if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
 			continue
@@ -237,27 +241,42 @@ func (t *TaskTracker) loadTasks() error {
 
 		var tracked TrackedTask
 		if err := json.Unmarshal(data, &tracked); err != nil {
-			t.logger.Warn("failed to unmarshal task", zap.String("file", file.Name()), zap.Error(err))
+			t.logger.Warn("failed to unmarshal task, removing", zap.String("file", file.Name()), zap.Error(err))
+			os.Remove(filePath)
 			continue
 		}
 
-		// Load tasks that are not completed
-		// failed 状态的任务直接清理，不再保留重试
+		// Clean up completed/failed task files
 		if tracked.Status == TaskStatusCompleted || tracked.Status == TaskStatusFailed {
-			// Clean up completed/failed task files
 			os.Remove(filePath)
-		} else {
-			t.tasks[tracked.Task.Token] = &tracked
-			loadedCount++
-			t.logger.Info("loaded pending task from disk",
+			cleanedCount++
+			continue
+		}
+
+		// Clean up stale tasks (older than 24h)
+		if now.Sub(tracked.ReceivedAt) > maxTaskAge {
+			t.logger.Warn("removing stale task on load",
 				zap.String("token", tracked.Task.Token),
 				zap.String("plugin", tracked.PluginName),
-				zap.String("status", string(tracked.Status)))
+				zap.Duration("age", now.Sub(tracked.ReceivedAt)))
+			os.Remove(filePath)
+			cleanedCount++
+			continue
 		}
+
+		t.tasks[tracked.Task.Token] = &tracked
+		loadedCount++
+		t.logger.Info("loaded pending task from disk",
+			zap.String("token", tracked.Task.Token),
+			zap.String("plugin", tracked.PluginName),
+			zap.String("status", string(tracked.Status)))
 	}
 
 	if loadedCount > 0 {
 		t.logger.Info("loaded pending tasks from disk", zap.Int("count", loadedCount))
+	}
+	if cleanedCount > 0 {
+		t.logger.Info("cleaned up stale/completed task files", zap.Int("count", cleanedCount))
 	}
 
 	return nil
