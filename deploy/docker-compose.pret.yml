@@ -182,6 +182,8 @@ services:
     image: clickhouse/clickhouse-server:24-alpine
     container_name: mxsec-clickhouse
     restart: always
+    cap_add:
+      - SYS_NICE
     ports:
       - "8123:8123"
       - "9000:9000"
