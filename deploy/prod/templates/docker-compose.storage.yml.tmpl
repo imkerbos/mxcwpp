@@ -54,6 +54,8 @@ services:
     container_name: mxsec-clickhouse
     restart: always
     network_mode: host
+    cap_add:
+      - SYS_NICE
     environment:
       CLICKHOUSE_DB: "{{ .Config.Infrastructure.ClickHouse.Database }}"
       CLICKHOUSE_USER: "{{ .Config.Infrastructure.ClickHouse.User }}"
