@@ -441,7 +441,7 @@ func downloadAndInstallTetragon(version, arch, backendURL string) error {
 	downloaded := false
 	var backendErr error
 	if backendURL != "" {
-		depURL := fmt.Sprintf("%s/api/v1/dependency/download/tetragon?arch=%s", backendURL, arch)
+		depURL := fmt.Sprintf("%s/api/v1/dependency/download/tetragon?arch=%s", strings.TrimRight(backendURL, "/"), arch)
 		_, backendErr = runCommand("curl", "-sfL", depURL, "-o", tmpFile)
 		if backendErr == nil {
 			if info, _ := os.Stat(tmpFile); info != nil && info.Size() > 1024*1024 {
