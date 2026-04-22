@@ -76,6 +76,7 @@ services:
     image: {{ .PrometheusImage }}
     container_name: mxsec-prometheus
     restart: always
+    user: root
     network_mode: host
     volumes:
       - {{ .InstallDir }}/current/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
