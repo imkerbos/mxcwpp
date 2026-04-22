@@ -84,7 +84,7 @@
         :data-source="filteredHosts"
         :loading="loading"
         :row-selection="rowSelection"
-        :pagination="{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total: number) => `共 ${total} 条` }"
+        :pagination="{ current: currentPage, pageSize: currentPageSize, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total: number) => `共 ${total} 条`, onChange: onPageChange, onShowSizeChange: onPageSizeChange }"
         row-key="host_id"
         size="small"
       >
@@ -170,6 +170,8 @@ const summary = ref<InspectionSummary>({
   plugin_outdated_count: 0,
 })
 const selectedRowKeys = ref<string[]>([])
+const currentPage = ref(1)
+const currentPageSize = ref(20)
 const searchText = ref((route.query.search as string) || '')
 const filterStatus = ref<string | undefined>((route.query.status as string) || undefined)
 const filterIssue = ref<string | undefined>((route.query.issue as string) || undefined)
@@ -270,6 +272,15 @@ const pluginStatusText = (status: string) => {
 const formatTime = (time: string | null) => {
   if (!time) return '-'
   return formatDateTime(time)
+}
+
+const onPageChange = (page: number) => {
+  currentPage.value = page
+}
+
+const onPageSizeChange = (_current: number, size: number) => {
+  currentPageSize.value = size
+  currentPage.value = 1
 }
 
 const loadData = async () => {
