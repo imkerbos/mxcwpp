@@ -232,39 +232,52 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 }
 
 // calculateAgentChanges 计算Agent数量变化（较昨日）
+// 较昨日 = 昨天结束时的数量 - 前天结束时的数量，展示昨天一整天的净变化
+// 例：4/22 新增 100 台 → 4/22 显示 0 → 4/23 显示 +100 → 4/24 显示 0
 func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 	now := time.Now()
-	oneDayAgo := now.AddDate(0, 0, -1)
-	twoDaysAgo := now.AddDate(0, 0, -2)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	yesterdayStart := todayStart.AddDate(0, 0, -1)
+	dayBeforeStart := yesterdayStart.AddDate(0, 0, -1)
 
-	var yesterdayOnlineCount int64
+	// 昨天结束时的在线 Agent：昨天结束前已创建，且在昨天有心跳活动
+	var yesterdayEndOnline int64
 	h.db.Model(&model.Host{}).
-		Where("last_heartbeat >= ? AND last_heartbeat < ?", twoDaysAgo, oneDayAgo).
-		Count(&yesterdayOnlineCount)
+		Where("created_at < ? AND last_heartbeat >= ?", todayStart, yesterdayStart).
+		Count(&yesterdayEndOnline)
 
-	var currentOnlineCount int64
-	h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&currentOnlineCount)
-
-	var currentOfflineCount int64
-	h.db.Model(&model.Host{}).Where("status = ?", "offline").Count(&currentOfflineCount)
-
-	var yesterdayTotalCount int64
+	// 昨天结束时的 Agent 总数
+	var yesterdayEndTotal int64
 	h.db.Model(&model.Host{}).
-		Where("created_at <= ?", oneDayAgo).
-		Count(&yesterdayTotalCount)
+		Where("created_at < ?", todayStart).
+		Count(&yesterdayEndTotal)
 
-	var yesterdayOfflineCount int64
-	if yesterdayTotalCount > yesterdayOnlineCount {
-		yesterdayOfflineCount = yesterdayTotalCount - yesterdayOnlineCount
+	// 前天结束时的在线 Agent：前天结束前已创建，且在前天有心跳活动
+	var dayBeforeEndOnline int64
+	h.db.Model(&model.Host{}).
+		Where("created_at < ? AND last_heartbeat >= ?", yesterdayStart, dayBeforeStart).
+		Count(&dayBeforeEndOnline)
+
+	// 前天结束时的 Agent 总数
+	var dayBeforeEndTotal int64
+	h.db.Model(&model.Host{}).
+		Where("created_at < ?", yesterdayStart).
+		Count(&dayBeforeEndTotal)
+
+	// 昨天结束时的离线数
+	yesterdayEndOffline := yesterdayEndTotal - yesterdayEndOnline
+	if yesterdayEndOffline < 0 {
+		yesterdayEndOffline = 0
 	}
 
-	onlineChange := int(currentOnlineCount) - int(yesterdayOnlineCount)
-	offlineChange := int(currentOfflineCount) - int(yesterdayOfflineCount)
-
-	if yesterdayTotalCount == 0 {
-		onlineChange = 0
-		offlineChange = 0
+	// 前天结束时的离线数
+	dayBeforeEndOffline := dayBeforeEndTotal - dayBeforeEndOnline
+	if dayBeforeEndOffline < 0 {
+		dayBeforeEndOffline = 0
 	}
+
+	onlineChange := int(yesterdayEndOnline) - int(dayBeforeEndOnline)
+	offlineChange := int(yesterdayEndOffline) - int(dayBeforeEndOffline)
 
 	return onlineChange, offlineChange
 }
