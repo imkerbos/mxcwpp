@@ -164,6 +164,9 @@
             {{ record.host.hostname }}
           </a>
           <span v-else>{{ record.host_id }}</span>
+          <div v-if="record.host?.ipv4?.length" style="color: #86909C; font-size: 12px;">
+            {{ record.host.ipv4[0] }}
+          </div>
         </template>
         <template v-else-if="column.key === 'event_type'">
           <a-tag color="blue">{{ parseEventType(record.actual) }}</a-tag>

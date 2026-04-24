@@ -103,6 +103,7 @@ type purlInfo struct {
 	Version  string `gorm:"column:version"`
 	HostID   string `gorm:"column:host_id"`
 	Hostname string `gorm:"column:hostname"`
+	IP       string `gorm:"column:ip"`
 }
 
 // GetLatestSyncStatus 查询最近一条 OSV 同步记录
@@ -167,7 +168,7 @@ func (v *VulnScanner) doScanAll() error {
 	// 1. 查询所有有 PURL 的软件包（JOIN hosts 带上 hostname / ip 用于填充 host_vulnerabilities）
 	var packages []purlInfo
 	if err := v.db.Table("software AS s").
-		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
 		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
 		Where("s.purl != '' AND s.purl IS NOT NULL").
 		Scan(&packages).Error; err != nil {
@@ -185,6 +186,7 @@ func (v *VulnScanner) doScanAll() error {
 	purlHosts := make(map[string][]string)   // purl → []hostID
 	purlPkgInfo := make(map[string]purlInfo) // purl → 包信息
 	hostnameMap := make(map[string]string)   // hostID → hostname
+	ipMap := make(map[string]string)         // hostID → ip
 	for _, pkg := range packages {
 		purlHosts[pkg.PURL] = append(purlHosts[pkg.PURL], pkg.HostID)
 		if _, exists := purlPkgInfo[pkg.PURL]; !exists {
@@ -192,6 +194,9 @@ func (v *VulnScanner) doScanAll() error {
 		}
 		if pkg.Hostname != "" {
 			hostnameMap[pkg.HostID] = pkg.Hostname
+		}
+		if pkg.IP != "" {
+			ipMap[pkg.HostID] = pkg.IP
 		}
 	}
 
@@ -212,7 +217,7 @@ func (v *VulnScanner) doScanAll() error {
 		}
 		batch := uniquePURLs[i:end]
 
-		vulnCount, err := v.queryBatch(batch, purlHosts, purlPkgInfo, hostnameMap)
+		vulnCount, err := v.queryBatch(batch, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 		if err != nil {
 			v.logger.Error("OSV.dev 批量查询失败",
 				zap.Int("batch_start", i),
@@ -230,7 +235,7 @@ func (v *VulnScanner) doScanAll() error {
 }
 
 // queryBatch 批量查询 OSV.dev 并写入数据库
-func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, purlPkgInfo map[string]purlInfo, hostnameMap map[string]string) (int, error) {
+func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, purlPkgInfo map[string]purlInfo, hostnameMap map[string]string, ipMap map[string]string) (int, error) {
 	// 构建请求
 	req := osvQueryBatchRequest{
 		Queries: make([]osvQuery, len(purls)),
@@ -319,12 +324,13 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 					VulnID:         vulnRecord.ID,
 					HostID:         hostID,
 					Hostname:       hostnameMap[hostID],
+					IP:             ipMap[hostID],
 					CurrentVersion: pkgInfo.Version,
 					Status:         "unpatched",
 				}
 				v.db.Clauses(clause.OnConflict{
 					Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
-					DoUpdates: clause.AssignmentColumns([]string{"hostname", "current_version"}),
+					DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
 				}).Create(hostVuln)
 			}
 

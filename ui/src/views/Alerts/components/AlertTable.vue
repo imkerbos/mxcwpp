@@ -135,6 +135,9 @@
           <a @click="handleViewHost(record.host_id)">
             {{ record.host?.hostname || record.host_id }}
           </a>
+          <div v-if="record.host?.ipv4?.length" style="color: #86909C; font-size: 12px;">
+            {{ record.host.ipv4[0] }}
+          </div>
         </template>
         <template v-else-if="column.key === 'first_seen_at'">
           {{ formatDateTime(record.first_seen_at) }}

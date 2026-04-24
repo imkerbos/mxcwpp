@@ -25,7 +25,7 @@ export interface Alert {
   host?: {
     host_id: string
     hostname: string
-    ip: string
+    ipv4: string[]
   }
   rule?: {
     rule_id: string

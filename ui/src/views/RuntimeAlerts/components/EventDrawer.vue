@@ -31,7 +31,7 @@
           </a-descriptions-item>
           <a-descriptions-item label="主机">
             <a v-if="alert.host" @click="handleViewHost">
-              {{ alert.host.hostname }} ({{ alert.host.ip }})
+              {{ alert.host.hostname }} ({{ alert.host.ipv4?.[0] || '-' }})
             </a>
             <span v-else>{{ alert.host_id }}</span>
           </a-descriptions-item>
