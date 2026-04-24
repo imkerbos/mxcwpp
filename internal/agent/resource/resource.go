@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -19,6 +20,13 @@ type diskIOSnapshot struct {
 	SectorsWritten uint64
 }
 
+// procCPUSnapshot 记录进程级 CPU 采样（/proc/self/stat）
+type procCPUSnapshot struct {
+	Utime     uint64    // 用户态 jiffies
+	Stime     uint64    // 内核态 jiffies
+	Timestamp time.Time // 采样时间
+}
+
 // Monitor 是资源监控器
 type Monitor struct {
 	logger      *zap.Logger
@@ -26,6 +34,7 @@ type Monitor struct {
 	lastNet     NetStat
 	lastDiskIO  map[string]diskIOSnapshot
 	lastUpdate  time.Time
+	lastProcCPU *procCPUSnapshot // 进程级 CPU 上次采样
 }
 
 // CPUStat 是 CPU 统计信息
@@ -65,14 +74,18 @@ type NetStat struct {
 
 // ResourceMetrics 是资源指标
 type ResourceMetrics struct {
-	CPUUsage      float64 // CPU 使用率（%）
-	MemUsage      float64 // 内存使用率（%）
-	DiskUsage     float64 // 磁盘使用率（%）
-	DiskReadBytes uint64  // 距上次采样的磁盘读取字节数
-	DiskWriteBytes uint64 // 距上次采样的磁盘写入字节数
-	NetBytesSent  uint64  // 网络发送字节数（累计）
-	NetBytesRecv  uint64  // 网络接收字节数（累计）
-	Timestamp     int64   // 时间戳
+	CPUUsage        float64 // CPU 使用率（%）
+	MemUsage        float64 // 内存使用率（%）
+	MemTotalBytes   uint64  // 系统总内存（字节）
+	DiskUsage       float64 // 磁盘使用率（%）
+	DiskReadBytes   uint64  // 距上次采样的磁盘读取字节数
+	DiskWriteBytes  uint64  // 距上次采样的磁盘写入字节数
+	NetBytesSent    uint64  // 网络发送字节数（累计）
+	NetBytesRecv    uint64  // 网络接收字节数（累计）
+	AgentCPUUsage   float64 // Agent 进程 CPU 使用率（%）
+	AgentMemRSS     uint64  // Agent 进程物理内存 RSS（字节）
+	AgentMemPercent float64 // Agent 进程内存占系统内存百分比（%）
+	Timestamp       int64   // 时间戳
 }
 
 // NewMonitor 创建新的资源监控器
@@ -99,11 +112,12 @@ func (m *Monitor) Collect() (*ResourceMetrics, error) {
 	}
 
 	// 采集内存使用率
-	memUsage, err := m.collectMemory()
+	memUsage, memTotalBytes, err := m.collectMemory()
 	if err != nil {
 		m.logger.Warn("failed to collect memory usage", zap.Error(err))
 	} else {
 		metrics.MemUsage = memUsage
+		metrics.MemTotalBytes = memTotalBytes
 	}
 
 	// 采集磁盘使用率
@@ -130,6 +144,25 @@ func (m *Monitor) Collect() (*ResourceMetrics, error) {
 	} else {
 		metrics.NetBytesSent = netBytesSent
 		metrics.NetBytesRecv = netBytesRecv
+	}
+
+	// 采集 Agent 进程级 CPU 使用率
+	agentCPU, err := m.collectProcessCPU()
+	if err != nil {
+		m.logger.Warn("failed to collect agent CPU usage", zap.Error(err))
+	} else {
+		metrics.AgentCPUUsage = agentCPU
+	}
+
+	// 采集 Agent 进程级内存 RSS
+	agentMem, err := m.collectProcessMemory()
+	if err != nil {
+		m.logger.Warn("failed to collect agent memory usage", zap.Error(err))
+	} else {
+		metrics.AgentMemRSS = agentMem
+		if metrics.MemTotalBytes > 0 {
+			metrics.AgentMemPercent = float64(agentMem) / float64(metrics.MemTotalBytes) * 100.0
+		}
 	}
 
 	return metrics, nil
@@ -187,11 +220,11 @@ func (m *Monitor) collectCPU() (float64, error) {
 	return 0, nil
 }
 
-// collectMemory 采集内存使用率
-func (m *Monitor) collectMemory() (float64, error) {
+// collectMemory 采集内存使用率，同时返回总内存字节数
+func (m *Monitor) collectMemory() (usage float64, totalBytes uint64, err error) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer file.Close()
 
@@ -205,8 +238,8 @@ func (m *Monitor) collectMemory() (float64, error) {
 		}
 
 		key := strings.TrimSuffix(fields[0], ":")
-		value, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
 			continue
 		}
 
@@ -221,7 +254,7 @@ func (m *Monitor) collectMemory() (float64, error) {
 	}
 
 	if mem.Total == 0 {
-		return 0, fmt.Errorf("failed to read memory info")
+		return 0, 0, fmt.Errorf("failed to read memory info")
 	}
 
 	if mem.Available > 0 {
@@ -232,7 +265,7 @@ func (m *Monitor) collectMemory() (float64, error) {
 		mem.Usage = 100.0 * float64(mem.Used) / float64(mem.Total)
 	}
 
-	return mem.Usage, nil
+	return mem.Usage, mem.Total * 1024, nil // KB → 字节
 }
 
 // collectDisk 采集磁盘使用率（根分区）
@@ -365,4 +398,87 @@ func (m *Monitor) collectNetwork() (uint64, uint64, error) {
 	m.lastNet.BytesRecv = bytesRecv
 
 	return bytesSent, bytesRecv, nil
+}
+
+// collectProcessCPU 采集当前进程的 CPU 使用率
+// 读取 /proc/self/stat 的 utime+stime（jiffies），两次采样取 delta 计算占比
+func (m *Monitor) collectProcessCPU() (float64, error) {
+	utime, stime, err := readProcSelfCPU()
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+	snap := &procCPUSnapshot{Utime: utime, Stime: stime, Timestamp: now}
+
+	if m.lastProcCPU == nil {
+		m.lastProcCPU = snap
+		return 0, nil
+	}
+
+	elapsed := now.Sub(m.lastProcCPU.Timestamp).Seconds()
+	if elapsed < 0.5 {
+		return 0, nil
+	}
+
+	// delta jiffies → 秒，除以经过的墙钟时间，再除以 CPU 核心数得到百分比
+	totalJiffies := (utime + stime) - (m.lastProcCPU.Utime + m.lastProcCPU.Stime)
+	// Linux 默认 100 jiffies/秒 (USER_HZ)
+	cpuSeconds := float64(totalJiffies) / 100.0
+	usage := cpuSeconds / elapsed / float64(runtime.NumCPU()) * 100.0
+	if usage > 100 {
+		usage = 100
+	}
+
+	m.lastProcCPU = snap
+	return usage, nil
+}
+
+// readProcSelfCPU 从 /proc/self/stat 解析 utime 和 stime
+func readProcSelfCPU() (utime, stime uint64, err error) {
+	data, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		return 0, 0, err
+	}
+	// /proc/self/stat 格式：pid (comm) state ppid ... 第14列=utime 第15列=stime
+	// comm 可能包含空格和括号，所以先找最后一个 ')' 的位置
+	content := string(data)
+	idx := strings.LastIndex(content, ")")
+	if idx < 0 {
+		return 0, 0, fmt.Errorf("invalid /proc/self/stat format")
+	}
+	fields := strings.Fields(content[idx+2:]) // 跳过 ") "
+	// fields[0]=state, fields[1]=ppid, ..., fields[11]=utime, fields[12]=stime
+	if len(fields) < 13 {
+		return 0, 0, fmt.Errorf("not enough fields in /proc/self/stat")
+	}
+	utime, _ = strconv.ParseUint(fields[11], 10, 64)
+	stime, _ = strconv.ParseUint(fields[12], 10, 64)
+	return utime, stime, nil
+}
+
+// collectProcessMemory 采集当前进程的物理内存 RSS
+// 读取 /proc/self/status 的 VmRSS 字段（单位 KB，返回字节）
+func (m *Monitor) collectProcessMemory() (uint64, error) {
+	file, err := os.Open("/proc/self/status")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "VmRSS:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				kb, parseErr := strconv.ParseUint(fields[1], 10, 64)
+				if parseErr != nil {
+					return 0, parseErr
+				}
+				return kb * 1024, nil // KB → 字节
+			}
+		}
+	}
+	return 0, fmt.Errorf("VmRSS not found in /proc/self/status")
 }

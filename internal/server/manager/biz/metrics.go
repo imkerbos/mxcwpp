@@ -52,6 +52,9 @@ type LatestMetrics struct {
 	NetBytesRecv   *uint64    `json:"net_bytes_recv,omitempty"`
 	DiskReadBytes  *uint64    `json:"disk_read_bytes,omitempty"`
 	DiskWriteBytes *uint64    `json:"disk_write_bytes,omitempty"`
+	AgentCPUUsage   *float64   `json:"agent_cpu_usage,omitempty"`
+	AgentMemRSS     *uint64    `json:"agent_mem_rss,omitempty"`
+	AgentMemPercent *float64   `json:"agent_mem_percent,omitempty"`
 	CollectedAt    *time.Time `json:"collected_at,omitempty"`
 }
 
@@ -64,6 +67,8 @@ type TimeSeriesMetrics struct {
 	NetOut    []TimeSeriesPoint `json:"net_out,omitempty"`
 	DiskRead  []TimeSeriesPoint `json:"disk_read,omitempty"`
 	DiskWrite []TimeSeriesPoint `json:"disk_write,omitempty"`
+	AgentCPU  []TimeSeriesPoint `json:"agent_cpu,omitempty"`
+	AgentMem  []TimeSeriesPoint `json:"agent_mem,omitempty"`
 }
 
 // TimeSeriesPoint 是时间序列数据点
@@ -311,6 +316,16 @@ func (s *MetricsService) getLatestMetricsFromPrometheus(ctx context.Context, lab
 	} else if err != nil && firstErr == nil {
 		firstErr = err
 	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_agent_cpu_usage", labels); err == nil && v != nil {
+		latest.AgentCPUUsage = v
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_agent_mem_rss", labels); err == nil && v != nil {
+		u := uint64(*v)
+		latest.AgentMemRSS = &u
+	}
+	if v, err := s.prometheusClient.GetMetricValue(ctx, "mxsec_agent_mem_percent", labels); err == nil && v != nil {
+		latest.AgentMemPercent = v
+	}
 
 	if !latest.hasData() {
 		if firstErr != nil {
@@ -377,6 +392,12 @@ func (s *MetricsService) getTimeSeriesFromPrometheus(ctx context.Context, labels
 		timeSeries.DiskWrite = convertToTimeSeriesPoints(pts)
 	} else if firstErr == nil {
 		firstErr = err
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_agent_cpu_usage", labels, start, end, step); err == nil {
+		timeSeries.AgentCPU = convertToTimeSeriesPoints(pts)
+	}
+	if pts, err := s.prometheusClient.GetMetricRange(ctx, "mxsec_agent_mem_rss", labels, start, end, step); err == nil {
+		timeSeries.AgentMem = convertToTimeSeriesPoints(pts)
 	}
 
 	if !timeSeries.hasData() && firstErr != nil {
@@ -467,7 +488,10 @@ func (m *LatestMetrics) hasData() bool {
 		m.NetBytesSent != nil ||
 		m.NetBytesRecv != nil ||
 		m.DiskReadBytes != nil ||
-		m.DiskWriteBytes != nil
+		m.DiskWriteBytes != nil ||
+		m.AgentCPUUsage != nil ||
+		m.AgentMemRSS != nil ||
+		m.AgentMemPercent != nil
 }
 
 func (m *TimeSeriesMetrics) hasData() bool {
@@ -481,5 +505,7 @@ func (m *TimeSeriesMetrics) hasData() bool {
 		len(m.NetIn) > 0 ||
 		len(m.NetOut) > 0 ||
 		len(m.DiskRead) > 0 ||
-		len(m.DiskWrite) > 0
+		len(m.DiskWrite) > 0 ||
+		len(m.AgentCPU) > 0 ||
+		len(m.AgentMem) > 0
 }

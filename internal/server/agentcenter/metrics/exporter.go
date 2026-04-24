@@ -43,11 +43,26 @@ var (
 		Name: "mxsec_host_disk_write_bytes",
 		Help: "Host disk write bytes per heartbeat interval",
 	}, []string{"host_id", "hostname"})
+
+	agentCPUUsage = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mxsec_agent_cpu_usage",
+		Help: "Agent process CPU usage percentage",
+	}, []string{"host_id", "hostname"})
+
+	agentMemRSS = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mxsec_agent_mem_rss",
+		Help: "Agent process resident memory in bytes",
+	}, []string{"host_id", "hostname"})
+
+	agentMemPercent = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mxsec_agent_mem_percent",
+		Help: "Agent process memory usage as percentage of total system memory",
+	}, []string{"host_id", "hostname"})
 )
 
 // Update 根据心跳数据更新指定主机的所有 Gauge。
 // 支持的 key：cpu_usage, mem_usage, disk_usage, net_in, net_out,
-// disk_read_bytes, disk_write_bytes。
+// disk_read_bytes, disk_write_bytes, agent_cpu_usage, agent_mem_rss。
 func Update(hostID, hostname string, m map[string]float64) {
 	labels := prometheus.Labels{"host_id": hostID, "hostname": hostname}
 	if v, ok := m["cpu_usage"]; ok {
@@ -71,6 +86,15 @@ func Update(hostID, hostname string, m map[string]float64) {
 	if v, ok := m["disk_write_bytes"]; ok {
 		hostDiskWrite.With(labels).Set(v)
 	}
+	if v, ok := m["agent_cpu_usage"]; ok {
+		agentCPUUsage.With(labels).Set(v)
+	}
+	if v, ok := m["agent_mem_rss"]; ok {
+		agentMemRSS.With(labels).Set(v)
+	}
+	if v, ok := m["agent_mem_percent"]; ok {
+		agentMemPercent.With(labels).Set(v)
+	}
 }
 
 // Delete 在 Agent 离线时删除其对应的 Gauge label，避免 stale 数据。
@@ -83,4 +107,7 @@ func Delete(hostID, hostname string) {
 	hostNetOut.Delete(labels)
 	hostDiskRead.Delete(labels)
 	hostDiskWrite.Delete(labels)
+	agentCPUUsage.Delete(labels)
+	agentMemRSS.Delete(labels)
+	agentMemPercent.Delete(labels)
 }

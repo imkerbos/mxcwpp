@@ -86,6 +86,33 @@
             </div>
           </div>
 
+          <!-- Agent 资源占用 -->
+          <div class="metrics-row" v-if="metrics?.latest && (metrics.latest.agent_cpu_usage != null || metrics.latest.agent_mem_rss != null)">
+            <div class="metric-card">
+              <div class="metric-icon-bg agent-cpu-bg"><RobotOutlined /></div>
+              <div class="metric-info">
+                <div class="metric-label">Agent CPU</div>
+                <div class="metric-value" :style="{ color: getAgentCpuColor(metrics.latest.agent_cpu_usage) }">
+                  {{ metrics.latest.agent_cpu_usage?.toFixed(1) ?? '-' }}<span class="metric-unit">%</span>
+                </div>
+                <a-progress :percent="metrics.latest.agent_cpu_usage || 0" :show-info="false"
+                  :stroke-color="getAgentCpuColor(metrics.latest.agent_cpu_usage)" :stroke-width="4" size="small" />
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon-bg agent-mem-bg"><RobotOutlined /></div>
+              <div class="metric-info">
+                <div class="metric-label">Agent 内存</div>
+                <div class="metric-value" :style="{ color: getUsageColor(metrics.latest.agent_mem_percent) }">
+                  {{ metrics.latest.agent_mem_percent?.toFixed(1) ?? '-' }}<span class="metric-unit">%</span>
+                </div>
+                <div style="font-size: 12px; color: #86909C; margin-top: 2px;">
+                  RSS: {{ formatBytes(metrics.latest.agent_mem_rss || 0) }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- 图表区域 -->
           <div class="charts-grid" v-if="metrics?.time_series">
             <!-- CPU 趋势 -->
@@ -108,6 +135,16 @@
               <div class="chart-title">磁盘 I/O</div>
               <v-chart class="chart" :option="diskIOOption" autoresize />
             </div>
+            <!-- Agent CPU 趋势 -->
+            <div class="chart-card" v-if="agentCpuOption">
+              <div class="chart-title">Agent CPU 使用率趋势</div>
+              <v-chart class="chart" :option="agentCpuOption" autoresize />
+            </div>
+            <!-- Agent 内存趋势 -->
+            <div class="chart-card" v-if="agentMemOption">
+              <div class="chart-title">Agent 内存趋势</div>
+              <v-chart class="chart" :option="agentMemOption" autoresize />
+            </div>
           </div>
         </template>
 
@@ -126,6 +163,7 @@ import {
   SwapOutlined,
   ThunderboltOutlined,
   ClockCircleOutlined,
+  RobotOutlined,
 } from '@ant-design/icons-vue'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
@@ -168,7 +206,9 @@ const hasMetricsData = computed(() => {
     ts?.net_in?.length ||
     ts?.net_out?.length ||
     ts?.disk_read?.length ||
-    ts?.disk_write?.length,
+    ts?.disk_write?.length ||
+    ts?.agent_cpu?.length ||
+    ts?.agent_mem?.length,
   )
 
   return hasLatest || hasSeries
@@ -208,6 +248,13 @@ const getUsageColor = (usage?: number): string => {
   if (!usage) return '#165DFF'
   if (usage >= 90) return '#F53F3F'
   if (usage >= 70) return '#FF7D00'
+  return '#00B42A'
+}
+
+const getAgentCpuColor = (usage?: number): string => {
+  if (!usage) return '#165DFF'
+  if (usage >= 50) return '#F53F3F'
+  if (usage >= 20) return '#FF7D00'
   return '#00B42A'
 }
 
@@ -333,6 +380,22 @@ const diskIOOption = computed(() => {
   ], ' KB/s')
 })
 
+const agentCpuOption = computed(() => {
+  const ts = metrics.value?.time_series
+  if (!ts?.agent_cpu?.length) return null
+  const { x, y } = tsToXY(ts.agent_cpu)
+  return makeLineOption(x, [{ name: 'Agent CPU', data: y, color: '#EB2F96' }], '%')
+})
+
+const agentMemOption = computed(() => {
+  const ts = metrics.value?.time_series
+  if (!ts?.agent_mem?.length) return null
+  const { x, y: raw } = tsToXY(ts.agent_mem)
+  // bytes -> MB
+  const y = raw.map(v => Math.round(v / 1024 / 1024 * 10) / 10)
+  return makeLineOption(x, [{ name: 'Agent 内存', data: y, color: '#13C2C2' }], ' MB')
+})
+
 onMounted(() => {
   loadMetrics()
   resetRefresh()
@@ -424,6 +487,8 @@ onUnmounted(() => {
 .disk-bg { background: linear-gradient(135deg, #D25F00, #d46b08); }
 .net-send-bg { background: linear-gradient(135deg, #00B42A, #009A29); }
 .io-bg   { background: linear-gradient(135deg, #FF7D00, #E06400); }
+.agent-cpu-bg { background: linear-gradient(135deg, #EB2F96, #C41D7F); }
+.agent-mem-bg { background: linear-gradient(135deg, #13C2C2, #08979C); }
 
 .metric-info { flex: 1; min-width: 0; }
 

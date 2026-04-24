@@ -578,7 +578,7 @@ func (h *HostsHandler) GetHostRiskStatistics(c *gin.Context) {
 	}
 	h.db.Model(&model.Alert{}).
 		Select("severity, COUNT(*) as count").
-		Where("host_id = ? AND status = ?", hostID, model.AlertStatusActive).
+		Where("host_id = ? AND status = ? AND category != ? AND (rule_id NOT LIKE ? OR rule_id = '')", hostID, model.AlertStatusActive, "agent_offline", "cel-%").
 		Group("severity").
 		Scan(&alertResults)
 

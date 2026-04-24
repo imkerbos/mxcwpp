@@ -752,6 +752,15 @@ func (s *Service) storeHostMetrics(_ context.Context, hostID string, record *grp
 	if v := parseFloat(fields["disk_write_bytes"]); v != nil {
 		gaugeMap["disk_write_bytes"] = *v
 	}
+	if v := parseFloat(fields["agent_cpu_usage"]); v != nil {
+		gaugeMap["agent_cpu_usage"] = *v
+	}
+	if v := parseFloat(fields["agent_mem_rss"]); v != nil {
+		gaugeMap["agent_mem_rss"] = *v
+	}
+	if v := parseFloat(fields["agent_mem_percent"]); v != nil {
+		gaugeMap["agent_mem_percent"] = *v
+	}
 
 	if len(gaugeMap) == 0 {
 		return nil

@@ -1,13 +1,13 @@
 <template>
   <div class="host-monitor-page">
     <div class="page-header">
-      <h2>后端监控</h2>
+      <h2>主机监控</h2>
       <span class="page-header-hint">实时监控服务器资源使用情况</span>
     </div>
 
     <!-- 概览统计 -->
     <a-row :gutter="[16, 16]" class="section-row">
-      <a-col :span="6" v-for="item in overviewStats" :key="item.key">
+      <a-col :span="4" v-for="item in overviewStats" :key="item.key">
         <div class="monitor-stat-card">
           <div class="stat-header">
             <span class="stat-label">{{ item.label }}</span>
@@ -91,7 +91,7 @@
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'usage'">
               <a-progress
-                :percent="record.usagePercent"
+                :percent="parseFloat(record.usagePercent.toFixed(1))"
                 :stroke-color="record.usagePercent > 90 ? '#F53F3F' : record.usagePercent > 70 ? '#FF7D00' : '#165DFF'"
                 :size="6"
               />
@@ -120,6 +120,8 @@ const overviewStats = ref([
   { key: 'memory', label: '内存使用率', value: '0%', statusColor: 'green', statusText: '正常', trend: 0 },
   { key: 'disk', label: '磁盘使用率', value: '0%', statusColor: 'green', statusText: '正常', trend: 0 },
   { key: 'load', label: '系统负载', value: '0.00', statusColor: 'green', statusText: '正常', trend: 0 },
+  { key: 'agentCpu', label: 'Agent CPU', value: '0%', statusColor: 'green', statusText: '正常', trend: 0 },
+  { key: 'agentMem', label: 'Agent 内存', value: '0 MB', statusColor: 'green', statusText: '正常', trend: 0 },
 ])
 
 // 图表数据
@@ -259,11 +261,15 @@ const loadMetrics = async () => {
   try {
     const res = await apiClient.get<any>('/monitor/host', { params: { range: timeRange.value } })
     if (res.overview) {
+      const agentCpu = res.overview.agentCpu ?? 0
+      const agentMem = res.overview.agentMemMB ?? 0
       overviewStats.value = [
-        { key: 'cpu', label: 'CPU 使用率', value: `${res.overview.cpu ?? 0}%`, statusColor: res.overview.cpu > 90 ? 'red' : res.overview.cpu > 70 ? 'orange' : 'green', statusText: res.overview.cpu > 90 ? '告警' : res.overview.cpu > 70 ? '注意' : '正常', trend: res.overview.cpuTrend ?? 0 },
-        { key: 'memory', label: '内存使用率', value: `${res.overview.memory ?? 0}%`, statusColor: res.overview.memory > 90 ? 'red' : res.overview.memory > 70 ? 'orange' : 'green', statusText: res.overview.memory > 90 ? '告警' : res.overview.memory > 70 ? '注意' : '正常', trend: res.overview.memoryTrend ?? 0 },
-        { key: 'disk', label: '磁盘使用率', value: `${res.overview.disk ?? 0}%`, statusColor: res.overview.disk > 90 ? 'red' : res.overview.disk > 70 ? 'orange' : 'green', statusText: res.overview.disk > 90 ? '告警' : res.overview.disk > 70 ? '注意' : '正常', trend: res.overview.diskTrend ?? 0 },
+        { key: 'cpu', label: 'CPU 使用率', value: `${(res.overview.cpu ?? 0).toFixed(1)}%`, statusColor: res.overview.cpu > 90 ? 'red' : res.overview.cpu > 70 ? 'orange' : 'green', statusText: res.overview.cpu > 90 ? '告警' : res.overview.cpu > 70 ? '注意' : '正常', trend: res.overview.cpuTrend ?? 0 },
+        { key: 'memory', label: '内存使用率', value: `${(res.overview.memory ?? 0).toFixed(1)}%`, statusColor: res.overview.memory > 90 ? 'red' : res.overview.memory > 70 ? 'orange' : 'green', statusText: res.overview.memory > 90 ? '告警' : res.overview.memory > 70 ? '注意' : '正常', trend: res.overview.memoryTrend ?? 0 },
+        { key: 'disk', label: '磁盘使用率', value: `${(res.overview.disk ?? 0).toFixed(1)}%`, statusColor: res.overview.disk > 90 ? 'red' : res.overview.disk > 70 ? 'orange' : 'green', statusText: res.overview.disk > 90 ? '告警' : res.overview.disk > 70 ? '注意' : '正常', trend: res.overview.diskTrend ?? 0 },
         { key: 'load', label: '系统负载', value: `${res.overview.load ?? '0.00'}`, statusColor: 'green', statusText: '正常', trend: res.overview.loadTrend ?? 0 },
+        { key: 'agentCpu', label: 'Agent CPU', value: `${agentCpu.toFixed(1)}%`, statusColor: agentCpu > 50 ? 'red' : agentCpu > 20 ? 'orange' : 'green', statusText: agentCpu > 50 ? '偏高' : agentCpu > 20 ? '注意' : '正常', trend: 0 },
+        { key: 'agentMem', label: 'Agent 内存', value: `${(res.overview.agentMemPercent ?? 0).toFixed(1)}% (${agentMem.toFixed(1)} MB)`, statusColor: agentMem > 512 ? 'red' : agentMem > 256 ? 'orange' : 'green', statusText: agentMem > 512 ? '偏高' : agentMem > 256 ? '注意' : '正常', trend: 0 },
       ]
     }
     cpuData.value = res.cpu ?? []

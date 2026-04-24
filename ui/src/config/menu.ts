@@ -130,7 +130,7 @@ export const menuConfig: MenuItem[] = [
     title: '系统监控',
     icon: MonitorOutlined,
     children: [
-      { key: 'host-monitor', title: '后端监控', route: '/system/host-monitor' },
+      { key: 'host-monitor', title: '主机监控', route: '/system/host-monitor' },
       { key: 'service-monitor', title: '后端服务', route: '/system/service-monitor' },
       { key: 'service-alert', title: '服务告警', route: '/system/service-alert' },
     ],

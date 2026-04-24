@@ -248,7 +248,7 @@ const routes: RouteRecordRaw[] = [
         path: 'system/host-monitor',
         name: 'HostMonitor',
         component: () => import('@/views/Monitoring/HostMonitor.vue'),
-        meta: { title: '后端监控' },
+        meta: { title: '主机监控' },
       },
       {
         path: 'system/service-monitor',

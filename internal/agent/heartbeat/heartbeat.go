@@ -125,6 +125,9 @@ func (m *Manager) sendHeartbeat() {
 		record.Data.Fields["disk_write_bytes"] = fmt.Sprintf("%d", resourceMetrics.DiskWriteBytes)
 		record.Data.Fields["net_out"] = fmt.Sprintf("%d", resourceMetrics.NetBytesSent)
 		record.Data.Fields["net_in"] = fmt.Sprintf("%d", resourceMetrics.NetBytesRecv)
+		record.Data.Fields["agent_cpu_usage"] = fmt.Sprintf("%.2f", resourceMetrics.AgentCPUUsage)
+		record.Data.Fields["agent_mem_rss"] = fmt.Sprintf("%d", resourceMetrics.AgentMemRSS)
+		record.Data.Fields["agent_mem_percent"] = fmt.Sprintf("%.2f", resourceMetrics.AgentMemPercent)
 	}
 
 	// 采集硬件和系统信息

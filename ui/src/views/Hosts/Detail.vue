@@ -118,7 +118,7 @@ const loadHostDetail = async () => {
       hostsApi.get(id),
       hostsApi.getScore(id).catch(() => null),
       hostsApi.getRiskStatistics(id).catch(() => null),
-      alertsApi.list({ host_id: id, alert_type: 'detection_rule' as any, page: 1, page_size: 1 }).catch(() => null),
+      alertsApi.list({ host_id: id, alert_type: 'runtime' as any, page: 1, page_size: 1 }).catch(() => null),
       antivirusApi.listResults({ host_id: id, page: 1, page_size: 1 }).catch(() => null),
     ])
     host.value = hostData

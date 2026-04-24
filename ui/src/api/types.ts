@@ -625,6 +625,9 @@ export interface LatestMetrics {
   net_bytes_recv?: number
   disk_read_bytes?: number
   disk_write_bytes?: number
+  agent_cpu_usage?: number
+  agent_mem_rss?: number
+  agent_mem_percent?: number
   collected_at?: string
 }
 
@@ -636,6 +639,8 @@ export interface TimeSeriesMetrics {
   net_out?: TimeSeriesPoint[]
   disk_read?: TimeSeriesPoint[]
   disk_write?: TimeSeriesPoint[]
+  agent_cpu?: TimeSeriesPoint[]
+  agent_mem?: TimeSeriesPoint[]
 }
 
 export interface TimeSeriesPoint {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
@@ -132,6 +133,9 @@ type hostOverview struct {
 	MemoryTrend float64 `json:"memoryTrend"`
 	DiskTrend   float64 `json:"diskTrend"`
 	LoadTrend   float64 `json:"loadTrend"`
+	AgentCPU        float64 `json:"agentCpu"`
+	AgentMemMB      float64 `json:"agentMemMB"`
+	AgentMemPercent float64 `json:"agentMemPercent"`
 }
 
 type metricPoint struct {
@@ -143,7 +147,7 @@ type metricPoint struct {
 	Out   float64 `json:"outbound,omitempty"`
 }
 
-// queryHostMetrics 查全局指标：优先 Prometheus，其次 ClickHouse
+// queryHostMetrics 查全局指标，统一走 Prometheus
 func (h *MonitorHandler) queryHostMetrics(ctx context.Context, start, end time.Time, duration time.Duration) (
 	overview *hostOverview, cpu, memory, disk, network []metricPoint,
 ) {
@@ -155,69 +159,6 @@ func (h *MonitorHandler) queryHostMetrics(ctx context.Context, start, end time.T
 
 	if h.prometheusClient != nil {
 		return h.queryHostMetricsFromPrometheus(ctx, start, end, duration)
-	}
-	if h.chConn == nil {
-		return
-	}
-
-	var bucketFn string
-	var timeFmt string
-	switch {
-	case duration <= 2*time.Hour:
-		bucketFn = "toStartOfFiveMinutes"
-		timeFmt = "15:04"
-	case duration <= 12*time.Hour:
-		bucketFn = "toStartOfFifteenMinutes"
-		timeFmt = "15:04"
-	default:
-		bucketFn = "toStartOfHour"
-		timeFmt = "01-02 15:04"
-	}
-
-	// 时序查询：按时间桶聚合所有主机
-	rows, err := h.chConn.Query(ctx, fmt.Sprintf(`
-		SELECT
-			%s(timestamp)                   AS bucket,
-			round(avg(cpu_usage),1)         AS cpu,
-			round(avg(mem_usage),1)         AS mem,
-			round(avg(disk_usage),1)        AS disk,
-			round(avg(load_1),2)            AS load,
-			toUInt64(sum(net_in))           AS net_in,
-			toUInt64(sum(net_out))          AS net_out,
-			toUInt64(sum(disk_read_bytes))  AS disk_read,
-			toUInt64(sum(disk_write_bytes)) AS disk_write
-		FROM host_metrics
-		WHERE timestamp >= ? AND timestamp <= ?
-		GROUP BY bucket
-		ORDER BY bucket ASC
-	`, bucketFn), start, end)
-	if err != nil {
-		h.logger.Warn("ClickHouse 查询全局主机指标失败", zap.Error(err))
-		return
-	}
-	defer rows.Close()
-
-	var lastCPU, lastMem, lastDisk, lastLoad float64
-	for rows.Next() {
-		var bucket time.Time
-		var cpuVal, memVal, diskVal, loadVal float64
-		var netIn, netOut, diskRead, diskWrite uint64
-		if scanErr := rows.Scan(&bucket, &cpuVal, &memVal, &diskVal, &loadVal, &netIn, &netOut, &diskRead, &diskWrite); scanErr != nil {
-			continue
-		}
-		t := bucket.Format(timeFmt)
-		cpu = append(cpu, metricPoint{Time: t, Usage: cpuVal})
-		memory = append(memory, metricPoint{Time: t, Usage: memVal})
-		disk = append(disk, metricPoint{Time: t, Read: float64(diskRead) / 1024, Write: float64(diskWrite) / 1024})
-		network = append(network, metricPoint{Time: t, In: float64(netIn) / 1024, Out: float64(netOut) / 1024})
-		lastCPU, lastMem, lastDisk, lastLoad = cpuVal, memVal, diskVal, loadVal
-	}
-
-	if len(cpu) > 0 {
-		overview.CPU = lastCPU
-		overview.Memory = lastMem
-		overview.Disk = lastDisk
-		overview.Load = lastLoad
 	}
 	return
 }
@@ -255,6 +196,9 @@ func (h *MonitorHandler) queryHostMetricsFromPrometheus(ctx context.Context, sta
 		"net_out":    `sum(mxsec_host_net_out)`,
 		"disk_read":  `sum(mxsec_host_disk_read_bytes)`,
 		"disk_write": `sum(mxsec_host_disk_write_bytes)`,
+		"agent_cpu":         `avg(mxsec_agent_cpu_usage)`,
+		"agent_mem":         `avg(mxsec_agent_mem_rss)`,
+		"agent_mem_percent": `avg(mxsec_agent_mem_percent)`,
 	}
 
 	type point struct {
@@ -321,15 +265,25 @@ func (h *MonitorHandler) queryHostMetricsFromPrometheus(ctx context.Context, sta
 		network = append(network, metricPoint{Time: t, In: niMap[t], Out: p.v / 1024})
 	}
 
-	// 取最后一个点作为 overview
+	// 取最后一个点作为 overview，保留 1 位小数
 	if len(results["cpu"]) > 0 {
-		overview.CPU = results["cpu"][len(results["cpu"])-1].v
+		overview.CPU = math.Round(results["cpu"][len(results["cpu"])-1].v*10) / 10
 	}
 	if len(results["mem"]) > 0 {
-		overview.Memory = results["mem"][len(results["mem"])-1].v
+		overview.Memory = math.Round(results["mem"][len(results["mem"])-1].v*10) / 10
 	}
 	if len(results["disk_usage"]) > 0 {
-		overview.Disk = results["disk_usage"][len(results["disk_usage"])-1].v
+		overview.Disk = math.Round(results["disk_usage"][len(results["disk_usage"])-1].v*10) / 10
+	}
+	if len(results["agent_cpu"]) > 0 {
+		overview.AgentCPU = math.Round(results["agent_cpu"][len(results["agent_cpu"])-1].v*10) / 10
+	}
+	if len(results["agent_mem"]) > 0 {
+		// bytes -> MB
+		overview.AgentMemMB = math.Round(results["agent_mem"][len(results["agent_mem"])-1].v/1024/1024*10) / 10
+	}
+	if len(results["agent_mem_percent"]) > 0 {
+		overview.AgentMemPercent = math.Round(results["agent_mem_percent"][len(results["agent_mem_percent"])-1].v*10) / 10
 	}
 	return
 }
