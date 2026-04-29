@@ -170,8 +170,9 @@ const handleTableChange = (pag: any) => { pagination.value.current = pag.current
 const showCheckDetail = (record: any) => { detailRecord.value = record; showDetail.value = true }
 
 const handleRunCheck = async () => {
+  if (!filterCluster.value) { message.warning('请先选择集群'); return }
   checkLoading.value = true
-  try { await apiClient.post('/kube/baseline/detect', { cluster_id: filterCluster.value }); message.success('基线检查任务已创建'); loadBaseline() }
+  try { await apiClient.post('/kube/baseline/detect', { cluster_id: Number(filterCluster.value) }); message.success('基线检查任务已创建'); loadBaseline() }
   catch { message.error('创建检查任务失败') }
   finally { checkLoading.value = false }
 }
