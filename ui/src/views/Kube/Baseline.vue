@@ -37,29 +37,30 @@
     <div class="dashboard-card">
       <div class="card-header">
         <span class="card-title">基线检查项</span>
-        <a-space>
-          <a-select v-model:value="filterCluster" style="width: 180px" placeholder="选择集群" allow-clear @change="loadBaseline">
-            <a-select-option v-for="c in clusterOptions" :key="c.value" :value="c.value">{{ c.label }}</a-select-option>
-          </a-select>
-          <a-button type="primary" @click="handleRunCheck" :loading="checkLoading">立即检查</a-button>
-        </a-space>
+        <a-button type="primary" @click="handleRunCheck" :loading="checkLoading">立即检查</a-button>
       </div>
       <div class="card-body">
         <div class="filter-bar">
+          <a-select v-model:value="filterCluster" style="width: 200px" placeholder="全部集群" allow-clear @change="handleClusterChange">
+            <a-select-option v-for="c in clusterOptions" :key="c.value" :value="c.value">{{ c.label }}</a-select-option>
+          </a-select>
           <a-input-search v-model:value="searchText" placeholder="搜索检查项" style="width: 240px" allow-clear @search="loadBaseline" />
           <a-select v-model:value="filterCategory" style="width: 180px" placeholder="检查分类" allow-clear @change="loadBaseline">
-            <a-select-option value="control_plane">控制平面</a-select-option>
-            <a-select-option value="etcd">etcd</a-select-option>
-            <a-select-option value="worker_node">Worker 节点</a-select-option>
-            <a-select-option value="policies">安全策略</a-select-option>
-            <a-select-option value="network">网络策略</a-select-option>
-            <a-select-option value="rbac">RBAC</a-select-option>
-            <a-select-option value="pod_security">Pod 安全</a-select-option>
+            <a-select-option value="RBAC">RBAC</a-select-option>
+            <a-select-option value="Pod Security">Pod 安全</a-select-option>
+            <a-select-option value="Network">网络策略</a-select-option>
+            <a-select-option value="Secrets & Config">密钥与配置</a-select-option>
+            <a-select-option value="Workload">工作负载</a-select-option>
+            <a-select-option value="Node">节点安全</a-select-option>
+            <a-select-option value="Cluster Config">集群配置</a-select-option>
+            <a-select-option value="Supply Chain">供应链</a-select-option>
+            <a-select-option value="Runtime">运行时</a-select-option>
           </a-select>
           <a-select v-model:value="filterResult" style="width: 120px" placeholder="结果" allow-clear @change="loadBaseline">
             <a-select-option value="pass">通过</a-select-option>
             <a-select-option value="fail">未通过</a-select-option>
             <a-select-option value="warn">警告</a-select-option>
+            <a-select-option value="error">错误</a-select-option>
           </a-select>
         </div>
 
@@ -74,9 +75,10 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'result'">
-              <a-tag :color="record.result === 'pass' ? 'green' : record.result === 'fail' ? 'red' : 'orange'" :bordered="false">
-                {{ resultTextMap[record.result] }}
+              <a-tag v-if="record.result" :color="{ pass: 'green', fail: 'red', warn: 'orange', error: 'default' }[record.result] || 'default'" :bordered="false">
+                {{ resultTextMap[record.result] || record.result }}
               </a-tag>
+              <span v-else style="color: #86909C">-</span>
             </template>
             <template v-if="column.key === 'severity'">
               <a-tag :color="severityColorMap[record.severity]" :bordered="false">{{ severityTextMap[record.severity] }}</a-tag>
@@ -134,7 +136,7 @@ const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: tr
 
 const severityColorMap: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold', low: 'blue' }
 const severityTextMap: Record<string, string> = { critical: '紧急', high: '高危', medium: '中危', low: '低危' }
-const resultTextMap: Record<string, string> = { pass: '通过', fail: '未通过', warn: '警告' }
+const resultTextMap: Record<string, string> = { pass: '通过', fail: '未通过', warn: '警告', error: '错误' }
 
 const columns = [
   { title: '编号', dataIndex: 'checkId', key: 'checkId', width: 100 },
@@ -166,11 +168,12 @@ const loadBaseline = async () => {
   finally { loading.value = false }
 }
 
+const handleClusterChange = () => { pagination.value.current = 1; loadBaseline() }
 const handleTableChange = (pag: any) => { pagination.value.current = pag.current; pagination.value.pageSize = pag.pageSize; loadBaseline() }
 const showCheckDetail = (record: any) => { detailRecord.value = record; showDetail.value = true }
 
 const handleRunCheck = async () => {
-  if (!filterCluster.value) { message.warning('请先选择集群'); return }
+  if (!filterCluster.value) { message.warning('请先在筛选栏选择目标集群'); return }
   checkLoading.value = true
   try { await apiClient.post('/kube/baseline/detect', { cluster_id: Number(filterCluster.value) }); message.success('基线检查任务已创建'); loadBaseline() }
   catch { message.error('创建检查任务失败') }

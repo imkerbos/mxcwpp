@@ -62,19 +62,29 @@ func (h *KubeBaselineHandler) ListBaseline(c *gin.Context) {
 		return
 	}
 
-	// 统计信息
-	var totalChecks, passed, failed int64
+	// 统计信息（单次聚合查询替代 3 条独立 COUNT）
+	var statsResult struct {
+		TotalChecks int64 `gorm:"column:total_checks"`
+		Passed      int64 `gorm:"column:passed"`
+		Failed      int64 `gorm:"column:failed"`
+	}
 	statsQuery := h.db.Model(&model.KubeBaseline{})
 	if clusterID != "" {
 		statsQuery = statsQuery.Where("cluster_id = ?", clusterID)
 	}
-	statsQuery.Count(&totalChecks)
-	h.db.Model(&model.KubeBaseline{}).Where(h.clusterFilter(clusterID)).Where("result = ?", "pass").Count(&passed)
-	h.db.Model(&model.KubeBaseline{}).Where(h.clusterFilter(clusterID)).Where("result = ?", "fail").Count(&failed)
+	statsQuery.Select(`
+		COUNT(*) AS total_checks,
+		SUM(CASE WHEN result = 'pass' THEN 1 ELSE 0 END) AS passed,
+		SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) AS failed
+	`).Scan(&statsResult)
+
+	totalChecks := statsResult.TotalChecks
+	passed := statsResult.Passed
+	failed := statsResult.Failed
 
 	var passRate float64
-	if totalChecks > 0 {
-		passRate = float64(passed) / float64(totalChecks) * 100
+	if passed+failed > 0 {
+		passRate = float64(passed) / float64(passed+failed) * 100
 	}
 
 	c.JSON(200, gin.H{
@@ -147,19 +157,4 @@ func (h *KubeBaselineHandler) RunBaselineCheck(c *gin.Context) {
 	})
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
-// clusterFilter 集群过滤条件辅助
-func (h *KubeBaselineHandler) clusterFilter(clusterID string) func(db *gorm.DB) *gorm.DB {
-	return func(db *gorm.DB) *gorm.DB {
-		if clusterID != "" {
-			return db.Where("cluster_id = ?", clusterID)
-		}
-		return db
-	}
-}
