@@ -176,7 +176,14 @@ const handleRunCheck = async () => {
   finally { checkLoading.value = false }
 }
 
-onMounted(() => { loadBaseline() })
+const loadClusters = async () => {
+  try {
+    const res = await apiClient.get<any>('/kube/clusters', { params: { page_size: 100 } })
+    clusterOptions.value = (res.items ?? []).map((c: any) => ({ value: String(c.id), label: c.name }))
+  } catch { /* ignore */ }
+}
+
+onMounted(() => { loadClusters(); loadBaseline() })
 </script>
 
 <style scoped>

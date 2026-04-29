@@ -301,6 +301,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '容器基线' },
       },
       {
+        path: 'kube/baseline-rules',
+        name: 'KubeBaselineRules',
+        component: () => import('@/views/Kube/BaselineRules.vue'),
+        meta: { title: '基线规则' },
+      },
+      {
         path: 'kube/whitelist',
         name: 'KubeWhitelist',
         component: () => import('@/views/Kube/Whitelist.vue'),

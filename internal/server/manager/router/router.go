@@ -471,12 +471,34 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.GET("/kube/events", eventHandler.ListEvents)
 	router.POST("/kube/events/:id/handle", eventHandler.HandleEvent)
 
+	// CEL 规则引擎
+	ruleEngine, err := biz.NewKubeRuleEngine(logger)
+	if err != nil {
+		logger.Error("初始化 K8s CEL 规则引擎失败", zap.Error(err))
+	}
+
 	// 基线检查
-	baselineChecker := biz.NewKubeBaselineChecker(db, logger, kubeClient)
+	baselineChecker := biz.NewKubeBaselineChecker(db, logger, kubeClient, ruleEngine)
 	baselineHandler := api.NewKubeBaselineHandler(db, logger, baselineChecker)
 	router.GET("/kube/baseline", baselineHandler.ListBaseline)
 	router.GET("/kube/baseline/:id", baselineHandler.GetBaselineDetail)
 	router.POST("/kube/baseline/detect", baselineHandler.RunBaselineCheck)
+
+	// 基线规则管理
+	rulesHandler := api.NewKubeBaselineRulesHandler(db, logger, baselineChecker, ruleEngine)
+	router.GET("/kube/baseline-rules", rulesHandler.ListRules)
+	router.GET("/kube/baseline-rules/export", rulesHandler.ExportRules)
+	router.POST("/kube/baseline-rules/import", rulesHandler.ImportRules)
+	router.POST("/kube/baseline-rules/validate-expression", rulesHandler.ValidateExpression)
+	router.GET("/kube/baseline-rules/expression-templates", rulesHandler.GetExpressionTemplates)
+	router.POST("/kube/baseline-rules/expression-templates", rulesHandler.CreateExpressionTemplate)
+	router.PUT("/kube/baseline-rules/expression-templates/:id", rulesHandler.UpdateExpressionTemplate)
+	router.DELETE("/kube/baseline-rules/expression-templates/:id", rulesHandler.DeleteExpressionTemplate)
+	router.GET("/kube/baseline-rules/:id", rulesHandler.GetRule)
+	router.POST("/kube/baseline-rules", rulesHandler.CreateRule)
+	router.PUT("/kube/baseline-rules/:id", rulesHandler.UpdateRule)
+	router.DELETE("/kube/baseline-rules/:id", rulesHandler.DeleteRule)
+	router.PUT("/kube/baseline-rules/:id/toggle", rulesHandler.ToggleRule)
 
 	// 白名单
 	whitelistHandler := api.NewKubeWhitelistHandler(db, logger)

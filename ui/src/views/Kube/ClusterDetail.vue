@@ -1,13 +1,13 @@
 <template>
   <div class="kube-detail-page">
-    <div class="page-header">
-      <h2>
+    <div class="page-header" style="gap: 16px">
+      <h2 style="white-space: nowrap">
         <a-button type="text" @click="$router.push('/kube/clusters')" style="margin-right: 8px; padding: 0">
           <LeftOutlined />
         </a-button>
         {{ cluster.name || '集群详情' }}
       </h2>
-      <div style="display: flex; align-items: center; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0">
         <span class="status-dot" :class="`dot-${cluster.status}`"></span>
         <a-tag :color="statusColorMap[cluster.status]" :bordered="false">{{ statusTextMap[cluster.status] }}</a-tag>
         <span class="page-header-hint">K8s {{ cluster.version }}</span>
@@ -42,7 +42,7 @@
 
         <!-- Node 列表 -->
         <a-tab-pane key="nodes" tab="Node 节点">
-          <a-table :columns="nodeColumns" :data-source="nodes" :loading="loadingNodes" :pagination="false" size="middle" row-key="name">
+          <a-table :columns="nodeColumns" :data-source="nodes" :loading="loadingNodes" :pagination="false" size="middle" row-key="name" :scroll="{ x: 1400 }">
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
                 <a-tag :color="record.status === 'Ready' ? 'green' : 'red'" :bordered="false">{{ record.status }}</a-tag>
@@ -189,9 +189,9 @@ const nodeColumns = [
   { title: '角色', dataIndex: 'roles', key: 'roles', width: 120 },
   { title: 'IP', dataIndex: 'ip', key: 'ip', width: 140 },
   { title: 'OS', dataIndex: 'os', key: 'os', width: 160 },
-  { title: 'CPU 使用', key: 'cpu', width: 160 },
-  { title: '内存使用', key: 'memory', width: 160 },
-  { title: 'Pod 数', dataIndex: 'podCount', key: 'podCount', width: 80 },
+  { title: 'CPU 使用', key: 'cpu', width: 200 },
+  { title: '内存使用', key: 'memory', width: 200 },
+  { title: 'Pod 数', dataIndex: 'podCount', key: 'podCount', width: 80, align: 'center' as const },
   { title: '版本', dataIndex: 'kubeletVersion', key: 'kubeletVersion', width: 120 },
 ]
 

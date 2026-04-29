@@ -94,6 +94,7 @@ export const menuConfig: MenuItem[] = [
       { key: 'kube-alarms', title: '安全告警', route: '/kube/alarms' },
       { key: 'kube-events', title: '安全事件', route: '/kube/events' },
       { key: 'kube-baseline', title: '基线检查', route: '/kube/baseline' },
+      { key: 'kube-baseline-rules', title: '基线规则', route: '/kube/baseline-rules' },
       { key: 'kube-whitelist', title: '告警白名单', route: '/kube/whitelist' },
     ],
   },

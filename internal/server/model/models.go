@@ -185,6 +185,8 @@ var (
 		&KubeAlarm{},
 		&KubeEvent{},
 		&KubeBaseline{},
+		&KubeBaselineRule{},
+		&KubeExpressionTemplate{},
 		&KubeWhitelist{},
 		&ConfigBackup{},
 		&Vulnerability{},

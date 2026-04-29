@@ -58,127 +58,53 @@ func TestHasOwnerKind(t *testing.T) {
 	}
 }
 
-// TestRegisterChecksCount 验证注册了 80 条检查
-func TestRegisterChecksCount(t *testing.T) {
+// TestRegisterCheckFuncsCount 验证注册了 80 条检查函数
+func TestRegisterCheckFuncsCount(t *testing.T) {
 	c := &KubeBaselineChecker{}
-	c.registerChecks()
+	c.checkFuncs = c.registerCheckFuncs()
 
-	if len(c.checks) != 80 {
-		t.Fatalf("期望注册 80 条检查, 实际 %d 条", len(c.checks))
+	if len(c.checkFuncs) != 80 {
+		t.Fatalf("期望注册 80 条检查函数, 实际 %d 条", len(c.checkFuncs))
 	}
 }
 
-// TestRegisterChecksUniqueIDs 验证所有 CheckID 唯一
-func TestRegisterChecksUniqueIDs(t *testing.T) {
+// TestRegisterCheckFuncsUniqueIDs 验证所有 CheckID 唯一（map key 天然唯一，验证数量即可）
+func TestRegisterCheckFuncsUniqueIDs(t *testing.T) {
 	c := &KubeBaselineChecker{}
-	c.registerChecks()
+	c.checkFuncs = c.registerCheckFuncs()
 
-	seen := make(map[string]bool)
-	for _, check := range c.checks {
-		if seen[check.CheckID] {
-			t.Fatalf("重复的 CheckID: %s", check.CheckID)
-		}
-		seen[check.CheckID] = true
+	// map key 天然唯一，只需确认数量
+	if len(c.checkFuncs) != 80 {
+		t.Fatalf("CheckID 数量不符, 期望 80, 实际 %d", len(c.checkFuncs))
 	}
 }
 
-// TestRegisterChecksAllFieldsSet 验证所有检查项字段非空
-func TestRegisterChecksAllFieldsSet(t *testing.T) {
+// TestRegisterCheckFuncsNoNil 验证所有检查函数非 nil
+func TestRegisterCheckFuncsNoNil(t *testing.T) {
 	c := &KubeBaselineChecker{}
-	c.registerChecks()
+	c.checkFuncs = c.registerCheckFuncs()
 
-	for _, check := range c.checks {
-		if check.CheckID == "" {
-			t.Fatal("CheckID 不能为空")
-		}
-		if check.CheckName == "" {
-			t.Fatalf("CheckName 不能为空: %s", check.CheckID)
-		}
-		if check.Category == "" {
-			t.Fatalf("Category 不能为空: %s", check.CheckID)
-		}
-		if check.Severity == "" {
-			t.Fatalf("Severity 不能为空: %s", check.CheckID)
-		}
-		if check.Description == "" {
-			t.Fatalf("Description 不能为空: %s", check.CheckID)
-		}
-		if check.Remediation == "" {
-			t.Fatalf("Remediation 不能为空: %s", check.CheckID)
-		}
-		if check.Benchmark == "" {
-			t.Fatalf("Benchmark 不能为空: %s", check.CheckID)
-		}
-		if check.Run == nil {
-			t.Fatalf("Run 函数不能为 nil: %s", check.CheckID)
+	for id, fn := range c.checkFuncs {
+		if fn == nil {
+			t.Fatalf("CheckFunc 不能为 nil: %s", id)
 		}
 	}
 }
 
-// TestRegisterChecksSeverityValues 验证 Severity 值合法
-func TestRegisterChecksSeverityValues(t *testing.T) {
+// TestGetRegisteredCheckIDs 验证获取已注册 CheckID 列表
+func TestGetRegisteredCheckIDs(t *testing.T) {
 	c := &KubeBaselineChecker{}
-	c.registerChecks()
+	c.checkFuncs = c.registerCheckFuncs()
 
-	validSeverities := map[string]bool{
-		"critical": true,
-		"high":     true,
-		"medium":   true,
-		"low":      true,
+	ids := c.GetRegisteredCheckIDs()
+	if len(ids) != 80 {
+		t.Fatalf("期望 80 个 CheckID, 实际 %d 个", len(ids))
 	}
 
-	for _, check := range c.checks {
-		if !validSeverities[check.Severity] {
-			t.Fatalf("非法 Severity %q: %s", check.Severity, check.CheckID)
-		}
-	}
-}
-
-// TestRegisterChecksCategoryDistribution 验证各类别检查数量
-func TestRegisterChecksCategoryDistribution(t *testing.T) {
-	c := &KubeBaselineChecker{}
-	c.registerChecks()
-
-	categoryCount := make(map[string]int)
-	for _, check := range c.checks {
-		categoryCount[check.Category]++
-	}
-
-	expectedCategories := map[string]int{
-		"RBAC":             9,
-		"Pod Security":     18,
-		"Network":          8,
-		"Secrets & Config": 8,
-		"Workload":         12,
-		"Node":             9,
-		"Cluster Config":   9,
-		"Supply Chain":     3,
-		"Runtime":          4,
-	}
-
-	for cat, expected := range expectedCategories {
-		actual := categoryCount[cat]
-		if actual != expected {
-			t.Fatalf("类别 %q: 期望 %d 条, 实际 %d 条", cat, expected, actual)
-		}
-	}
-
-	// 确保没有意外的类别
-	for cat := range categoryCount {
-		if _, ok := expectedCategories[cat]; !ok {
-			t.Fatalf("意外的类别: %q (%d 条)", cat, categoryCount[cat])
-		}
-	}
-}
-
-// TestRegisterChecksBenchmark 所有检查都应引用 CIS Kubernetes Benchmark 1.8
-func TestRegisterChecksBenchmark(t *testing.T) {
-	c := &KubeBaselineChecker{}
-	c.registerChecks()
-
-	for _, check := range c.checks {
-		if check.Benchmark != cisBenchmark {
-			t.Fatalf("检查 %s 的 Benchmark 不正确: %q, 期望 %q", check.CheckID, check.Benchmark, cisBenchmark)
+	// 验证已排序
+	for i := 1; i < len(ids); i++ {
+		if ids[i] < ids[i-1] {
+			t.Fatalf("CheckID 未排序: %s < %s", ids[i], ids[i-1])
 		}
 	}
 }
