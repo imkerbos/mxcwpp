@@ -13,6 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
 )
@@ -51,8 +53,13 @@ func main() {
 	// 启动病毒库自动更新器
 	go services.VirusDBUpdater.Start(ctx)
 
+	// 启动 GCP Pub/Sub 消费者管理器（GKE 审计日志接入，per-cluster 配置）
+	alarmService := biz.NewKubeAlarmService(services.DB, services.Logger)
+	consumerManager := gcppubsub.NewConsumerManager(services.DB, services.Logger, alarmService)
+	consumerManager.Start(ctx)
+
 	// 设置路由
-	httpRouter := router.Setup(services.DB, services.Logger, services.Config, services.ScoreCache, services.MetricsService, services.ACRegistry, services.ACDispatcher, services.CHConn, services.Redis, services.PrometheusClient, services.VirusDBUpdater)
+	httpRouter := router.Setup(services.DB, services.Logger, services.Config, services.ScoreCache, services.MetricsService, services.ACRegistry, services.ACDispatcher, services.CHConn, services.Redis, services.PrometheusClient, services.VirusDBUpdater, consumerManager)
 
 	// 创建 HTTP Server
 	server := &http.Server{

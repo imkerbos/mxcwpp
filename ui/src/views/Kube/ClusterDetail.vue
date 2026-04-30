@@ -38,6 +38,123 @@
             <a-descriptions-item label="最后心跳">{{ cluster.lastHeartbeat }}</a-descriptions-item>
             <a-descriptions-item label="备注" :span="3">{{ cluster.remark || '--' }}</a-descriptions-item>
           </a-descriptions>
+
+          <!-- 审计日志接入说明 -->
+          <div class="webhook-hint" style="margin-top: 20px; padding: 10px 14px; background: #F7F8FA; border: 1px solid #E5E8EF; border-radius: 6px; line-height: 1.8">
+            审计日志接入支持两种方式，根据集群类型选择：<br>
+            <b>自建集群</b>（kubeadm / k3s / RKE）→ 使用下方「Audit Webhook 配置」，在 apiserver 中配置 Webhook 直接推送<br>
+            <b>GKE 集群</b>（托管 apiserver）→ 使用下方「GCP Pub/Sub 配置」，通过 Cloud Logging → Pub/Sub 间接接入
+          </div>
+
+          <!-- Audit Webhook 配置 -->
+          <div class="webhook-section">
+            <div class="webhook-section-title">Audit Webhook 配置（自建集群）</div>
+            <div class="webhook-hint">适用于可自行配置 apiserver 启动参数的集群。将 Webhook URL 配置到 apiserver 的 Audit Webhook Backend，即可接收审计事件并生成安全告警。</div>
+
+            <template v-if="cluster.auditToken">
+              <div class="webhook-field">
+                <span class="webhook-field-label">Webhook URL</span>
+                <div class="webhook-field-value">
+                  <code class="webhook-code">{{ cluster.webhookURL }}</code>
+                  <a-button type="link" size="small" @click="copyToClipboard(cluster.webhookURL, 'Webhook URL')">
+                    <CopyOutlined />
+                  </a-button>
+                </div>
+              </div>
+
+              <div class="webhook-field">
+                <span class="webhook-field-label">Audit Token</span>
+                <div class="webhook-field-value">
+                  <code class="webhook-code">{{ showToken ? cluster.auditToken : maskToken(cluster.auditToken) }}</code>
+                  <a-button type="link" size="small" @click="showToken = !showToken">
+                    <EyeOutlined v-if="!showToken" />
+                    <EyeInvisibleOutlined v-else />
+                  </a-button>
+                  <a-button type="link" size="small" @click="copyToClipboard(cluster.auditToken, 'Audit Token')">
+                    <CopyOutlined />
+                  </a-button>
+                  <a-popconfirm title="重新生成后旧 Token 将立即失效，已配置的 Webhook 需要同步更新。确定继续？" @confirm="regenerateToken">
+                    <a-button type="link" size="small" danger>重新生成</a-button>
+                  </a-popconfirm>
+                </div>
+              </div>
+
+              <a-collapse :bordered="false" style="margin-top: 12px; background: transparent">
+                <a-collapse-panel key="guide" header="K8s Apiserver 审计策略配置示例">
+                  <div class="webhook-code-block">
+                    <div class="webhook-code-block-header">
+                      <span>audit-webhook-config.yaml</span>
+                      <a-button type="link" size="small" @click="copyToClipboard(auditWebhookYaml, '配置')">
+                        <CopyOutlined /> 复制
+                      </a-button>
+                    </div>
+                    <pre class="webhook-pre">{{ auditWebhookYaml }}</pre>
+                  </div>
+                  <div class="webhook-hint" style="margin-top: 8px">
+                    将上述内容保存为文件后，在 kube-apiserver 启动参数中添加：<br>
+                    <code>--audit-webhook-config-file=/etc/kubernetes/audit-webhook-config.yaml</code><br>
+                    <code>--audit-webhook-batch-max-wait=5s</code>
+                  </div>
+                </a-collapse-panel>
+              </a-collapse>
+            </template>
+
+            <div v-else style="padding: 8px 0">
+              <span style="color: #86909C; font-size: 13px">该集群尚未生成 Audit Token。</span>
+              <a-button type="primary" size="small" style="margin-left: 12px" @click="regenerateToken">生成 Token</a-button>
+            </div>
+          </div>
+
+          <!-- GCP Pub/Sub 配置 -->
+          <div class="webhook-section" style="margin-top: 16px">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px">
+              <div class="webhook-section-title">GCP Pub/Sub 配置（GKE 审计日志接入）</div>
+              <a-switch
+                v-model:checked="gcpForm.enabled"
+                checked-children="已启用"
+                un-checked-children="未启用"
+                :loading="gcpSaving"
+              />
+            </div>
+            <div class="webhook-hint">GKE 集群的审计日志通过 Cloud Logging → Pub/Sub 链路接入。配置后平台将自动消费审计事件并生成安全告警。</div>
+
+            <div v-if="gcpForm.enabled || cluster.gcpEnabled">
+              <a-form layout="vertical" style="max-width: 560px">
+                <a-form-item label="GCP Project ID" required>
+                  <a-input v-model:value="gcpForm.projectId" placeholder="your-gcp-project-id" />
+                </a-form-item>
+                <a-form-item label="Pub/Sub Subscription" required>
+                  <a-input v-model:value="gcpForm.subscription" placeholder="mxsec-k8s-audit-sub" />
+                </a-form-item>
+                <a-form-item>
+                  <template #label>
+                    <span>SA JSON Key</span>
+                    <span style="font-weight: 400; color: #86909C; margin-left: 8px">
+                      {{ cluster.gcpHasCredentials ? '（已配置，留空保持不变）' : '（GCE ADC / Workload Identity 可留空）' }}
+                    </span>
+                  </template>
+                  <a-textarea
+                    v-model:value="gcpForm.credentialsJson"
+                    placeholder="粘贴 Service Account JSON Key 内容，GCE 实例或 Workload Identity 环境下可留空"
+                    :rows="4"
+                    style="font-family: monospace; font-size: 12px"
+                  />
+                </a-form-item>
+                <a-form-item>
+                  <a-space>
+                    <a-button type="primary" :loading="gcpSaving" @click="saveGCPConfig">保存配置</a-button>
+                    <a-popconfirm
+                      v-if="cluster.gcpEnabled"
+                      title="清除后将停止接收该集群的 GKE 审计日志，确定继续？"
+                      @confirm="deleteGCPConfig"
+                    >
+                      <a-button danger :loading="gcpSaving">清除配置</a-button>
+                    </a-popconfirm>
+                  </a-space>
+                </a-form-item>
+              </a-form>
+            </div>
+          </div>
         </a-tab-pane>
 
         <!-- Node 列表 -->
@@ -141,16 +258,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { LeftOutlined } from '@ant-design/icons-vue'
+import { LeftOutlined, CopyOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
 import apiClient from '@/api/client'
 
 const route = useRoute()
 const clusterId = route.params.id as string
 const activeTab = ref('overview')
 
-const cluster = ref<any>({ name: '', status: 'running', version: '', apiServer: '' })
+const cluster = ref<any>({ name: '', status: 'running', version: '', apiServer: '', auditToken: '', webhookURL: '', gcpEnabled: false, gcpProjectId: '', gcpSubscription: '', gcpHasCredentials: false })
+const showToken = ref(false)
+const gcpSaving = ref(false)
+const gcpForm = ref({ enabled: false, projectId: '', subscription: '', credentialsJson: '' })
 const nodes = ref<any[]>([])
 const pods = ref<any[]>([])
 const workloads = ref<any[]>([])
@@ -239,6 +360,11 @@ const loadCluster = async () => {
     }
     if (res.namespaces) namespaces.value = res.namespaces
     if (res.risks) riskStats.value = res.risks
+    // 同步 GCP 表单
+    gcpForm.value.enabled = res.gcpEnabled ?? false
+    gcpForm.value.projectId = res.gcpProjectId ?? ''
+    gcpForm.value.subscription = res.gcpSubscription ?? ''
+    gcpForm.value.credentialsJson = ''
   } catch { /* API 未就绪 */ }
 }
 
@@ -270,6 +396,97 @@ const loadWorkloads = async () => {
 
 const handlePodTableChange = (pag: any) => { podPagination.value.current = pag.current; podPagination.value.pageSize = pag.pageSize; loadPods() }
 
+// Audit Webhook 相关
+const maskToken = (token: string) => {
+  if (!token || token.length <= 8) return token
+  return token.slice(0, 4) + '*'.repeat(token.length - 8) + token.slice(-4)
+}
+
+const auditWebhookYaml = computed(() => {
+  const url = cluster.value.webhookURL || 'https://YOUR_DOMAIN/api/v1/kube/audit-webhook/YOUR_TOKEN'
+  return `apiVersion: v1
+kind: Config
+clusters:
+- name: mxsec-audit
+  cluster:
+    server: "${url}"
+contexts:
+- name: mxsec-audit
+  context:
+    cluster: mxsec-audit
+current-context: mxsec-audit`
+})
+
+const copyToClipboard = async (text: string, label: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(`${label} 已复制到剪贴板`)
+  } catch {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try { document.execCommand('copy'); message.success(`${label} 已复制到剪贴板`) }
+    catch { message.error('复制失败，请手动复制') }
+    document.body.removeChild(textArea)
+  }
+}
+
+const regenerateToken = async () => {
+  try {
+    const res = await apiClient.post<any>(`/kube/clusters/${clusterId}/regenerate-token`)
+    cluster.value.auditToken = res.auditToken
+    cluster.value.webhookURL = res.webhookURL
+    message.success('Audit Token 已重新生成')
+  } catch {
+    message.error('重新生成失败')
+  }
+}
+
+const saveGCPConfig = async () => {
+  if (!gcpForm.value.projectId || !gcpForm.value.subscription) {
+    message.warning('请填写 GCP Project ID 和 Pub/Sub Subscription')
+    return
+  }
+  gcpSaving.value = true
+  try {
+    const res = await apiClient.put<any>(`/kube/clusters/${clusterId}/gcp-config`, {
+      projectId: gcpForm.value.projectId,
+      subscription: gcpForm.value.subscription,
+      credentialsJson: gcpForm.value.credentialsJson || undefined,
+    })
+    cluster.value.gcpEnabled = res.gcpEnabled
+    cluster.value.gcpProjectId = res.gcpProjectId
+    cluster.value.gcpSubscription = res.gcpSubscription
+    cluster.value.gcpHasCredentials = res.gcpHasCredentials
+    gcpForm.value.credentialsJson = ''
+    message.success('GCP Pub/Sub 配置已保存')
+  } catch {
+    message.error('保存 GCP 配置失败')
+  } finally {
+    gcpSaving.value = false
+  }
+}
+
+const deleteGCPConfig = async () => {
+  gcpSaving.value = true
+  try {
+    await apiClient.delete(`/kube/clusters/${clusterId}/gcp-config`)
+    cluster.value.gcpEnabled = false
+    cluster.value.gcpProjectId = ''
+    cluster.value.gcpSubscription = ''
+    cluster.value.gcpHasCredentials = false
+    gcpForm.value = { enabled: false, projectId: '', subscription: '', credentialsJson: '' }
+    message.success('GCP Pub/Sub 配置已清除')
+  } catch {
+    message.error('清除 GCP 配置失败')
+  } finally {
+    gcpSaving.value = false
+  }
+}
+
 onMounted(() => { loadCluster(); loadNodes(); loadPods(); loadWorkloads() })
 </script>
 
@@ -293,4 +510,15 @@ onMounted(() => { loadCluster(); loadNodes(); loadPods(); loadWorkloads() })
 .dot-running { background: #00B42A; box-shadow: 0 0 0 3px rgba(0,180,42,0.15); }
 .dot-warning { background: #FF7D00; box-shadow: 0 0 0 3px rgba(255,125,0,0.15); }
 .dot-offline { background: #F53F3F; box-shadow: 0 0 0 3px rgba(245,63,63,0.15); }
+
+.webhook-section { margin-top: 20px; padding: 16px; background: #F7F8FA; border: 1px solid #E5E8EF; border-radius: 8px; }
+.webhook-section-title { font-size: 14px; font-weight: 600; color: #1D2129; margin-bottom: 4px; }
+.webhook-hint { font-size: 12px; color: #86909C; margin-bottom: 12px; line-height: 1.6; }
+.webhook-field { margin-bottom: 10px; }
+.webhook-field-label { display: block; font-size: 12px; color: #86909C; margin-bottom: 4px; }
+.webhook-field-value { display: flex; align-items: center; gap: 4px; }
+.webhook-code { background: #FFFFFF; border: 1px solid #E5E8EF; border-radius: 4px; padding: 4px 8px; font-size: 12px; color: #1D2129; word-break: break-all; flex: 1; }
+.webhook-code-block { background: #FFFFFF; border: 1px solid #E5E8EF; border-radius: 4px; overflow: hidden; }
+.webhook-code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: #F2F3F5; border-bottom: 1px solid #E5E8EF; font-size: 12px; color: #86909C; }
+.webhook-pre { margin: 0; padding: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: #1D2129; }
 </style>

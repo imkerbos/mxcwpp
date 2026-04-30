@@ -75,6 +75,11 @@ type KubeCluster struct {
 	NamespaceCount int               `gorm:"column:namespace_count;type:int;default:0" json:"namespaceCount"`
 	HealthScore    int               `gorm:"column:health_score;type:int;default:100" json:"healthScore"`
 	Remark         string            `gorm:"column:remark;type:text" json:"remark"`
+	// GCP Pub/Sub 配置（GKE 审计日志接入，per-cluster）
+	GCPEnabled        bool   `gorm:"column:gcp_enabled;type:tinyint(1);default:0" json:"gcpEnabled"`
+	GCPProjectID      string `gorm:"column:gcp_project_id;type:varchar(255)" json:"gcpProjectId,omitempty"`
+	GCPSubscription   string `gorm:"column:gcp_subscription;type:varchar(255)" json:"gcpSubscription,omitempty"`
+	GCPCredentialsJSON string `gorm:"column:gcp_credentials_json;type:text" json:"-"` // SA JSON Key 内容，API 不直接暴露
 	CreatedAt      LocalTime         `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	UpdatedAt      LocalTime         `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updatedAt"`
 }

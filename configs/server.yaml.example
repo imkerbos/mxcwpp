@@ -13,6 +13,11 @@ server:
     host: "0.0.0.0"
     port: 8080
 
+  # 外网访问地址（用于拼接 K8s Audit Webhook URL）
+  # 格式：https://your-domain.com（不带尾部斜杠）
+  # 如果为空，则使用 http://host:port 作为 fallback（仅适用于内网环境）
+  external_url: ""
+
 # 数据库配置
 database:
   # 数据库类型：mysql 或 postgres
@@ -103,3 +108,8 @@ metrics:
     pushgateway_url: ""    # 例如: "http://pushgateway:9091"
     job_name: "mxsec-platform"  # Job 名称（默认 "mxsec-platform"）
     timeout: 10s           # 请求超时（默认 10 秒）
+
+# GKE 审计日志接入说明
+# GCP Pub/Sub 配置已迁移到集群级别（UI → 容器安全 → 集群管理 → 集群详情 → GCP Pub/Sub 配置）
+# 每个 GKE 集群可独立配置 project_id、subscription 和 SA 凭据
+# 详见: docs/deployment/gke-audit-log-setup.md

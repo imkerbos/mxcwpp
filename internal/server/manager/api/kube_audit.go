@@ -15,19 +15,17 @@ import (
 
 // KubeAuditHandler K8s Audit Webhook 接收端
 type KubeAuditHandler struct {
-	db           *gorm.DB
-	logger       *zap.Logger
-	alarmService *biz.KubeAlarmService
-	detector     *biz.KubeDetector
+	db        *gorm.DB
+	logger    *zap.Logger
+	processor *biz.KubeAuditProcessor
 }
 
 // NewKubeAuditHandler 创建 Audit Webhook Handler
 func NewKubeAuditHandler(db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService) *KubeAuditHandler {
 	return &KubeAuditHandler{
-		db:           db,
-		logger:       logger,
-		alarmService: alarmService,
-		detector:     biz.NewKubeDetector(db, logger, alarmService),
+		db:        db,
+		logger:    logger,
+		processor: biz.NewKubeAuditProcessor(db, logger, alarmService),
 	}
 }
 
@@ -87,81 +85,7 @@ func (h *KubeAuditHandler) ReceiveAuditWebhook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"received": len(eventList.Items)})
 }
 
-// processAuditEvents 异步处理 audit 事件
+// processAuditEvents 异步处理 audit 事件（委托给 KubeAuditProcessor）
 func (h *KubeAuditHandler) processAuditEvents(cluster model.KubeCluster, events []AuditEvent) {
-	for _, event := range events {
-		// 只处理 ResponseComplete 阶段，避免重复
-		if event.Stage != "" && event.Stage != "ResponseComplete" {
-			continue
-		}
-
-		rawData, _ := json.Marshal(event)
-
-		kubeEvent := model.KubeEvent{
-			ClusterID:   cluster.ID,
-			ClusterName: cluster.Name,
-			EventType:   "audit",
-			Severity:    h.classifyAuditSeverity(&event),
-			Title:       h.buildAuditTitle(&event),
-			Message:     h.buildAuditMessage(&event),
-			RawData:     model.RawJSON(rawData),
-			Status:      model.KubeEventStatusUnhandled,
-		}
-
-		if event.ObjectRef != nil {
-			kubeEvent.Namespace = event.ObjectRef.Namespace
-		}
-		if len(event.SourceIPs) > 0 {
-			kubeEvent.SourceIP = event.SourceIPs[0]
-		}
-
-		if err := h.db.Create(&kubeEvent).Error; err != nil {
-			h.logger.Error("保存 audit event 失败", zap.Error(err))
-		}
-
-		// 规则引擎检测
-		h.detector.DetectAuditEvent(cluster.ID, cluster.Name, &event)
-	}
-}
-
-func (h *KubeAuditHandler) classifyAuditSeverity(event *AuditEvent) string {
-	if event.ObjectRef == nil {
-		return "info"
-	}
-	// 高危操作
-	if event.ObjectRef.Subresource == "exec" {
-		return "high"
-	}
-	if event.ObjectRef.Resource == "secrets" && (event.Verb == "get" || event.Verb == "list") {
-		return "medium"
-	}
-	if event.ObjectRef.Resource == "clusterrolebindings" && event.Verb == "create" {
-		return "high"
-	}
-	return "info"
-}
-
-func (h *KubeAuditHandler) buildAuditTitle(event *AuditEvent) string {
-	if event.ObjectRef == nil {
-		return event.Verb + " " + event.RequestURI
-	}
-	title := event.Verb + " " + event.ObjectRef.Resource
-	if event.ObjectRef.Subresource != "" {
-		title += "/" + event.ObjectRef.Subresource
-	}
-	if event.ObjectRef.Name != "" {
-		title += " " + event.ObjectRef.Name
-	}
-	return title
-}
-
-func (h *KubeAuditHandler) buildAuditMessage(event *AuditEvent) string {
-	msg := "User: " + event.User.Username
-	if event.ObjectRef != nil && event.ObjectRef.Namespace != "" {
-		msg += ", Namespace: " + event.ObjectRef.Namespace
-	}
-	if event.UserAgent != "" {
-		msg += ", UserAgent: " + event.UserAgent
-	}
-	return msg
+	h.processor.ProcessAuditEvents(cluster, events)
 }

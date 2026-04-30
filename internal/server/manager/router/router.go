@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
@@ -18,7 +19,7 @@ import (
 )
 
 // Setup 设置并返回配置好的 Gin 路由引擎
-func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater) *gin.Engine {
+func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) *gin.Engine {
 	// 设置 Gin 模式
 	if cfg.Log.Level == "debug" {
 		gin.SetMode(gin.DebugMode)
@@ -108,13 +109,13 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV1Auth.GET("/discovery/agentcenter", discoveryHandler.ListACInstances)
 
 	// 注册所有 API 路由
-	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater)
+	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater, consumerManager)
 
 	return router
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -136,7 +137,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupPolicyImportExportAPI(router, db, logger)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger, chConn)
-	setupKubeAPI(router, db, logger, alarmService)
+	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
 	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
 	setupBackupsAPI(router, db, logger)
 	setupVulnerabilitiesAPI(router, db, logger)
@@ -445,11 +446,11 @@ func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupKubeAPI 设置 Kubernetes 容器安全 API 路由
-func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService) {
+func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) {
 	kubeClient := biz.NewKubeClientManager(db, logger)
 
 	// 集群管理
-	clusterHandler := api.NewKubeClusterHandler(db, logger, kubeClient)
+	clusterHandler := api.NewKubeClusterHandler(db, logger, kubeClient, cfg, consumerManager)
 	router.GET("/kube/clusters", clusterHandler.ListClusters)
 	router.POST("/kube/clusters", clusterHandler.CreateCluster)
 	router.GET("/kube/clusters/:id", clusterHandler.GetCluster)
@@ -458,6 +459,9 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.GET("/kube/clusters/:id/nodes", clusterHandler.GetClusterNodes)
 	router.GET("/kube/clusters/:id/pods", clusterHandler.GetClusterPods)
 	router.GET("/kube/clusters/:id/workloads", clusterHandler.GetClusterWorkloads)
+	router.POST("/kube/clusters/:id/regenerate-token", clusterHandler.RegenerateAuditToken)
+	router.PUT("/kube/clusters/:id/gcp-config", clusterHandler.UpdateGCPConfig)
+	router.DELETE("/kube/clusters/:id/gcp-config", clusterHandler.DeleteGCPConfig)
 
 	// 容器告警
 	alarmHandler := api.NewKubeAlarmHandler(db, logger)

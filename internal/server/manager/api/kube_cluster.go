@@ -1,31 +1,58 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // KubeClusterHandler 集群管理 API Handler
 type KubeClusterHandler struct {
-	db         *gorm.DB
-	logger     *zap.Logger
-	kubeClient *biz.KubeClientManager
+	db              *gorm.DB
+	logger          *zap.Logger
+	kubeClient      *biz.KubeClientManager
+	cfg             *config.Config
+	consumerManager *gcppubsub.ConsumerManager // 可为 nil
 }
 
 // NewKubeClusterHandler 创建集群管理 Handler
-func NewKubeClusterHandler(db *gorm.DB, logger *zap.Logger, kubeClient *biz.KubeClientManager) *KubeClusterHandler {
+func NewKubeClusterHandler(db *gorm.DB, logger *zap.Logger, kubeClient *biz.KubeClientManager, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) *KubeClusterHandler {
 	return &KubeClusterHandler{
-		db:         db,
-		logger:     logger,
-		kubeClient: kubeClient,
+		db:              db,
+		logger:          logger,
+		kubeClient:      kubeClient,
+		cfg:             cfg,
+		consumerManager: consumerManager,
 	}
+}
+
+// generateAuditToken 生成 64 字符的随机 audit token
+func generateAuditToken() (string, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(tokenBytes), nil
+}
+
+// buildWebhookURL 根据配置拼接完整的 audit webhook URL
+func (h *KubeClusterHandler) buildWebhookURL(auditToken string) string {
+	if h.cfg.Server.ExternalURL != "" {
+		return strings.TrimRight(h.cfg.Server.ExternalURL, "/") + "/api/v1/kube/audit-webhook/" + auditToken
+	}
+	return fmt.Sprintf("http://%s/api/v1/kube/audit-webhook/%s", h.cfg.Server.HTTP.Address(), auditToken)
 }
 
 // ListClusters 集群列表
@@ -116,10 +143,19 @@ func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 		return
 	}
 
+	// 生成 audit_token 用于 K8s Audit Webhook 认证
+	auditToken, err := generateAuditToken()
+	if err != nil {
+		h.logger.Error("生成 audit_token 失败", zap.Error(err))
+		InternalError(c, "生成 audit_token 失败")
+		return
+	}
+
 	cluster := model.KubeCluster{
 		Name:       req.Name,
 		ApiServer:  req.ApiServer,
 		KubeConfig: req.KubeConfig,
+		AuditToken: auditToken,
 		Status:     model.KubeClusterStatusOffline,
 		Remark:     req.Remark,
 	}
@@ -149,7 +185,15 @@ func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 	}
 
 	h.logger.Info("集群接入成功", zap.String("name", req.Name), zap.Uint("id", cluster.ID))
-	SuccessWithMessage(c, "集群接入成功", cluster)
+	SuccessWithMessage(c, "集群接入成功", gin.H{
+		"id":         cluster.ID,
+		"name":       cluster.Name,
+		"apiServer":  cluster.ApiServer,
+		"status":     cluster.Status,
+		"version":    cluster.Version,
+		"auditToken": cluster.AuditToken,
+		"webhookURL": h.buildWebhookURL(cluster.AuditToken),
+	})
 }
 
 // GetCluster 集群详情（含实时 K8s 数据）
@@ -235,6 +279,13 @@ func (h *KubeClusterHandler) GetCluster(c *gin.Context) {
 			"events":   eventCount,
 			"baseline": baselineFailCount,
 		},
+		"auditToken": cluster.AuditToken,
+		"webhookURL": h.buildWebhookURL(cluster.AuditToken),
+		// GCP Pub/Sub 配置
+		"gcpEnabled":      cluster.GCPEnabled,
+		"gcpProjectId":    cluster.GCPProjectID,
+		"gcpSubscription": cluster.GCPSubscription,
+		"gcpHasCredentials": cluster.GCPCredentialsJSON != "",
 	}
 
 	Success(c, result)
@@ -366,6 +417,9 @@ func (h *KubeClusterHandler) DeleteCluster(c *gin.Context) {
 	}
 
 	h.kubeClient.RemoveClient(uint(id))
+	if h.consumerManager != nil {
+		h.consumerManager.OnClusterDeleted(cluster.ID)
+	}
 	h.logger.Info("集群已删除", zap.String("name", cluster.Name), zap.Uint("id", cluster.ID))
 	SuccessMessage(c, "集群已移除")
 }
@@ -434,6 +488,149 @@ func (h *KubeClusterHandler) GetClusterWorkloads(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"items": workloads})
+}
+
+// RegenerateAuditToken 重新生成集群的 audit_token
+func (h *KubeClusterHandler) RegenerateAuditToken(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		BadRequest(c, "无效的集群 ID")
+		return
+	}
+
+	var cluster model.KubeCluster
+	if err := h.db.First(&cluster, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "集群不存在")
+			return
+		}
+		h.logger.Error("查询集群失败", zap.Error(err))
+		InternalError(c, "查询集群失败")
+		return
+	}
+
+	newToken, err := generateAuditToken()
+	if err != nil {
+		h.logger.Error("生成 audit_token 失败", zap.Error(err))
+		InternalError(c, "生成 token 失败")
+		return
+	}
+
+	if err := h.db.Model(&cluster).Update("audit_token", newToken).Error; err != nil {
+		h.logger.Error("更新 audit_token 失败", zap.Error(err))
+		InternalError(c, "更新 token 失败")
+		return
+	}
+
+	h.logger.Info("集群 audit_token 已重新生成", zap.String("cluster", cluster.Name), zap.Uint("id", cluster.ID))
+	SuccessWithMessage(c, "Token 已重新生成", gin.H{
+		"auditToken": newToken,
+		"webhookURL": h.buildWebhookURL(newToken),
+	})
+}
+
+// UpdateGCPConfig 配置集群的 GCP Pub/Sub 参数
+func (h *KubeClusterHandler) UpdateGCPConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		BadRequest(c, "无效的集群 ID")
+		return
+	}
+
+	var cluster model.KubeCluster
+	if err := h.db.First(&cluster, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "集群不存在")
+			return
+		}
+		h.logger.Error("查询集群失败", zap.Error(err))
+		InternalError(c, "查询集群失败")
+		return
+	}
+
+	var req struct {
+		ProjectID       string `json:"projectId" binding:"required"`
+		Subscription    string `json:"subscription" binding:"required"`
+		CredentialsJSON string `json:"credentialsJson"` // SA JSON Key 内容，可选（GCE ADC / Workload Identity 时留空）
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+
+	updates := map[string]interface{}{
+		"gcp_enabled":      true,
+		"gcp_project_id":   req.ProjectID,
+		"gcp_subscription": req.Subscription,
+	}
+	// 仅在请求中包含凭据时更新，允许保留已有凭据
+	if req.CredentialsJSON != "" {
+		updates["gcp_credentials_json"] = req.CredentialsJSON
+	}
+
+	if err := h.db.Model(&cluster).Updates(updates).Error; err != nil {
+		h.logger.Error("更新 GCP 配置失败", zap.Error(err))
+		InternalError(c, "更新 GCP 配置失败")
+		return
+	}
+
+	// 通知消费者管理器
+	if h.consumerManager != nil {
+		h.consumerManager.OnClusterGCPConfigChanged(cluster.ID)
+	}
+
+	h.logger.Info("集群 GCP Pub/Sub 配置已更新",
+		zap.String("cluster", cluster.Name),
+		zap.String("project_id", req.ProjectID),
+		zap.String("subscription", req.Subscription),
+	)
+
+	SuccessWithMessage(c, "GCP Pub/Sub 配置已保存", gin.H{
+		"gcpEnabled":        true,
+		"gcpProjectId":      req.ProjectID,
+		"gcpSubscription":   req.Subscription,
+		"gcpHasCredentials": req.CredentialsJSON != "" || cluster.GCPCredentialsJSON != "",
+	})
+}
+
+// DeleteGCPConfig 清除集群的 GCP Pub/Sub 配置
+func (h *KubeClusterHandler) DeleteGCPConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		BadRequest(c, "无效的集群 ID")
+		return
+	}
+
+	var cluster model.KubeCluster
+	if err := h.db.First(&cluster, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "集群不存在")
+			return
+		}
+		h.logger.Error("查询集群失败", zap.Error(err))
+		InternalError(c, "查询集群失败")
+		return
+	}
+
+	if err := h.db.Model(&cluster).Updates(map[string]interface{}{
+		"gcp_enabled":          false,
+		"gcp_project_id":       "",
+		"gcp_subscription":     "",
+		"gcp_credentials_json": "",
+	}).Error; err != nil {
+		h.logger.Error("清除 GCP 配置失败", zap.Error(err))
+		InternalError(c, "清除 GCP 配置失败")
+		return
+	}
+
+	// 通知消费者管理器停止消费者
+	if h.consumerManager != nil {
+		h.consumerManager.OnClusterGCPConfigChanged(cluster.ID)
+	}
+
+	h.logger.Info("集群 GCP Pub/Sub 配置已清除", zap.String("cluster", cluster.Name))
+	SuccessMessage(c, "GCP Pub/Sub 配置已清除")
 }
 
 // updateClusterStats 后台更新集群统计信息

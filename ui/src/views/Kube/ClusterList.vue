@@ -105,6 +105,34 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 创建成功后展示 Webhook 配置 -->
+    <a-modal
+      v-model:open="showWebhookModal"
+      title="集群接入成功 - Webhook 配置"
+      :footer="null"
+      width="640px"
+      @cancel="showWebhookModal = false"
+    >
+      <a-alert type="success" message="集群已成功接入，请配置 Audit Webhook 以启用安全告警。" show-icon style="margin-bottom: 16px" />
+      <div class="webhook-info-field">
+        <span class="webhook-info-label">Webhook URL</span>
+        <div class="webhook-info-value">
+          <code class="webhook-info-code">{{ createdWebhookURL }}</code>
+          <a-button type="link" size="small" @click="copyText(createdWebhookURL, 'Webhook URL')"><CopyOutlined /></a-button>
+        </div>
+      </div>
+      <div class="webhook-info-field">
+        <span class="webhook-info-label">Audit Token</span>
+        <div class="webhook-info-value">
+          <code class="webhook-info-code">{{ createdAuditToken }}</code>
+          <a-button type="link" size="small" @click="copyText(createdAuditToken, 'Audit Token')"><CopyOutlined /></a-button>
+        </div>
+      </div>
+      <a-alert type="warning" style="margin-top: 12px">
+        <template #message>请妥善保存以上信息。Token 可在集群详情页查看和重新生成。</template>
+      </a-alert>
+    </a-modal>
   </div>
 </template>
 
@@ -115,6 +143,7 @@ import {
   ClusterOutlined,
   CheckCircleOutlined,
   WarningOutlined,
+  CopyOutlined,
 } from '@ant-design/icons-vue'
 import type { FormInstance } from 'ant-design-vue'
 import { message } from 'ant-design-vue'
@@ -124,6 +153,9 @@ const searchText = ref('')
 const filterStatus = ref<string>()
 const loading = ref(false)
 const clusters = ref<any[]>([])
+const showWebhookModal = ref(false)
+const createdWebhookURL = ref('')
+const createdAuditToken = ref('')
 
 const pagination = ref({
   current: 1, pageSize: 20, total: 0, showSizeChanger: true,
@@ -201,8 +233,14 @@ const handleSubmit = async () => {
       await apiClient.put(`/kube/clusters/${editingId.value}`, form.value)
       message.success('集群已更新')
     } else {
-      await apiClient.post('/kube/clusters', form.value)
+      const res = await apiClient.post<any>('/kube/clusters', form.value)
       message.success('集群接入成功')
+      // 展示 webhook 配置信息
+      if (res?.auditToken) {
+        createdAuditToken.value = res.auditToken
+        createdWebhookURL.value = res.webhookURL || ''
+        showWebhookModal.value = true
+      }
     }
     showAddModal.value = false
     resetForm()
@@ -221,6 +259,23 @@ const resetForm = () => {
   editingId.value = undefined
   form.value = { name: '', apiServer: '', kubeConfig: '', remark: '' }
   formRef.value?.resetFields()
+}
+
+const copyText = async (text: string, label: string) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(`${label} 已复制到剪贴板`)
+  } catch {
+    const textArea = document.createElement('textarea')
+    textArea.value = text
+    textArea.style.position = 'fixed'
+    textArea.style.opacity = '0'
+    document.body.appendChild(textArea)
+    textArea.select()
+    try { document.execCommand('copy'); message.success(`${label} 已复制到剪贴板`) }
+    catch { message.error('复制失败，请手动复制') }
+    document.body.removeChild(textArea)
+  }
 }
 
 onMounted(() => { loadClusters() })
@@ -259,4 +314,9 @@ onMounted(() => { loadClusters() })
 .dot-running { background: #00B42A; box-shadow: 0 0 0 3px rgba(0,180,42,0.15); }
 .dot-warning { background: #FF7D00; box-shadow: 0 0 0 3px rgba(255,125,0,0.15); }
 .dot-offline { background: #F53F3F; box-shadow: 0 0 0 3px rgba(245,63,63,0.15); }
+
+.webhook-info-field { margin-bottom: 12px; }
+.webhook-info-label { display: block; font-size: 12px; color: #86909C; margin-bottom: 4px; }
+.webhook-info-value { display: flex; align-items: center; gap: 4px; }
+.webhook-info-code { background: #F7F8FA; border: 1px solid #E5E8EF; border-radius: 4px; padding: 6px 10px; font-size: 12px; color: #1D2129; word-break: break-all; flex: 1; }
 </style>

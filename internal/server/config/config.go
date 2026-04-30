@@ -53,6 +53,7 @@ type ServerConfig struct {
 	JWTSecret   string     `mapstructure:"jwt_secret"`   // JWT 密钥，用于生成和验证 Token
 	ManagerAddr string     `mapstructure:"manager_addr"` // AC 向 Manager SD 注册的 Manager HTTP 地址（如 http://manager:8080）
 	InstanceID  string     `mapstructure:"instance_id"`  // AC 实例唯一 ID（多实例部署时区分，留空则用 hostname）
+	ExternalURL string     `mapstructure:"external_url"` // 外网访问地址（如 https://mxsec.example.com），用于拼接 K8s Audit Webhook URL
 }
 
 // GRPCConfig 是 gRPC 服务配置
