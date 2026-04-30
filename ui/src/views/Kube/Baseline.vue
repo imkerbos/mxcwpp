@@ -75,7 +75,7 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'result'">
-              <a-tag v-if="record.result" :color="{ pass: 'green', fail: 'red', warn: 'orange', error: 'default' }[record.result] || 'default'" :bordered="false">
+              <a-tag v-if="record.result" :color="({ pass: 'green', fail: 'red', warn: 'orange', error: 'default' } as Record<string, string>)[record.result] || 'default'" :bordered="false">
                 {{ resultTextMap[record.result] || record.result }}
               </a-tag>
               <span v-else style="color: #86909C">-</span>
