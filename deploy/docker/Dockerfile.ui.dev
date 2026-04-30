@@ -1,17 +1,17 @@
-# 开发模式 - 使用 vite dev server
+# 开发模式 - Air 热重载 + Vite dev server
 FROM node:20-alpine
+
+RUN apk add --no-cache curl
 
 WORKDIR /app
 
-# 安装依赖
+# 安装 Air
+RUN curl -sSfL https://raw.githubusercontent.com/air-verse/air/master/install.sh | sh -s -- -b /usr/local/bin
+
+# 安装依赖（源码通过 volume 挂载，不 COPY）
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 
-# 复制源代码
-COPY ui/ .
-
-# 暴露端口
 EXPOSE 3000
 
-# 启动开发服务器
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+CMD ["air", "-c", "/etc/air/ui.toml"]

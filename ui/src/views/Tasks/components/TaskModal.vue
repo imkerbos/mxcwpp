@@ -70,34 +70,47 @@
       <a-form-item label="目标类型" name="target_type">
         <a-radio-group v-model:value="formData.target_type" @change="handleTargetTypeChange">
           <a-radio value="all">全部{{ getRuntimeTypeLabel(formData.runtime_type) }}</a-radio>
-          <a-radio value="host_ids">指定{{ getRuntimeTypeLabel(formData.runtime_type) }}</a-radio>
+          <a-radio value="business_line">按业务线</a-radio>
+          <a-radio value="tags">按标签</a-radio>
           <a-radio value="os_family">按OS筛选</a-radio>
+          <a-radio value="host_ids">指定{{ getRuntimeTypeLabel(formData.runtime_type) }}</a-radio>
         </a-radio-group>
       </a-form-item>
 
+      <!-- 业务线选择 -->
       <a-form-item
-        v-if="formData.target_type === 'host_ids'"
-        :label="getRuntimeTypeLabel(formData.runtime_type) + '列表'"
-        name="host_ids"
+        v-if="formData.target_type === 'business_line'"
+        label="选择业务线"
+        name="business_lines"
       >
         <a-select
-          v-model:value="formData.host_ids"
+          v-model:value="formData.business_lines"
           mode="multiple"
-          :placeholder="'选择' + getRuntimeTypeLabel(formData.runtime_type)"
-          :loading="hostsLoading"
+          placeholder="选择业务线"
+          :loading="businessLinesLoading"
+          style="width: 100%"
         >
-          <a-select-option
-            v-for="host in filteredHosts"
-            :key="host.host_id"
-            :value="host.host_id"
-          >
-            {{ host.hostname }} ({{ host.host_id.slice(0, 8) }}...)
-            <a-tag v-if="host.runtime_type" size="small" style="margin-left: 8px;">
-              {{ getRuntimeTypeLabel(host.runtime_type) }}
-            </a-tag>
+          <a-select-option v-for="bl in businessLines" :key="bl.code" :value="bl.code">
+            {{ bl.name }} ({{ bl.host_count || 0 }}台)
           </a-select-option>
         </a-select>
       </a-form-item>
+
+      <!-- 标签选择 -->
+      <a-form-item
+        v-if="formData.target_type === 'tags'"
+        label="选择标签"
+        name="tags"
+      >
+        <a-select
+          v-model:value="formData.tags"
+          mode="multiple"
+          placeholder="选择或输入标签"
+          style="width: 100%"
+          :options="tagOptions"
+        />
+      </a-form-item>
+
       <a-form-item
         v-if="formData.target_type === 'os_family'"
         label="操作系统"
@@ -117,6 +130,32 @@
           </a-select-option>
         </a-select>
       </a-form-item>
+
+      <a-form-item
+        v-if="formData.target_type === 'host_ids'"
+        :label="getRuntimeTypeLabel(formData.runtime_type) + '列表'"
+        name="host_ids"
+      >
+        <a-select
+          v-model:value="formData.host_ids"
+          mode="multiple"
+          :placeholder="'选择' + getRuntimeTypeLabel(formData.runtime_type)"
+          :loading="hostsLoading"
+          show-search
+          :filter-option="filterHostOption"
+        >
+          <a-select-option
+            v-for="host in filteredHosts"
+            :key="host.host_id"
+            :value="host.host_id"
+          >
+            {{ host.hostname }} ({{ host.host_id.slice(0, 8) }}...)
+            <a-tag v-if="host.runtime_type" size="small" style="margin-left: 8px;">
+              {{ getRuntimeTypeLabel(host.runtime_type) }}
+            </a-tag>
+          </a-select-option>
+        </a-select>
+      </a-form-item>
     </a-form>
   </a-modal>
 </template>
@@ -133,6 +172,7 @@ import {
 import { tasksApi } from '@/api/tasks'
 import { policiesApi } from '@/api/policies'
 import { hostsApi } from '@/api/hosts'
+import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
 import type { Policy, Host } from '@/api/types'
 import type { FormInstance } from 'ant-design-vue/es/form'
 import { OS_OPTIONS } from '@/constants/os'
@@ -149,8 +189,10 @@ const emit = defineEmits<{
 const formRef = ref<FormInstance>()
 const policies = ref<Policy[]>([])
 const hosts = ref<Host[]>([])
+const businessLines = ref<BusinessLine[]>([])
 const policiesLoading = ref(false)
 const hostsLoading = ref(false)
+const businessLinesLoading = ref(false)
 const osOptions = OS_OPTIONS
 
 const formData = reactive({
@@ -158,9 +200,11 @@ const formData = reactive({
   type: 'manual' as 'manual' | 'scheduled',
   runtime_type: 'vm' as 'vm' | 'docker' | 'k8s',
   policy_ids: [] as string[],
-  target_type: 'all' as 'all' | 'host_ids' | 'os_family',
+  target_type: 'all' as 'all' | 'business_line' | 'tags' | 'os_family' | 'host_ids',
   host_ids: [] as string[],
   os_family: [] as string[],
+  business_lines: [] as string[],
+  tags: [] as string[],
 })
 
 const rules = {
@@ -199,6 +243,28 @@ const rules = {
       trigger: 'change',
     },
   ],
+  business_lines: [
+    {
+      validator: (_rule: any, value: string[]) => {
+        if (formData.target_type === 'business_line' && (!value || value.length === 0)) {
+          return Promise.reject('请至少选择一个业务线')
+        }
+        return Promise.resolve()
+      },
+      trigger: 'change',
+    },
+  ],
+  tags: [
+    {
+      validator: (_rule: any, value: string[]) => {
+        if (formData.target_type === 'tags' && (!value || value.length === 0)) {
+          return Promise.reject('请至少选择一个标签')
+        }
+        return Promise.resolve()
+      },
+      trigger: 'change',
+    },
+  ],
 }
 
 const open = computed({
@@ -217,6 +283,22 @@ const filteredPolicies = computed(() => {
     return policy.runtime_types.includes(formData.runtime_type)
   })
 })
+
+// 标签选项（从主机中提取）
+const tagOptions = computed(() => {
+  const tags = new Set<string>()
+  filteredHosts.value.forEach(h => {
+    if (h.tags) {
+      h.tags.forEach((t: string) => tags.add(t))
+    }
+  })
+  return Array.from(tags).sort().map(t => ({ label: t, value: t }))
+})
+
+// 主机搜索过滤
+const filterHostOption = (input: string, option: any) => {
+  return option.children?.[0]?.children?.toLowerCase?.()?.includes(input.toLowerCase()) ?? false
+}
 
 // 根据运行时类型筛选主机
 const filteredHosts = computed(() => {
@@ -273,6 +355,18 @@ const loadHosts = async () => {
   }
 }
 
+const loadBusinessLines = async () => {
+  businessLinesLoading.value = true
+  try {
+    const response = await businessLinesApi.list({ page_size: 1000 }) as any
+    businessLines.value = response.items || []
+  } catch (error) {
+    console.error('加载业务线列表失败:', error)
+  } finally {
+    businessLinesLoading.value = false
+  }
+}
+
 const handleRuntimeTypeChange = () => {
   // 清空策略选择
   formData.policy_ids = []
@@ -283,22 +377,52 @@ const handleRuntimeTypeChange = () => {
 const handleTargetTypeChange = () => {
   formData.host_ids = []
   formData.os_family = []
+  formData.business_lines = []
+  formData.tags = []
 }
 
 const handleSubmit = async () => {
   try {
     await formRef.value?.validate()
-    const targets: any = {
-      type: formData.target_type,
-    }
+
+    // 根据目标类型构建目标配置（业务线/标签在前端转成 host_ids）
+    let targetType: string = formData.target_type
+    let targetHostIds: string[] | undefined
+    let targetOsFamily: string[] | undefined
+
     if (formData.target_type === 'host_ids') {
-      targets.host_ids = formData.host_ids
+      targetType = 'host_ids'
+      targetHostIds = formData.host_ids
     } else if (formData.target_type === 'os_family') {
-      targets.os_family = formData.os_family
+      targetType = 'os_family'
+      targetOsFamily = formData.os_family
+    } else if (formData.target_type === 'business_line') {
+      targetType = 'host_ids'
+      targetHostIds = filteredHosts.value
+        .filter(h => h.business_line && formData.business_lines.includes(h.business_line))
+        .map(h => h.host_id)
+      if (targetHostIds.length === 0) {
+        message.warning('所选业务线下没有符合检查类型的主机')
+        return
+      }
+    } else if (formData.target_type === 'tags') {
+      targetType = 'host_ids'
+      targetHostIds = filteredHosts.value
+        .filter(h => h.tags && h.tags.some((t: string) => formData.tags.includes(t)))
+        .map(h => h.host_id)
+      if (targetHostIds.length === 0) {
+        message.warning('所选标签下没有符合检查类型的主机')
+        return
+      }
     }
-    // 添加运行时类型筛选
-    targets.runtime_type = formData.runtime_type
-    
+
+    const targets: any = {
+      type: targetType,
+      host_ids: targetHostIds,
+      os_family: targetOsFamily,
+      runtime_type: formData.runtime_type,
+    }
+
     await tasksApi.create({
       name: formData.name,
       type: formData.type,
@@ -322,6 +446,8 @@ const handleCancel = () => {
   formData.target_type = 'all'
   formData.host_ids = []
   formData.os_family = []
+  formData.business_lines = []
+  formData.tags = []
 }
 
 watch(
@@ -330,6 +456,7 @@ watch(
     if (open) {
       loadPolicies()
       loadHosts()
+      loadBusinessLines()
     }
   }
 )
@@ -337,6 +464,7 @@ watch(
 onMounted(() => {
   loadPolicies()
   loadHosts()
+  loadBusinessLines()
 })
 </script>
 

@@ -295,11 +295,11 @@ services:
     volumes:
       - ../ui:/app:rw
       - /app/node_modules
+      - ../configs/air/ui.toml:/etc/air/ui.toml:ro
     working_dir: /app
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       NODE_ENV: development
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://0.0.0.0:3000/ 2>&1 || exit 1"]
       interval: 10s
