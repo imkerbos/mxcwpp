@@ -110,10 +110,52 @@ type purlInfo struct {
 	IP       string `gorm:"column:ip"`
 }
 
-// GetLatestSyncStatus 查询最近一条 OSV 同步记录
+// SyncOnly 仅同步漏洞数据库（NVD + Red Hat），不执行 OSV 主机扫描
+func (v *VulnScanner) SyncOnly() error {
+	startedAt := time.Now()
+
+	record := model.SecurityDBSyncRecord{
+		DBType:    "vuln-sync",
+		Status:    "running",
+		StartedAt: startedAt,
+	}
+	v.db.Create(&record)
+
+	v.logger.Info("开始漏洞库同步（仅同步，不扫描主机）")
+
+	var lastErr error
+	// NVD 同步
+	if err := v.SyncNVD(); err != nil {
+		v.logger.Warn("NVD 同步失败", zap.Error(err))
+		lastErr = err
+	}
+	// Red Hat Security Data 同步
+	if err := v.SyncRedHat(); err != nil {
+		v.logger.Warn("Red Hat 同步失败", zap.Error(err))
+		if lastErr == nil {
+			lastErr = err
+		}
+	}
+
+	duration := int(time.Since(startedAt).Seconds())
+	updates := map[string]interface{}{"duration": duration}
+	if lastErr != nil {
+		updates["status"] = "failed"
+		updates["error_msg"] = lastErr.Error()
+	} else {
+		updates["status"] = "success"
+		updates["version"] = time.Now().Format("20060102.150405")
+	}
+	v.db.Model(&record).Updates(updates)
+
+	v.logger.Info("漏洞库同步完成", zap.Int("duration_seconds", duration))
+	return lastErr
+}
+
+// GetLatestSyncStatus 查询最近一条漏洞相关同步记录
 func (v *VulnScanner) GetLatestSyncStatus() (*model.SecurityDBSyncRecord, error) {
 	var record model.SecurityDBSyncRecord
-	err := v.db.Where("db_type = ?", "osv").Order("id DESC").First(&record).Error
+	err := v.db.Where("db_type IN ?", []string{"osv", "vuln-sync"}).Order("id DESC").First(&record).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, nil
@@ -123,10 +165,10 @@ func (v *VulnScanner) GetLatestSyncStatus() (*model.SecurityDBSyncRecord, error)
 	return &record, nil
 }
 
-// GetSyncHistory 分页查询 OSV 同步历史记录
+// GetSyncHistory 分页查询漏洞相关同步历史记录
 func (v *VulnScanner) GetSyncHistory(page, pageSize int) ([]model.SecurityDBSyncRecord, int64, error) {
 	var total int64
-	query := v.db.Model(&model.SecurityDBSyncRecord{}).Where("db_type = ?", "osv")
+	query := v.db.Model(&model.SecurityDBSyncRecord{}).Where("db_type IN ?", []string{"osv", "vuln-sync"})
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -256,6 +298,11 @@ func (v *VulnScanner) doScanAll() error {
 	// NVD 补充同步：覆盖 OSV.dev 尚未收录的最新 CVE
 	if err := v.SyncNVD(); err != nil {
 		v.logger.Warn("NVD 补充同步失败（不影响 OSV 数据）", zap.Error(err))
+	}
+
+	// Red Hat Security Data 补充同步
+	if err := v.SyncRedHat(); err != nil {
+		v.logger.Warn("Red Hat 补充同步失败（不影响其他数据）", zap.Error(err))
 	}
 
 	return nil

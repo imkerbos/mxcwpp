@@ -19,6 +19,10 @@ export const vulnerabilitiesApi = {
     return apiClient.post(`/vulnerabilities/${id}/ignore`)
   },
 
+  triggerSync: () => {
+    return apiClient.post('/vulnerabilities/sync')
+  },
+
   triggerScan: () => {
     return apiClient.post('/vulnerabilities/scan')
   },

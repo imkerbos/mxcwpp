@@ -605,6 +605,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	handler := api.NewVulnerabilitiesHandler(db, logger)
 	router.GET("/vulnerabilities", handler.ListVulnerabilities)
 	router.POST("/vulnerabilities/:id/ignore", handler.IgnoreVulnerability)
+	router.POST("/vulnerabilities/sync", handler.TriggerSync)
 	router.POST("/vulnerabilities/scan", handler.TriggerScan)
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)

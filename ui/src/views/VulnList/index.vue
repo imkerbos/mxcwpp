@@ -65,7 +65,7 @@
       </div>
       <div class="scan-status-actions">
         <a-button size="small" @click="showScanHistory">历史记录</a-button>
-        <a-button size="small" type="primary" @click="handleScan">手动同步</a-button>
+        <a-button size="small" type="primary" @click="handleSync">手动同步</a-button>
       </div>
     </div>
 
@@ -372,6 +372,10 @@ const scanHistoryPagination = ref({
 })
 
 const scanHistoryColumns = [
+  {
+    title: '类型', dataIndex: 'dbType', width: 120,
+    customRender: ({ text }: { text: string }) => text === 'vuln-sync' ? '漏洞库同步' : '全量扫描',
+  },
   { title: '版本', dataIndex: 'version', width: 160 },
   { title: '状态', key: 'status', width: 80 },
   { title: '耗时(秒)', dataIndex: 'duration', width: 80 },
@@ -500,10 +504,20 @@ const handleIgnore = async (record: Vulnerability) => {
   }
 }
 
+const handleSync = async () => {
+  try {
+    await vulnerabilitiesApi.triggerSync()
+    message.success('漏洞库同步任务已启动（NVD + Red Hat）')
+    setTimeout(() => loadScanStatus(), 2000)
+  } catch {
+    message.error('启动漏洞库同步失败')
+  }
+}
+
 const handleScan = async () => {
   try {
     await vulnerabilitiesApi.triggerScan()
-    message.success('扫描任务已创建')
+    message.success('全量扫描任务已启动（OSV + NVD + Red Hat）')
     setTimeout(() => loadScanStatus(), 2000)
   } catch {
     message.error('创建扫描任务失败')

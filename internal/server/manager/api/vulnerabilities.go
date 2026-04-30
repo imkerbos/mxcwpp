@@ -250,7 +250,21 @@ func (h *VulnerabilitiesHandler) IgnoreVulnerability(c *gin.Context) {
 	SuccessMessage(c, "漏洞已忽略")
 }
 
-// TriggerScan 触发漏洞扫描
+// TriggerSync 触发漏洞库同步（仅同步 NVD + Red Hat 数据，不执行主机扫描）
+// POST /api/v1/vulnerabilities/sync
+func (h *VulnerabilitiesHandler) TriggerSync(c *gin.Context) {
+	scanner := biz.NewVulnScanner(h.db, h.logger)
+
+	go func() {
+		if err := scanner.SyncOnly(); err != nil {
+			h.logger.Error("漏洞库同步失败", zap.Error(err))
+		}
+	}()
+
+	SuccessMessage(c, "漏洞库同步任务已启动")
+}
+
+// TriggerScan 触发漏洞扫描（包含漏洞库同步 + 主机扫描）
 // POST /api/v1/vulnerabilities/scan
 func (h *VulnerabilitiesHandler) TriggerScan(c *gin.Context) {
 	scanner := biz.NewVulnScanner(h.db, h.logger)
