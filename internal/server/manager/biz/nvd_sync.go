@@ -277,7 +277,11 @@ func (v *VulnScanner) fetchRecentNVDCVEs() ([]nvdItem, error) {
 			break
 		}
 		var pageResult nvdResponse
-		json.NewDecoder(pageResp.Body).Decode(&pageResult)
+		if err := json.NewDecoder(pageResp.Body).Decode(&pageResult); err != nil {
+			pageResp.Body.Close()
+			v.logger.Warn("NVD 分页解析失败", zap.Int("startIndex", startIndex), zap.Error(err))
+			break
+		}
 		pageResp.Body.Close()
 		allItems = append(allItems, pageResult.Vulnerabilities...)
 		v.logger.Info("NVD 分页获取完成", zap.Int("startIndex", startIndex), zap.Int("pageItems", len(pageResult.Vulnerabilities)))
