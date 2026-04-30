@@ -24,12 +24,13 @@ import (
 
 // ComponentsHandler 组件管理 API 处理器
 type ComponentsHandler struct {
-	db        *gorm.DB
-	logger    *zap.Logger
-	cfg       *config.Config  // Server 配置
-	uploadDir string          // 上传文件存储目录
-	urlPrefix string          // 文件访问 URL 前缀
-	signer    *signing.Signer // Ed25519 签名器（可选）
+	db          *gorm.DB
+	logger      *zap.Logger
+	cfg         *config.Config  // Server 配置
+	uploadDir   string          // 上传文件存储目录
+	urlPrefix   string          // 文件访问 URL 前缀
+	signer      *signing.Signer // Ed25519 签名器（可选）
+	downloadSem chan struct{}    // 并发下载信号量，限制同时下载数
 }
 
 // NewComponentsHandler 创建组件管理处理器
@@ -44,11 +45,12 @@ func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, cfg *config.Config, u
 		logger.Error("创建插件上传目录失败", zap.Error(err))
 	}
 	handler := &ComponentsHandler{
-		db:        db,
-		logger:    logger,
-		cfg:       cfg,
-		uploadDir: uploadDir,
-		urlPrefix: urlPrefix,
+		db:          db,
+		logger:      logger,
+		cfg:         cfg,
+		uploadDir:   uploadDir,
+		urlPrefix:   urlPrefix,
+		downloadSem: make(chan struct{}, 10), // 最多 10 个并发下载
 	}
 
 	// 初始化签名器（如果配置了私钥）
@@ -1196,6 +1198,18 @@ func (h *ComponentsHandler) CheckAgentUpdate(c *gin.Context) {
 // DownloadPluginPackage 下载插件包 (供 Agent 调用)
 // GET /api/v1/plugins/download/:name
 func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
+	// 并发限制：超过 10 个同时下载时返回 429
+	select {
+	case h.downloadSem <- struct{}{}:
+		defer func() { <-h.downloadSem }()
+	default:
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    429,
+			"message": "下载并发数已达上限，请稍后重试",
+		})
+		return
+	}
+
 	name := c.Param("name")
 	arch := c.DefaultQuery("arch", "amd64")
 

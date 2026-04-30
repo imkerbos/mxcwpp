@@ -186,27 +186,10 @@ func handleBaselineTask(ctx context.Context, taskData map[string]interface{}, ch
 	taskID, _ := taskData["task_id"].(string)
 	policyID, _ := taskData["policy_id"].(string)
 
-	// 提取策略配置
-	policiesJSON, ok := taskData["policies"].(string)
-	if !ok {
-		return fmt.Errorf("missing policies in task data")
-	}
-
-	var policiesData []map[string]interface{}
-	if err := json.Unmarshal([]byte(policiesJSON), &policiesData); err != nil {
-		return fmt.Errorf("failed to unmarshal policies: %w", err)
-	}
-
-	// 转换为 Policy 对象
-	var policies []*engine.Policy
-	for _, pd := range policiesData {
-		policyJSON, _ := json.Marshal(pd)
-		var p engine.Policy
-		if err := json.Unmarshal(policyJSON, &p); err != nil {
-			logger.Warn("failed to unmarshal policy", zap.Error(err))
-			continue
-		}
-		policies = append(policies, &p)
+	// 提取策略配置（兼容新旧格式：新版直接是 JSON 数组，旧版是 JSON 字符串）
+	policies, err := parsePolicies(taskData["policies"])
+	if err != nil {
+		return fmt.Errorf("failed to parse policies: %w", err)
 	}
 
 	// 提取主机信息（用于 OS 匹配）
@@ -275,6 +258,34 @@ func handleBaselineTask(ctx context.Context, taskData map[string]interface{}, ch
 	return nil
 }
 
+// parsePolicies 解析策略数据，兼容新旧两种格式：
+// - 新版：policies 是 JSON 数组（[]interface{}），Server 端已修复双重编码
+// - 旧版：policies 是 JSON 字符串（string），需要二次 Unmarshal
+func parsePolicies(raw interface{}) ([]*engine.Policy, error) {
+	var policiesBytes []byte
+
+	switch v := raw.(type) {
+	case string:
+		// 旧版格式：双重编码的 JSON 字符串
+		policiesBytes = []byte(v)
+	case []interface{}:
+		// 新版格式：直接是 JSON 数组，需要 Marshal 回 bytes 再统一处理
+		var err error
+		policiesBytes, err = json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal policies array: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("unexpected policies type: %T", raw)
+	}
+
+	var policies []*engine.Policy
+	if err := json.Unmarshal(policiesBytes, &policies); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal policies: %w", err)
+	}
+	return policies, nil
+}
+
 // newPluginLogger 创建插件专用的 logger
 // 输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/baseline.log
 func newPluginLogger() (*zap.Logger, error) {
@@ -298,27 +309,10 @@ func handleFixTask(ctx context.Context, taskData map[string]interface{}, fixer *
 	taskID, _ := taskData["task_id"].(string)
 	fixTaskID, _ := taskData["fix_task_id"].(string)
 
-	// 提取策略配置
-	policiesJSON, ok := taskData["policies"].(string)
-	if !ok {
-		return fmt.Errorf("missing policies in task data")
-	}
-
-	var policiesData []map[string]interface{}
-	if err := json.Unmarshal([]byte(policiesJSON), &policiesData); err != nil {
-		return fmt.Errorf("failed to unmarshal policies: %w", err)
-	}
-
-	// 转换为 Policy 对象
-	var policies []*engine.Policy
-	for _, pd := range policiesData {
-		policyJSON, _ := json.Marshal(pd)
-		var p engine.Policy
-		if err := json.Unmarshal(policyJSON, &p); err != nil {
-			logger.Warn("failed to unmarshal policy", zap.Error(err))
-			continue
-		}
-		policies = append(policies, &p)
+	// 提取策略配置（兼容新旧格式：新版直接是 JSON 数组，旧版是 JSON 字符串）
+	policies, err := parsePolicies(taskData["policies"])
+	if err != nil {
+		return fmt.Errorf("failed to parse policies: %w", err)
 	}
 
 	// 提取规则 ID 列表

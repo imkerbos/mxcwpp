@@ -105,6 +105,11 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// 启用 Server→Agent Snappy 压缩（Agent 端已注册 snappy decompressor）
+	if err := grpc.SetSendCompressor(stream.Context(), "snappy"); err != nil {
+		s.logger.Warn("设置发送压缩器失败，将使用无压缩传输", zap.Error(err))
+	}
+
 	// 接收第一个 PackagedData 以获取 Agent ID
 	firstData, err := stream.Recv()
 	if err != nil {
@@ -2085,6 +2090,101 @@ func (s *Service) BroadcastPluginConfigs(ctx context.Context) (int, []string, er
 	s.logger.Info("插件配置广播完成",
 		zap.Int("success_count", successCount),
 		zap.Int("failed_count", len(failedAgents)))
+
+	return successCount, failedAgents, nil
+}
+
+// BroadcastPluginConfigsByName 只广播指定名称的插件配置（差异广播）
+// 分批发送，每批 20 个 Agent 后暂停 200ms，避免所有 Agent 同时下载
+func (s *Service) BroadcastPluginConfigsByName(ctx context.Context, pluginNames []string) (int, []string, error) {
+	if len(pluginNames) == 0 {
+		return 0, nil, nil
+	}
+
+	// 从数据库查询指定的插件配置
+	var pluginConfigs []model.PluginConfig
+	if err := s.db.Where("enabled = ? AND name IN ?", true, pluginNames).Find(&pluginConfigs).Error; err != nil {
+		return 0, nil, fmt.Errorf("查询插件配置失败: %w", err)
+	}
+
+	if len(pluginConfigs) == 0 {
+		return 0, nil, nil
+	}
+
+	// 获取所有在线连接
+	s.connMu.RLock()
+	connections := make([]*Connection, 0, len(s.connections))
+	for _, conn := range s.connections {
+		connections = append(connections, conn)
+	}
+	s.connMu.RUnlock()
+
+	if len(connections) == 0 {
+		return 0, nil, nil
+	}
+
+	s.logger.Info("开始差异广播插件配置",
+		zap.Int("agent_count", len(connections)),
+		zap.Strings("plugins", pluginNames))
+
+	// 分批发送，每批 broadcastBatchSize 个 Agent
+	const broadcastBatchSize = 20
+	const broadcastBatchDelay = 200 * time.Millisecond
+	successCount := 0
+	var failedAgents []string
+
+	for i, conn := range connections {
+		if i > 0 && i%broadcastBatchSize == 0 {
+			time.Sleep(broadcastBatchDelay)
+		}
+
+		runtimeType := s.getAgentRuntimeType(conn.AgentID)
+
+		var configs []*grpcProto.Config
+		for _, pc := range pluginConfigs {
+			if len(pc.RuntimeTypes) > 0 && !containsString([]string(pc.RuntimeTypes), string(runtimeType)) {
+				continue
+			}
+
+			downloadURLs, sha256 := s.resolvePluginDelivery(pc)
+			if len(downloadURLs) == 0 {
+				continue
+			}
+
+			config := &grpcProto.Config{
+				Name:         pc.Name,
+				Type:         string(pc.Type),
+				Version:      pc.Version,
+				Sha256:       sha256,
+				Signature:    pc.Signature,
+				DownloadUrls: downloadURLs,
+				Detail:       pc.Detail,
+			}
+			configs = append(configs, config)
+		}
+
+		if len(configs) == 0 {
+			continue
+		}
+
+		cmd := &grpcProto.Command{
+			Configs: configs,
+		}
+
+		select {
+		case conn.sendCh <- cmd:
+			successCount++
+		case <-conn.ctx.Done():
+			failedAgents = append(failedAgents, conn.AgentID)
+		default:
+			failedAgents = append(failedAgents, conn.AgentID)
+		}
+	}
+
+	s.logger.Info("差异广播完成",
+		zap.Int("success_count", successCount),
+		zap.Int("failed_count", len(failedAgents)),
+		zap.Strings("plugins", pluginNames))
 
 	return successCount, failedAgents, nil
 }

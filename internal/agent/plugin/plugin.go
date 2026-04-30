@@ -697,15 +697,30 @@ func (m *Manager) downloadFromURL(urlStr, destPath string) error {
 		return m.copyFile(srcPath, destPath)
 	}
 
-	// HTTP/HTTPS 下载
+	// HTTP/HTTPS 下载（429 限流时自动重试）
 	client := &http.Client{
-		Timeout: 5 * time.Minute,
+		Timeout: 10 * time.Minute,
 	}
 
-	// 发送请求
-	resp, err := client.Get(urlStr)
-	if err != nil {
-		return fmt.Errorf("failed to download: %w", err)
+	var resp *http.Response
+	for retries := 0; retries < 5; retries++ {
+		var err error
+		resp, err = client.Get(urlStr)
+		if err != nil {
+			return fmt.Errorf("failed to download: %w", err)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			// 指数退避：5s, 10s, 20s, 40s, 80s
+			backoff := time.Duration(5<<retries) * time.Second
+			m.logger.Info("server rate limit, retrying after backoff",
+				zap.String("url", urlStr),
+				zap.Duration("backoff", backoff),
+				zap.Int("retry", retries+1))
+			time.Sleep(backoff)
+			continue
+		}
+		break
 	}
 	defer resp.Body.Close()
 
@@ -720,8 +735,9 @@ func (m *Manager) downloadFromURL(urlStr, destPath string) error {
 	}
 	defer destFile.Close()
 
-	// 复制数据
-	_, err = io.Copy(destFile, resp.Body)
+	// 限速下载（10 MB/s），避免多 Agent 同时下载占满带宽
+	reader := newRateLimitedReader(resp.Body, 10*1024*1024)
+	_, err = io.Copy(destFile, reader)
 	if err != nil {
 		os.Remove(destPath)
 		return fmt.Errorf("failed to write file: %w", err)
@@ -1538,4 +1554,52 @@ func (m *Manager) taskCleanupLoop() {
 			m.taskTracker.CleanupOldTasks(24 * time.Hour)
 		}
 	}
+}
+
+// rateLimitedReader 限速 Reader，用于控制下载速率
+type rateLimitedReader struct {
+	reader    io.Reader
+	bytesPerSec int64
+	lastTime  time.Time
+	bytesRead int64
+}
+
+func newRateLimitedReader(r io.Reader, bytesPerSec int64) *rateLimitedReader {
+	return &rateLimitedReader{
+		reader:      r,
+		bytesPerSec: bytesPerSec,
+		lastTime:    time.Now(),
+	}
+}
+
+func (r *rateLimitedReader) Read(p []byte) (int, error) {
+	// 检查是否需要限速
+	elapsed := time.Since(r.lastTime)
+	if elapsed > 0 && r.bytesRead > 0 {
+		currentRate := float64(r.bytesRead) / elapsed.Seconds()
+		if currentRate > float64(r.bytesPerSec) {
+			// 计算需要等待的时间
+			waitTime := time.Duration(float64(r.bytesRead)/float64(r.bytesPerSec)*float64(time.Second)) - elapsed
+			if waitTime > 0 {
+				time.Sleep(waitTime)
+			}
+		}
+	}
+
+	// 限制单次读取大小（64KB），细粒度控制速率
+	maxRead := 64 * 1024
+	if len(p) > maxRead {
+		p = p[:maxRead]
+	}
+
+	n, err := r.reader.Read(p)
+	r.bytesRead += int64(n)
+
+	// 每秒重置计数器
+	if elapsed >= time.Second {
+		r.lastTime = time.Now()
+		r.bytesRead = 0
+	}
+
+	return n, err
 }

@@ -254,10 +254,16 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 		zap.Int("rule_count", len(allRules)),
 	)
 
-	// 为每个匹配的主机下发任务（带重试）
+	// 为每个匹配的主机下发任务（带重试，每批 20 台后暂停 100ms 避免瞬时流量尖峰）
+	const dispatchBatchSize = 20
+	const dispatchBatchDelay = 100 * time.Millisecond
 	successCount := 0
 	now := model.Now()
-	for _, host := range matchedHosts {
+	for i, host := range matchedHosts {
+		// 批间限速：每 dispatchBatchSize 台主机暂停一次
+		if i > 0 && i%dispatchBatchSize == 0 {
+			time.Sleep(dispatchBatchDelay)
+		}
 		// 使用重试机制下发任务
 		err := Retry(context.Background(), func() error {
 			return s.sendTaskToHostMultiPolicy(&host, task, allPolicies, transferService)
@@ -354,7 +360,7 @@ func (s *TaskService) sendTaskToHostMultiPolicy(
 	},
 ) error {
 	// 构建多策略数据
-	policiesData := s.buildMultiPoliciesData(policies, host)
+	policiesData := s.buildMultiPoliciesData(policies, host, true) // 检查任务裁剪 fix.command
 
 	// 构建任务数据（JSON）
 	taskData := map[string]interface{}{
@@ -399,7 +405,9 @@ func (s *TaskService) sendTaskToHostMultiPolicy(
 }
 
 // buildMultiPoliciesData 构建多策略数据
-func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *model.Host) string {
+// 返回 json.RawMessage 避免双重 JSON 编码（之前返回 string，嵌入 map 后 Marshal 会再次转义）
+// stripFixCommand: 检查任务不需要 fix.command / fix.restart_services，裁剪以减少传输量
+func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *model.Host, stripFixCommand bool) json.RawMessage {
 	policiesArray := make([]map[string]interface{}, 0, len(policies))
 
 	for _, policy := range policies {
@@ -437,7 +445,12 @@ func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *mod
 				"description": rule.Description,
 				"severity":    rule.Severity,
 				"check":       rule.CheckConfig,
-				"fix":         rule.FixConfig,
+			}
+			if stripFixCommand {
+				// 检查任务只需修复建议，不需要 command 和 restart_services
+				ruleData["fix"] = map[string]string{"suggestion": rule.FixConfig.Suggestion}
+			} else {
+				ruleData["fix"] = rule.FixConfig
 			}
 			rulesList = append(rulesList, ruleData)
 		}
@@ -471,10 +484,10 @@ func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *mod
 	policiesJSON, err := json.Marshal(policiesArray)
 	if err != nil {
 		s.logger.Error("序列化策略数据失败", zap.Error(err))
-		return "[]"
+		return json.RawMessage("[]")
 	}
 
-	return string(policiesJSON)
+	return json.RawMessage(policiesJSON)
 }
 
 // sendTaskToHost 向指定主机发送任务
@@ -532,12 +545,12 @@ func (s *TaskService) sendTaskToHost(
 }
 
 // buildPoliciesData 构建策略数据（转换为 baseline plugin 期望的格式）
-func (s *TaskService) buildPoliciesData(policy *model.Policy, rules []model.Rule) string {
+func (s *TaskService) buildPoliciesData(policy *model.Policy, rules []model.Rule) json.RawMessage {
 	return s.buildPoliciesDataWithRuntime(policy, rules, "")
 }
 
 // buildPoliciesDataWithRuntime 构建策略数据（带运行时类型过滤）
-func (s *TaskService) buildPoliciesDataWithRuntime(policy *model.Policy, rules []model.Rule, runtimeType model.RuntimeType) string {
+func (s *TaskService) buildPoliciesDataWithRuntime(policy *model.Policy, rules []model.Rule, runtimeType model.RuntimeType) json.RawMessage {
 	// 构建规则列表
 	rulesList := make([]map[string]interface{}, 0, len(rules))
 	for _, rule := range rules {
@@ -574,16 +587,15 @@ func (s *TaskService) buildPoliciesDataWithRuntime(policy *model.Policy, rules [
 		"rules":       rulesList,
 	}
 
-	// 序列化为 JSON 字符串（注意：返回的是单个策略数组的 JSON 字符串）
-	// baseline plugin 期望 policies 是一个 JSON 字符串，解析后是 []map[string]interface{}
+	// 序列化为 JSON（返回 json.RawMessage 避免双重编码）
 	policiesArray := []map[string]interface{}{policyData}
 	policiesJSON, err := json.Marshal(policiesArray)
 	if err != nil {
 		s.logger.Error("序列化策略数据失败", zap.Error(err))
-		return "[]"
+		return json.RawMessage("[]")
 	}
 
-	return string(policiesJSON)
+	return json.RawMessage(policiesJSON)
 }
 
 // matchPolicyOS 检查主机是否匹配策略的 OS 要求
@@ -804,8 +816,8 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			continue
 		}
 
-		// 构建策略数据
-		policiesData := s.buildMultiPoliciesData(matchedPolicies, &host)
+		// 构建策略数据（修复任务保留完整 fix 配置）
+		policiesData := s.buildMultiPoliciesData(matchedPolicies, &host, false)
 
 		// 构建任务数据（JSON）
 		taskData := map[string]interface{}{

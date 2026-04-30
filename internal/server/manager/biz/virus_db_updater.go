@@ -38,6 +38,8 @@ type VirusDBUpdater struct {
 	uploadDir      string // 组件上传目录
 	pluginsBaseURL string // 插件下载基础 URL（用于 PluginConfig 下载地址）
 	triggerCh      chan struct{}
+	// fileHashes 记录上一次发布时每个病毒库文件的 SHA256，用于文件级 Delta 检测
+	fileHashes     map[string]string // filename -> sha256
 }
 
 // NewVirusDBUpdater 创建病毒库更新器
@@ -59,6 +61,7 @@ func NewVirusDBUpdater(db *gorm.DB, redisClient *redis.Client, logger *zap.Logge
 		uploadDir:      absUploadDir,
 		pluginsBaseURL: pluginsBaseURL,
 		triggerCh:      make(chan struct{}, 1),
+		fileHashes:     make(map[string]string),
 	}
 }
 
@@ -175,26 +178,47 @@ func (u *VirusDBUpdater) runOnce(ctx context.Context) {
 		return
 	}
 
-	// 3. 打包病毒库文件
-	archivePath, version, err := u.packageVirusDB()
+	// 3. 文件级 Delta 检测：只打包实际有变化的文件
+	changedFiles, allHashes := u.detectChangedFiles()
+	if len(changedFiles) == 0 {
+		u.logger.Info("病毒库文件无变化，跳过打包发布")
+		u.finishRecord(&record, "", 0, "", startedAt, nil)
+		return
+	}
+
+	u.logger.Info("检测到病毒库文件变化",
+		zap.Int("changed_files", len(changedFiles)),
+		zap.Strings("files", changedFiles))
+
+	// 4. 打包变化的文件（增量包）
+	archivePath, version, err := u.packageVirusDBDelta(changedFiles)
 	if err != nil {
 		u.logger.Error("打包病毒库失败", zap.Error(err))
 		u.finishRecord(&record, "", 0, "", startedAt, err)
 		return
 	}
 
-	// 3. 计算文件信息（用于记录）
+	// 5. 计算文件信息
 	sha256Hash, fileSize, _ := u.fileSHA256(archivePath)
 
-	// 4. 发布为组件新版本
+	// 6. 发布为组件新版本
 	if err := u.publishVersion(archivePath, version); err != nil {
 		u.logger.Error("发布病毒库版本失败", zap.Error(err))
 		u.finishRecord(&record, version, fileSize, sha256Hash, startedAt, err)
 		return
 	}
 
+	// 7. 更新文件 hash 缓存
+	u.fileHashes = allHashes
+
+	// 8. 清理旧版本文件（保留最近 5 个）
+	u.cleanupOldVersions(5)
+
 	u.finishRecord(&record, version, fileSize, sha256Hash, startedAt, nil)
-	u.logger.Info("病毒库更新完成", zap.String("version", version))
+	u.logger.Info("病毒库增量更新完成",
+		zap.String("version", version),
+		zap.Int64("size", fileSize),
+		zap.Int("changed_files", len(changedFiles)))
 }
 
 // finishRecord 更新同步记录的最终状态
@@ -285,6 +309,116 @@ func (u *VirusDBUpdater) packageVirusDB() (string, string, error) {
 	)
 
 	return archivePath, version, nil
+}
+
+// detectChangedFiles 检测病毒库文件中哪些发生了变化
+// 返回变化的文件名列表和当前所有文件的 hash map
+func (u *VirusDBUpdater) detectChangedFiles() ([]string, map[string]string) {
+	patterns := []string{"*.cvd", "*.cld"}
+	var allFiles []string
+	for _, pattern := range patterns {
+		matches, _ := filepath.Glob(filepath.Join(u.dataDir, pattern))
+		allFiles = append(allFiles, matches...)
+	}
+
+	currentHashes := make(map[string]string, len(allFiles))
+	var changedFiles []string
+
+	for _, filePath := range allFiles {
+		filename := filepath.Base(filePath)
+		hash, _, err := u.fileSHA256(filePath)
+		if err != nil {
+			u.logger.Warn("计算文件 SHA256 失败", zap.String("file", filename), zap.Error(err))
+			changedFiles = append(changedFiles, filename)
+			continue
+		}
+		currentHashes[filename] = hash
+
+		if oldHash, ok := u.fileHashes[filename]; !ok || oldHash != hash {
+			changedFiles = append(changedFiles, filename)
+		}
+	}
+
+	return changedFiles, currentHashes
+}
+
+// packageVirusDBDelta 只打包指定的变化文件
+func (u *VirusDBUpdater) packageVirusDBDelta(changedFiles []string) (string, string, error) {
+	if len(changedFiles) == 0 {
+		return "", "", fmt.Errorf("no changed files to package")
+	}
+
+	version := time.Now().Format("20060102.150405")
+	archiveName := fmt.Sprintf("virus-database-%s.tar.gz", version)
+	archivePath := filepath.Join(u.uploadDir, "plugins", archiveName)
+
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil {
+		return "", "", err
+	}
+
+	args := []string{"-czf", archivePath, "-C", u.dataDir}
+	args = append(args, changedFiles...)
+
+	cmd := exec.Command("tar", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("tar failed: %s: %w", string(output), err)
+	}
+
+	u.logger.Info("病毒库增量打包完成",
+		zap.String("archive", archivePath),
+		zap.Int("changed_files", len(changedFiles)),
+		zap.Strings("files", changedFiles),
+	)
+
+	return archivePath, version, nil
+}
+
+// cleanupOldVersions 清理旧版本的病毒库 tar.gz 文件
+// keep: 保留最近的 N 个版本
+func (u *VirusDBUpdater) cleanupOldVersions(keep int) {
+	var component model.Component
+	if err := u.db.Where("name = ?", virusDBComponentName).First(&component).Error; err != nil {
+		return
+	}
+
+	// 查询所有非最新版本，按创建时间倒序
+	var oldVersions []model.ComponentVersion
+	if err := u.db.Where("component_id = ? AND is_latest = ?", component.ID, false).
+		Order("created_at DESC").
+		Find(&oldVersions).Error; err != nil {
+		u.logger.Error("查询旧版本失败", zap.Error(err))
+		return
+	}
+
+	// 保留最近 keep-1 个旧版本（加上当前最新版共 keep 个）
+	if len(oldVersions) <= keep-1 {
+		return
+	}
+
+	toDelete := oldVersions[keep-1:]
+	deletedCount := 0
+	for _, ver := range toDelete {
+		// 查找关联的包文件并删除
+		var pkgs []model.ComponentPackage
+		u.db.Where("version_id = ?", ver.ID).Find(&pkgs)
+		for _, pkg := range pkgs {
+			if pkg.FilePath != "" {
+				if err := os.Remove(pkg.FilePath); err != nil && !os.IsNotExist(err) {
+					u.logger.Warn("删除旧版本文件失败", zap.String("path", pkg.FilePath), zap.Error(err))
+				}
+			}
+		}
+		// 删除数据库记录
+		u.db.Where("version_id = ?", ver.ID).Delete(&model.ComponentPackage{})
+		u.db.Delete(&ver)
+		deletedCount++
+	}
+
+	if deletedCount > 0 {
+		u.logger.Info("清理旧版本完成",
+			zap.Int("deleted", deletedCount),
+			zap.Int("kept", keep))
+	}
 }
 
 // publishVersion 将病毒库发布为组件新版本
