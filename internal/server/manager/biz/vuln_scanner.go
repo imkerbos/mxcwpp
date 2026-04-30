@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,9 +18,11 @@ import (
 )
 
 const (
-	osvBatchURL   = "https://api.osv.dev/v1/querybatch"
-	osvBatchSize  = 1000 // OSV.dev 单次最多 1000 个查询
-	osvTimeout    = 30 * time.Second
+	osvBatchURL          = "https://api.osv.dev/v1/querybatch"
+	osvVulnURL           = "https://api.osv.dev/v1/vulns/"
+	osvBatchSize         = 1000 // OSV.dev 单次最多 1000 个查询
+	osvDetailConcurrency = 10   // 并发获取漏洞详情的最大协程数
+	osvTimeout           = 30 * time.Second
 )
 
 // VulnScanner 漏洞扫描器，基于 OSV.dev API
@@ -63,12 +66,13 @@ type osvQueryResult struct {
 }
 
 type osvVuln struct {
-	ID       string     `json:"id"`
-	Summary  string     `json:"summary"`
-	Details  string     `json:"details"`
-	Aliases  []string   `json:"aliases"`
-	Severity []osvSeverity `json:"severity,omitempty"`
-	Affected []osvAffected `json:"affected,omitempty"`
+	ID         string         `json:"id"`
+	Summary    string         `json:"summary"`
+	Details    string         `json:"details"`
+	Aliases    []string       `json:"aliases"`
+	Upstream   []string       `json:"upstream"`
+	Severity   []osvSeverity  `json:"severity,omitempty"`
+	Affected   []osvAffected  `json:"affected,omitempty"`
 	References []osvReference `json:"references,omitempty"`
 }
 
@@ -231,6 +235,11 @@ func (v *VulnScanner) doScanAll() error {
 		zap.Int("total_purls", len(uniquePURLs)),
 		zap.Int("total_vulns", totalVulns))
 
+	// NVD 补充同步：覆盖 OSV.dev 尚未收录的最新 CVE
+	if err := v.SyncNVD(); err != nil {
+		v.logger.Warn("NVD 补充同步失败（不影响 OSV 数据）", zap.Error(err))
+	}
+
 	return nil
 }
 
@@ -266,6 +275,21 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 		return 0, fmt.Errorf("解析 OSV.dev 响应失败: %w", err)
 	}
 
+	// 收集所有唯一漏洞 ID（querybatch 仅返回 id + modified，需单独获取完整详情）
+	vulnIDSet := make(map[string]struct{})
+	for _, qr := range result.Results {
+		for _, item := range qr.Vulns {
+			vulnIDSet[item.ID] = struct{}{}
+		}
+	}
+	uniqueIDs := make([]string, 0, len(vulnIDSet))
+	for id := range vulnIDSet {
+		uniqueIDs = append(uniqueIDs, id)
+	}
+
+	// 并发获取完整漏洞详情
+	vulnDetails := v.fetchVulnDetailsBatch(uniqueIDs)
+
 	// 处理结果
 	vulnCount := 0
 	for i, qr := range result.Results {
@@ -274,123 +298,213 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 		}
 		purl := purls[i]
 
-		for _, vuln := range qr.Vulns {
-			cveID := v.extractCVE(vuln)
-			if cveID == "" {
+		for _, minVuln := range qr.Vulns {
+			fullVuln, ok := vulnDetails[minVuln.ID]
+			if !ok {
 				continue
 			}
 
+			cveIDs := v.extractCVEs(*fullVuln)
 			pkgInfo := purlPkgInfo[purl]
-			severity := v.mapSeverity(vuln)
-			cvssScore := v.extractCVSS(vuln)
-			fixedVersion := v.extractFixedVersion(vuln)
-			referenceURL := v.extractReferenceURL(vuln)
+			severity := v.mapSeverity(*fullVuln)
+			cvssScore := v.extractCVSS(*fullVuln)
+			fixedVersion := v.extractFixedVersion(*fullVuln)
+			referenceURL := v.extractReferenceURL(*fullVuln)
 
-			// Upsert 漏洞记录
-			vulnRecord := &model.Vulnerability{
-				CveID:          cveID,
-				OsvID:          vuln.ID,
-				PURL:           purl,
-				Severity:       severity,
-				CvssScore:      cvssScore,
-				Component:      pkgInfo.Name,
-				Description:    vuln.Summary,
-				Status:         "unpatched",
-				DiscoveredAt:   model.LocalTime(time.Now()),
-				CurrentVersion: pkgInfo.Version,
-				FixedVersion:   fixedVersion,
-				ReferenceUrl:   referenceURL,
-			}
+			// 一个 RHSA 可能关联多个 CVE，为每个 CVE 创建独立记录
+			for _, cveID := range cveIDs {
+				vulnRecord := &model.Vulnerability{
+					CveID:          cveID,
+					OsvID:          fullVuln.ID,
+					PURL:           purl,
+					Severity:       severity,
+					CvssScore:      cvssScore,
+					Component:      pkgInfo.Name,
+					Description:    fullVuln.Summary,
+					Status:         "unpatched",
+					DiscoveredAt:   model.LocalTime(time.Now()),
+					CurrentVersion: pkgInfo.Version,
+					FixedVersion:   fixedVersion,
+					ReferenceUrl:   referenceURL,
+				}
 
-			if err := v.db.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "cve_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"osv_id", "purl", "cvss_score", "description", "fixed_version", "reference_url"}),
-			}).Create(vulnRecord).Error; err != nil {
-				v.logger.Error("写入漏洞记录失败",
-					zap.String("cve_id", cveID),
-					zap.Error(err))
-				continue
-			}
-
-			// 为每个受影响的主机创建关联（同 host_id 去重，避免同一主机同 PURL 重复计数）
-			seen := make(map[string]struct{})
-			for _, hostID := range purlHosts[purl] {
-				if _, ok := seen[hostID]; ok {
+				if err := v.db.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "cve_id"}},
+					DoUpdates: clause.AssignmentColumns([]string{"osv_id", "purl", "cvss_score", "description", "fixed_version", "reference_url"}),
+				}).Create(vulnRecord).Error; err != nil {
+					v.logger.Error("写入漏洞记录失败",
+						zap.String("cve_id", cveID),
+						zap.Error(err))
 					continue
 				}
-				seen[hostID] = struct{}{}
 
-				hostVuln := &model.HostVulnerability{
-					VulnID:         vulnRecord.ID,
-					HostID:         hostID,
-					Hostname:       hostnameMap[hostID],
-					IP:             ipMap[hostID],
-					CurrentVersion: pkgInfo.Version,
-					Status:         "unpatched",
+				// MySQL ON DUPLICATE KEY UPDATE 时 GORM 不回填 ID，需手动查询
+				if vulnRecord.ID == 0 {
+					v.db.Where("cve_id = ?", cveID).Select("id").First(vulnRecord)
 				}
-				v.db.Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
-					DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
-				}).Create(hostVuln)
-			}
+				if vulnRecord.ID == 0 {
+					continue
+				}
 
-			// 更新受影响主机数
-			var affectedCount int64
-			v.db.Model(&model.HostVulnerability{}).
-				Where("vuln_id = ? AND status = ?", vulnRecord.ID, "unpatched").
-				Count(&affectedCount)
-			v.db.Model(vulnRecord).Update("affected_hosts", affectedCount)
-
-			// 异步发送漏洞告警通知（仅新发现的漏洞，取第一个主机作为通知目标）
-			if len(purlHosts[purl]) > 0 {
-				firstHost := purlHosts[purl][0]
-				go func(vuln *model.Vulnerability, hostID, hostname string, affected int64) {
-					// 查询主机 IP
-					var host model.Host
-					ip := ""
-					if v.db.Select("ipv4").First(&host, "host_id = ?", hostID).Error == nil && len(host.IPv4) > 0 {
-						ip = host.IPv4[0]
+				// 为每个受影响的主机创建关联
+				hostSeen := make(map[string]struct{})
+				for _, hostID := range purlHosts[purl] {
+					if _, exists := hostSeen[hostID]; exists {
+						continue
 					}
-					ns := NewNotificationService(v.db, v.logger)
-					if err := ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
+					hostSeen[hostID] = struct{}{}
+
+					hostVuln := &model.HostVulnerability{
+						VulnID:         vulnRecord.ID,
 						HostID:         hostID,
-						Hostname:       hostname,
-						IP:             ip,
-						CveID:          vuln.CveID,
-						Severity:       vuln.Severity,
-						CvssScore:      vuln.CvssScore,
-						Component:      vuln.Component,
-						CurrentVersion: vuln.CurrentVersion,
-						FixedVersion:   vuln.FixedVersion,
-						Description:    vuln.Description,
-						AffectedHosts:  int(affected),
-					}); err != nil {
-						v.logger.Error("发送漏洞告警通知失败", zap.String("cve_id", vuln.CveID), zap.Error(err))
+						Hostname:       hostnameMap[hostID],
+						IP:             ipMap[hostID],
+						CurrentVersion: pkgInfo.Version,
+						Status:         "unpatched",
 					}
-				}(vulnRecord, firstHost, hostnameMap[firstHost], affectedCount)
-			}
+					v.db.Clauses(clause.OnConflict{
+						Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
+						DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
+					}).Create(hostVuln)
+				}
 
-			vulnCount++
+				// 更新受影响主机数
+				var affectedCount int64
+				v.db.Model(&model.HostVulnerability{}).
+					Where("vuln_id = ? AND status = ?", vulnRecord.ID, "unpatched").
+					Count(&affectedCount)
+				v.db.Model(vulnRecord).Update("affected_hosts", affectedCount)
+
+				// 异步发送漏洞告警通知（仅新发现的漏洞，取第一个主机作为通知目标）
+				if len(purlHosts[purl]) > 0 {
+					firstHost := purlHosts[purl][0]
+					go func(vuln *model.Vulnerability, hostID, hostname string, affected int64) {
+						var host model.Host
+						ip := ""
+						if v.db.Select("ipv4").First(&host, "host_id = ?", hostID).Error == nil && len(host.IPv4) > 0 {
+							ip = host.IPv4[0]
+						}
+						ns := NewNotificationService(v.db, v.logger)
+						if err := ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
+							HostID:         hostID,
+							Hostname:       hostname,
+							IP:             ip,
+							CveID:          vuln.CveID,
+							Severity:       vuln.Severity,
+							CvssScore:      vuln.CvssScore,
+							Component:      vuln.Component,
+							CurrentVersion: vuln.CurrentVersion,
+							FixedVersion:   vuln.FixedVersion,
+							Description:    vuln.Description,
+							AffectedHosts:  int(affected),
+						}); err != nil {
+							v.logger.Error("发送漏洞告警通知失败", zap.String("cve_id", vuln.CveID), zap.Error(err))
+						}
+					}(vulnRecord, firstHost, hostnameMap[firstHost], affectedCount)
+				}
+
+				vulnCount++
+			}
 		}
 	}
 
 	return vulnCount, nil
 }
 
-// extractCVE 从 OSV 漏洞中提取 CVE ID
-func (v *VulnScanner) extractCVE(vuln osvVuln) string {
-	// 先检查 ID 是否就是 CVE
-	if strings.HasPrefix(vuln.ID, "CVE-") {
-		return vuln.ID
+// fetchVulnDetail 获取单个漏洞的完整详情（querybatch 仅返回 id + modified）
+func (v *VulnScanner) fetchVulnDetail(id string) (*osvVuln, error) {
+	resp, err := v.httpClient.Get(osvVulnURL + id)
+	if err != nil {
+		return nil, fmt.Errorf("调用 OSV.dev 详情 API 失败: %w", err)
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("OSV.dev 详情 API 返回 %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var vuln osvVuln
+	if err := json.NewDecoder(resp.Body).Decode(&vuln); err != nil {
+		return nil, fmt.Errorf("解析漏洞详情失败: %w", err)
+	}
+	return &vuln, nil
+}
+
+// fetchVulnDetailsBatch 并发获取多个漏洞的完整详情
+func (v *VulnScanner) fetchVulnDetailsBatch(ids []string) map[string]*osvVuln {
+	results := make(map[string]*osvVuln)
+	if len(ids) == 0 {
+		return results
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, osvDetailConcurrency)
+
+	for _, id := range ids {
+		wg.Add(1)
+		go func(vulnID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			detail, err := v.fetchVulnDetail(vulnID)
+			if err != nil {
+				v.logger.Warn("获取漏洞详情失败，跳过",
+					zap.String("id", vulnID),
+					zap.Error(err))
+				return
+			}
+
+			mu.Lock()
+			results[vulnID] = detail
+			mu.Unlock()
+		}(id)
+	}
+
+	wg.Wait()
+	v.logger.Info("漏洞详情获取完成",
+		zap.Int("requested", len(ids)),
+		zap.Int("succeeded", len(results)))
+	return results
+}
+
+// extractCVEs 从 OSV 漏洞中提取所有关联的 CVE ID
+// 一个 RHSA 可能关联多个 CVE（如 RHSA-2023:5539 → CVE-2023-44488, CVE-2023-5217）
+func (v *VulnScanner) extractCVEs(vuln osvVuln) []string {
+	// ID 本身就是 CVE
+	if strings.HasPrefix(vuln.ID, "CVE-") {
+		return []string{vuln.ID}
+	}
+
+	seen := make(map[string]struct{})
+	var cves []string
+
 	// 检查 aliases
 	for _, alias := range vuln.Aliases {
 		if strings.HasPrefix(alias, "CVE-") {
-			return alias
+			if _, ok := seen[alias]; !ok {
+				seen[alias] = struct{}{}
+				cves = append(cves, alias)
+			}
 		}
 	}
-	// 没有 CVE ID，使用 OSV ID
-	return vuln.ID
+	// 检查 upstream（Red Hat 生态的 CVE 关联在此字段）
+	for _, up := range vuln.Upstream {
+		if strings.HasPrefix(up, "CVE-") {
+			if _, ok := seen[up]; !ok {
+				seen[up] = struct{}{}
+				cves = append(cves, up)
+			}
+		}
+	}
+
+	if len(cves) > 0 {
+		return cves
+	}
+	// 没有 CVE ID，使用 OSV ID 作为回退
+	return []string{vuln.ID}
 }
 
 // mapSeverity 映射严重级别

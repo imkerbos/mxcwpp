@@ -74,7 +74,7 @@
         <div class="filter-bar">
           <a-input-search
             v-model:value="searchText"
-            placeholder="搜索 CVE、组件、版本、主机或描述"
+            placeholder="搜索 CVE / Advisory / 组件 / 版本 / 主机"
             style="width: 320px"
             allow-clear
             @search="handleFilterChange"
@@ -131,9 +131,17 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'cve'">
-              <a :href="`https://nvd.nist.gov/vuln/detail/${record.cveId}`" target="_blank" rel="noopener">
-                {{ record.cveId }}
-              </a>
+              <template v-if="record.cveId?.startsWith('CVE-')">
+                <a :href="`https://nvd.nist.gov/vuln/detail/${record.cveId}`" target="_blank" rel="noopener">
+                  {{ record.cveId }}
+                </a>
+              </template>
+              <template v-else>
+                <a :href="`https://osv.dev/vulnerability/${record.osvId || record.cveId}`" target="_blank" rel="noopener">
+                  {{ record.cveId }}
+                </a>
+                <a-tag color="orange" :bordered="false" style="margin-left: 4px; font-size: 10px; line-height: 16px">Advisory</a-tag>
+              </template>
             </template>
 
             <template v-else-if="column.key === 'severity'">
@@ -182,7 +190,18 @@
     >
       <template v-if="detailRecord">
         <a-descriptions :column="1" bordered size="small">
-          <a-descriptions-item label="CVE 编号">{{ detailRecord.cveId }}</a-descriptions-item>
+          <a-descriptions-item label="漏洞编号">
+            <template v-if="detailRecord.cveId?.startsWith('CVE-')">
+              <a :href="`https://nvd.nist.gov/vuln/detail/${detailRecord.cveId}`" target="_blank" rel="noopener">{{ detailRecord.cveId }}</a>
+            </template>
+            <template v-else>
+              {{ detailRecord.cveId }}
+              <a-tag color="orange" :bordered="false" style="margin-left: 4px">Advisory</a-tag>
+            </template>
+          </a-descriptions-item>
+          <a-descriptions-item v-if="detailRecord.osvId" label="OSV ID">
+            <a :href="`https://osv.dev/vulnerability/${detailRecord.osvId}`" target="_blank" rel="noopener">{{ detailRecord.osvId }}</a>
+          </a-descriptions-item>
           <a-descriptions-item label="CVSS 评分">{{ detailRecord.cvssScore }}</a-descriptions-item>
           <a-descriptions-item label="严重级别">
             <a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false">
@@ -321,7 +340,7 @@ const activeContextText = computed(() => {
 })
 
 const columns = [
-  { title: 'CVE 编号', key: 'cve', width: 160 },
+  { title: '漏洞编号', key: 'cve', width: 200 },
   { title: '严重级别', key: 'severity', width: 100 },
   { title: 'CVSS', key: 'cvss', width: 90 },
   { title: '影响组件', dataIndex: 'component', key: 'component', width: 180 },
@@ -498,9 +517,10 @@ const handleExport = () => {
   }
 
   const rows = [
-    ['CVE', 'Severity', 'CVSS', 'Component', 'CurrentVersion', 'FixedVersion', 'AffectedHosts', 'Status', 'DiscoveredAt'],
+    ['CVE', 'OSV_ID', 'Severity', 'CVSS', 'Component', 'CurrentVersion', 'FixedVersion', 'AffectedHosts', 'Status', 'DiscoveredAt'],
     ...vulns.value.map((item) => [
       item.cveId,
+      item.osvId || '',
       item.severity,
       String(item.cvssScore ?? ''),
       item.component || '',

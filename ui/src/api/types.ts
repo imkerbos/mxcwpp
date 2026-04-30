@@ -203,6 +203,7 @@ export interface VulnerabilityHost {
 export interface Vulnerability {
   id: number
   cveId: string
+  osvId?: string
   severity: string
   cvssScore: number
   component: string

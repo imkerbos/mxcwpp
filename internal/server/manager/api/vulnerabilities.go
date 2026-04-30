@@ -44,12 +44,13 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		pattern := "%" + filter.Search + "%"
 		clauses := []string{
 			"vulnerabilities.cve_id LIKE ?",
+			"vulnerabilities.osv_id LIKE ?",
 			"vulnerabilities.description LIKE ?",
 			"vulnerabilities.component LIKE ?",
 			"vulnerabilities.current_version LIKE ?",
 			"vulnerabilities.fixed_version LIKE ?",
 		}
-		args := []interface{}{pattern, pattern, pattern, pattern, pattern}
+		args := []interface{}{pattern, pattern, pattern, pattern, pattern, pattern}
 		if filter.HostID != "" {
 			clauses = append(clauses, "hv.hostname LIKE ?", "hv.ip LIKE ?", "hv.current_version LIKE ?")
 			args = append(args, pattern, pattern, pattern)
@@ -91,8 +92,8 @@ func (h *VulnerabilitiesHandler) countAffectedHosts(filter vulnerabilityListFilt
 	if filter.Search != "" {
 		pattern := "%" + filter.Search + "%"
 		query = query.Where(
-			"vulnerabilities.cve_id LIKE ? OR vulnerabilities.description LIKE ? OR vulnerabilities.component LIKE ? OR hv.hostname LIKE ? OR hv.ip LIKE ? OR hv.current_version LIKE ?",
-			pattern, pattern, pattern, pattern, pattern, pattern,
+			"vulnerabilities.cve_id LIKE ? OR vulnerabilities.osv_id LIKE ? OR vulnerabilities.description LIKE ? OR vulnerabilities.component LIKE ? OR hv.hostname LIKE ? OR hv.ip LIKE ? OR hv.current_version LIKE ?",
+			pattern, pattern, pattern, pattern, pattern, pattern, pattern,
 		)
 	}
 	if filter.Component != "" {
