@@ -87,7 +87,7 @@
                 <span class="detail-value">{{ stats.hosts || 0 }}</span>
               </div>
               <div class="detail-row">
-                <span class="detail-label">高危主机占比</span>
+                <span class="detail-label">不合规率(中危+)</span>
                 <span class="detail-value text-danger">{{ stats.baselineHostPercent || 0 }}%</span>
               </div>
               <div class="detail-row">

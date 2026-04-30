@@ -3,6 +3,7 @@ import apiClient from './client'
 export interface BaselineRisk {
   name: string
   critical: number
+  high: number
   medium: number
   low: number
 }

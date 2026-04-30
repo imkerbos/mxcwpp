@@ -285,46 +285,34 @@ func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 // calculateBaselinePercentages 计算基线合规率和存在高危基线问题的主机百分比
 // 优化：单次聚合查询替代 5 条独立 COUNT
 func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
-	var totalHosts int64
-	h.db.Model(&model.Host{}).Count(&totalHosts)
-	if totalHosts == 0 {
-		return 100.0, 0.0
-	}
-
 	var result struct {
-		HostsWithResults int64 `gorm:"column:hosts_with_results"`
-		PassCount        int64 `gorm:"column:pass_count"`
-		FailCount        int64 `gorm:"column:fail_count"`
-		HighRiskHosts    int64 `gorm:"column:high_risk_hosts"`
+		PassCount          int64 `gorm:"column:pass_count"`
+		FailCount          int64 `gorm:"column:fail_count"`
+		MediumPlusFailCount int64 `gorm:"column:medium_plus_fail_count"`
 	}
 	h.db.Raw(`
 		SELECT
-			COUNT(DISTINCT host_id) AS hosts_with_results,
 			SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) AS pass_count,
 			SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
-			COUNT(DISTINCT CASE WHEN status = 'fail' AND severity IN ('high','critical') THEN host_id END) AS high_risk_hosts
+			SUM(CASE WHEN status = 'fail' AND severity IN ('medium','high','critical') THEN 1 ELSE 0 END) AS medium_plus_fail_count
 		FROM scan_results
 	`).Scan(&result)
 
-	if result.HostsWithResults == 0 {
+	totalResults := result.PassCount + result.FailCount
+	if totalResults == 0 {
 		return 100.0, 0.0
 	}
 
-	totalResults := result.PassCount + result.FailCount
-	complianceRate := 100.0
-	if totalResults > 0 {
-		complianceRate = float64(result.PassCount) / float64(totalResults) * 100.0
-	}
+	// 整体合规率 = 通过项 / 总检查项
+	complianceRate := float64(result.PassCount) / float64(totalResults) * 100.0
 	if complianceRate > 100.0 {
 		complianceRate = 100.0
 	}
 
-	highRiskHostPercent := float64(result.HighRiskHosts) / float64(totalHosts) * 100.0
-	if highRiskHostPercent > 100.0 {
-		highRiskHostPercent = 100.0
-	}
+	// 基线不合规率 = 中危及以上失败项 / 总检查项
+	noncomplianceRate := float64(result.MediumPlusFailCount) / float64(totalResults) * 100.0
 
-	return complianceRate, highRiskHostPercent
+	return complianceRate, noncomplianceRate
 }
 
 // getBaselineRisksTop3 获取基线风险 Top 3
@@ -334,6 +322,7 @@ func (h *DashboardHandler) getBaselineRisksTop3() []gin.H {
 		PolicyID      string `gorm:"column:policy_id"`
 		Name          string `gorm:"column:name"`
 		CriticalCount int64  `gorm:"column:critical_count"`
+		HighCount     int64  `gorm:"column:high_count"`
 		MediumCount   int64  `gorm:"column:medium_count"`
 		LowCount      int64  `gorm:"column:low_count"`
 	}
@@ -341,13 +330,15 @@ func (h *DashboardHandler) getBaselineRisksTop3() []gin.H {
 	h.db.Raw(`
 		SELECT p.id AS policy_id, p.name,
 			SUM(CASE WHEN sr.severity = 'critical' THEN 1 ELSE 0 END) AS critical_count,
+			SUM(CASE WHEN sr.severity = 'high'     THEN 1 ELSE 0 END) AS high_count,
 			SUM(CASE WHEN sr.severity = 'medium'   THEN 1 ELSE 0 END) AS medium_count,
 			SUM(CASE WHEN sr.severity = 'low'      THEN 1 ELSE 0 END) AS low_count
 		FROM scan_results sr
 		INNER JOIN policies p ON p.id = sr.policy_id
 		WHERE sr.status = 'fail'
 		GROUP BY p.id, p.name
-		ORDER BY (SUM(CASE WHEN sr.severity = 'critical' THEN 3
+		ORDER BY (SUM(CASE WHEN sr.severity = 'critical' THEN 4
+		               WHEN sr.severity = 'high'     THEN 3
 		               WHEN sr.severity = 'medium'   THEN 2
 		               ELSE 1 END)) DESC
 		LIMIT 3
@@ -358,6 +349,7 @@ func (h *DashboardHandler) getBaselineRisksTop3() []gin.H {
 		top3 = append(top3, gin.H{
 			"name":     r.Name,
 			"critical": r.CriticalCount,
+			"high":     r.HighCount,
 			"medium":   r.MediumCount,
 			"low":      r.LowCount,
 		})
