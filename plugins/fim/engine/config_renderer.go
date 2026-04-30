@@ -3,14 +3,47 @@ package engine
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"regexp"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // aideDBDir AIDE 数据库目录
 const aideDBDir = "/var/lib/aide"
 
+// aideVersionRe 匹配 aide --version 输出中的版本号 (如 "0.15.1", "0.16", "0.17.4")
+var aideVersionRe = regexp.MustCompile(`(\d+)\.(\d+)`)
+
+// detectAIDEVersion 检测 AIDE 版本，返回 (major, minor)
+// 解析失败时返回 (0, 15) 按最低版本兼容处理
+func detectAIDEVersion(logger *zap.Logger) (int, int) {
+	output, err := exec.Command("aide", "--version").CombinedOutput()
+	if err != nil {
+		// aide --version 在某些版本返回非零退出码但仍输出版本信息
+		if len(output) == 0 {
+			logger.Warn("获取 AIDE 版本失败，按 0.15 兼容处理", zap.Error(err))
+			return 0, 15
+		}
+	}
+	matches := aideVersionRe.FindStringSubmatch(string(output))
+	if len(matches) < 3 {
+		logger.Warn("解析 AIDE 版本失败，按 0.15 兼容处理", zap.String("output", string(output)))
+		return 0, 15
+	}
+	var major, minor int
+	fmt.Sscanf(matches[1], "%d", &major)
+	fmt.Sscanf(matches[2], "%d", &minor)
+	logger.Info("检测到 AIDE 版本", zap.Int("major", major), zap.Int("minor", minor))
+	return major, minor
+}
+
 // Render 将 FIMPolicy 渲染为 aide.conf 格式并写入指定路径
-func Render(policy *FIMPolicy, configPath string) error {
+func Render(policy *FIMPolicy, configPath string, logger *zap.Logger) error {
+	major, minor := detectAIDEVersion(logger)
+	useNewSyntax := major > 0 || minor >= 16 // 0.16+ 支持 database_in/database_new
+
 	var sb strings.Builder
 
 	// 头部：数据库配置
@@ -18,9 +51,14 @@ func Render(policy *FIMPolicy, configPath string) error {
 	sb.WriteString("# DO NOT EDIT - this file is auto-generated\n\n")
 
 	sb.WriteString(fmt.Sprintf("@@define DBDIR %s\n", aideDBDir))
-	sb.WriteString("database_in=file:@@{DBDIR}/aide-mxsec.db.gz\n")
-	sb.WriteString("database_out=file:@@{DBDIR}/aide-mxsec.db.new.gz\n")
-	sb.WriteString("database_new=file:@@{DBDIR}/aide-mxsec.db.new.gz\n")
+	if useNewSyntax {
+		sb.WriteString("database_in=file:@@{DBDIR}/aide-mxsec.db.gz\n")
+		sb.WriteString("database_out=file:@@{DBDIR}/aide-mxsec.db.new.gz\n")
+		sb.WriteString("database_new=file:@@{DBDIR}/aide-mxsec.db.new.gz\n")
+	} else {
+		sb.WriteString("database=file:@@{DBDIR}/aide-mxsec.db.gz\n")
+		sb.WriteString("database_out=file:@@{DBDIR}/aide-mxsec.db.new.gz\n")
+	}
 	sb.WriteString("gzip_dbout=yes\n\n")
 
 	// 检查级别定义

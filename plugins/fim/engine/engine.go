@@ -44,7 +44,7 @@ func (e *Engine) Execute(ctx context.Context, taskData json.RawMessage) (*Execut
 
 	// 3. 渲染配置文件
 	e.logger.Info("渲染 AIDE 配置", zap.String("config_path", aideConfigPath))
-	if err := Render(policy, aideConfigPath); err != nil {
+	if err := Render(policy, aideConfigPath, e.logger); err != nil {
 		return nil, fmt.Errorf("渲染配置失败: %w", err)
 	}
 
@@ -82,7 +82,7 @@ func (e *Engine) RenderConfig(taskData json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("解析策略失败: %w", err)
 	}
-	return Render(policy, aideConfigPath)
+	return Render(policy, aideConfigPath, e.logger)
 }
 
 // parsePolicyFromTask 从任务 JSON 提取策略配置
