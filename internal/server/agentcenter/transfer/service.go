@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
@@ -890,16 +891,7 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 	}
 	fields := bridgeRecord.Data.Fields
 
-	// 提取必要字段
-	resultID := fields["result_id"]
-	if resultID == "" {
-		// 如果没有 result_id，生成一个（使用 UUID，确保不超过 64 字符）
-		resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().UnixNano()%1000000000)
-		// 如果还是太长，使用更短的格式
-		if len(resultID) > 64 {
-			resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().Unix()%1000000)
-		}
-	}
+	// 提取必要字段（复合主键 task_id + host_id + rule_id 天然保证唯一，不再需要 result_id）
 	hostID := conn.AgentID
 	policyID := fields["policy_id"]
 	ruleID := fields["rule_id"]
@@ -942,15 +934,14 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		}
 	}
 
-	// 创建 ScanResult
+	// 创建 ScanResult（复合主键 task_id + host_id + rule_id）
 	scanResult := &model.ScanResult{
-		ResultID:      resultID,
-		HostID:        hostID,
-		Hostname:      conn.Hostname, // 冗余存储主机名
-		PolicyID:      policyID,
-		PolicyName:    policyName, // 冗余存储策略名
-		RuleID:        ruleID,
 		TaskID:        taskID,
+		HostID:        hostID,
+		RuleID:        ruleID,
+		Hostname:      conn.Hostname,
+		PolicyID:      policyID,
+		PolicyName:    policyName,
 		Status:        resultStatus,
 		Severity:      severity,
 		Category:      category,
@@ -961,63 +952,36 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		CheckedAt:     model.ToLocalTime(timestamp),
 	}
 
-	// 保存到数据库（使用 UPSERT 去重：基于 host_id + rule_id 唯一约束）
-	// 每个主机的每个规则只保留一条最新结果，新检查会覆盖旧结果
-	var existingResult model.ScanResult
-	err := s.db.Where("host_id = ? AND rule_id = ?", hostID, ruleID).First(&existingResult).Error
-
-	if err == gorm.ErrRecordNotFound {
-		// 不存在，创建新记录
-		if err := s.db.Create(scanResult).Error; err != nil {
-			return fmt.Errorf("保存检测结果失败: %w", err)
-		}
-		s.logger.Debug("检测结果已保存",
-			zap.String("agent_id", conn.AgentID),
-			zap.String("result_id", resultID),
-			zap.String("rule_id", ruleID),
-			zap.String("status", string(resultStatus)),
-		)
-	} else if err == nil {
-		// 已存在，更新记录
-		existingResult.Status = scanResult.Status
-		existingResult.Actual = scanResult.Actual
-		existingResult.Expected = scanResult.Expected
-		existingResult.CheckedAt = scanResult.CheckedAt
-		existingResult.Severity = scanResult.Severity
-		existingResult.FixSuggestion = scanResult.FixSuggestion
-		existingResult.TaskID = scanResult.TaskID // 更新为最新任务ID
-		existingResult.Hostname = scanResult.Hostname
-		existingResult.PolicyName = scanResult.PolicyName
-
-		if err := s.db.Save(&existingResult).Error; err != nil {
-			return fmt.Errorf("更新检测结果失败: %w", err)
-		}
-		// 使用已存在的 result_id 继续后续处理
-		scanResult = &existingResult
-		s.logger.Debug("检测结果已更新",
-			zap.String("agent_id", conn.AgentID),
-			zap.String("result_id", existingResult.ResultID),
-			zap.String("rule_id", ruleID),
-			zap.String("status", string(resultStatus)),
-		)
-	} else {
-		return fmt.Errorf("查询检测结果失败: %w", err)
+	// 保存到数据库（复合主键 task_id + host_id + rule_id 保证幂等）
+	if err := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_id"}, {Name: "host_id"}, {Name: "rule_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"status", "actual", "expected", "checked_at", "severity", "fix_suggestion", "hostname", "policy_name"}),
+	}).Create(scanResult).Error; err != nil {
+		return fmt.Errorf("保存检测结果失败: %w", err)
 	}
+
+	s.logger.Debug("检测结果已保存",
+		zap.String("agent_id", conn.AgentID),
+		zap.String("task_id", taskID),
+		zap.String("rule_id", ruleID),
+		zap.String("status", string(resultStatus)),
+	)
 
 	// 如果检测结果为 fail，创建或更新告警
 	if resultStatus == model.ResultStatusFail {
 		if err := s.createOrUpdateAlert(scanResult, conn); err != nil {
 			s.logger.Warn("创建或更新告警失败",
-				zap.String("result_id", resultID),
+				zap.String("host_id", hostID),
+				zap.String("rule_id", ruleID),
 				zap.Error(err),
 			)
-			// 不中断流程，告警创建失败不影响检测结果保存
 		}
 	} else if resultStatus == model.ResultStatusPass {
 		// 如果检测结果为 pass，检查是否有活跃告警需要恢复
 		if err := s.resolveAlertIfExists(scanResult, conn); err != nil {
 			s.logger.Warn("解决告警失败",
-				zap.String("result_id", resultID),
+				zap.String("host_id", hostID),
+				zap.String("rule_id", ruleID),
 				zap.Error(err),
 			)
 		}
@@ -1026,11 +990,18 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 	return nil
 }
 
+// scanResultAlertKey 生成基线扫描告警的去重键（同一主机同一规则只需一个告警）
+func scanResultAlertKey(hostID, ruleID string) string {
+	return "baseline-" + hostID + "-" + ruleID
+}
+
 // createOrUpdateAlert 创建或更新告警
 func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connection) error {
+	alertKey := scanResultAlertKey(scanResult.HostID, scanResult.RuleID)
+
 	// 查询是否已存在告警
 	var existingAlert model.Alert
-	err := s.db.Where("result_id = ?", scanResult.ResultID).First(&existingAlert).Error
+	err := s.db.Where("result_id = ?", alertKey).First(&existingAlert).Error
 
 	now := model.Now()
 
@@ -1038,7 +1009,6 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 		// 白名单检查：命中则跳过告警创建
 		if s.isAlertWhitelisted(scanResult.RuleID, scanResult.HostID, scanResult.Category, scanResult.Severity) {
 			s.logger.Debug("告警命中白名单，跳过创建",
-				zap.String("result_id", scanResult.ResultID),
 				zap.String("rule_id", scanResult.RuleID),
 				zap.String("host_id", scanResult.HostID),
 			)
@@ -1047,14 +1017,14 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 
 		// 创建新告警
 		alert := &model.Alert{
-			ResultID:      scanResult.ResultID,
+			ResultID:      alertKey,
 			HostID:        scanResult.HostID,
 			RuleID:        scanResult.RuleID,
 			PolicyID:      scanResult.PolicyID,
 			Severity:      scanResult.Severity,
 			Category:      scanResult.Category,
 			Title:         scanResult.Title,
-			Description:   "", // 可以从 Rule 中获取
+			Description:   "",
 			Actual:        scanResult.Actual,
 			Expected:      scanResult.Expected,
 			FixSuggestion: scanResult.FixSuggestion,
@@ -1072,7 +1042,8 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 
 		s.logger.Debug("告警已创建",
 			zap.Uint("alert_id", alert.ID),
-			zap.String("result_id", scanResult.ResultID),
+			zap.String("host_id", scanResult.HostID),
+			zap.String("rule_id", scanResult.RuleID),
 		)
 	} else if err == nil {
 		// 更新现有告警（更新最后发现时间）
@@ -1091,7 +1062,8 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 
 		s.logger.Debug("告警已更新",
 			zap.Uint("alert_id", existingAlert.ID),
-			zap.String("result_id", scanResult.ResultID),
+			zap.String("host_id", scanResult.HostID),
+			zap.String("rule_id", scanResult.RuleID),
 		)
 	} else {
 		return fmt.Errorf("查询告警失败: %w", err)
@@ -1102,9 +1074,11 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 
 // resolveAlertIfExists 如果存在活跃告警则解决并发送恢复通知
 func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Connection) error {
+	alertKey := scanResultAlertKey(scanResult.HostID, scanResult.RuleID)
+
 	// 查询是否存在活跃告警
 	var existingAlert model.Alert
-	err := s.db.Where("result_id = ? AND status = ?", scanResult.ResultID, model.AlertStatusActive).First(&existingAlert).Error
+	err := s.db.Where("result_id = ? AND status = ?", alertKey, model.AlertStatusActive).First(&existingAlert).Error
 
 	if err == gorm.ErrRecordNotFound {
 		// 没有活跃告警，无需处理
@@ -1118,7 +1092,7 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 	now := model.Now()
 	existingAlert.Status = model.AlertStatusResolved
 	existingAlert.ResolvedAt = &now
-	existingAlert.ResolvedBy = "system" // 系统自动解决
+	existingAlert.ResolvedBy = "system"
 	existingAlert.ResolveReason = "检测通过，问题已修复"
 
 	if err := s.db.Save(&existingAlert).Error; err != nil {
@@ -1127,7 +1101,8 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 
 	s.logger.Debug("告警已自动解决",
 		zap.Uint("alert_id", existingAlert.ID),
-		zap.String("result_id", scanResult.ResultID),
+		zap.String("host_id", scanResult.HostID),
+		zap.String("rule_id", scanResult.RuleID),
 	)
 
 	// 发送告警恢复通知（异步，不阻塞）
@@ -1252,40 +1227,8 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		)
 	}
 
-	// 增加已完成主机数
-	if err := s.db.Model(&task).Update("completed_host_count", gorm.Expr("completed_host_count + 1")).Error; err != nil {
-		s.logger.Error("更新任务完成主机数失败", zap.String("task_id", taskID), zap.Error(err))
-	}
-
-	// 更新主机状态为 completed（包括从 timeout 状态恢复的情况）
+	// 1. 先更新 TaskHostStatus（仅从 dispatched/timeout → completed，防止重复信号时多次递增）
 	now := model.Now()
-
-	// 先查询是否存在该记录
-	var existingStatus model.TaskHostStatus
-	if err := s.db.Where("task_id = ? AND host_id = ?", taskID, conn.AgentID).First(&existingStatus).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			s.logger.Warn("未找到主机状态记录，无法更新",
-				zap.String("task_id", taskID),
-				zap.String("host_id", conn.AgentID),
-			)
-			return nil
-		}
-		s.logger.Error("查询主机状态失败",
-			zap.String("task_id", taskID),
-			zap.String("host_id", conn.AgentID),
-			zap.Error(err),
-		)
-		return nil
-	}
-
-	// 记录更新前的状态
-	s.logger.Debug("准备更新主机状态",
-		zap.String("task_id", taskID),
-		zap.String("host_id", conn.AgentID),
-		zap.String("current_status", string(existingStatus.Status)),
-	)
-
-	// 执行更新（允许从 dispatched 和 timeout 状态更新为 completed）
 	result := s.db.Model(&model.TaskHostStatus{}).
 		Where("task_id = ? AND host_id = ? AND status IN ?", taskID, conn.AgentID,
 			[]string{model.TaskHostStatusDispatched, model.TaskHostStatusTimeout}).
@@ -1304,9 +1247,9 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		return nil
 	}
 
-	// 检查是否真的更新了记录
+	// 没有实际更新（已经是 completed 或记录不存在），跳过后续操作
 	if result.RowsAffected == 0 {
-		s.logger.Warn("更新主机状态未影响任何记录",
+		s.logger.Debug("主机状态未变更，跳过递增（可能是重复完成信号）",
 			zap.String("task_id", taskID),
 			zap.String("host_id", conn.AgentID),
 		)
@@ -1316,10 +1259,16 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 	s.logger.Info("成功更新主机状态为已完成",
 		zap.String("task_id", taskID),
 		zap.String("host_id", conn.AgentID),
-		zap.Int64("rows_affected", result.RowsAffected),
 	)
 
-	// 重新查询任务以获取最新的完成主机数
+	// 2. 状态实际发生了转移，才递增 completed_host_count
+	if err := s.db.Model(&model.ScanTask{}).
+		Where("task_id = ?", taskID).
+		Update("completed_host_count", gorm.Expr("completed_host_count + 1")).Error; err != nil {
+		s.logger.Error("递增 completed_host_count 失败", zap.String("task_id", taskID), zap.Error(err))
+	}
+
+	// 3. 重新查询任务以获取最新的完成主机数
 	if err := s.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		return fmt.Errorf("查询任务失败: %w", err)
 	}
@@ -1331,7 +1280,7 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		zap.Int("dispatched_host_count", task.DispatchedHostCount),
 	)
 
-	// 检查是否所有主机都已完成
+	// 4. 检查是否所有主机都已完成
 	if task.DispatchedHostCount > 0 && task.CompletedHostCount >= task.DispatchedHostCount {
 		// 所有主机都已返回结果，标记任务为 completed
 		now := model.Now()
@@ -2211,16 +2160,7 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 	}
 	fields := bridgeRecord.Data.Fields
 
-	// 提取必要字段
-	resultID := fields["result_id"]
-	if resultID == "" {
-		// 如果没有 result_id，生成一个
-		resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().UnixNano()%1000000000)
-		if len(resultID) > 64 {
-			resultID = fmt.Sprintf("%s-%s-%d", conn.AgentID[:8], fields["rule_id"][:8], time.Now().Unix()%1000000)
-		}
-	}
-
+	// 提取必要字段（复合主键 task_id + host_id + rule_id，不再需要 result_id）
 	fixTaskID := fields["fix_task_id"]
 	hostID := conn.AgentID
 	ruleID := fields["rule_id"]
@@ -2249,9 +2189,8 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 		resultStatus = model.FixResultStatusFailed
 	}
 
-	// 创建 FixResult
+	// 创建 FixResult（复合主键 task_id + host_id + rule_id）
 	fixResult := &model.FixResult{
-		ResultID: resultID,
 		TaskID:   fixTaskID,
 		HostID:   hostID,
 		RuleID:   ruleID,
@@ -2270,7 +2209,6 @@ func (s *Service) handleFixResult(ctx context.Context, record *grpcProto.Encoded
 
 	s.logger.Debug("修复结果已保存",
 		zap.String("agent_id", conn.AgentID),
-		zap.String("result_id", resultID),
 		zap.String("fix_task_id", fixTaskID),
 		zap.String("rule_id", ruleID),
 		zap.String("status", string(resultStatus)),

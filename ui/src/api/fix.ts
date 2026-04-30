@@ -16,13 +16,13 @@ export const fixApi = {
 
   // 创建修复任务
   async createFixTask(data: {
-    // 方式1：直接指定 result_ids（推荐，精确指定要修复的项）
-    result_ids?: string[]
-    // 方式2：指定主机和规则ID（已废弃，会导致统计不准确）
+    // 方式1：直接指定扫描结果的复合键（推荐）
+    result_keys?: Array<{ task_id: string; host_id: string; rule_id: string }>
+    // 方式2：指定主机和规则ID
     host_ids?: string[]
     rule_ids?: string[]
     severities?: string[]
-    // 方式3：使用筛选条件（用于全选所有筛选结果）
+    // 方式3：使用筛选条件
     use_filters?: boolean
     business_line?: string
   }): Promise<{ task_id: string }> {

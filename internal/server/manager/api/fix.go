@@ -33,7 +33,7 @@ func NewFixHandler(db *gorm.DB, logger *zap.Logger) *FixHandler {
 
 // FixableItemResponse 可修复项响应
 type FixableItemResponse struct {
-	ResultID      string `json:"result_id"`
+	TaskID        string `json:"task_id"`
 	HostID        string `json:"host_id"`
 	Hostname      string `json:"hostname"`
 	IP            string `json:"ip"`
@@ -151,7 +151,7 @@ func (h *FixHandler) GetFixableItems(c *gin.Context) {
 		rule := ruleMap[r.RuleID]
 		hostInfo := hostMap[r.HostID]
 		item := FixableItemResponse{
-			ResultID:      r.ResultID,
+			TaskID:        r.TaskID,
 			HostID:        r.HostID,
 			Hostname:      hostInfo.Hostname,
 			IP:            hostInfo.IP,
@@ -181,21 +181,26 @@ func (h *FixHandler) GetFixableItems(c *gin.Context) {
 	})
 }
 
+// ScanResultKey 标识一条扫描结果的复合键
+type ScanResultKey struct {
+	TaskID string `json:"task_id"`
+	HostID string `json:"host_id"`
+	RuleID string `json:"rule_id"`
+}
+
 // CreateFixTaskRequest 创建修复任务请求
 type CreateFixTaskRequest struct {
-	// 方式1：直接指定 result_ids（推荐，精确指定要修复的项）
-	ResultIDs []string `json:"result_ids"`
+	// 方式1：直接指定扫描结果的复合键（推荐，精确指定要修复的项）
+	ResultKeys []ScanResultKey `json:"result_keys"`
 
-	// 方式2：指定主机和规则ID（已废弃，会导致统计不准确）
+	// 方式2：指定主机和规则ID
 	HostIDs    []string `json:"host_ids"`
 	RuleIDs    []string `json:"rule_ids"`
 	Severities []string `json:"severities"`
 
 	// 方式3：使用筛选条件（用于全选所有筛选结果）
-	UseFilters   bool     `json:"use_filters"`   // 是否使用筛选条件
-	BusinessLine string   `json:"business_line"` // 业务线筛选
-	// 注意：当 use_filters=true 时，会忽略其他参数，
-	// 而是根据筛选条件查询所有符合条件的失败记录
+	UseFilters   bool   `json:"use_filters"`
+	BusinessLine string `json:"business_line"`
 }
 
 // CreateFixTask 创建修复任务
@@ -268,16 +273,22 @@ func (h *FixHandler) CreateFixTask(c *gin.Context) {
 			zap.Int("unique_hosts", len(hostIDs)),
 			zap.Int("unique_rules", len(ruleIDs)))
 
-	} else if len(req.ResultIDs) > 0 {
-		// 方式1：使用 result_ids（推荐方式，精确指定要修复的项）
-		h.logger.Info("使用 result_ids 创建修复任务",
-			zap.Int("result_count", len(req.ResultIDs)))
+	} else if len(req.ResultKeys) > 0 {
+		// 方式1：使用复合键（推荐方式，精确指定要修复的项）
+		h.logger.Info("使用 result_keys 创建修复任务",
+			zap.Int("key_count", len(req.ResultKeys)))
 
-		// 查询指定的失败记录
+		// 构建查询条件：(task_id, host_id, rule_id) 组合
 		var results []model.ScanResult
-		if err := h.db.Where("result_id IN ?", req.ResultIDs).
-			Where("status IN ?", []string{"fail", "error"}).
-			Find(&results).Error; err != nil {
+		query := h.db.Where("status IN ?", []string{"fail", "error"})
+		for i, key := range req.ResultKeys {
+			if i == 0 {
+				query = query.Where("(task_id = ? AND host_id = ? AND rule_id = ?)", key.TaskID, key.HostID, key.RuleID)
+			} else {
+				query = query.Or("(task_id = ? AND host_id = ? AND rule_id = ?) AND status IN ?", key.TaskID, key.HostID, key.RuleID, []string{"fail", "error"})
+			}
+		}
+		if err := query.Find(&results).Error; err != nil {
 			h.logger.Error("查询失败记录失败", zap.Error(err))
 			InternalError(c, "查询失败")
 			return
@@ -308,7 +319,7 @@ func (h *FixHandler) CreateFixTask(c *gin.Context) {
 
 		actualCount = int64(len(results))
 
-		h.logger.Info("result_ids 查询结果",
+		h.logger.Info("result_keys 查询结果",
 			zap.Int("total_records", len(results)),
 			zap.Int("unique_hosts", len(hostIDs)),
 			zap.Int("unique_rules", len(ruleIDs)))

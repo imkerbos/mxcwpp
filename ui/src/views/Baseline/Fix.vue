@@ -166,7 +166,7 @@
       :pagination="pagination"
       :row-selection="rowSelection"
       @change="handleTableChange"
-      row-key="result_id"
+      :row-key="getRowKey"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'hostname'">
@@ -212,7 +212,7 @@
               <a-button
                 type="link"
                 size="small"
-                :loading="fixingItems[record.result_id]"
+                :loading="fixingItems[getRowKey(record)]"
               >
                 立即修复
               </a-button>
@@ -284,7 +284,7 @@
           cancel-text="取消"
           @confirm="handleSingleFix(selectedItem)"
         >
-          <a-button type="primary" :loading="fixingItems[selectedItem.result_id]">
+          <a-button type="primary" :loading="fixingItems[getRowKey(selectedItem)]">
             <ToolOutlined /> 执行修复
           </a-button>
         </a-popconfirm>
@@ -370,6 +370,9 @@ const detailModalVisible = ref(false)
 const progressModalVisible = ref(false)
 const selectedItem = ref<FixableItem | null>(null)
 const fixingItems = reactive<Record<string, boolean>>({})
+
+// 组合行键：用 task_id + host_id + rule_id 生成唯一标识
+const getRowKey = (record: FixableItem) => `${record.task_id}_${record.host_id}_${record.rule_id}`
 
 // 全选相关
 const selectAllFiltered = ref(false) // 是否选择了所有筛选结果
@@ -605,10 +608,11 @@ const handleViewDetail = (record: FixableItem) => {
 }
 
 const handleSingleFix = async (record: FixableItem) => {
-  fixingItems[record.result_id] = true
+  const key = getRowKey(record)
+  fixingItems[key] = true
   try {
     const response = await fixApi.createFixTask({
-      result_ids: [record.result_id],
+      result_keys: [{ task_id: record.task_id, host_id: record.host_id, rule_id: record.rule_id }],
     })
 
     // 先关闭详情 Modal，再显示进度 Modal（避免详情 Modal 遮挡进度条）
@@ -642,7 +646,7 @@ const handleSingleFix = async (record: FixableItem) => {
     console.error('修复失败:', error)
     message.error('修复失败: ' + (error.response?.data?.message || error.message))
   } finally {
-    fixingItems[record.result_id] = false
+    fixingItems[key] = false
   }
 }
 
@@ -693,7 +697,7 @@ const handleBatchFix = async () => {
 
   // 否则使用选中的具体项
   const selectedItems = fixableItems.value.filter(item =>
-    selectedRowKeys.value.includes(item.result_id) && item.has_fix
+    selectedRowKeys.value.includes(getRowKey(item)) && item.has_fix
   )
 
   if (selectedItems.length === 0) {
@@ -704,7 +708,7 @@ const handleBatchFix = async () => {
   fixing.value = true
   try {
     const response = await fixApi.createFixTask({
-      result_ids: selectedItems.map(item => item.result_id),
+      result_keys: selectedItems.map(item => ({ task_id: item.task_id, host_id: item.host_id, rule_id: item.rule_id })),
     })
 
     // 显示进度 Modal

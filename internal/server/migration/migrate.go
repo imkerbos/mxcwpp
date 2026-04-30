@@ -42,6 +42,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("告警表result_id列扩展处理", zap.Error(err))
 	}
 
+	// 执行数据迁移：scan_results / fix_results 主键从 result_id 迁移到复合主键
+	if err := migrateScanResultsCompositeKey(db, logger); err != nil {
+		logger.Warn("scan_results 复合主键迁移处理", zap.Error(err))
+	}
+
 	// 执行数据迁移：为现有数据设置默认的运行时类型
 	if err := migrateRuntimeTypes(db, logger); err != nil {
 		logger.Warn("运行时类型迁移处理", zap.Error(err))
@@ -292,13 +297,48 @@ func migrateAlertResultIDColumn(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
+// migrateScanResultsCompositeKey 将 scan_results 和 fix_results 表从单列主键(result_id)迁移为复合主键(task_id, host_id, rule_id)
+// 此函数幂等：如果 result_id 列已不存在则跳过
+func migrateScanResultsCompositeKey(db *gorm.DB, logger *zap.Logger) error {
+	for _, table := range []string{"scan_results", "fix_results"} {
+		var hasResultID bool
+		if err := db.Raw(
+			"SELECT COUNT(*) > 0 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'result_id'",
+			table,
+		).Scan(&hasResultID).Error; err != nil {
+			return err
+		}
+
+		if !hasResultID {
+			continue // 已迁移，跳过
+		}
+
+		logger.Info("开始迁移主键：result_id → (task_id, host_id, rule_id)", zap.String("table", table))
+
+		stmts := []string{
+			fmt.Sprintf("ALTER TABLE `%s` DROP PRIMARY KEY", table),
+			fmt.Sprintf("ALTER TABLE `%s` ADD PRIMARY KEY (`task_id`, `host_id`, `rule_id`)", table),
+			fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `result_id`", table),
+		}
+		for _, sql := range stmts {
+			if err := db.Exec(sql).Error; err != nil {
+				logger.Error("主键迁移失败", zap.String("table", table), zap.String("sql", sql), zap.Error(err))
+				return err
+			}
+		}
+		logger.Info("主键迁移完成", zap.String("table", table))
+	}
+
+	return nil
+}
+
 // migratePolicyGroupName 更新策略组名称为"主机系统基线组"
 func migratePolicyGroupName(db *gorm.DB, logger *zap.Logger) error {
 	// 更新默认策略组的名称（从"系统基线组"改为"主机系统基线组"）
 	result := db.Model(&model.PolicyGroup{}).
 		Where("id = ?", "system-baseline").
 		Where("name = ?", "系统基线组").
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"name":        "主机系统基线组",
 			"description": "系统内置的基线检查策略组，包含 Linux 主机操作系统安全基线检查策略（仅适用于主机/虚拟机，不适用于容器）",
 			"icon":        "🖥",

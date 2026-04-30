@@ -99,12 +99,23 @@ func (h *ResultsHandler) ListResults(c *gin.Context) {
 }
 
 // GetResult 获取检测结果详情
-// GET /api/v1/results/:result_id
+// GET /api/v1/results/detail?task_id=xxx&host_id=xxx&rule_id=xxx
 func (h *ResultsHandler) GetResult(c *gin.Context) {
-	resultID := c.Param("result_id")
+	taskID := c.Query("task_id")
+	hostID := c.Query("host_id")
+	ruleID := c.Query("rule_id")
+
+	if taskID == "" || hostID == "" || ruleID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "task_id, host_id, rule_id 不能为空",
+		})
+		return
+	}
 
 	var result model.ScanResult
-	if err := h.db.Where("result_id = ?", resultID).Preload("Host").Preload("Rule").First(&result).Error; err != nil {
+	if err := h.db.Where("task_id = ? AND host_id = ? AND rule_id = ?", taskID, hostID, ruleID).
+		Preload("Host").Preload("Rule").First(&result).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"code":    404,

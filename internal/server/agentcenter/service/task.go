@@ -359,6 +359,7 @@ func (s *TaskService) sendTaskToHostMultiPolicy(
 	// 构建任务数据（JSON）
 	taskData := map[string]interface{}{
 		"task_id":    task.TaskID,
+		"host_id":    host.HostID,
 		"policy_ids": task.GetPolicyIDs(),
 		"policies":   policiesData,
 		"os_family":  host.OSFamily,

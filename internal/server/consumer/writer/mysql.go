@@ -34,34 +34,20 @@ func NewMySQLWriter(db *gorm.DB, logger *zap.Logger) *MySQLWriter {
 }
 
 // WriteBaseline 处理基线检查结果（DataType 8000），ON DUPLICATE KEY UPDATE 保证幂等
+// 复合主键 (task_id, host_id, rule_id) 天然保证跨主机去重，无需人造 result_id
 func (w *MySQLWriter) WriteBaseline(msg *kafka.MQMessage) error {
 	fields, err := ParseRecordFields(msg.Body)
 	if err != nil {
 		return fmt.Errorf("解析基线结果失败: %w", err)
 	}
 
-	resultID := fields["result_id"]
-	if resultID == "" {
-		// fallback：旧版插件可能不发 result_id，用 agent_id + rule_id + 时间戳生成
-		agentPrefix := msg.AgentID
-		if len(agentPrefix) > 8 {
-			agentPrefix = agentPrefix[:8]
-		}
-		rulePrefix := fields["rule_id"]
-		if len(rulePrefix) > 8 {
-			rulePrefix = rulePrefix[:8]
-		}
-		resultID = fmt.Sprintf("%s-%s-%d", agentPrefix, rulePrefix, time.Now().UnixNano()%1000000000)
-	}
-
 	result := &model.ScanResult{
-		ResultID:      resultID,
+		TaskID:        fields["task_id"],
 		HostID:        msg.AgentID,
+		RuleID:        fields["rule_id"],
 		Hostname:      msg.Hostname,
 		PolicyID:      fields["policy_id"],
 		PolicyName:    fields["policy_name"],
-		RuleID:        fields["rule_id"],
-		TaskID:        fields["task_id"],
 		Status:        model.ResultStatus(fields["status"]),
 		Severity:      fields["severity"],
 		Category:      fields["category"],
@@ -73,7 +59,7 @@ func (w *MySQLWriter) WriteBaseline(msg *kafka.MQMessage) error {
 	}
 
 	return w.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "result_id"}},
+		Columns:   []clause.Column{{Name: "task_id"}, {Name: "host_id"}, {Name: "rule_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"status", "actual", "checked_at"}),
 	}).Create(result).Error
 }
@@ -181,6 +167,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 
 // WriteTaskCompletion 处理基线扫描任务完成信号（DataType 8001）
 // 更新 task_host_status + scan_tasks.completed_host_count
+// 幂等保护：仅当 TaskHostStatus 实际发生状态转移时才递增计数
 func (w *MySQLWriter) WriteTaskCompletion(msg *kafka.MQMessage) error {
 	fields, err := ParseRecordFields(msg.Body)
 	if err != nil {
@@ -195,14 +182,22 @@ func (w *MySQLWriter) WriteTaskCompletion(msg *kafka.MQMessage) error {
 	now := model.LocalTime(time.Now())
 
 	return w.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 更新 TaskHostStatus
-		if err := tx.Model(&model.TaskHostStatus{}).
-			Where("task_id = ? AND host_id = ?", taskID, msg.AgentID).
+		// 1. 更新 TaskHostStatus（仅从 dispatched/timeout → completed，防止重复消费时多次递增）
+		result := tx.Model(&model.TaskHostStatus{}).
+			Where("task_id = ? AND host_id = ? AND status IN ?", taskID, msg.AgentID,
+				[]string{model.TaskHostStatusDispatched, model.TaskHostStatusTimeout}).
 			Updates(map[string]interface{}{
-				"status":       model.TaskHostStatusCompleted,
-				"completed_at": &now,
-			}).Error; err != nil {
-			return fmt.Errorf("更新 TaskHostStatus 失败: %w", err)
+				"status":        model.TaskHostStatusCompleted,
+				"completed_at":  &now,
+				"error_message": "",
+			})
+		if result.Error != nil {
+			return fmt.Errorf("更新 TaskHostStatus 失败: %w", result.Error)
+		}
+
+		// 没有实际更新（已经是 completed 或记录不存在），跳过后续操作
+		if result.RowsAffected == 0 {
+			return nil
 		}
 
 		// 2. 递增 ScanTask.completed_host_count
@@ -218,13 +213,14 @@ func (w *MySQLWriter) WriteTaskCompletion(msg *kafka.MQMessage) error {
 			return fmt.Errorf("查询 ScanTask 失败: %w", err)
 		}
 
-		if task.CompletedHostCount >= task.DispatchedHostCount && task.DispatchedHostCount > 0 {
+		if task.DispatchedHostCount > 0 && task.CompletedHostCount >= task.DispatchedHostCount {
 			completedAt := model.LocalTime(time.Now())
 			if err := tx.Model(&model.ScanTask{}).
 				Where("task_id = ?", taskID).
 				Updates(map[string]interface{}{
-					"status":       model.TaskStatusCompleted,
-					"completed_at": &completedAt,
+					"status":        model.TaskStatusCompleted,
+					"completed_at":  &completedAt,
+					"failed_reason": "",
 				}).Error; err != nil {
 				return fmt.Errorf("更新 ScanTask 状态为 completed 失败: %w", err)
 			}
@@ -242,13 +238,7 @@ func (w *MySQLWriter) WriteFixResult(msg *kafka.MQMessage) error {
 		return fmt.Errorf("解析修复结果失败: %w", err)
 	}
 
-	resultID := fields["result_id"]
-	if resultID == "" {
-		return fmt.Errorf("修复结果缺少 result_id")
-	}
-
 	fixResult := &model.FixResult{
-		ResultID: resultID,
 		TaskID:   fields["fix_task_id"],
 		HostID:   msg.AgentID,
 		RuleID:   fields["rule_id"],
@@ -261,9 +251,9 @@ func (w *MySQLWriter) WriteFixResult(msg *kafka.MQMessage) error {
 	}
 
 	return w.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 创建 FixResult（幂等）
+		// 1. 创建 FixResult（幂等，复合主键去重）
 		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "result_id"}},
+			Columns:   []clause.Column{{Name: "task_id"}, {Name: "host_id"}, {Name: "rule_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"status", "output", "error_msg"}),
 		}).Create(fixResult).Error; err != nil {
 			return fmt.Errorf("创建 FixResult 失败: %w", err)

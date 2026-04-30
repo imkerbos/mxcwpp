@@ -119,8 +119,15 @@ func (h *TasksHandler) enrichTaskWithTargetHosts(task *model.ScanTask) *TaskResp
 		var ruleCount int64
 		h.db.Model(&model.Rule{}).Where("policy_id IN ? AND enabled = ?", policyIDs, true).Count(&ruleCount)
 		response.TotalRuleCount = int(ruleCount)
-		// 预期检查项总数 = 在线主机数 × 规则数
-		response.ExpectedCheckCount = response.MatchedHostCount * response.TotalRuleCount
+
+		// 预期检查项总数：
+		// - 已下发的任务（running/completed/failed）：使用实际下发主机数
+		// - 未下发的任务（created/pending）：使用当前在线主机数作为预估
+		hostCountForExpected := response.MatchedHostCount
+		if task.DispatchedHostCount > 0 {
+			hostCountForExpected = task.DispatchedHostCount
+		}
+		response.ExpectedCheckCount = hostCountForExpected * response.TotalRuleCount
 	}
 
 	return response

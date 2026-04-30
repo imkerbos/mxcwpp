@@ -168,7 +168,7 @@
             :loading="resultsLoading"
             :pagination="resultPagination"
             @change="handleResultTableChange"
-            row-key="result_id"
+            :row-key="(record: any) => record.task_id + '_' + record.host_id + '_' + record.rule_id"
             size="small"
           >
             <template #bodyCell="{ column, record }">

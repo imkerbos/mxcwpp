@@ -82,11 +82,11 @@ func (FixTask) TableName() string {
 }
 
 // FixResult 修复结果模型
+// 复合主键 (task_id, host_id, rule_id) — 一次修复任务中每台主机的每条规则只有一条结果
 type FixResult struct {
-	ResultID  string          `gorm:"primaryKey;column:result_id;type:varchar(64);not null" json:"result_id"`
-	TaskID    string          `gorm:"column:task_id;type:varchar(64);not null;index" json:"task_id"`
-	HostID    string          `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
-	RuleID    string          `gorm:"column:rule_id;type:varchar(64);not null" json:"rule_id"`
+	TaskID    string          `gorm:"primaryKey;column:task_id;type:varchar(64);not null" json:"task_id"`
+	HostID    string          `gorm:"primaryKey;column:host_id;type:varchar(64);not null" json:"host_id"`
+	RuleID    string          `gorm:"primaryKey;column:rule_id;type:varchar(64);not null" json:"rule_id"`
 	Status    FixResultStatus `gorm:"column:status;type:varchar(20);not null" json:"status"`
 	Command   string          `gorm:"column:command;type:text" json:"command"`
 	Output    string          `gorm:"column:output;type:text" json:"output"`

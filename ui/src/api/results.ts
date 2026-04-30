@@ -17,7 +17,9 @@ export const resultsApi = {
   },
 
   // 获取检测结果详情
-  get: (resultId: string) => {
-    return apiClient.get<ScanResult>(`/results/${resultId}`)
+  get: (taskId: string, hostId: string, ruleId: string) => {
+    return apiClient.get<ScanResult>('/results/detail', {
+      params: { task_id: taskId, host_id: hostId, rule_id: ruleId }
+    })
   },
 }

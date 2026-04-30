@@ -28,7 +28,6 @@ type AgentCenterServices struct {
 	GRPCServer        *grpc.Server
 	TransferService   *transfer.Service
 	TaskService       *service.TaskService
-	TaskStatusUpdater *service.TaskStatusUpdater
 	StatusCtx         context.Context
 	StatusCancel      context.CancelFunc
 	Listener          net.Listener
@@ -77,8 +76,6 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	// 7. 创建任务服务
 	taskService := service.NewTaskService(db, logger)
 
-	// 8. 创建任务状态更新器
-	taskStatusUpdater := service.NewTaskStatusUpdater(db, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 9. 创建网络监听器
@@ -96,7 +93,6 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		GRPCServer:        grpcServer,
 		TransferService:   transferService,
 		TaskService:       taskService,
-		TaskStatusUpdater: taskStatusUpdater,
 		StatusCtx:         ctx,
 		StatusCancel:      cancel,
 		Listener:          listener,
@@ -108,8 +104,6 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 	// 启动任务调度器（定期分发待执行任务）
 	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.Logger)
 
-	// 启动任务状态更新器（定期更新任务完成状态）
-	go s.TaskStatusUpdater.Start(s.StatusCtx)
 }
 
 // Cleanup 清理资源

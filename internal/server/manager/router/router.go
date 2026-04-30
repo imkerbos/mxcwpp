@@ -240,7 +240,7 @@ func setupTasksAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 func setupResultsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	handler := api.NewResultsHandler(db, logger)
 	router.GET("/results", handler.ListResults)
-	router.GET("/results/:result_id", handler.GetResult)
+	router.GET("/results/detail", handler.GetResult)
 	router.GET("/results/host/:host_id/score", handler.GetHostBaselineScore)
 	router.GET("/results/host/:host_id/summary", handler.GetHostBaselineSummary)
 	router.GET("/results/host/:host_id/export", handler.ExportHostBaselineResults)

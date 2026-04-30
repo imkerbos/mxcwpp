@@ -11,14 +11,14 @@ const (
 )
 
 // ScanResult 检测结果模型
+// 复合主键 (task_id, host_id, rule_id) — 一次任务中每台主机的每条规则只有一条结果
 type ScanResult struct {
-	ResultID      string       `gorm:"primaryKey;column:result_id;type:varchar(64);not null" json:"result_id"`
-	HostID        string       `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
-	Hostname      string       `gorm:"column:hostname;type:varchar(255)" json:"hostname"` // 冗余存储，避免主机删除后数据丢失
+	TaskID        string       `gorm:"primaryKey;column:task_id;type:varchar(64);not null" json:"task_id"`
+	HostID        string       `gorm:"primaryKey;column:host_id;type:varchar(64);not null" json:"host_id"`
+	RuleID        string       `gorm:"primaryKey;column:rule_id;type:varchar(64);not null" json:"rule_id"`
+	Hostname      string       `gorm:"column:hostname;type:varchar(255)" json:"hostname"`
 	PolicyID      string       `gorm:"column:policy_id;type:varchar(64);index" json:"policy_id"`
-	PolicyName    string       `gorm:"column:policy_name;type:varchar(255)" json:"policy_name"` // 冗余存储，避免策略删除后数据丢失
-	RuleID        string       `gorm:"column:rule_id;type:varchar(64);not null;index" json:"rule_id"`
-	TaskID        string       `gorm:"column:task_id;type:varchar(64);index" json:"task_id"`
+	PolicyName    string       `gorm:"column:policy_name;type:varchar(255)" json:"policy_name"`
 	Status        ResultStatus `gorm:"column:status;type:varchar(20);not null" json:"status"`
 	Severity      string       `gorm:"column:severity;type:varchar(20)" json:"severity"`
 	Category      string       `gorm:"column:category;type:varchar(50)" json:"category"`

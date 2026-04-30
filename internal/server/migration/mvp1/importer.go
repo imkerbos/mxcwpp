@@ -532,21 +532,20 @@ func (imp *Importer) migrateScanResults(ctx context.Context) (*TableReport, erro
 			continue
 		}
 
-		// result_id 判重
+		// 复合主键 (task_id, host_id, rule_id) 判重
 		var existing model.ScanResult
-		if err := imp.db.Where("result_id = ?", src.ResultID).First(&existing).Error; err == nil {
-			report.addSkip(fmt.Sprintf("结果 %s 已存在", src.ResultID[:8]))
+		if err := imp.db.Where("task_id = ? AND host_id = ? AND rule_id = ?", src.TaskID, src.HostID, src.RuleID).First(&existing).Error; err == nil {
+			report.addSkip(fmt.Sprintf("结果 %s/%s 已存在", src.HostID[:8], src.RuleID))
 			continue
 		}
 
 		newResult := model.ScanResult{
-			ResultID:      src.ResultID,
+			TaskID:        src.TaskID,
 			HostID:        src.HostID,
+			RuleID:        src.RuleID,
 			Hostname:      src.Hostname,
 			PolicyID:      src.PolicyID,
 			PolicyName:    src.PolicyName,
-			RuleID:        src.RuleID,
-			TaskID:        src.TaskID,
 			Status:        model.ResultStatus(src.Status),
 			Severity:      src.Severity,
 			Category:      src.Category,
@@ -558,7 +557,7 @@ func (imp *Importer) migrateScanResults(ctx context.Context) (*TableReport, erro
 			CreatedAt:     parseTime(src.CreatedAt),
 		}
 		if err := imp.db.Create(&newResult).Error; err != nil {
-			report.addFail(fmt.Sprintf("创建结果 %s 失败: %s", src.ResultID[:8], err.Error()))
+			report.addFail(fmt.Sprintf("创建结果 %s/%s 失败: %s", src.HostID[:8], src.RuleID, err.Error()))
 			continue
 		}
 		report.Created++

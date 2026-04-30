@@ -1126,19 +1126,20 @@ const loadTaskResultStats = async (taskId: string) => {
     }))
 
     // 计算进度百分比（基于预期检查项数量）
-    if (selectedTask.value?.status === 'running') {
-      // 使用后端返回的预期检查项总数：在线主机数 × 规则总数
-      const expectedTotal = selectedTask.value.expected_check_count || 0
-      if (expectedTotal > 0) {
-        // 正常计算进度，执行中时最大显示 99%
-        const completedPercent = Math.min(Math.round((taskResultStats.total / expectedTotal) * 100), 99)
-        taskProgress.value = completedPercent
+    const expectedTotal = selectedTask.value?.expected_check_count || 0
+    if (expectedTotal > 0) {
+      const completedPercent = Math.round((taskResultStats.total / expectedTotal) * 100)
+      if (selectedTask.value?.status === 'running') {
+        // 执行中时最大显示 99%
+        taskProgress.value = Math.min(completedPercent, 99)
       } else {
-        // 如果没有预期值，显示为 0%
-        taskProgress.value = 0
+        // 已完成/失败等状态，显示真实进度（可能不到 100%）
+        taskProgress.value = Math.min(completedPercent, 100)
       }
-    } else {
+    } else if (selectedTask.value?.status === 'completed') {
       taskProgress.value = 100
+    } else {
+      taskProgress.value = 0
     }
   } catch (error) {
     console.error('加载任务结果统计失败:', error)

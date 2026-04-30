@@ -37,7 +37,6 @@ type AgentCenterServices struct {
 	HTTPServer             *http.Server   // HTTP 管理端口（健康探测、命令下发）
 	TransferService        *transfer.Service
 	TaskService            *service.TaskService
-	TaskStatusUpdater      *service.TaskStatusUpdater
 	PluginUpdateScheduler  *scheduler.PluginUpdateScheduler
 	AgentUpdateScheduler   *scheduler.AgentUpdateScheduler
 	AgentRestartScheduler  *scheduler.AgentRestartScheduler
@@ -107,8 +106,6 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	// 7. 创建任务服务
 	taskService := service.NewTaskService(db, logger)
 
-	// 8. 创建任务状态更新器
-	taskStatusUpdater := service.NewTaskStatusUpdater(db, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 9. 创建插件更新调度器
@@ -177,7 +174,6 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		HTTPServer:            httpServer,
 		TransferService:       transferService,
 		TaskService:           taskService,
-		TaskStatusUpdater:     taskStatusUpdater,
 		PluginUpdateScheduler: pluginUpdateScheduler,
 		AgentUpdateScheduler:  agentUpdateScheduler,
 		AgentRestartScheduler: agentRestartScheduler,
@@ -210,9 +206,6 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 
 	// 启动任务超时调度器（检查超时任务）
 	go scheduler.StartTaskTimeoutScheduler(s.DB, s.Logger)
-
-	// 启动任务状态更新器（定期更新任务完成状态）
-	go s.TaskStatusUpdater.Start(s.StatusCtx)
 
 	// 启动定期告警调度器（按配置间隔发送告警通知）
 	go scheduler.StartAlertScheduler(s.DB, s.Logger)

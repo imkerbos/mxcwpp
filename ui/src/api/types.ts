@@ -432,11 +432,10 @@ export interface ScanTask {
 
 // 检测结果相关类型
 export interface ScanResult {
-  result_id: string
+  task_id: string
   host_id: string
   rule_id: string
   policy_id: string
-  task_id?: string
   category: string
   title: string
   description: string
@@ -683,7 +682,6 @@ export interface FixTask {
 }
 
 export interface FixResult {
-  result_id: string
   task_id: string
   host_id: string
   hostname?: string
@@ -821,7 +819,7 @@ export interface FIMEventStats {
 }
 
 export interface FixableItem {
-  result_id: string
+  task_id: string
   host_id: string
   hostname: string
   ip: string
