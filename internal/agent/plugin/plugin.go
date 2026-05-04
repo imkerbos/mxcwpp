@@ -697,41 +697,57 @@ func (m *Manager) downloadFromURL(urlStr, destPath string) error {
 		return m.copyFile(srcPath, destPath)
 	}
 
-	// HTTP/HTTPS 下载（429 限流时自动重试）
+	// HTTP/HTTPS 下载（支持 429 限流和瞬时错误重试）
 	client := &http.Client{
 		Timeout: 10 * time.Minute,
 	}
 
-	var resp *http.Response
-	for retries := 0; retries < 5; retries++ {
-		var err error
-		resp, err = client.Get(urlStr)
-		if err != nil {
-			return fmt.Errorf("failed to download: %w", err)
-		}
-		if resp.StatusCode == http.StatusTooManyRequests {
-			resp.Body.Close()
-			// 指数退避：5s, 10s, 20s, 40s, 80s
-			backoff := time.Duration(5<<retries) * time.Second
-			m.logger.Info("server rate limit, retrying after backoff",
+	const maxRetries = 5
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(5<<(attempt-1)) * time.Second
+			m.logger.Info("retrying download after backoff",
 				zap.String("url", urlStr),
 				zap.Duration("backoff", backoff),
-				zap.Int("retry", retries+1))
+				zap.Int("attempt", attempt+1),
+				zap.Error(lastErr))
 			time.Sleep(backoff)
-			continue
 		}
-		break
+
+		err := m.doDownload(client, urlStr, destPath)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+
+		// 判断是否可重试：EOF / connection reset / timeout 类瞬时错误
+		if !isRetryableError(err) {
+			return err
+		}
+	}
+	return lastErr
+}
+
+// doDownload 执行单次 HTTP 下载
+func (m *Manager) doDownload(client *http.Client, urlStr, destPath string) error {
+	resp, err := client.Get(urlStr)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return fmt.Errorf("server rate limit (429)")
+	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return &nonRetryableError{fmt.Errorf("unexpected status code: %d", resp.StatusCode)}
 	}
 
 	// 创建目标文件
 	destFile, err := os.Create(destPath)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		return &nonRetryableError{fmt.Errorf("failed to create file: %w", err)}
 	}
 	defer destFile.Close()
 
@@ -744,6 +760,19 @@ func (m *Manager) downloadFromURL(urlStr, destPath string) error {
 	}
 
 	return nil
+}
+
+// nonRetryableError 标记不应重试的错误
+type nonRetryableError struct{ error }
+
+func (e *nonRetryableError) Unwrap() error { return e.error }
+
+// isRetryableError 判断是否为可重试的瞬时错误
+func isRetryableError(err error) bool {
+	if _, ok := err.(*nonRetryableError); ok {
+		return false
+	}
+	return true
 }
 
 // copyFile 复制文件（用于 file:// 协议）

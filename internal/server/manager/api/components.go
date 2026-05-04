@@ -1261,7 +1261,8 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 	}
 
 	// 检查文件是否存在
-	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(pkg.FilePath)
+	if os.IsNotExist(err) {
 		h.logger.Error("插件包文件不存在", zap.String("path", pkg.FilePath))
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,
@@ -1270,10 +1271,21 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 		return
 	}
 
+	// 大文件下载需要延长写超时，避免传输中途被 WriteTimeout 断开
+	// 按实际文件大小估算：假设最低 1 MB/s + 60s 余量
+	deadline := time.Duration(fileInfo.Size()/(1024*1024)+60) * time.Second
+	if deadline < 5*time.Minute {
+		deadline = 5 * time.Minute
+	}
+	rc := http.NewResponseController(c.Writer)
+	if err := rc.SetWriteDeadline(time.Now().Add(deadline)); err != nil {
+		h.logger.Warn("设置写超时失败，使用默认超时", zap.Error(err))
+	}
+
 	// 设置下载响应头 - 文件名使用插件名（Agent 下载后可直接使用）
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", name))
 	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Length", strconv.FormatInt(pkg.FileSize, 10))
+	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
 	c.Header("X-Plugin-Name", name)
 	c.Header("X-Plugin-Version", latestVersion.Version)
 	c.Header("X-Plugin-SHA256", pkg.SHA256)
