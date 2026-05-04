@@ -224,7 +224,65 @@ func (c *KubeBaselineChecker) RunChecks(clusterID uint) ([]model.KubeBaseline, e
 	}
 
 	c.updateHealthScore(clusterID, results)
+	c.syncBaselineAlerts(clusterID, cluster.Name, results)
 	return results, nil
+}
+
+// syncBaselineAlerts ��据检查结果同步基线告警（fail 创建/更新，pass 自动恢复）
+func (c *KubeBaselineChecker) syncBaselineAlerts(clusterID uint, clusterName string, results []model.KubeBaseline) {
+	now := model.LocalTime(time.Now())
+
+	for _, r := range results {
+		fingerprint := model.BaselineAlertFingerprint(clusterID, r.CheckID)
+
+		if r.Result == "fail" {
+			var existing model.KubeBaselineAlert
+			err := c.db.Where("fingerprint = ?", fingerprint).First(&existing).Error
+			if err != nil {
+				// 不存在，创建新告警
+				alert := model.KubeBaselineAlert{
+					ClusterID:         clusterID,
+					ClusterName:       clusterName,
+					CheckID:           r.CheckID,
+					CheckName:         r.CheckName,
+					Category:          r.Category,
+					Severity:          r.Severity,
+					Description:       r.Description,
+					Remediation:       r.Remediation,
+					AffectedResources: r.AffectedResources,
+					Fingerprint:       fingerprint,
+					Status:            model.KubeBaselineAlertStatusActive,
+					FirstSeenAt:       now,
+					LastSeenAt:        now,
+				}
+				if createErr := c.db.Create(&alert).Error; createErr != nil {
+					c.logger.Error("创建基线告警失败", zap.String("check_id", r.CheckID), zap.Error(createErr))
+				}
+			} else {
+				// 已存在，更新 lastSeenAt 和受影响资源；如果之前是 resolved 则重新激活
+				updates := map[string]interface{}{
+					"last_seen_at":       now,
+					"affected_resources": r.AffectedResources,
+					"severity":           r.Severity,
+					"description":        r.Description,
+					"remediation":        r.Remediation,
+				}
+				if existing.Status == model.KubeBaselineAlertStatusResolved {
+					updates["status"] = model.KubeBaselineAlertStatusActive
+					updates["resolved_at"] = nil
+				}
+				c.db.Model(&existing).Updates(updates)
+			}
+		} else if r.Result == "pass" {
+			// 检查通过，自动恢复对应的活跃告警
+			c.db.Model(&model.KubeBaselineAlert{}).
+				Where("fingerprint = ? AND status = ?", fingerprint, model.KubeBaselineAlertStatusActive).
+				Updates(map[string]interface{}{
+					"status":      model.KubeBaselineAlertStatusResolved,
+					"resolved_at": now,
+				})
+		}
+	}
 }
 
 func (c *KubeBaselineChecker) updateHealthScore(clusterID uint, results []model.KubeBaseline) {

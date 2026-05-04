@@ -2,9 +2,11 @@
   <div class="kube-alarms-page">
     <div class="page-header">
       <h2>容器集群安全告警</h2>
-      <span class="page-header-hint">Kubernetes 集群入侵检测告警</span>
+      <span class="page-header-hint">Kubernetes 集群入侵检测告警与基线违规</span>
     </div>
 
+    <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
+      <a-tab-pane key="runtime" tab="运行时告警">
     <!-- 统计卡片 -->
     <a-row :gutter="[16, 16]" class="section-row">
       <a-col :span="6">
@@ -137,6 +139,132 @@
         <pre v-if="detailRecord.rawData" class="raw-json">{{ JSON.stringify(detailRecord.rawData, null, 2) }}</pre>
       </template>
     </a-drawer>
+      </a-tab-pane>
+
+      <a-tab-pane key="baseline" tab="基线违规">
+        <!-- 基线告警统计 -->
+        <a-row :gutter="[16, 16]" class="section-row">
+          <a-col :span="8">
+            <div class="alarm-stat critical">
+              <div class="alarm-stat-value">{{ baselineStats.active }}</div>
+              <div class="alarm-stat-label">活跃</div>
+            </div>
+          </a-col>
+          <a-col :span="8">
+            <div class="alarm-stat" style="border-color: #00B42A">
+              <div class="alarm-stat-value" style="color: #00B42A">{{ baselineStats.resolved }}</div>
+              <div class="alarm-stat-label">已恢复</div>
+            </div>
+          </a-col>
+          <a-col :span="8">
+            <div class="alarm-stat low">
+              <div class="alarm-stat-value">{{ baselineStats.ignored }}</div>
+              <div class="alarm-stat-label">已忽略</div>
+            </div>
+          </a-col>
+        </a-row>
+
+        <div class="dashboard-card">
+          <div class="card-body">
+            <div class="filter-bar">
+              <a-input-search v-model:value="baselineSearch" placeholder="搜索检查项" style="width: 240px" allow-clear @search="loadBaselineAlerts" />
+              <a-select v-model:value="baselineFilterSeverity" style="width: 120px" placeholder="级别" allow-clear @change="loadBaselineAlerts">
+                <a-select-option value="critical">紧急</a-select-option>
+                <a-select-option value="high">高危</a-select-option>
+                <a-select-option value="medium">中危</a-select-option>
+                <a-select-option value="low">低危</a-select-option>
+              </a-select>
+              <a-select v-model:value="baselineFilterStatus" style="width: 120px" placeholder="状态" allow-clear @change="loadBaselineAlerts">
+                <a-select-option value="active">活跃</a-select-option>
+                <a-select-option value="resolved">已恢复</a-select-option>
+                <a-select-option value="ignored">已忽略</a-select-option>
+              </a-select>
+              <div style="flex: 1"></div>
+              <a-button @click="handleBaselineBatchIgnore" :disabled="!baselineSelectedKeys.length">批量忽略</a-button>
+            </div>
+
+            <a-table
+              :columns="baselineColumns"
+              :data-source="baselineAlerts"
+              :loading="baselineLoading"
+              :pagination="baselinePagination"
+              :row-selection="{ selectedRowKeys: baselineSelectedKeys, onChange: (keys: string[]) => { baselineSelectedKeys = keys } }"
+              @change="handleBaselineTableChange"
+              size="middle"
+              row-key="id"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'severity'">
+                  <a-tag :color="severityColorMap[record.severity]" :bordered="false">{{ severityTextMap[record.severity] }}</a-tag>
+                </template>
+                <template v-if="column.key === 'status'">
+                  <a-tag :color="record.status === 'active' ? 'orange' : record.status === 'resolved' ? 'green' : 'default'" :bordered="false">
+                    {{ baselineStatusTextMap[record.status] }}
+                  </a-tag>
+                </template>
+                <template v-if="column.key === 'action'">
+                  <a-space>
+                    <a-button type="link" size="small" @click="showBaselineDetail(record)">详情</a-button>
+                    <a-button type="link" size="small" @click="handleBaselineIgnore(record)" v-if="record.status === 'active'">忽略</a-button>
+                  </a-space>
+                </template>
+              </template>
+            </a-table>
+          </div>
+        </div>
+
+        <!-- 基线告警详情 Drawer -->
+        <a-drawer v-model:open="showBaselineDetailDrawer" title="基线违规详情" width="680">
+          <template v-if="baselineDetailRecord">
+            <div class="alarm-detail-header">
+              <a-tag :color="severityColorMap[baselineDetailRecord.severity]" :bordered="false" class="severity-tag">{{ severityTextMap[baselineDetailRecord.severity] }}</a-tag>
+              <span style="font-size: 12px; color: #86909C; font-family: monospace">{{ baselineDetailRecord.checkId }}</span>
+              <span class="alarm-detail-title">{{ baselineDetailRecord.checkName }}</span>
+            </div>
+
+            <div class="alarm-detail-section" v-if="baselineDetailRecord.description">
+              <div class="section-label">检查说明</div>
+              <div class="section-content">{{ baselineDetailRecord.description }}</div>
+            </div>
+
+            <div class="alarm-detail-section remediation" v-if="baselineDetailRecord.remediation">
+              <div class="section-label">修复建议</div>
+              <div class="section-content remediation-content">{{ baselineDetailRecord.remediation }}</div>
+            </div>
+
+            <a-divider style="margin: 16px 0" />
+
+            <a-descriptions :column="2" bordered size="small">
+              <a-descriptions-item label="检查ID">{{ baselineDetailRecord.checkId }}</a-descriptions-item>
+              <a-descriptions-item label="分类">{{ baselineDetailRecord.category }}</a-descriptions-item>
+              <a-descriptions-item label="集群">{{ baselineDetailRecord.clusterName }}</a-descriptions-item>
+              <a-descriptions-item label="状态">
+                <a-tag :color="baselineDetailRecord.status === 'active' ? 'orange' : baselineDetailRecord.status === 'resolved' ? 'green' : 'default'" :bordered="false">
+                  {{ baselineStatusTextMap[baselineDetailRecord.status] }}
+                </a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="首次发现">{{ baselineDetailRecord.firstSeenAt }}</a-descriptions-item>
+              <a-descriptions-item label="最近检测">{{ baselineDetailRecord.lastSeenAt }}</a-descriptions-item>
+            </a-descriptions>
+
+            <template v-if="baselineDetailRecord.affectedResources && baselineDetailRecord.affectedResources.length > 0">
+              <a-divider style="margin: 16px 0">受影响资源</a-divider>
+              <a-table
+                :columns="[
+                  { title: '类型', dataIndex: 'kind', width: 120 },
+                  { title: '名称', dataIndex: 'name' },
+                  { title: '命名空间', dataIndex: 'namespace', width: 150 },
+                ]"
+                :data-source="baselineDetailRecord.affectedResources"
+                :pagination="false"
+                size="small"
+                :row-key="(r: any) => `${r.kind}-${r.namespace}-${r.name}`"
+              />
+            </template>
+          </template>
+        </a-drawer>
+      </a-tab-pane>
+    </a-tabs>
   </div>
 </template>
 
@@ -145,6 +273,7 @@ import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import apiClient from '@/api/client'
 
+const activeTab = ref('runtime')
 const searchText = ref('')
 const filterCluster = ref<string>()
 const filterSeverity = ref<string>()
@@ -156,6 +285,18 @@ const selectedRowKeys = ref<string[]>([])
 const showDetail = ref(false)
 const detailRecord = ref<any>(null)
 const stats = ref({ critical: 0, high: 0, medium: 0, low: 0 })
+
+// 基线违规
+const baselineSearch = ref('')
+const baselineFilterSeverity = ref<string>()
+const baselineFilterStatus = ref<string>()
+const baselineLoading = ref(false)
+const baselineAlerts = ref<any[]>([])
+const baselineSelectedKeys = ref<string[]>([])
+const baselineStats = ref({ active: 0, resolved: 0, ignored: 0 })
+const baselinePagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, showTotal: (t: number) => `共 ${t} 条` })
+const showBaselineDetailDrawer = ref(false)
+const baselineDetailRecord = ref<any>(null)
 
 const pagination = ref({ current: 1, pageSize: 20, total: 0, showSizeChanger: true, showTotal: (t: number) => `共 ${t} 条` })
 
@@ -180,6 +321,19 @@ const alarmTypeColorMap: Record<string, string> = {
   reverse_shell: 'red',
   crypto_mining: 'volcano',
 }
+
+const baselineStatusTextMap: Record<string, string> = { active: '活跃', resolved: '已恢复', ignored: '已忽略' }
+
+const baselineColumns = [
+  { title: '最近检测', dataIndex: 'lastSeenAt', key: 'lastSeenAt', width: 180 },
+  { title: '级别', key: 'severity', width: 80 },
+  { title: '检查ID', dataIndex: 'checkId', key: 'checkId', width: 130 },
+  { title: '检查名称', dataIndex: 'checkName', key: 'checkName', ellipsis: true },
+  { title: '分类', dataIndex: 'category', key: 'category', width: 120 },
+  { title: '集群', dataIndex: 'clusterName', key: 'clusterName', width: 140 },
+  { title: '状态', key: 'status', width: 100 },
+  { title: '操作', key: 'action', width: 130 },
+]
 
 const columns = [
   { title: '告警时间', dataIndex: 'createdAt', key: 'createdAt', width: 180 },
@@ -212,6 +366,28 @@ const showAlarmDetail = (record: any) => { detailRecord.value = record; showDeta
 const handleProcess = async (record: any) => { try { await apiClient.post(`/kube/alarms/${record.id}/process`); message.success('已处理'); loadAlarms() } catch { message.error('操作失败') } }
 const handleBatchProcess = async () => { try { await apiClient.post('/kube/alarms/batch-process', { ids: selectedRowKeys.value }); message.success('批量处理成功'); selectedRowKeys.value = []; loadAlarms() } catch { message.error('操作失败') } }
 const handleBatchIgnore = async () => { try { await apiClient.post('/kube/alarms/batch-ignore', { ids: selectedRowKeys.value }); message.success('批量忽略成功'); selectedRowKeys.value = []; loadAlarms() } catch { message.error('操作失败') } }
+
+const handleTabChange = (key: string) => {
+  if (key === 'baseline') loadBaselineAlerts()
+}
+
+const loadBaselineAlerts = async () => {
+  baselineLoading.value = true
+  try {
+    const res = await apiClient.get<any>('/kube/baseline-alerts', {
+      params: { page: baselinePagination.value.current, page_size: baselinePagination.value.pageSize, search: baselineSearch.value || undefined, severity: baselineFilterSeverity.value || undefined, status: baselineFilterStatus.value || undefined },
+    })
+    baselineAlerts.value = res.items ?? []
+    baselinePagination.value.total = res.total ?? 0
+    if (res.stats) baselineStats.value = res.stats
+  } catch { baselineAlerts.value = [] }
+  finally { baselineLoading.value = false }
+}
+
+const handleBaselineTableChange = (pag: any) => { baselinePagination.value.current = pag.current; baselinePagination.value.pageSize = pag.pageSize; loadBaselineAlerts() }
+const showBaselineDetail = (record: any) => { baselineDetailRecord.value = record; showBaselineDetailDrawer.value = true }
+const handleBaselineIgnore = async (record: any) => { try { await apiClient.post(`/kube/baseline-alerts/${record.id}/ignore`); message.success('已忽略'); loadBaselineAlerts() } catch { message.error('操作失败') } }
+const handleBaselineBatchIgnore = async () => { try { await apiClient.post('/kube/baseline-alerts/batch-ignore', { ids: baselineSelectedKeys.value }); message.success('批量忽略成功'); baselineSelectedKeys.value = []; loadBaselineAlerts() } catch { message.error('操作失败') } }
 
 const loadClusters = async () => {
   try {

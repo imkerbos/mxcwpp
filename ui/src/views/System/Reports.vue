@@ -314,8 +314,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ReloadOutlined,
   DesktopOutlined,
@@ -350,10 +350,18 @@ interface ReportRiskDistribution {
   high_risk_baselines: number
 }
 
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const loadingTopLists = ref(false)
-const activeTab = ref<string>('overview')
+
+const validTabs = ['overview', 'antivirus', 'vulnerability', 'kube', 'runtime']
+const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview'
+const activeTab = ref<string>(initialTab)
+
+watch(activeTab, (val) => {
+  router.replace({ query: { ...route.query, tab: val } })
+})
 const dateRange = ref<[Dayjs, Dayjs]>([
   dayjs().subtract(7, 'day'),
   dayjs()

@@ -334,6 +334,19 @@ export interface KubeReport {
   clusterDistribution: Array<{ clusterName: string; count: number }>
   topNamespaces: Array<{ namespace: string; clusterName: string; count: number }>
   topTargets: Array<{ target: string; namespace: string; count: number; severity: string }>
+  baselineOverview: {
+    totalChecks: number
+    passed: number
+    failed: number
+    passRate: number
+  }
+  baselineAlerts: {
+    active: number
+    resolved: number
+    ignored: number
+  }
+  baselineBySeverity: Record<string, number>
+  baselineByCategory: Record<string, number>
 }
 
 // 运行时检测报告
@@ -513,6 +526,26 @@ export interface KubeExecutiveReport {
     bySeverity: Record<string, number>
     byCategory: Record<string, number>
   }
+  failedCheckDetails: Array<{
+    checkId: string
+    checkName: string
+    category: string
+    severity: string
+    severityLabel: string
+    description: string
+    remediation: string
+    clusterName: string
+    affectedResources: Array<{ kind: string; name: string; namespace: string }> | null
+  }>
+  baselineRiskItems: Array<{
+    checkId: string
+    category: string
+    description: string
+    severity: string
+    severityLabel: string
+    remediation: string
+    clusterName: string
+  }>
   clusterDetails: Array<{
     clusterName: string
     alarmCount: number

@@ -504,6 +504,12 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.DELETE("/kube/baseline-rules/:id", rulesHandler.DeleteRule)
 	router.PUT("/kube/baseline-rules/:id/toggle", rulesHandler.ToggleRule)
 
+	// 基线告警
+	baselineAlertHandler := api.NewKubeBaselineAlertHandler(db, logger)
+	router.GET("/kube/baseline-alerts", baselineAlertHandler.ListAlerts)
+	router.POST("/kube/baseline-alerts/:id/ignore", baselineAlertHandler.IgnoreAlert)
+	router.POST("/kube/baseline-alerts/batch-ignore", baselineAlertHandler.BatchIgnoreAlerts)
+
 	// 白名单
 	whitelistHandler := api.NewKubeWhitelistHandler(db, logger)
 	router.GET("/kube/whitelist", whitelistHandler.ListWhitelist)

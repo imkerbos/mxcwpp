@@ -478,7 +478,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   FileTextOutlined,
@@ -504,8 +505,16 @@ import VulnTaskReport from './task-reports/VulnTaskReport.vue'
 import KubeTaskReport from './task-reports/KubeTaskReport.vue'
 import RuntimeTaskReport from './task-reports/RuntimeTaskReport.vue'
 
-// Tab 切换
-const activeTab = ref('baseline')
+// Tab 切换 — 从 URL query 持久化
+const route = useRoute()
+const router = useRouter()
+const validTabs = ['baseline', 'antivirus', 'vulnerability', 'kube', 'runtime']
+const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'baseline'
+const activeTab = ref(initialTab)
+
+watch(activeTab, (val) => {
+  router.replace({ query: { ...route.query, tab: val } })
+})
 
 // 数据
 const loading = ref(false)

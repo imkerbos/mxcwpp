@@ -227,6 +227,50 @@
               </div>
             </div>
           </div>
+
+          <!-- 高危风险项 -->
+          <div v-if="report.baselineRiskItems && report.baselineRiskItems.length > 0" class="risk-items-section" style="margin-top: 24px">
+            <h4 style="margin-bottom: 12px; color: #1D2129; font-size: 15px">高风险基线违规项</h4>
+            <div class="risk-item" v-for="(item, i) in report.baselineRiskItems" :key="i">
+              <div class="risk-item-header">
+                <span class="severity-tag" :class="item.severity">{{ item.severityLabel }}</span>
+                <span class="risk-item-id">{{ item.checkId }}</span>
+                <span class="risk-item-title">{{ item.description }}</span>
+              </div>
+              <div class="risk-item-meta">
+                <span>分类：{{ getCategoryLabel(item.category) }}</span>
+                <span v-if="item.clusterName">集群：{{ item.clusterName }}</span>
+              </div>
+              <div class="risk-item-remediation" v-if="item.remediation">
+                <strong>修复建议：</strong>{{ item.remediation }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 失败检查项明细表 -->
+          <div v-if="report.failedCheckDetails && report.failedCheckDetails.length > 0" style="margin-top: 24px">
+            <h4 style="margin-bottom: 12px; color: #1D2129; font-size: 15px">不合规检查项明细</h4>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 120px">检查ID</th>
+                  <th>检查名称</th>
+                  <th style="width: 100px">分类</th>
+                  <th style="width: 70px">级别</th>
+                  <th style="width: 120px">集群</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, i) in report.failedCheckDetails" :key="i">
+                  <td>{{ item.checkId }}</td>
+                  <td>{{ item.checkName }}</td>
+                  <td>{{ getCategoryLabel(item.category) }}</td>
+                  <td><span class="severity-tag" :class="item.severity">{{ item.severityLabel }}</span></td>
+                  <td>{{ item.clusterName || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <!-- 6. 集群概览 -->
@@ -443,6 +487,15 @@ const getSeverityLabel = (severity: string): string => {
   return labels[severity] || severity
 }
 
+const getCategoryLabel = (category: string): string => {
+  const labels: Record<string, string> = {
+    'RBAC': 'RBAC 安全', 'Pod Security': 'Pod 安全', 'Network': '网络安全',
+    'Secrets & Config': '密钥与配置', 'Workload': '工作负载', 'Node': '节点安全',
+    'Cluster': '集群配置', 'Supply Chain': '供应链与运行时',
+  }
+  return labels[category] || category
+}
+
 const getAlarmTypeLabel = (type: string): string => {
   const labels: Record<string, string> = {
     container_escape: '容器逃逸', abnormal_process: '异常进程', abnormal_network: '异常网络',
@@ -477,5 +530,55 @@ onMounted(() => { loadSavedReports() })
   background: #fff;
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.risk-item {
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  background: #FFF7F0;
+  border-left: 3px solid #FF7D00;
+  border-radius: 4px;
+
+  .risk-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .risk-item-id {
+    font-size: 12px;
+    color: #86909C;
+    font-family: 'SF Mono', 'Consolas', monospace;
+  }
+  .risk-item-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1D2129;
+  }
+  .risk-item-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+    color: #86909C;
+    margin-bottom: 6px;
+  }
+  .risk-item-remediation {
+    font-size: 13px;
+    color: #4E5969;
+    line-height: 1.6;
+    white-space: pre-line;
+  }
+}
+
+.severity-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  &.critical { background: #FFECE8; color: #F53F3F; }
+  &.high { background: #FFF3E8; color: #FF7D00; }
+  &.medium { background: #FFF7E6; color: #F7BA1E; }
+  &.low { background: #E8F3FF; color: #165DFF; }
 }
 </style>

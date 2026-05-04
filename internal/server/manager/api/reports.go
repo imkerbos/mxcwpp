@@ -2589,6 +2589,56 @@ func (h *ReportsHandler) GetKubeReport(c *gin.Context) {
 		})
 	}
 
+	// 7. 基线检查统计（基线结果代表当前集群合规状态，不按日期过滤）
+	var baselineTotalChecks, baselinePassedChecks, baselineFailedChecks int64
+	h.db.Model(&model.KubeBaseline{}).Count(&baselineTotalChecks)
+	h.db.Model(&model.KubeBaseline{}).Where("result = ?", "pass").Count(&baselinePassedChecks)
+	h.db.Model(&model.KubeBaseline{}).Where("result = ?", "fail").Count(&baselineFailedChecks)
+	baselinePassRate := 0.0
+	if baselineTotalChecks > 0 {
+		baselinePassRate = float64(baselinePassedChecks) / float64(baselineTotalChecks) * 100.0
+	}
+
+	// 8. 基线告警统计
+	var baselineActiveAlerts, baselineResolvedAlerts, baselineIgnoredAlerts int64
+	h.db.Model(&model.KubeBaselineAlert{}).Where("status = ?", "active").Count(&baselineActiveAlerts)
+	h.db.Model(&model.KubeBaselineAlert{}).Where("status = ?", "resolved").Count(&baselineResolvedAlerts)
+	h.db.Model(&model.KubeBaselineAlert{}).Where("status = ?", "ignored").Count(&baselineIgnoredAlerts)
+
+	// 9. 基线失败项按严重级别分布
+	baselineBySeverityReport := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var bslSevRowsReport []struct {
+		Severity string
+		Count    int64
+	}
+	h.db.Model(&model.KubeBaseline{}).
+		Select("severity, COUNT(*) as count").
+		Where("result = ?", "fail").
+		Group("severity").
+		Scan(&bslSevRowsReport)
+	for _, r := range bslSevRowsReport {
+		if r.Severity != "" {
+			baselineBySeverityReport[r.Severity] = r.Count
+		}
+	}
+
+	// 10. 基线失败项按类别分布
+	baselineByCategoryReport := make(map[string]int64)
+	var bslCatRowsReport []struct {
+		Category string
+		Count    int64
+	}
+	h.db.Model(&model.KubeBaseline{}).
+		Select("category, COUNT(*) as count").
+		Where("result = ?", "fail").
+		Group("category").
+		Scan(&bslCatRowsReport)
+	for _, r := range bslCatRowsReport {
+		if r.Category != "" {
+			baselineByCategoryReport[r.Category] = r.Count
+		}
+	}
+
 	Success(c, gin.H{
 		"summary": gin.H{
 			"totalAlarms":     summary.TotalAlarms,
@@ -2602,6 +2652,19 @@ func (h *ReportsHandler) GetKubeReport(c *gin.Context) {
 		"clusterDistribution":   clusterDistribution,
 		"topNamespaces":         topNamespaces,
 		"topTargets":            topTargets,
+		"baselineOverview": gin.H{
+			"totalChecks": baselineTotalChecks,
+			"passed":      baselinePassedChecks,
+			"failed":      baselineFailedChecks,
+			"passRate":    baselinePassRate,
+		},
+		"baselineAlerts": gin.H{
+			"active":   baselineActiveAlerts,
+			"resolved": baselineResolvedAlerts,
+			"ignored":  baselineIgnoredAlerts,
+		},
+		"baselineBySeverity": baselineBySeverityReport,
+		"baselineByCategory": baselineByCategoryReport,
 	})
 }
 
@@ -3382,20 +3445,12 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 		alarmByCluster = append(alarmByCluster, gin.H{"clusterName": r.ClusterName, "count": r.Count})
 	}
 
-	// 2. 基线检查统计
+	// 2. 基线检查统计（基线结果代表当前集群合规状态，不按日期过滤）
 	var totalChecks, passedChecks, failedChecks, warningChecks int64
-	h.db.Model(&model.KubeBaseline{}).
-		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime).
-		Count(&totalChecks)
-	h.db.Model(&model.KubeBaseline{}).
-		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "pass").
-		Count(&passedChecks)
-	h.db.Model(&model.KubeBaseline{}).
-		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "fail").
-		Count(&failedChecks)
-	h.db.Model(&model.KubeBaseline{}).
-		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "warning").
-		Count(&warningChecks)
+	h.db.Model(&model.KubeBaseline{}).Count(&totalChecks)
+	h.db.Model(&model.KubeBaseline{}).Where("result = ?", "pass").Count(&passedChecks)
+	h.db.Model(&model.KubeBaseline{}).Where("result = ?", "fail").Count(&failedChecks)
+	h.db.Model(&model.KubeBaseline{}).Where("result = ?", "warning").Count(&warningChecks)
 
 	baselineBySeverity := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
 	var bslSevRows []struct {
@@ -3404,7 +3459,7 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 	}
 	h.db.Model(&model.KubeBaseline{}).
 		Select("severity, COUNT(*) as count").
-		Where("checked_at >= ? AND checked_at <= ? AND result = ?", startTime, endTime, "fail").
+		Where("result = ?", "fail").
 		Group("severity").
 		Scan(&bslSevRows)
 	for _, r := range bslSevRows {
@@ -3420,12 +3475,48 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 	}
 	h.db.Model(&model.KubeBaseline{}).
 		Select("category, COUNT(*) as count").
-		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime).
 		Group("category").
 		Scan(&bslCatRows)
 	for _, r := range bslCatRows {
 		if r.Category != "" {
 			baselineByCategory[r.Category] = r.Count
+		}
+	}
+
+	// 2.5 失败基线检查项详情
+	var failedBaselineItems []model.KubeBaseline
+	h.db.Where("result = ?", "fail").
+		Order("FIELD(severity, 'critical', 'high', 'medium', 'low'), check_id ASC").
+		Find(&failedBaselineItems)
+
+	failedCheckDetails := make([]gin.H, 0, len(failedBaselineItems))
+	baselineRiskItems := make([]gin.H, 0)
+	severityLabelsKube := map[string]string{"critical": "严重", "high": "高危", "medium": "中危", "low": "低危"}
+
+	for _, item := range failedBaselineItems {
+		detail := gin.H{
+			"checkId":           item.CheckID,
+			"checkName":         item.CheckName,
+			"category":          item.Category,
+			"severity":          item.Severity,
+			"severityLabel":     severityLabelsKube[item.Severity],
+			"description":       item.Description,
+			"remediation":       item.Remediation,
+			"clusterName":       item.ClusterName,
+			"affectedResources": item.AffectedResources,
+		}
+		failedCheckDetails = append(failedCheckDetails, detail)
+
+		if item.Severity == "critical" || item.Severity == "high" {
+			baselineRiskItems = append(baselineRiskItems, gin.H{
+				"checkId":       item.CheckID,
+				"category":      item.Category,
+				"description":   item.CheckName,
+				"severity":      item.Severity,
+				"severityLabel": severityLabelsKube[item.Severity],
+				"remediation":   item.Remediation,
+				"clusterName":   item.ClusterName,
+			})
 		}
 	}
 
@@ -3444,13 +3535,13 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 
 	clusterDetails := make([]gin.H, 0, len(clusterDetailRows))
 	for _, cd := range clusterDetailRows {
-		// 计算该集群基线通过率
+		// 计算该集群基线通过率（基线结果代表当前状态，不按日期过滤）
 		var cTotal, cPassed int64
 		h.db.Model(&model.KubeBaseline{}).
-			Where("cluster_name = ? AND checked_at >= ? AND checked_at <= ?", cd.ClusterName, startTime, endTime).
+			Where("cluster_name = ?", cd.ClusterName).
 			Count(&cTotal)
 		h.db.Model(&model.KubeBaseline{}).
-			Where("cluster_name = ? AND checked_at >= ? AND checked_at <= ? AND result = ?", cd.ClusterName, startTime, endTime, "pass").
+			Where("cluster_name = ? AND result = ?", cd.ClusterName, "pass").
 			Count(&cPassed)
 		passRate := 0.0
 		if cTotal > 0 {
@@ -3552,6 +3643,8 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 			"bySeverity":  baselineBySeverity,
 			"byCategory":  baselineByCategory,
 		},
+		"failedCheckDetails": failedCheckDetails,
+		"baselineRiskItems":  baselineRiskItems,
 		"clusterDetails": clusterDetails,
 		"topAlarms":      topAlarms,
 		"recommendation": gin.H{

@@ -50,10 +50,87 @@
         </a-col>
       </a-row>
 
-      <!-- 图表行 1：严重级别 + 告警类型 -->
+      <!-- CIS 基线概览 -->
+      <a-row :gutter="[16, 16]" class="stats-overview">
+        <a-col :xs="12" :sm="8" :md="8" :lg="{ span: 4, offset: 2 }">
+          <a-card :bordered="false" class="stat-card">
+            <a-statistic
+              title="基线检查项"
+              :value="report.baselineOverview.totalChecks"
+              :value-style="{ color: '#165DFF' }"
+            />
+          </a-card>
+        </a-col>
+        <a-col :xs="12" :sm="8" :md="8" :lg="4">
+          <a-card :bordered="false" class="stat-card">
+            <a-statistic
+              title="通过"
+              :value="report.baselineOverview.passed"
+              :value-style="{ color: '#00B42A' }"
+            />
+          </a-card>
+        </a-col>
+        <a-col :xs="12" :sm="8" :md="8" :lg="4">
+          <a-card :bordered="false" class="stat-card">
+            <a-statistic
+              title="不合规"
+              :value="report.baselineOverview.failed"
+              :value-style="{ color: '#F53F3F' }"
+            />
+          </a-card>
+        </a-col>
+        <a-col :xs="12" :sm="8" :md="8" :lg="4">
+          <a-card :bordered="false" class="stat-card">
+            <a-statistic
+              title="通过率"
+              :value="report.baselineOverview.passRate"
+              :precision="1"
+              suffix="%"
+              :value-style="{ color: report.baselineOverview.passRate >= 80 ? '#00B42A' : report.baselineOverview.passRate >= 60 ? '#FF7D00' : '#F53F3F' }"
+            />
+          </a-card>
+        </a-col>
+        <a-col :xs="12" :sm="8" :md="8" :lg="4">
+          <a-card :bordered="false" class="stat-card">
+            <a-statistic
+              title="活跃告警"
+              :value="report.baselineAlerts.active"
+              :value-style="{ color: report.baselineAlerts.active > 0 ? '#F53F3F' : '#00B42A' }"
+            />
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <!-- 基线图表：不合规严重级别 + 不合规分类 -->
       <a-row :gutter="[16, 16]" class="charts-row">
         <a-col :xs="24" :md="12">
-          <a-card title="严重级别分布" :bordered="false" class="chart-card">
+          <a-card title="不合规项严重级别分布" :bordered="false" class="chart-card">
+            <v-chart
+              v-if="hasBaselineSeverityData"
+              :option="baselineSeverityChartOption"
+              style="height: 320px"
+              autoresize
+            />
+            <a-empty v-else description="暂无数据" style="height: 320px; display: flex; align-items: center; justify-content: center;" />
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :md="12">
+          <a-card title="不合规项分类分布" :bordered="false" class="chart-card">
+            <v-chart
+              v-if="hasBaselineCategoryData"
+              :option="baselineCategoryChartOption"
+              style="height: 320px"
+              autoresize
+            />
+            <a-empty v-else description="暂无数据" style="height: 320px; display: flex; align-items: center; justify-content: center;" />
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <!-- 运行时告警图表 -->
+      <a-row :gutter="[16, 16]" class="charts-row" v-if="hasSeverityData || hasAlarmTypeData">
+        <a-col :xs="24" :md="12">
+          <a-card title="运行时告警严重级别" :bordered="false" class="chart-card">
             <v-chart
               v-if="hasSeverityData"
               :option="severityChartOption"
@@ -64,7 +141,7 @@
           </a-card>
         </a-col>
         <a-col :xs="24" :md="12">
-          <a-card title="告警类型分布" :bordered="false" class="chart-card">
+          <a-card title="运行时告警类型" :bordered="false" class="chart-card">
             <v-chart
               v-if="hasAlarmTypeData"
               :option="alarmTypeChartOption"
@@ -76,17 +153,15 @@
         </a-col>
       </a-row>
 
-      <!-- 图表行 2：集群分布 -->
-      <a-row :gutter="[16, 16]" class="charts-row">
+      <!-- 集群分布 -->
+      <a-row :gutter="[16, 16]" class="charts-row" v-if="report.clusterDistribution.length > 0">
         <a-col :span="24">
           <a-card title="集群告警分布" :bordered="false" class="chart-card">
             <v-chart
-              v-if="report.clusterDistribution.length > 0"
               :option="clusterChartOption"
               style="height: 320px"
               autoresize
             />
-            <a-empty v-else description="暂无数据" style="height: 320px; display: flex; align-items: center; justify-content: center;" />
           </a-card>
         </a-col>
       </a-row>
@@ -159,6 +234,19 @@ const report = ref<KubeReport>({
   clusterDistribution: [],
   topNamespaces: [],
   topTargets: [],
+  baselineOverview: {
+    totalChecks: 0,
+    passed: 0,
+    failed: 0,
+    passRate: 0,
+  },
+  baselineAlerts: {
+    active: 0,
+    resolved: 0,
+    ignored: 0,
+  },
+  baselineBySeverity: {},
+  baselineByCategory: {},
 })
 
 const alarmTypeTextMap: Record<string, string> = {
@@ -203,6 +291,51 @@ const hasSeverityData = computed(() =>
 const hasAlarmTypeData = computed(() =>
   Object.values(report.value.alarmTypeDistribution).some(v => v > 0)
 )
+
+const categoryLabelMap: Record<string, string> = {
+  'RBAC': 'RBAC', 'Pod Security': 'Pod 安全', 'Network': '网络', 'Secrets & Config': '密钥配置',
+  'Workload': '工作负载', 'Node': '节点', 'Cluster Config': '集群配置', 'Supply Chain': '供应链', 'Runtime': '运行时',
+}
+
+const hasBaselineSeverityData = computed(() =>
+  Object.values(report.value.baselineBySeverity).some(v => v > 0)
+)
+const hasBaselineCategoryData = computed(() =>
+  Object.values(report.value.baselineByCategory).some(v => v > 0)
+)
+
+const baselineSeverityChartOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+  legend: { orient: 'vertical', left: 'left' },
+  series: [
+    {
+      name: '严重级别',
+      type: 'pie',
+      radius: ['40%', '70%'],
+      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+      data: (['critical', 'high', 'medium', 'low'] as const)
+        .map(sev => ({
+          value: report.value.baselineBySeverity[sev] || 0,
+          name: severityLabelMap[sev],
+          itemStyle: { color: severityColors[sev] },
+        }))
+        .filter(item => item.value > 0),
+    },
+  ],
+}))
+
+const baselineCategoryChartOption = computed<EChartsOption>(() => {
+  const entries = Object.entries(report.value.baselineByCategory).filter(([, v]) => v > 0)
+  const labels = entries.map(([k]) => categoryLabelMap[k] || k)
+  const values = entries.map(([, v]) => v)
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'category', data: labels, axisLabel: { rotate: 30, interval: 0 } },
+    yAxis: { type: 'value' },
+    series: [{ name: '不合规数', type: 'bar', data: values, itemStyle: { color: '#F53F3F' } }],
+  }
+})
 
 const severityChartOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
