@@ -611,6 +611,64 @@ export interface RuntimeExecutiveReport {
   }
 }
 
+// 漏洞修复 Executive 报告
+export interface RemediationExecutiveReport {
+  meta: {
+    reportId: string
+    reportTitle: string
+    generatedAt: string
+    companyName: string
+    reportPeriod: string
+    checkTarget: string
+  }
+  summary: {
+    overallConclusion: string
+    remediationOverview: string
+    hasFailedTasks: boolean
+    hasUnpatchedVulns: boolean
+    remediationRate: number
+  }
+  statistics: {
+    totalTasks: number
+    successTasks: number
+    failedTasks: number
+    pendingTasks: number
+    cancelledTasks: number
+    successRate: number
+    totalVulns: number
+    patchedVulns: number
+    unpatchedVulns: number
+    remediationRate: number
+    mttrHours: number
+    bySeverity: Array<{ severity: string; total: number; fixed: number; rate: number }>
+    byComponent: Array<{ component: string; total: number; fixed: number }>
+  }
+  taskDetails: Array<{
+    id: number
+    cveId: string
+    hostname: string
+    ip: string
+    component: string
+    command: string
+    status: string
+    startedAt?: string
+    finishedAt?: string
+  }>
+  hostDetails: Array<{
+    hostId: string
+    hostname: string
+    ip: string
+    total: number
+    success: number
+    failed: number
+  }>
+  recommendation: {
+    overallAssessment: string
+    actionSuggestions: string[]
+    disclaimer: string
+  }
+}
+
 // 已保存的报告记录
 export interface GeneratedReportItem {
   id: number
@@ -722,6 +780,10 @@ export const reportsApi = {
 
   getRuntimeExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<RuntimeExecutiveReport> => {
     return apiClient.get('/reports/runtime/executive', { params })
+  },
+
+  getRemediationExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<RemediationExecutiveReport> => {
+    return apiClient.get('/reports/remediation/executive', { params })
   },
 
   // 已保存的报告

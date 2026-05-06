@@ -51,6 +51,8 @@ export const menuConfig: MenuItem[] = [
       { key: 'alerts', title: '告警列表', route: '/alerts' },
       { key: 'whitelist', title: '白名单', route: '/whitelist' },
       { key: 'vuln-list', title: '漏洞列表', route: '/vuln-list' },
+      { key: 'vuln-remediation', title: '修复报告', route: '/vuln-remediation' },
+      { key: 'remediation-tasks', title: '修复任务', route: '/vuln-remediation/tasks' },
       { key: 'policies', title: '基线检查', route: '/policies' },
     ],
   },

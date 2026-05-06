@@ -102,7 +102,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 // StartBackgroundServices 启动后台服务（任务调度器和状态更新器）
 func (s *AgentCenterServices) StartBackgroundServices() {
 	// 启动任务调度器（定期分发待执行任务）
-	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.Logger)
+	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.DB, s.Logger)
 
 }
 

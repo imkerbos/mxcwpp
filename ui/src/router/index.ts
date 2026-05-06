@@ -195,6 +195,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/VulnList/index.vue'),
         meta: { title: '漏洞列表' },
       },
+      {
+        path: 'vuln-remediation',
+        name: 'VulnRemediation',
+        component: () => import('@/views/VulnRemediation/index.vue'),
+        meta: { title: '修复报告' },
+      },
+      {
+        path: 'vuln-remediation/tasks',
+        name: 'RemediationTasks',
+        component: () => import('@/views/VulnRemediation/Tasks.vue'),
+        meta: { title: '修复任务' },
+      },
       // 病毒查杀
       {
         path: 'virus/scan',

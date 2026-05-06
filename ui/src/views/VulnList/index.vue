@@ -120,6 +120,14 @@
           </div>
         </div>
 
+        <div v-if="selectedRowKeys.length > 0" class="batch-action-bar">
+          <span>已选择 {{ selectedRowKeys.length }} 项</span>
+          <a-button type="primary" size="small" :loading="batchLoading" @click="handleBatchRemediate">
+            批量创建修复任务
+          </a-button>
+          <a-button size="small" @click="selectedRowKeys = []">取消选择</a-button>
+        </div>
+
         <a-table
           :columns="columns"
           :data-source="vulns"
@@ -127,6 +135,7 @@
           :pagination="pagination"
           size="middle"
           row-key="id"
+          :row-selection="{ selectedRowKeys, onChange: onSelectChange, getCheckboxProps: (record: Vulnerability) => ({ disabled: record.status !== 'unpatched' }) }"
           @change="handleTableChange"
         >
           <template #bodyCell="{ column, record }">
@@ -171,6 +180,14 @@
                   v-if="record.status === 'unpatched'"
                   type="link"
                   size="small"
+                  @click="handleShowAdvice(record)"
+                >
+                  修复
+                </a-button>
+                <a-button
+                  v-if="record.status === 'unpatched'"
+                  type="link"
+                  size="small"
                   @click="handleIgnore(record)"
                 >
                   忽略
@@ -189,60 +206,121 @@
       placement="right"
     >
       <template v-if="detailRecord">
-        <a-descriptions :column="1" bordered size="small">
-          <a-descriptions-item label="漏洞编号">
-            <template v-if="detailRecord.cveId?.startsWith('CVE-')">
-              <a :href="`https://nvd.nist.gov/vuln/detail/${detailRecord.cveId}`" target="_blank" rel="noopener">{{ detailRecord.cveId }}</a>
-            </template>
-            <template v-else>
-              {{ detailRecord.cveId }}
-              <a-tag color="orange" :bordered="false" style="margin-left: 4px">Advisory</a-tag>
-            </template>
-          </a-descriptions-item>
-          <a-descriptions-item v-if="detailRecord.osvId" label="OSV ID">
-            <a :href="`https://osv.dev/vulnerability/${detailRecord.osvId}`" target="_blank" rel="noopener">{{ detailRecord.osvId }}</a>
-          </a-descriptions-item>
-          <a-descriptions-item label="CVSS 评分">{{ detailRecord.cvssScore }}</a-descriptions-item>
-          <a-descriptions-item label="严重级别">
-            <a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false">
-              {{ severityTextMap[detailRecord.severity] }}
-            </a-tag>
-          </a-descriptions-item>
-          <a-descriptions-item label="影响组件">
-            <a-tag color="blue">{{ detailRecord.component || '-' }}</a-tag>
-          </a-descriptions-item>
-          <a-descriptions-item label="当前版本">{{ detailRecord.currentVersion || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="修复版本">{{ detailRecord.fixedVersion || '暂无' }}</a-descriptions-item>
-          <a-descriptions-item label="状态">
-            <a-tag :color="statusColor(detailRecord.status)" :bordered="false">
-              {{ statusTextMap[detailRecord.status] || detailRecord.status }}
-            </a-tag>
-          </a-descriptions-item>
-          <a-descriptions-item label="描述">{{ detailRecord.description || '-' }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailRecord.referenceUrl" label="参考链接">
-            <a :href="detailRecord.referenceUrl" target="_blank" rel="noopener">{{ detailRecord.referenceUrl }}</a>
-          </a-descriptions-item>
-        </a-descriptions>
+        <a-tabs v-model:activeKey="detailTab">
+          <a-tab-pane key="info" tab="基本信息">
+            <a-descriptions :column="1" bordered size="small">
+              <a-descriptions-item label="漏洞编号">
+                <template v-if="detailRecord.cveId?.startsWith('CVE-')">
+                  <a :href="`https://nvd.nist.gov/vuln/detail/${detailRecord.cveId}`" target="_blank" rel="noopener">{{ detailRecord.cveId }}</a>
+                </template>
+                <template v-else>
+                  {{ detailRecord.cveId }}
+                  <a-tag color="orange" :bordered="false" style="margin-left: 4px">Advisory</a-tag>
+                </template>
+              </a-descriptions-item>
+              <a-descriptions-item v-if="detailRecord.osvId" label="OSV ID">
+                <a :href="`https://osv.dev/vulnerability/${detailRecord.osvId}`" target="_blank" rel="noopener">{{ detailRecord.osvId }}</a>
+              </a-descriptions-item>
+              <a-descriptions-item label="CVSS 评分">{{ detailRecord.cvssScore }}</a-descriptions-item>
+              <a-descriptions-item label="严重级别">
+                <a-tag :color="severityColorMap[detailRecord.severity]" :bordered="false">
+                  {{ severityTextMap[detailRecord.severity] }}
+                </a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="影响组件">
+                <a-tag color="blue">{{ detailRecord.component || '-' }}</a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="当前版本">{{ detailRecord.currentVersion || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="修复版本">{{ detailRecord.fixedVersion || '暂无' }}</a-descriptions-item>
+              <a-descriptions-item label="状态">
+                <a-tag :color="statusColor(detailRecord.status)" :bordered="false">
+                  {{ statusTextMap[detailRecord.status] || detailRecord.status }}
+                </a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="描述">{{ detailRecord.description || '-' }}</a-descriptions-item>
+              <a-descriptions-item v-if="detailRecord.referenceUrl" label="参考链接">
+                <a :href="detailRecord.referenceUrl" target="_blank" rel="noopener">{{ detailRecord.referenceUrl }}</a>
+              </a-descriptions-item>
+            </a-descriptions>
 
-        <a-divider>受影响主机</a-divider>
-        <a-table
-          :columns="hostColumns"
-          :data-source="detailRecord.hosts ?? []"
-          :pagination="false"
-          size="small"
-          row-key="id"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'host'">
-              <RouterLink :to="`/hosts/${record.hostId}?tab=vulnerabilities`">{{ record.hostname || record.hostId }}</RouterLink>
-            </template>
-            <template v-else-if="column.key === 'status'">
-              <a-tag :color="statusColor(record.status)" :bordered="false">
-                {{ statusTextMap[record.status] || record.status }}
-              </a-tag>
-            </template>
-          </template>
-        </a-table>
+            <a-divider>受影响主机</a-divider>
+            <a-table
+              :columns="hostColumns"
+              :data-source="detailRecord.hosts ?? []"
+              :pagination="false"
+              size="small"
+              row-key="id"
+            >
+              <template #bodyCell="{ column, record: hostRecord }">
+                <template v-if="column.key === 'host'">
+                  <RouterLink :to="`/hosts/${hostRecord.hostId}?tab=vulnerabilities`">{{ hostRecord.hostname || hostRecord.hostId }}</RouterLink>
+                </template>
+                <template v-else-if="column.key === 'status'">
+                  <a-tag :color="statusColor(hostRecord.status)" :bordered="false">
+                    {{ statusTextMap[hostRecord.status] || hostRecord.status }}
+                  </a-tag>
+                </template>
+              </template>
+            </a-table>
+          </a-tab-pane>
+
+          <a-tab-pane key="advice" tab="修复建议">
+            <a-spin :spinning="adviceLoading">
+              <template v-if="adviceData">
+                <a-alert
+                  v-if="!adviceData.fixedVersion"
+                  type="warning"
+                  show-icon
+                  message="暂无官方修复版本"
+                  description="建议关注供应商安全公告，或通过网络层限制访问以降低风险。"
+                  style="margin-bottom: 16px"
+                />
+
+                <div v-if="adviceData.commands.length > 0" class="advice-section">
+                  <h4>升级命令</h4>
+                  <div v-for="(cmd, idx) in adviceData.commands" :key="idx" class="advice-command">
+                    <div class="advice-command-header">
+                      <a-tag color="blue" :bordered="false">{{ cmd.packageType.toUpperCase() }}</a-tag>
+                      <span class="advice-command-desc">{{ cmd.description }}</span>
+                    </div>
+                    <div class="advice-command-code">
+                      <code>{{ cmd.command }}</code>
+                      <a-button type="link" size="small" @click="copyCommand(cmd.command)">复制</a-button>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="adviceData.references.length > 0" class="advice-section">
+                  <h4>参考链接</h4>
+                  <ul>
+                    <li v-for="(ref, idx) in adviceData.references" :key="idx">
+                      <a :href="ref" target="_blank" rel="noopener">{{ ref }}</a>
+                    </li>
+                  </ul>
+                </div>
+
+                <div v-if="adviceData.workaround" class="advice-section">
+                  <h4>临时缓解措施</h4>
+                  <a-alert type="info" :message="adviceData.workaround" show-icon />
+                </div>
+
+                <a-divider />
+                <a-space v-if="detailRecord.status === 'unpatched'">
+                  <a-button
+                    type="primary"
+                    :loading="createTaskLoading"
+                    @click="handleCreateTask"
+                  >
+                    创建修复任务（全部主机）
+                  </a-button>
+                  <a-button @click="handlePatch(detailRecord)">
+                    标记为已修复
+                  </a-button>
+                </a-space>
+              </template>
+            </a-spin>
+          </a-tab-pane>
+        </a-tabs>
       </template>
     </a-drawer>
 
@@ -285,6 +363,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { vulnerabilitiesApi } from '@/api/vulnerabilities'
+import type { RemediationAdvice } from '@/api/vulnerabilities'
+import { remediationTasksApi } from '@/api/remediation-tasks'
 import type { SecurityDBSyncRecord } from '@/api/antivirus'
 import type { Vulnerability, VulnerabilityStats } from '@/api/types'
 import { formatDateTime } from '@/utils/date'
@@ -303,6 +383,12 @@ const vulns = ref<Vulnerability[]>([])
 const stats = ref<VulnerabilityStats>({ total: 0, critical: 0, high: 0, affectedHosts: 0 })
 const showDetail = ref(false)
 const detailRecord = ref<Vulnerability>()
+const detailTab = ref('info')
+const adviceLoading = ref(false)
+const adviceData = ref<RemediationAdvice | null>(null)
+const selectedRowKeys = ref<number[]>([])
+const batchLoading = ref(false)
+const createTaskLoading = ref(false)
 
 const pagination = ref({
   current: 1,
@@ -491,7 +577,44 @@ const handleTableChange = (pag: any) => {
 
 const handleDetail = (record: Vulnerability) => {
   detailRecord.value = record
+  detailTab.value = 'info'
+  adviceData.value = null
   showDetail.value = true
+}
+
+const handleShowAdvice = async (record: Vulnerability) => {
+  detailRecord.value = record
+  detailTab.value = 'advice'
+  showDetail.value = true
+  await loadAdvice(record.id)
+}
+
+const loadAdvice = async (vulnId: number) => {
+  adviceLoading.value = true
+  try {
+    adviceData.value = await vulnerabilitiesApi.getAdvice(vulnId)
+  } catch {
+    message.error('获取修复建议失败')
+    adviceData.value = null
+  } finally {
+    adviceLoading.value = false
+  }
+}
+
+const handlePatch = async (record: Vulnerability) => {
+  try {
+    await vulnerabilitiesApi.patch(record.id)
+    message.success('已标记为修复')
+    showDetail.value = false
+    loadVulns()
+  } catch {
+    message.error('操作失败')
+  }
+}
+
+const copyCommand = (cmd: string) => {
+  navigator.clipboard.writeText(cmd)
+  message.success('已复制到剪贴板')
 }
 
 const handleIgnore = async (record: Vulnerability) => {
@@ -502,6 +625,46 @@ const handleIgnore = async (record: Vulnerability) => {
   } catch {
     message.error('操作失败')
   }
+}
+
+const handleBatchRemediate = async () => {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要修复的漏洞')
+    return
+  }
+  batchLoading.value = true
+  try {
+    const res = await remediationTasksApi.batchCreate(selectedRowKeys.value)
+    message.success(`已创建 ${res.created} 个修复任务，请前往修复任务页面确认执行`)
+    selectedRowKeys.value = []
+  } catch {
+    message.error('批量创建修复任务失败')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
+const handleCreateTask = async () => {
+  if (!detailRecord.value) return
+  const hosts = detailRecord.value.hosts?.filter(h => h.status === 'unpatched') ?? []
+  if (hosts.length === 0) {
+    message.warning('该漏洞无未修复的主机')
+    return
+  }
+  createTaskLoading.value = true
+  try {
+    const hostIds = hosts.map(h => h.hostId)
+    const res = await remediationTasksApi.create(detailRecord.value.id, hostIds)
+    message.success(`已为 ${res.created} 台主机创建修复任务，请前往修复任务页面确认执行`)
+  } catch {
+    message.error('创建修复任务失败')
+  } finally {
+    createTaskLoading.value = false
+  }
+}
+
+const onSelectChange = (keys: number[]) => {
+  selectedRowKeys.value = keys
 }
 
 const handleSync = async () => {
@@ -600,6 +763,12 @@ watch(
   }
 )
 
+watch(detailTab, (tab) => {
+  if (tab === 'advice' && detailRecord.value && !adviceData.value) {
+    loadAdvice(detailRecord.value.id)
+  }
+})
+
 onMounted(() => {
   syncFiltersFromRoute()
   loadVulns()
@@ -673,6 +842,18 @@ onMounted(() => {
   font-weight: 600;
 }
 
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: #E8F3FF;
+  border: 1px solid #BEDAFF;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
 .scan-status-bar {
   display: flex;
   align-items: center;
@@ -713,6 +894,51 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.advice-section {
+  margin-bottom: 20px;
+}
+
+.advice-section h4 {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #1D2129;
+}
+
+.advice-command {
+  margin-bottom: 12px;
+  border: 1px solid #E5E8EF;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.advice-command-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.advice-command-desc {
+  font-size: 13px;
+  color: #4E5969;
+}
+
+.advice-command-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #F7F8FA;
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+
+.advice-command-code code {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  color: #1D2129;
+  word-break: break-all;
 }
 
 @media (max-width: 960px) {

@@ -15,10 +15,11 @@ const (
 	ReportTypeVulnerability ReportType = "vulnerability"
 	ReportTypeKube          ReportType = "kube"
 	ReportTypeRuntime       ReportType = "runtime"
+	ReportTypeRemediation   ReportType = "remediation"
 )
 
 // ReportJSON 用于存储报告数据的 JSON 类型
-type ReportJSON map[string]interface{}
+type ReportJSON map[string]any
 
 // Value 实现 driver.Valuer 接口
 func (r ReportJSON) Value() (driver.Value, error) {
@@ -33,7 +34,7 @@ func (r ReportJSON) Value() (driver.Value, error) {
 }
 
 // Scan 实现 sql.Scanner 接口
-func (r *ReportJSON) Scan(value interface{}) error {
+func (r *ReportJSON) Scan(value any) error {
 	if value == nil {
 		*r = nil
 		return nil

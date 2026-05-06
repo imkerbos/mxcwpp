@@ -16,6 +16,7 @@
       <a-tab-pane key="baseline" tab="基线检查" />
       <a-tab-pane key="antivirus" tab="病毒查杀" />
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
+      <a-tab-pane key="remediation" tab="漏洞修复" />
       <a-tab-pane key="kube" tab="容器安全" />
       <a-tab-pane key="runtime" tab="运行时检测" />
     </a-tabs>
@@ -472,6 +473,7 @@
     <!-- 其他 Tab -->
     <AntivirusTaskReport v-if="activeTab === 'antivirus'" />
     <VulnTaskReport v-if="activeTab === 'vulnerability'" />
+    <RemediationTaskReport v-if="activeTab === 'remediation'" />
     <KubeTaskReport v-if="activeTab === 'kube'" />
     <RuntimeTaskReport v-if="activeTab === 'runtime'" />
   </div>
@@ -502,6 +504,7 @@ import { policiesApi } from '@/api/policies'
 import html2pdf from 'html2pdf.js'
 import AntivirusTaskReport from './task-reports/AntivirusTaskReport.vue'
 import VulnTaskReport from './task-reports/VulnTaskReport.vue'
+import RemediationTaskReport from './task-reports/RemediationTaskReport.vue'
 import KubeTaskReport from './task-reports/KubeTaskReport.vue'
 import RuntimeTaskReport from './task-reports/RuntimeTaskReport.vue'
 

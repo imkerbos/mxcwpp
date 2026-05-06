@@ -202,5 +202,6 @@ var (
 		&GeneratedReport{},
 		&MigrationJob{},
 		&ComponentPushHost{},
+		&RemediationTask{},
 	}
 )

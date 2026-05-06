@@ -3967,3 +3967,229 @@ func (h *ReportsHandler) DeleteGeneratedReport(c *gin.Context) {
 
 	Success(c, nil)
 }
+
+// GetRemediationExecutiveReport 获取漏洞修复 Executive 报告（可导出 PDF）
+// GET /api/v1/reports/remediation/executive
+func (h *ReportsHandler) GetRemediationExecutiveReport(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+
+	companyName := h.getCompanyName()
+	reportID := fmt.Sprintf("REM-%s-%08x", time.Now().Format("20060102"), time.Now().UnixNano()&0xFFFFFFFF)
+	periodStr := fmt.Sprintf("%s 至 %s", startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
+
+	// 1. 修复任务统计
+	var totalTasks, successTasks, failedTasks, pendingTasks, cancelledTasks int64
+	taskQuery := h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ?", startTime, endTime)
+	taskQuery.Count(&totalTasks)
+	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "success").Count(&successTasks)
+	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "failed").Count(&failedTasks)
+	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND (status = ? OR status = ? OR status = ?)", startTime, endTime, "pending", "confirmed", "running").Count(&pendingTasks)
+	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "cancelled").Count(&cancelledTasks)
+
+	// 2. 漏洞修复情况
+	var totalVulns, patchedVulns, unpatchedVulns int64
+	h.db.Model(&model.Vulnerability{}).Where("discovered_at <= ?", endTime).Count(&totalVulns)
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND patched_at >= ? AND patched_at <= ?", "patched", startTime, endTime).Count(&patchedVulns)
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND discovered_at <= ?", "unpatched", endTime).Count(&unpatchedVulns)
+
+	remediationRate := 0.0
+	if totalVulns > 0 {
+		remediationRate = float64(patchedVulns) / float64(totalVulns) * 100
+	}
+
+	// 3. MTTR（平均修复时间）
+	var mttrHours float64
+	h.db.Model(&model.RemediationTask{}).
+		Select("AVG(TIMESTAMPDIFF(HOUR, created_at, finished_at))").
+		Where("status = ? AND created_at >= ? AND created_at <= ?", "success", startTime, endTime).
+		Scan(&mttrHours)
+
+	// 4. 按严重级别统计修复情况
+	type severityFixRow struct {
+		Severity string
+		Total    int64
+		Fixed    int64
+	}
+	var severityRows []severityFixRow
+	h.db.Raw(`
+		SELECT severity,
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'patched' THEN 1 ELSE 0 END) as fixed
+		FROM vulnerabilities
+		WHERE discovered_at <= ?
+		GROUP BY severity
+	`, endTime).Scan(&severityRows)
+
+	bySeverity := make([]gin.H, 0, len(severityRows))
+	for _, r := range severityRows {
+		rate := 0.0
+		if r.Total > 0 {
+			rate = float64(r.Fixed) / float64(r.Total) * 100
+		}
+		bySeverity = append(bySeverity, gin.H{
+			"severity": r.Severity, "total": r.Total, "fixed": r.Fixed, "rate": rate,
+		})
+	}
+
+	// 5. 按组件统计修复情况
+	type componentFixRow struct {
+		Component string
+		Total     int64
+		Fixed     int64
+	}
+	var componentRows []componentFixRow
+	h.db.Raw(`
+		SELECT component,
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'patched' THEN 1 ELSE 0 END) as fixed
+		FROM vulnerabilities
+		WHERE discovered_at <= ? AND component <> ''
+		GROUP BY component
+		ORDER BY total DESC
+		LIMIT 10
+	`, endTime).Scan(&componentRows)
+
+	byComponent := make([]gin.H, 0, len(componentRows))
+	for _, r := range componentRows {
+		byComponent = append(byComponent, gin.H{
+			"component": r.Component, "total": r.Total, "fixed": r.Fixed,
+		})
+	}
+
+	// 6. 修复任务明细（最近的成功/失败任务）
+	var tasks []model.RemediationTask
+	h.db.Where("created_at >= ? AND created_at <= ? AND status IN ?", startTime, endTime, []string{"success", "failed"}).
+		Order("finished_at DESC").
+		Limit(50).
+		Find(&tasks)
+
+	taskDetails := make([]gin.H, 0, len(tasks))
+	for _, t := range tasks {
+		detail := gin.H{
+			"id":        t.ID,
+			"cveId":     t.CveID,
+			"hostname":  t.Hostname,
+			"ip":        t.IP,
+			"component": t.Component,
+			"command":   t.Command,
+			"status":    t.Status,
+		}
+		if t.FinishedAt != nil {
+			detail["finishedAt"] = t.FinishedAt.String()
+		}
+		if t.StartedAt != nil {
+			detail["startedAt"] = t.StartedAt.String()
+		}
+		taskDetails = append(taskDetails, detail)
+	}
+
+	// 7. 主机修复情况
+	type hostFixRow struct {
+		HostID   string
+		Hostname string
+		IP       string
+		Total    int64
+		Success  int64
+		Failed   int64
+	}
+	var hostRows []hostFixRow
+	h.db.Raw(`
+		SELECT host_id, hostname, ip,
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+		FROM remediation_tasks
+		WHERE created_at >= ? AND created_at <= ?
+		GROUP BY host_id, hostname, ip
+		ORDER BY total DESC
+		LIMIT 20
+	`, startTime, endTime).Scan(&hostRows)
+
+	hostDetails := make([]gin.H, 0, len(hostRows))
+	for _, row := range hostRows {
+		hostDetails = append(hostDetails, gin.H{
+			"hostId": row.HostID, "hostname": row.Hostname, "ip": row.IP,
+			"total": row.Total, "success": row.Success, "failed": row.Failed,
+		})
+	}
+
+	// 8. 结论与建议
+	successRate := 0.0
+	if totalTasks > 0 {
+		successRate = float64(successTasks) / float64(totalTasks) * 100
+	}
+
+	var overallConclusion, remediationOverview string
+	if totalTasks == 0 {
+		overallConclusion = "报告周期内无修复活动"
+		remediationOverview = "未执行任何修复任务。"
+	} else if successRate >= 90 {
+		overallConclusion = "修复执行效果良好"
+		remediationOverview = fmt.Sprintf("共执行 %d 个修复任务，成功率 %.1f%%，修复 %d 个漏洞。", totalTasks, successRate, patchedVulns)
+	} else if successRate >= 60 {
+		overallConclusion = "修复执行效果一般"
+		remediationOverview = fmt.Sprintf("共执行 %d 个修复任务，成功率 %.1f%%，%d 个任务失败需排查。", totalTasks, successRate, failedTasks)
+	} else {
+		overallConclusion = "修复执行效果较差"
+		remediationOverview = fmt.Sprintf("共执行 %d 个修复任务，成功率仅 %.1f%%，需重点排查失败原因。", totalTasks, successRate)
+	}
+
+	actionSuggestions := make([]string, 0)
+	if failedTasks > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("排查 %d 个失败任务的执行日志，确认失败原因", failedTasks))
+	}
+	if unpatchedVulns > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("仍有 %d 个漏洞未修复，建议制定修复计划", unpatchedVulns))
+	}
+	if pendingTasks > 0 {
+		actionSuggestions = append(actionSuggestions, fmt.Sprintf("%d 个任务待确认或执行中，跟进处理进度", pendingTasks))
+	}
+	actionSuggestions = append(actionSuggestions, "建议建立定期修复验证机制，确保修复有效性")
+
+	reportData := gin.H{
+		"meta": gin.H{
+			"reportId":     reportID,
+			"reportTitle":  "漏洞修复专项报告",
+			"generatedAt":  time.Now().Format("2006-01-02 15:04:05"),
+			"companyName":  companyName,
+			"reportPeriod": periodStr,
+			"checkTarget":  fmt.Sprintf("%d 台服务器", len(hostRows)),
+		},
+		"summary": gin.H{
+			"overallConclusion":   overallConclusion,
+			"remediationOverview": remediationOverview,
+			"hasFailedTasks":      failedTasks > 0,
+			"hasUnpatchedVulns":   unpatchedVulns > 0,
+			"remediationRate":     remediationRate,
+		},
+		"statistics": gin.H{
+			"totalTasks":      totalTasks,
+			"successTasks":    successTasks,
+			"failedTasks":     failedTasks,
+			"pendingTasks":    pendingTasks,
+			"cancelledTasks":  cancelledTasks,
+			"successRate":     successRate,
+			"totalVulns":      totalVulns,
+			"patchedVulns":    patchedVulns,
+			"unpatchedVulns":  unpatchedVulns,
+			"remediationRate": remediationRate,
+			"mttrHours":       mttrHours,
+			"bySeverity":      bySeverity,
+			"byComponent":     byComponent,
+		},
+		"taskDetails": taskDetails,
+		"hostDetails": hostDetails,
+		"recommendation": gin.H{
+			"overallAssessment": fmt.Sprintf("报告周期内共执行 %d 个修复任务，成功 %d 个，失败 %d 个。漏洞修复率 %.1f%%。%s",
+				totalTasks, successTasks, failedTasks, remediationRate, remediationOverview),
+			"actionSuggestions": actionSuggestions,
+			"disclaimer":        "本报告基于平台执行的修复任务数据生成。部分手动修复可能未通过平台记录，实际修复情况可能优于报告数据。",
+		},
+	}
+
+	h.saveGeneratedReport(model.ReportTypeRemediation, "漏洞修复专项报告", reportID, periodStr, reportData)
+	Success(c, reportData)
+}

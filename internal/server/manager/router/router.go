@@ -320,6 +320,7 @@ func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	// Executive 报告（可导出 PDF）
 	router.GET("/reports/antivirus/:task_id/executive", handler.GetAntivirusExecutiveReport)
 	router.GET("/reports/vulnerability/executive", handler.GetVulnerabilityExecutiveReport)
+	router.GET("/reports/remediation/executive", handler.GetRemediationExecutiveReport)
 	router.GET("/reports/kube/executive", handler.GetKubeExecutiveReport)
 	router.GET("/reports/runtime/executive", handler.GetRuntimeExecutiveReport)
 	// 已保存的报告
@@ -615,6 +616,27 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/vulnerabilities/scan", handler.TriggerScan)
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
+
+	// 漏洞修复相关
+	remHandler := api.NewRemediationHandler(db, logger)
+	router.GET("/vulnerabilities/:id/advice", remHandler.GetAdvice)
+	router.POST("/vulnerabilities/:id/patch", remHandler.PatchVulnerability)
+	router.POST("/vulnerabilities/:id/verify", remHandler.VerifyRemediation)
+	router.GET("/vulnerabilities/stats/remediation", remHandler.GetRemediationStats)
+	router.GET("/vulnerabilities/stats/trend", remHandler.GetRemediationTrend)
+
+	// 修复任务管理
+	taskHandler := api.NewRemediationTasksHandler(db, logger)
+	router.POST("/remediation-tasks", taskHandler.CreateTask)
+	router.GET("/remediation-tasks", taskHandler.ListTasks)
+	router.GET("/remediation-tasks/stats", taskHandler.GetTaskStats)
+	router.GET("/remediation-tasks/:id", taskHandler.GetTask)
+	router.POST("/remediation-tasks/:id/confirm", taskHandler.ConfirmTask)
+	router.POST("/remediation-tasks/:id/cancel", taskHandler.CancelTask)
+	router.POST("/remediation-tasks/:id/retry", taskHandler.RetryTask)
+	router.POST("/remediation-tasks/:id/verify", remHandler.VerifyTask)
+	router.POST("/remediation-tasks/batch", taskHandler.BatchCreate)
+	router.POST("/remediation-tasks/batch-confirm", taskHandler.BatchConfirm)
 }
 
 // setupAlertContextAPI 设置告警溯源 API 路由

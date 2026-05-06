@@ -873,6 +873,9 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 	case 7004: // Scanner 隔离/删除结果
 		return s.handleQuarantineResult(ctx, record, conn)
 
+	case 9001: // 漏洞修复任务结果
+		return s.handleRemediationResult(ctx, record, conn)
+
 	default:
 		s.logger.Debug("未知数据类型",
 			zap.String("agent_id", conn.AgentID),
@@ -2812,6 +2815,22 @@ func (s *Service) handleQuarantineResult(ctx context.Context, record *grpcProto.
 		return s.db.Create(file).Error
 	}
 	return nil
+}
+
+// handleRemediationResult 处理漏洞修复任务结果（DataType 9001）
+func (s *Service) handleRemediationResult(_ context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析修复结果失败: %w", err)
+	}
+
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	executor := biz.NewRemediationExecutor(s.db, s.logger)
+	return executor.HandleResult(conn.AgentID, fields)
 }
 
 // getAgentRuntimeType 获取 Agent 的运行时类型
