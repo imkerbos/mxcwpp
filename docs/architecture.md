@@ -1,193 +1,233 @@
-# 系统架构
+# 架构设计
 
-## 1. 概述
+## 概述
 
-矩阵云安全平台当前采用 **Agent + Plugin + Manager/AgentCenter/Consumer** 的 V2 架构。相比 V1 的单体式直写数据库模式，V2 将控制面拆分为接入层、管理层、消息层、消费层和分层存储，目标是让控制面具备多实例、高吞吐和更清晰的职责边界。
+MxSec Platform 采用 **Agent + Plugin + Manager / AgentCenter / Consumer** 分层架构。控制面无状态，支持多实例水平扩展；数据面通过 Kafka 异步解耦，按存储特征分层写入 MySQL（业务主数据）和 ClickHouse（时序与事件归档）。
 
-当前实际能力边界：
-
-- 应用层已支持 `Manager / AgentCenter / Consumer` 多实例部署
-- Agent 侧已支持 Manager 服务发现和多 AC 接入
-- Kafka / Consumer / ClickHouse 异步链路已纳入当前项目主架构
-- 默认部署下存储层仍以单节点为主，MySQL / Redis / ClickHouse 的主从与容灾需在生产环境单独加固
-
-**技术栈**: Go 1.21+ (Gin/gRPC/Gorm/Zap), Vue 3 + TS, Protobuf, Kafka, Redis, MySQL, ClickHouse, Prometheus
-
-## 2. 总体拓扑
+## 系统拓扑
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                               控制面                                     │
-│                                                                          │
-│  浏览器 ── HTTPS ──► Nginx ──► Manager × N                               │
-│                                  │                                       │
-│                                  ├─ MySQL / Redis / ClickHouse           │
-│                                  ├─ Prometheus 查询                      │
-│                                  └─ AC 服务发现 / 任务路由               │
-│                                                                          │
-│  Agent ── gRPC(mTLS) ──► AgentCenter × N ──► Kafka ──► Consumer × N      │
-│                          │                        │                       │
-│                          ├─ HTTP 管理接口         ├─ MySQL               │
-│                          ├─ 连接池 / 命令下发     ├─ ClickHouse          │
-│                          └─ Kafka 失败降级队列    └─ Redis(agent:ac)     │
-└──────────────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                              端点层                                      │
-│                                                                          │
-│  mxsec-agent + plugins                                                   │
-│  ├─ baseline   基线检查 / 修复                                            │
-│  ├─ collector  资产采集                                                   │
-│  ├─ fim        文件完整性监控                                             │
-│  ├─ scanner    病毒查杀 / 隔离                                            │
-│  └─ sensor     Tetragon eBPF 运行时事件采集                               │
-└──────────────────────────────────────────────────────────────────────────┘
+                         ┌─────────────────────────┐
+                         │      用户 / 浏览器       │
+                         └────────────┬────────────┘
+                                      │ HTTPS
+                                      ▼
+                         ┌─────────────────────────┐
+                         │         Nginx           │
+                         │    反向代理 / 负载均衡    │
+                         └────────────┬────────────┘
+                       /api/*         │         静态资源
+                ┌─────────────────────┘────────────────────┐
+                ▼                                          ▼
+      ┌────────────────────┐                    ┌────────────────────┐
+      │     Manager × N    │                    │      Vue3 SPA      │
+      │ REST API / 调度 /   │                    │    前端控制台       │
+      │ 服务发现 / SD 模块  │                    └────────────────────┘
+      └───────┬─────┬──────┘
+              │     │
+      Prometheus    │ MySQL / Redis / ClickHouse
+              │     │
+              ▼     ▼
+      ┌────────────────────┐                    ┌────────────────────┐
+      │     Prometheus     │                    │   MySQL / Redis /   │
+      │   主机指标数据源    │                    │    ClickHouse      │
+      └─────────▲──────────┘                    └─────────▲──────────┘
+                │ scrape /metrics                          │
+                │                                          │
+      ┌─────────┴──────────┐                               │
+      │   AgentCenter × N  │───── Kafka Produce ──────────▶│
+      │ gRPC 接入 / 转发    │                               │
+      │ Prometheus Exporter │            Kafka ──▶ Consumer × N
+      └─────────┬──────────┘
+                │ gRPC BiDi Stream / mTLS
+                ▼
+      ┌──────────────────────────────────────────────────────┐
+      │               mxsec-agent（每台目标主机）             │
+      │  插件基座 + 生命周期管理 + 服务发现                    │
+      │  baseline / collector / fim / scanner / sensor       │
+      └──────────────────────────────────────────────────────┘
 ```
 
-## 3. 组件职责
-
-### Agent
-
-部署在目标主机上的轻量守护进程，负责：
-
-- 管理插件生命周期
-- 通过 gRPC 双向流与 AgentCenter 通信
-- 使用 mTLS 与控制面建立安全连接
-- 通过服务发现或静态地址列表选择可用 AC
-- 透传插件数据，不承担复杂业务存储逻辑
-
-入口：`cmd/agent/main.go`
-
-### AgentCenter
-
-Agent 接入层，当前定位为 **无状态连接管理 + 数据转发层**。
-
-- 维护 Agent 连接池和在线状态
-- 通过 gRPC 下发命令和插件任务
-- 通过 HTTP 暴露 `/health`、`/conn/stat`、`/conn/list`、`/command`、`/command/batch`
-- 将 Agent 上报数据按 DataType 路由到 Kafka
-- Kafka 不可用时使用内存降级队列暂存
-- 启动后向 Manager 注册，运行中周期性心跳
-
-入口：`cmd/server/agentcenter/main.go`
+## 组件职责
 
 ### Manager
 
-管理面服务，当前定位为 **无状态 API + 调度 + 服务发现**。
+管理面 HTTP API 服务，无状态，前置 Nginx 负载均衡。
 
-- 提供前端 REST API 和 JWT 认证
-- 管理策略、规则、任务、告警、报告、组件、用户等业务对象
-- 内嵌 AC Registry / SD 模块，负责 AC 注册、探测、发现
-- 调用 Redis `agent:ac` 映射对任务做精准路由
-- 查询 MySQL / ClickHouse / Redis / Prometheus 聚合前端所需数据
+- 提供 100+ 个 REST API 端点，JWT 认证
+- 策略、规则、任务、告警、报告、用户等业务 CRUD
+- 内嵌 AC Registry / SD 模块，负责 AgentCenter 注册、主动健康探测、服务发现
+- 任务调度：Redis 分布式锁，5s 调度间隔
+- 查询 MySQL / ClickHouse / Redis / Prometheus 聚合前端数据
+- 任务下发：查 Redis `agent:ac` 映射精准路由到目标 AC
 
 入口：`cmd/server/manager/main.go`
 
+### AgentCenter
+
+Agent 接入层，无状态连接管理 + 数据转发，零数据库依赖。
+
+- 维护 Agent gRPC 双向流连接池（令牌限流，单实例最大 2000 连接）
+- 将 Agent 上报数据按 DataType 路由到 Kafka Topic
+- Kafka 不可用时使用内存降级队列暂存，恢复后自动重放
+- HTTP 管理接口：`/health` `/conn/stat` `/conn/list` `/command` `/command/batch`
+- 启动时向 Manager SD 注册，15s 心跳，优雅注销
+- 主机性能指标通过 `/metrics` 暴露给 Prometheus 抓取
+
+入口：`cmd/server/agentcenter/main.go`
+
 ### Consumer
 
-异步消费服务，负责将 Kafka 数据可靠写入存储。
+Kafka 异步消费服务，负责数据持久化。
 
-- 消费 Kafka 多 Topic 数据
-- 按 DataType 路由到 MySQL / ClickHouse
-- 执行幂等写入
-- 写入失败时投递到 DLQ
-- 在消费心跳时维护 `agent:ac:{agentID}` 映射
+- 订阅 5 个业务 Topic，按 DataType 路由写入 MySQL / ClickHouse
+- 幂等写入：MySQL `ON DUPLICATE KEY UPDATE`，ClickHouse `ReplacingMergeTree`
+- 批量优化：MySQL 500 条/5s，ClickHouse 5000 条/10s
+- 写入失败进 Dead Letter Queue（`*.dlq` Topic）
+- 消费心跳时维护 Redis `agent:ac:{agentID}` 映射，检查 pending 任务触发补发
+- CEL 规则引擎集成：eBPF 事件实时匹配告警规则，触发自动响应
 
 入口：`cmd/server/consumer/main.go`
 
-## 4. 高可用能力
+### Agent
 
-### 已具备的控制面 HA 能力
+部署在目标主机上的轻量守护进程，自身不提供安全能力，所有能力通过插件实现。
 
-- `Manager` 支持多实例，无状态，前置 Nginx 负载均衡
-- `AgentCenter` 支持多实例，向 Manager SD 注册并接受主动健康探测
-- `Consumer` 支持多实例，通过 Kafka Consumer Group 自动分摊分区
-- Agent 支持通过服务发现接口获取健康 AC 列表，并具备静态地址回退
-- 任务调度已使用 Redis 分布式锁避免多副本重复分发
+- 插件生命周期管理（启动、停止、升级、崩溃重启、watchdog 健康检查）
+- gRPC 双向流通信（mTLS），环形缓冲区 2048 条 + 100ms 批量发送 + Snappy 压缩
+- 服务发现：查 Manager SD 接口获取健康 AC 列表，power-of-two-choices 负载均衡
+- 首次接入允许跳过证书校验以获取证书，后续连接切换为正式 mTLS
+- 数据透传，不解析插件内容
 
-### 当前高可用边界
+入口：`cmd/agent/main.go`
 
-- `MySQL` 默认仍为单实例业务主存储
-- `ClickHouse` 默认仍为单实例事件/时序分析存储
-- `Redis` 在项目中承担共享缓存与同步状态，Sentinel/主从切换仍属于后续生产加固项
-- 因此当前更准确的说法是：**控制面高可用已落地，存储层完整容灾需按生产环境独立建设**
+### 插件
 
-## 5. 数据链路
+每个插件是独立子进程，通过 `os.Pipe` + Protobuf 与 Agent 通信。
 
-### 上报链路
+| 插件 | 功能 | 触发方式 |
+|------|------|---------|
+| baseline | 基线检查 + 自动修复（9 种检查器） | 任务下发 / 定时 |
+| collector | 资产采集（11 种采集器） | 定时（1-12h） |
+| fim | 文件完整性监控（仅 VM） | 任务下发 |
+| scanner | 病毒查杀（ClamAV + YARA-X）+ 隔离箱 | 任务下发 / 定时 |
+| sensor | Tetragon/eBPF 运行时事件采集 | 常驻运行 |
 
-```
-Plugin → mxsec-agent → gRPC(mTLS) → AgentCenter
-      → Kafka(topic by DataType)
-      → Consumer
-      → MySQL / ClickHouse / Redis
-```
+## 数据链路
 
-### 下发链路
+### 上报链路（Agent → 存储）
 
 ```
-用户 / API → Manager
-          → 查询 SD + Redis(agent:ac)
-          → 调用目标 AC 的 HTTP 管理接口
-          → gRPC 下发给 Agent
-          → Agent 路由到对应插件执行
+Plugin ─→ Agent Ring Buffer ─→ gRPC(mTLS) ─→ AgentCenter
+    ─→ Kafka(按 DataType 路由到 Topic)
+    ─→ Consumer
+    ─→ MySQL / ClickHouse / Redis
 ```
 
-## 6. Topic 与存储分层
+### 下发链路（用户 → Agent）
 
-### Kafka Topic
+```
+用户/API ─→ Manager ─→ 查 SD + Redis(agent:ac) ─→ 调用目标 AC HTTP 接口
+    ─→ AC gRPC 下发 ─→ Agent ─→ 路由到对应插件执行
+```
 
-按数据特征拆分，而不是所有数据共用一个 Topic：
+### 查询链路（前端 → 存储）
 
-- `mxsec.agent.heartbeat`
-- `mxsec.agent.events`
-- `mxsec.agent.baseline`
-- `mxsec.agent.asset`
-- `mxsec.agent.command-ack`
-- `mxsec.agent.*.dlq`
+| 查询场景 | 数据源 |
+|---------|--------|
+| 主机/策略/任务/告警状态 | MySQL |
+| 监控指标曲线/趋势图 | Prometheus |
+| FIM 事件列表/统计 | ClickHouse（优先），MySQL（fallback） |
+| 基线评分 | Redis 缓存 |
+| Dashboard 趋势 | ClickHouse 物化视图 |
 
-### 存储分工
+## Kafka 设计
 
-| 组件 | 用途 |
-|------|------|
-| MySQL | 任务、策略、主机、告警状态、资产快照等业务主数据 |
-| Redis | SD 同步、`agent:ac` 映射、分布式锁、缓存 |
-| ClickHouse | 指标趋势、FIM 事件、告警时间线、历史归档 |
-| Prometheus | 主机性能指标查询源 |
+按数据写入特征分组，各 Topic 独立 Retention 和 Partition 策略：
 
-## 7. 安全与通信
+| Topic | DataType | Partitions | Retention | 说明 |
+|-------|----------|-----------|-----------|------|
+| `mxsec.agent.heartbeat` | 1000, 1001 | 6 | 24h | 心跳/插件状态 → MySQL |
+| `mxsec.agent.events` | 6001, eBPF | 12 | 72h | FIM/运行时事件 → ClickHouse |
+| `mxsec.agent.baseline` | 8000-8004 | 6 | 7d | 基线结果/任务完成 → MySQL |
+| `mxsec.agent.asset` | 5050-5060 | 6 | 7d | 资产数据 → MySQL |
+| `mxsec.agent.command-ack` | 命令回包 | 6 | 7d | Agent 执行结果 |
 
-| 路径 | 协议 | 认证 |
+Partition Key 为 AgentID，保证同一 Agent 数据有序。Replication Factor = 2，`min.insync.replicas = 1`。
+
+各 Topic 配套 DLQ：`mxsec.agent.{topic-name}.dlq`。
+
+## 存储分层
+
+| 存储 | 定位 | 写入方 |
+|------|------|--------|
+| MySQL 8.0+ | 业务主数据（主机、策略、任务、告警状态、资产快照、用户） | Consumer / Manager |
+| ClickHouse | 时序分析与事件归档（指标趋势、FIM、告警时间线、审计日志） | Consumer |
+| Redis | SD 同步、`agent:ac` 映射、分布式锁、基线评分缓存 | Manager / Consumer |
+| Prometheus | 主机性能指标查询源（CPU / 内存 / 磁盘 / 网络） | AgentCenter Exporter |
+
+## 高可用设计
+
+### 已具备 HA 能力
+
+| 组件 | 方式 | 说明 |
 |------|------|------|
-| Browser ↔ Nginx / Manager | HTTPS / HTTP REST | JWT |
-| Agent ↔ AgentCenter | gRPC 双向流 | mTLS |
-| Agent ↔ Plugin | OS Pipe + Protobuf | 父子进程 |
-| Manager ↔ AgentCenter | HTTP 内部接口 | 内网管理调用 |
+| Manager | ×N 副本 + Nginx least_conn | 无状态，JWT 认证，Redis 共享缓存 |
+| AgentCenter | ×N 副本 + L4 LB | 无状态，零数据库依赖，Agent 自动重连 |
+| Consumer | ×N 副本 + Kafka ConsumerGroup | Partition 自动 Rebalance |
+| Kafka | 3 Broker KRaft 集群 | replication_factor=2 |
+| Redis SD | Pub/Sub 多副本同步 | Manager 内存为源头，Redis 为多实例同步缓存 |
 
-证书生成与分发流程仍保持不变，见 `scripts/generate-certs.sh`。
+### 需按生产环境独立建设
 
-## 8. 部署形态
-
-| 环境 | 拓扑特征 |
+| 组件 | 推荐方案 |
 |------|---------|
-| `dev` | 单机联调，控制面可简化，适合功能开发 |
-| `pret / perf` | 多副本控制面 + 3 节点 Kafka，适合压测与预发验证 |
-| `prod` | 推荐启用 Manager/AC/Consumer 多副本，Kafka/ClickHouse/Redis/MySQL 需结合实际做容灾 |
+| MySQL | 主从复制 / MGR / 云 RDS |
+| Redis | Sentinel / 云托管 Redis |
+| ClickHouse | 副本表 / 云 ClickHouse（当前单实例，数据有 TTL，丢失可从 Kafka 重放） |
 
-## 9. 相关代码路径
+### 任务下发可靠性
 
-```text
-mxsec-platform/
-├── cmd/server/manager/          # Manager 入口
-├── cmd/server/agentcenter/      # AgentCenter 入口
-├── cmd/server/consumer/         # Consumer 入口
-├── internal/server/manager/sd/  # AC 服务发现与注册中心
-├── internal/server/common/kafka/# Kafka Topic / Producer 封装
-├── internal/server/consumer/    # Consumer 路由 / Writer / DLQ
-├── internal/server/database/    # MySQL / Redis / ClickHouse 客户端
-├── internal/agent/              # Agent 连接、传输、插件管理
-├── plugins/scanner/             # 病毒查杀插件
-├── plugins/sensor/              # 运行时检测插件
-└── plugins/fim/                 # 文件完整性监控插件
+- 所有任务先持久化到 MySQL（status=pending）
+- Manager 查 SD + Redis 路由到目标 AC 下发
+- Agent 离线或 AC 不可达时任务保持 pending
+- Consumer 消费心跳时检查 pending 任务，触发补发
+- 任务调度使用 Redis 分布式锁，避免多副本重复分发
+
+## 安全与通信
+
+| 链路 | 协议 | 认证方式 |
+|------|------|---------|
+| 浏览器 ↔ Nginx / Manager | HTTPS / REST | JWT |
+| Agent ↔ AgentCenter | gRPC 双向流 | mTLS |
+| Agent ↔ Plugin | OS Pipe + Protobuf | 父子进程隔离 |
+| Manager ↔ AgentCenter | HTTP 内部接口 | 内网调用 |
+
+证书生成：`scripts/generate-certs.sh`
+
+## 与 Elkeid 的关键差异
+
+本项目在设计理念上参考了 Elkeid 的 Agent + Plugin + Server 架构，但在实现上有以下差异：
+
+| 维度 | Elkeid | MxSec |
+|------|--------|-------|
+| 存储 | MongoDB | MySQL + ClickHouse |
+| 服务发现 | 独立 SD 服务 | Manager 内嵌 SD 模块 |
+| Kafka Topic | 单 Topic | 按数据特征分组 5 Topic |
+| 任务分发 | Redis PubSub | 持久化 + 心跳补发 |
+| 负载均衡 | 最小连接数 | power-of-two-choices |
+| Agent→AC 映射 | Manager 定时采集 | Consumer 消费心跳时写入 |
+
+## 关键代码路径
+
+```
+cmd/server/manager/              # Manager 入口
+cmd/server/agentcenter/          # AgentCenter 入口
+cmd/server/consumer/             # Consumer 入口
+internal/server/manager/sd/      # AC 服务发现与注册
+internal/server/common/kafka/    # Kafka Producer / Topic 路由
+internal/server/consumer/        # Consumer 路由 / Writer / DLQ / CEL 引擎
+internal/server/database/        # MySQL / Redis / ClickHouse 客户端
+internal/agent/                  # Agent 连接 / 传输 / 插件管理
+plugins/                         # 各插件实现
 ```
