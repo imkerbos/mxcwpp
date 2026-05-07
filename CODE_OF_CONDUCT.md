@@ -6,6 +6,6 @@ By participating in this project, you agree to abide by its terms.
 
 ## Reporting
 
-If you witness or experience unacceptable behavior, please report it to: conduct@mxsec.io
+If you witness or experience unacceptable behavior, please report it to: 0xkerbos@gmail.com
 
 All reports will be reviewed and handled confidentially.
