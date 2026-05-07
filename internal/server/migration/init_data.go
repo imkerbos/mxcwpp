@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	builtinrules "github.com/imkerbos/mxsec-platform/configs/rules"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 	"github.com/imkerbos/mxsec-platform/plugins/baseline/engine"
@@ -707,32 +708,12 @@ type builtinRuleYAML struct {
 }
 
 // initBuiltinDetectionRules 初始化内置 CEL 检测规则
-// 增量导入：按 name 去重，已存在的跳过，新规则自动补入
+// 增量导入：新规则插入，已存在且未被用户修改的内置规则跟随版本更新
 func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
-	// 查找 YAML 文件
-	yamlPaths := []string{
-		"configs/rules/builtin-rules.yaml",
-		"/opt/mxsec-platform/configs/rules/builtin-rules.yaml",
-	}
-
-	var yamlData []byte
-	var loadErr error
-	for _, p := range yamlPaths {
-		yamlData, loadErr = os.ReadFile(p)
-		if loadErr == nil {
-			logger.Info("加载内置规则文件", zap.String("path", p))
-			break
-		}
-	}
-
-	if yamlData == nil {
-		return fmt.Errorf("未找到内置规则文件: %v", loadErr)
-	}
-
-	// 使用 viper 解析 YAML
+	// 从 embed 读取内置规则 YAML
 	v := viper.New()
 	v.SetConfigType("yaml")
-	if err := v.ReadConfig(strings.NewReader(string(yamlData))); err != nil {
+	if err := v.ReadConfig(strings.NewReader(string(builtinrules.BuiltinRulesYAML))); err != nil {
 		return fmt.Errorf("解析内置规则 YAML 失败: %w", err)
 	}
 
@@ -741,20 +722,32 @@ func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
 		return fmt.Errorf("反序列化内置规则失败: %w", err)
 	}
 
-	// 查询已存在的规则名称，用于跳过
-	var existingNames []string
-	db.Model(&model.DetectionRule{}).Pluck("name", &existingNames)
-	nameSet := make(map[string]struct{}, len(existingNames))
-	for _, n := range existingNames {
-		nameSet[n] = struct{}{}
+	// 查询已存在的内置规则，按 name 索引
+	var existingRules []model.DetectionRule
+	db.Where("builtin = ?", true).Find(&existingRules)
+	existingMap := make(map[string]*model.DetectionRule, len(existingRules))
+	for i := range existingRules {
+		existingMap[existingRules[i].Name] = &existingRules[i]
 	}
 
-	// 增量写入：仅插入不存在的规则
-	imported := 0
+	imported, updated := 0, 0
 	for _, r := range rulesFile.Rules {
-		if _, exists := nameSet[r.Name]; exists {
+		if existing, ok := existingMap[r.Name]; ok {
+			// 已存在的内置规则：用户未修改过则跟随版本更新
+			if !existing.UserModified {
+				db.Model(existing).Updates(map[string]interface{}{
+					"expression":  r.Expression,
+					"severity":    r.Severity,
+					"category":    r.Category,
+					"mitre_id":    r.MitreID,
+					"description": r.Description,
+					"data_types":  model.StringArray(r.DataTypes),
+				})
+				updated++
+			}
 			continue
 		}
+		// 新规则：插入并标记为内置
 		rule := model.DetectionRule{
 			Name:        r.Name,
 			Expression:  r.Expression,
@@ -764,6 +757,7 @@ func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
 			Description: r.Description,
 			DataTypes:   model.StringArray(r.DataTypes),
 			Enabled:     true,
+			Builtin:     true,
 		}
 		if err := db.Create(&rule).Error; err != nil {
 			logger.Warn("导入内置规则失败", zap.String("name", r.Name), zap.Error(err))
@@ -772,11 +766,11 @@ func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
 		imported++
 	}
 
-	if imported > 0 {
-		logger.Info("内置检测规则增量导入完成", zap.Int("new", imported), zap.Int("existing", len(existingNames)))
-	} else {
-		logger.Debug("内置检测规则已是最新", zap.Int("total", len(existingNames)))
-	}
+	logger.Info("内置检测规则同步完成",
+		zap.Int("new", imported),
+		zap.Int("updated", updated),
+		zap.Int("existing", len(existingRules)),
+	)
 	return nil
 }
 

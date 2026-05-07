@@ -177,6 +177,10 @@ func (h *DetectionRulesHandler) UpdateRule(c *gin.Context) {
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
+	// 内置规则被用户编辑后标记 user_modified，防止版本升级时被覆盖
+	if rule.Builtin {
+		updates["user_modified"] = true
+	}
 
 	if err := h.db.Model(&rule).Updates(updates).Error; err != nil {
 		h.logger.Error("更新检测规则失败", zap.Error(err))
@@ -188,12 +192,26 @@ func (h *DetectionRulesHandler) UpdateRule(c *gin.Context) {
 	Success(c, rule)
 }
 
-// DeleteRule 删除检测规则
+// DeleteRule 删除检测规则（内置规则不可删除，只能禁用）
 // DELETE /api/v1/detection-rules/:id
 func (h *DetectionRulesHandler) DeleteRule(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		BadRequest(c, "无效的规则 ID")
+		return
+	}
+
+	var rule model.DetectionRule
+	if err := h.db.First(&rule, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "规则不存在")
+			return
+		}
+		InternalError(c, "查询失败")
+		return
+	}
+	if rule.Builtin {
+		BadRequest(c, "内置规则不可删除，请使用禁用功能")
 		return
 	}
 

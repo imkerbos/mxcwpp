@@ -12,9 +12,11 @@ type DetectionRule struct {
 	Category    string      `gorm:"type:varchar(100);index" json:"category"`
 	Description string      `gorm:"type:text" json:"description"`
 	DataTypes   StringArray `gorm:"type:json" json:"dataTypes"` // 适用的 DataType 列表（如 "3000", "3001"）
-	Enabled     bool        `gorm:"default:true;index" json:"enabled"`
-	CreatedAt   LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt   LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	Enabled      bool        `gorm:"default:true;index" json:"enabled"`
+	Builtin      bool        `gorm:"default:false" json:"builtin"`
+	UserModified bool        `gorm:"column:user_modified;default:false" json:"userModified"`
+	CreatedAt    LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt    LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 // TableName 指定表名
