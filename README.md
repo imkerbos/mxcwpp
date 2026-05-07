@@ -1,5 +1,12 @@
 # MxSec Platform
 
+[![Go Version](https://img.shields.io/github/go-mod/go-version/imkerbos/mxsec-platform)](https://github.com/imkerbos/mxsec-platform)
+[![License](https://img.shields.io/github/license/imkerbos/mxsec-platform)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/imkerbos/mxsec-platform?style=social)](https://github.com/imkerbos/mxsec-platform/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/imkerbos/mxsec-platform)](https://github.com/imkerbos/mxsec-platform/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/imkerbos/mxsec-platform)](https://github.com/imkerbos/mxsec-platform/commits/main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/imkerbos/mxsec-platform)](https://goreportcard.com/report/github.com/imkerbos/mxsec-platform)
+
 企业级主机与容器安全管理平台。覆盖安全基线、资产管理、漏洞扫描、病毒查杀、运行时检测与合规审计，面向安全运营团队提供统一管控视图。
 
 ## 功能概览
@@ -31,10 +38,10 @@ Agent ─→ gRPC(mTLS) ─→ AgentCenter ×N ─→ Kafka ─→ Consumer ×N 
 
 | 层面 | 技术 |
 |------|------|
-| 后端 | Go 1.21+（Gin / gRPC / Gorm / Zap） |
+| 后端 | Go 1.25+（Gin / gRPC / Gorm / Zap） |
 | 前端 | Vue 3 + TypeScript + Pinia + Ant Design Vue 4 |
 | 存储 | MySQL 8.0+ / Redis 7 / ClickHouse 24 |
-| 消息 | Kafka（KRaft 模式，5 Topic + DLQ） |
+| 消息 | Kafka（KRaft 模式，7 Topic + DLQ） |
 | 监控 | Prometheus（主机性能指标唯一数据源） |
 | 通信 | gRPC 双向流 + mTLS + Protobuf |
 | 部署 | Docker Compose / Systemd + Nginx |
@@ -48,7 +55,7 @@ Agent ─→ gRPC(mTLS) ─→ AgentCenter ×N ─→ Kafka ─→ Consumer ×N 
 ## 快速开始
 
 ```bash
-git clone https://github.com/mxsec/mxsec-platform.git
+git clone https://github.com/imkerbos/mxsec-platform.git
 cd mxsec-platform/deploy
 
 cp .env.example .env
@@ -67,7 +74,7 @@ docker compose --env-file .env up -d \
 
 ```bash
 make build-server                                        # 构建服务端
-make build-agent                                         # 构建 Agent
+make build-consumer                                      # 构建 Consumer
 make package-agent-all VERSION=1.0.0 SERVER_HOST=IP:6751 # 打包 Agent（RPM/DEB）
 make package-plugins-all VERSION=1.0.0                   # 打包插件
 make proto                                               # 生成 Protobuf 代码
@@ -83,7 +90,7 @@ mxsec-platform/
 ├── internal/
 │   ├── server/             # 服务端（manager / agentcenter / consumer / common）
 │   └── agent/              # Agent（connection / transport / plugin / heartbeat）
-├── plugins/                # 插件（baseline / collector / fim / scanner / sensor）
+├── plugins/                # 插件（baseline / collector / fim / scanner / sensor / remediation）
 ├── api/proto/              # Protobuf 定义
 ├── ui/                     # 前端工程（Vue 3 + TypeScript）
 ├── configs/                # 配置文件（server.yaml / agent.yaml / 规则文件）
@@ -102,6 +109,10 @@ mxsec-platform/
 - [发展路线](docs/roadmap.md) - 已完成能力、近期规划、中远期方向
 - [开源治理](docs/governance.md) - 项目治理模型、决策流程、安全策略
 - [社区规范](docs/contributing.md) - 贡献指南、开发环境、代码规范、提交流程
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=imkerbos/mxsec-platform&type=Date)](https://star-history.com/#imkerbos/mxsec-platform&Date)
 
 ## License
 
