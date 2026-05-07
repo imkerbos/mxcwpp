@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+# AgentCenter 生产镜像
+FROM golang:1.25-alpine AS builder
+
+ARG VERSION=dev
+
+RUN apk add --no-cache git protobuf protobuf-dev && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+# 生成 Protobuf Go 代码
+RUN mkdir -p api/proto/bridge api/proto/grpc && \
+    protoc \
+    --go_out=api/proto/bridge --go_opt=paths=source_relative \
+    -I=api/proto api/proto/bridge.proto && \
+    protoc \
+    --go_out=api/proto/grpc --go_opt=paths=source_relative \
+    --go-grpc_out=api/proto/grpc --go-grpc_opt=paths=source_relative \
+    -I=api/proto api/proto/grpc.proto
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.buildVersion=${VERSION}" \
+    -o agentcenter ./cmd/server/agentcenter
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
+
+COPY --from=builder /app/agentcenter /usr/bin/agentcenter
+
+RUN mkdir -p /etc/mxsec-platform/certs /var/log/mxsec-platform /opt/mxsec-platform/plugins
+
+WORKDIR /opt/mxsec-platform
+
+EXPOSE 6751
+
+ENTRYPOINT ["/usr/bin/agentcenter"]
+CMD ["-config", "/etc/mxsec-platform/server.yaml"]
