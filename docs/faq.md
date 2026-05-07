@@ -122,6 +122,140 @@ mxsec-agent --update --file ./mxsec-agent-1.1.0.rpm
 2. 检查 parts 数量：`SELECT count() FROM system.parts WHERE active AND database = 'mxsec'`
 3. 如果 parts 过多，等待后台 merge 完成或适当调大 Consumer 的批量写入间隔
 
+## 集群部署问题
+
+### 多节点部署时 AC 注册不上 Manager
+
+检查 `network_mode: host` 下端口是否可达，确认 Manager HTTP 端口 8080 在节点间可访问。AC 注册接口为 `POST /api/v1/internal/ac/register`，启动时最多重试 3 次。
+
+排查步骤：
+
+1. 在 AC 所在节点执行：`curl http://<manager-ip>:8080/api/v1/health`
+2. 检查 AC 启动日志：`docker compose logs agentcenter | grep register`
+3. 确认防火墙规则允许节点间 8080 端口通信
+4. 检查 `.env` 中 `MANAGER_HOST` 是否配置为 Manager 节点的实际 IP
+
+### Kafka 跨节点 Broker 通信失败
+
+检查 `KAFKA_ADVERTISED_LISTENERS` 配置，生产 host 网络下需使用实际 IP 而非容器名。
+
+排查步骤：
+
+1. 确认每个 Broker 的 `KAFKA_ADVERTISED_LISTENERS` 使用了节点真实 IP
+2. 在其他节点测试连通性：`nc -zv <broker-ip> 9092`
+3. 检查 Kafka 日志：`docker compose logs kafka-1 | grep -i "listener\|advertised"`
+4. 确认所有 Broker 节点间 9092 端口互通
+
+## mTLS 证书问题
+
+### Agent 首次连接报 TLS 握手失败
+
+Agent 首次连接允许无证书降级（insecure 模式），连接后 Server 自动下发证书，后续恢复 mTLS。如果首次连接就报 TLS 握手失败，说明降级逻辑未生效或 CA 证书有问题。
+
+排查步骤：
+
+1. 检查 Server 端 `ca.crt` 是否存在且有效：`openssl x509 -in deploy/certs/ca.crt -noout -dates`
+2. 检查 AgentCenter 日志中是否有证书相关错误：`docker compose logs agentcenter | grep -i "tls\|cert"`
+3. 确认 Agent 版本支持 insecure 降级（v1.0.0 及以上）
+4. 如果 CA 证书损坏，执行 `make certs` 重新生成后重启 Server
+
+### 证书过期如何更新
+
+执行 `make certs` 重新生成全部证书，然后重启 Server 组件。Agent 会在下次心跳时自动获取新证书。
+
+操作步骤：
+
+```bash
+# 1. 重新生成证书
+make certs
+
+# 2. 重启 Server 端所有组件
+docker compose restart agentcenter manager
+
+# 3. 验证证书有效期
+openssl x509 -in deploy/certs/server.crt -noout -dates
+openssl x509 -in deploy/certs/ca.crt -noout -dates
+```
+
+注意事项：
+
+- 证书更新后无需手动操作 Agent，Agent 心跳周期内会自动拉取新证书
+- 如果大量 Agent 同时拉取证书，注意 Server 端负载
+- 建议在业务低峰期执行证书更换
+
+## 业务问题
+
+### 检测规则已启用但告警为 0
+
+可能原因及排查步骤：
+
+1. **检查规则数据**：确认 `detection_rules` 表中有对应规则数据，且 `enabled` 字段为 true
+2. **检查 CEL 引擎**：查看 Consumer 日志中 CEL 表达式引擎是否正常启动
+   ```bash
+   docker compose logs consumer | grep -i "cel\|detection\|rule"
+   ```
+3. **检查数据源**：确认 Tetragon 已安装且 Sensor 插件正常运行
+   ```bash
+   # 在 Agent 所在主机检查
+   kubectl get pods -n kube-system | grep tetragon
+   ls -la /var/lib/mxsec-agent/plugin/sensor
+   ```
+4. **检查数据流转**：确认原始事件数据已写入 Kafka，Consumer 正常消费
+
+### 任务创建后一直 pending 不执行
+
+可能原因及排查步骤：
+
+1. **确认 Agent 在线**：检查主机心跳是否正常，管理界面主机状态应为"在线"
+2. **检查 AgentCenter 注册**：确认 AC 已成功注册到 Manager 的服务发现（SD）
+   ```bash
+   docker compose logs agentcenter | grep -i "register\|sd"
+   ```
+3. **检查任务匹配**：确认任务的 `target_type` 和目标条件能匹配到至少一台主机
+4. **检查任务下发日志**：
+   ```bash
+   docker compose logs manager | grep -i "task\|dispatch"
+   docker compose logs agentcenter | grep -i "task"
+   ```
+
+### Kafka 消费积压如何处理
+
+增加 Consumer 副本数（`CONSUMER_REPLICAS` 环境变量），ConsumerGroup 使用 RoundRobin 策略自动 rebalance。
+
+排查和处理步骤：
+
+1. **确认积压情况**：查看各 Topic 的 Consumer Lag
+2. **排除下游阻塞**：检查 ClickHouse 写入是否正常
+   ```bash
+   docker compose logs consumer | grep -i "clickhouse\|write\|error"
+   ```
+3. **扩容 Consumer**：修改 `deploy/.env` 中的 `CONSUMER_REPLICAS` 值，然后重启
+   ```bash
+   docker compose up -d --scale consumer=3
+   ```
+4. **监控恢复进度**：观察 Consumer Lag 是否持续下降
+
+## DLQ 处理
+
+### 发现大量消息进了 DLQ
+
+检查 `{topic}-dlq` 中的错误信息，常见原因包括：数据库连接失败、字段格式不匹配、下游服务不可用。
+
+排查和处理步骤：
+
+1. **查看 DLQ 消息内容**：确认错误类型和来源 Topic
+   ```bash
+   docker compose logs consumer | grep -i "dlq\|dead.letter"
+   ```
+2. **分析常见原因**：
+   - 数据库连接失败：检查 MySQL / ClickHouse 连接状态
+   - 字段格式不匹配：通常由 Agent 版本不一致导致，确认上报数据结构
+   - 序列化错误：检查 Protobuf 定义是否与 Agent 端一致
+3. **修复根因**：解决底层问题后，DLQ 中的新消息将不再增加
+4. **手动重放 DLQ 消息**：DLQ 消息不会自动重放，修复问题后需手动处理
+   - 编写脚本从 DLQ Topic 消费并重新投递到原 Topic
+   - 或根据业务需要直接丢弃过期的 DLQ 消息
+
 ## 日志位置
 
 | 组件 | 位置 |

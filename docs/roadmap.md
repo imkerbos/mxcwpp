@@ -16,8 +16,8 @@
 | FIM | 策略/事件/任务闭环，ClickHouse 归档 |
 | 容器安全 | 集群/告警/事件/CIS 基线（80 条规则）/白名单/K8s Audit Webhook |
 | 病毒查杀 | ClamAV + YARA-X 双引擎，任务/结果/隔离箱 |
-| 漏洞管理 | PURL 采集 + OSV.dev 匹配 + CVSS v3.1 评分 |
-| CEL 规则引擎 | 20 条内置规则 + MITRE 映射 + 热加载 |
+| 漏洞管理 | PURL 采集 + OSV.dev/NVD/Red Hat 三源匹配 + CVSS v3.1 评分 |
+| CEL 规则引擎 | 38 条内置规则 + MITRE 映射 + 热加载 |
 | eBPF 检测 | Tetragon 事件采集 → ClickHouse 归档 |
 | 行为序列检测 | 滑动窗口 + 状态机 + Redis |
 | 威胁情报 | MISP IOC → Redis → CEL 碰撞 |

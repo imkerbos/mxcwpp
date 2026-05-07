@@ -69,6 +69,158 @@ make lint            # 代码检查
 - 不添加超出需求的功能和抽象
 - 提交前运行 `make fmt lint test` 确保通过
 
+## CI/CD 检查项
+
+代码提交后会自动执行以下检查，本地开发时应提前验证：
+
+### 后端
+
+| 检查项 | 命令 | 说明 |
+|--------|------|------|
+| 代码格式化 | `make fmt` | 执行 gofmt，确保代码风格统一 |
+| 静态检查 | `make lint` | 执行 golangci-lint，捕获潜在问题 |
+| 单元测试 | `make test` | 执行 `go test ./...`，确保所有测试通过 |
+| 编译检查 | `go vet ./...` | 检查代码中的可疑结构，如 printf 格式串不匹配等 |
+
+### 前端
+
+| 检查项 | 说明 |
+|--------|------|
+| ESLint | JavaScript / TypeScript 代码规范检查 |
+| TypeScript 类型检查 | 确保类型安全，无编译错误 |
+
+建议在提交前按顺序执行：
+
+```bash
+# 后端
+make fmt
+make lint
+go vet ./...
+make test
+
+# 前端（在 ui/ 目录下）
+npm run lint
+npm run type-check
+```
+
+## 数据库迁移指南
+
+项目使用 Gorm AutoMigrate 管理数据库表结构，模型变更会在服务启动时自动同步。
+
+### 新增字段
+
+在对应的 model 结构体中添加字段即可。Gorm 在启动时会自动执行 `ALTER TABLE` 添加新列。
+
+```go
+// 示例：在 model.Host 中新增字段
+type Host struct {
+    // ... 已有字段
+    Region string `gorm:"type:varchar(64);default:''" json:"region"` // 新增字段，带默认值
+}
+```
+
+**注意**：新字段必须设置默认值（通过 Gorm tag 的 `default` 或使用指针类型），避免 `NOT NULL` 无默认值导致已有数据迁移失败。
+
+### 删除字段
+
+Gorm AutoMigrate 不会自动删除已有列。如需删除字段，需手动执行 SQL：
+
+```sql
+ALTER TABLE hosts DROP COLUMN region;
+```
+
+删除前确认该字段在代码中已无引用。
+
+### 初始化数据
+
+系统启动时需要预置的数据（如默认用户、默认策略等），在 `internal/server/migration/init_data.go` 的 `InitDefaultData` 函数中添加。该函数在每次启动时执行，需自行处理幂等逻辑（已存在则跳过）。
+
+### 向后兼容原则
+
+- 新增字段必须有默认值
+- 不要修改已有字段的类型或约束，除非确认兼容
+- 表结构变更需考虑回滚方案
+
+## 前后端联调流程
+
+### 启动开发环境
+
+```bash
+make dev-docker-up
+```
+
+该命令启动完整开发环境，包含 Manager API、UI 前端及 MySQL 等基础设施服务。
+
+### 架构说明
+
+```
+浏览器 --> Nginx(:3000) --> Vite Dev Server (UI)
+                |
+                +--> /api/* 反向代理 --> Manager(:8080)
+```
+
+- UI 通过 Nginx 反向代理将 `/api/*` 请求转发到 Manager:8080
+- 前端修改实时热更新（Vite HMR），保存文件后浏览器自动刷新
+- 后端修改通过 Air 自动重编译，代码变更后 Manager 自动重启
+
+### 联调要点
+
+- 前端 API 定义在 `ui/src/api/` 目录，新增接口时先定义类型再实现调用
+- 后端接口定义后，前端可通过浏览器开发者工具的 Network 面板查看实际请求和响应
+- 如遇跨域问题，检查 Nginx 配置（`deploy/` 目录下的 Docker Compose 配置）
+
+## 插件开发指引
+
+### 插件架构
+
+插件是独立的可执行文件，由 Agent 以子进程方式启动。插件与 Agent 之间通过 Pipe（文件描述符 3/4）进行双向通信，使用 Protobuf 序列化消息。
+
+### 目录结构
+
+```
+plugins/<plugin-name>/
+├── main.go          # 入口
+├── engine/          # 核心逻辑
+└── go.mod           # 独立 module
+```
+
+### 插件 SDK
+
+插件 SDK 位于 `plugins/lib/go/`，提供 `Client` 类封装了与 Agent 的通信细节：
+
+```go
+import plugins "github.com/imkerbos/mxsec-platform/plugins/lib/go"
+
+client, err := plugins.NewClient()
+// 使用 client 接收任务、上报数据
+```
+
+### DataType 编号约定
+
+插件上报数据时需指定 DataType 编号，各模块的编号范围如下：
+
+| 编号范围 | 模块 | 说明 |
+|----------|------|------|
+| 3000-3002 | eBPF | 内核级事件采集 |
+| 5050-5060 | 资产采集 | 主机资产信息上报 |
+| 6001-6002 | FIM | 文件完整性监控 |
+| 7001-7004 | Scanner | 漏洞扫描 |
+| 8000-8004 | 基线检查 | 安全基线合规检测 |
+
+新增插件时请在上述范围之外分配编号，并在团队内协调避免冲突。
+
+### 构建与打包
+
+```bash
+# 构建所有插件（当前架构）
+make package-plugins
+
+# 构建所有插件（amd64 + arm64）
+make package-plugins-all
+```
+
+构建产物输出到 `dist/plugins/` 目录。
+
 ## 提交流程
 
 ### 1. 选择或创建 Issue
@@ -163,19 +315,6 @@ go test ./internal/server/manager/... -v
 - 使用场景和动机
 - 期望的行为
 - 是否愿意参与实现
-
-## 插件开发
-
-如需开发自定义插件，参考现有插件结构：
-
-```
-plugins/<plugin-name>/
-├── main.go          # 入口
-├── engine/          # 核心逻辑
-└── go.mod           # 独立 module
-```
-
-插件通过 `os.Pipe` + Protobuf 与 Agent 通信，使用 `plugins/lib/go/` 提供的 SDK。
 
 ## 沟通渠道
 
