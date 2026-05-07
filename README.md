@@ -114,6 +114,10 @@ mxsec-platform/
 
 [![Star History Chart](https://api.star-history.com/svg?repos=imkerbos/mxsec-platform&type=Date)](https://star-history.com/#imkerbos/mxsec-platform&Date)
 
+## Contributors
+
+见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
 ## License
 
 [Apache License 2.0](LICENSE)

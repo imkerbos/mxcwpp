@@ -235,18 +235,60 @@ make package-plugins-all
 
 ### 2. 开发
 
-**内部开发者**：直接在 main 分支开发，不创建功能分支。
+项目采用 **feature branch → dev → main** 三层分支模型：
 
-**外部贡献者**：Fork 仓库后通过 PR 提交。
+| 分支 | 用途 | 规则 |
+|------|------|------|
+| `main` | 稳定发布 | 不直接提交，仅从 dev 合并 |
+| `dev` | 集成测试 | 功能分支合并到此处验证 |
+| `<name>/<type>-<desc>` | 个人开发 | 从 dev 拉取，完成后合并回 dev |
+
+分支命名示例：`kerbos/feat-baseline-rules`、`zhangsan/fix-login-bug`
+
+**内部开发者**：
 
 ```bash
-# 外部贡献者：Fork 后克隆
+# 从 dev 创建个人功能分支
+git checkout dev
+git pull origin dev
+git checkout -b kerbos/feat-xxx
+
+# 开发完成后验证
+make fmt
+make lint
+make test
+
+# 合并到 dev 进行集成测试
+git checkout dev
+git merge kerbos/feat-xxx
+git push origin dev
+
+# dev 验证通过后合并到 main
+git checkout main
+git merge dev
+git push origin main
+
+# 清理已合并的功能分支
+git branch -d kerbos/feat-xxx
+```
+
+**外部贡献者**：Fork 仓库后基于 `dev` 分支通过 PR 提交。
+
+```bash
+# Fork 后克隆
 git clone https://github.com/<your-username>/mxsec-platform.git
 cd mxsec-platform
+git checkout dev
+
+# 创建功能分支开发
+git checkout -b <your-name>/feat-xxx
 
 # 开发并测试
-make test
+make fmt
 make lint
+make test
+
+# 提交 PR 到上游 dev 分支
 ```
 
 ### 3. 提交代码
