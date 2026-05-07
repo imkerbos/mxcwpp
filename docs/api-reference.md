@@ -26,7 +26,8 @@
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/health` | 健康检查 |
+| GET | `/health` | 健康检查（Docker healthcheck 用） |
+| GET | `/api/v1/health` | API 健康检查（含版本信息、组件状态） |
 | GET | `/metrics` | Prometheus 指标 |
 
 ### Agent 与插件下载

@@ -122,6 +122,16 @@ mxsec-agent --update --file ./mxsec-agent-1.1.0.rpm
 2. 检查 parts 数量：`SELECT count() FROM system.parts WHERE active AND database = 'mxsec'`
 3. 如果 parts 过多，等待后台 merge 完成或适当调大 Consumer 的批量写入间隔
 
+## mxctl 工具
+
+### 如何使用 mxctl 部署集群
+
+构建：`go build -o ./bin/mxctl ./cmd/tools/mxctl`。典型流程：`mxctl check -f cluster.yaml`（校验配置）→ `mxctl preflight -f cluster.yaml`（SSH 连通性和远端环境检查）→ `mxctl deploy -f cluster.yaml`（完整部署）。详见[部署文档](deployment.md)。
+
+### mxctl preflight 失败提示 unsupported_os
+
+远端节点的 `/etc/os-release` 中 `ID` 不在支持列表中（ubuntu / debian / rocky / rhel / centos / almalinux / ol）。确认操作系统发行版是否受支持。
+
 ## 集群部署问题
 
 ### 多节点部署时 AC 注册不上 Manager
@@ -184,6 +194,21 @@ openssl x509 -in deploy/certs/ca.crt -noout -dates
 - 建议在业务低峰期执行证书更换
 
 ## 业务问题
+
+### 如何修改内置检测规则
+
+内置规则通过 `configs/rules/builtin-rules.yaml` 嵌入到二进制中（`go:embed`），服务启动时自动同步到数据库 `detection_rules` 表。用户可在管理界面编辑内置规则，编辑后自动标记 `user_modified=true`，后续版本升级不会覆盖用户修改。
+
+### 内置规则和自定义规则的区别
+
+内置规则带 `builtin=true` 标记，不可删除只能禁用；自定义规则可自由编辑和删除。版本升级时，新增的内置规则自动导入，已有未修改的内置规则自动更新，用户修改过的规则保持不变。
+
+### 修复任务执行失败如何排查
+
+1. 查看 Manager 日志中 remediation 相关记录
+2. 确认 Agent 侧 remediation 插件是否已安装且状态正常（管理界面 -> 主机详情 -> 插件列表）
+3. 检查修复命令是否需要 root 权限（Agent 以 root 运行时插件也以 root 执行）
+4. 查看 Agent 日志中对应任务 ID 的执行记录
 
 ### 检测规则已启用但告警为 0
 

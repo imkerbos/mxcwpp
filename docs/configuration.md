@@ -171,6 +171,7 @@ server:
   jwt_secret: "xxx"         # JWT 签名密钥
   manager_addr: "http://manager:8080"   # AC 向 Manager 注册使用的地址
   instance_id: ""           # 多实例部署时的实例标识（留空自动生成）
+  external_url: ""          # 外网访问地址（如 https://mxsec.example.com），用于拼接 K8s Audit Webhook URL
 ```
 
 ### database
@@ -193,6 +194,24 @@ database:
 ```
 
 注意：数据库用户名统一为 `mxsec_user`，与 `.env.example`、`deploy.sh`、`configs/server.yaml.example` 保持一致。
+
+`database.type` 支持 `mysql`（默认）和 `postgres` 两种。PostgreSQL 配置示例：
+
+```yaml
+database:
+  type: "postgres"
+  postgres:
+    host: "postgres"
+    port: 5432
+    user: "mxsec_user"
+    password: "xxx"
+    database: "mxsec"
+    sslmode: "disable"
+    timezone: "Asia/Shanghai"
+    max_idle_conns: 20
+    max_open_conns: 200
+    conn_max_lifetime: "1h"
+```
 
 ### redis -- 单节点模式
 
@@ -222,6 +241,18 @@ redis:
 
 启用 Sentinel 后，`addr` 字段不再生效，客户端通过 Sentinel 节点自动发现 master。`master_name` 需与 Redis Sentinel 配置中的 master 名称一致。
 
+**高级连接参数**（可选，一般使用默认值即可）：
+
+```yaml
+redis:
+  min_idle_conns: 10       # 最小空闲连接数
+  dial_timeout: "5s"       # 连接超时
+  read_timeout: "3s"       # 读超时
+  write_timeout: "3s"      # 写超时
+  # cluster: false         # 集群模式（预留，当前未实现）
+  # cluster_addrs: []      # 集群节点地址列表
+```
+
 ### kafka
 
 ```yaml
@@ -238,6 +269,18 @@ kafka:
 
 `topic_prefix` 用于环境隔离。为空时 topic 名称不加前缀；设为 `prod` 后，所有 topic 自动加上 `prod.` 前缀。
 
+**Producer 高级参数**（可选）：
+
+```yaml
+kafka:
+  producer:
+    required_acks: -1          # 0=NoResponse, 1=WaitForLocal, -1=WaitForAll
+    max_message_bytes: 1048576 # 单条消息最大字节数（默认 1MB）
+    flush_messages: 500        # 批量发送消息数阈值
+    flush_frequency: "500ms"   # 批量发送时间间隔
+    retry_max: 3               # 发送失败重试次数
+```
+
 ### clickhouse
 
 ```yaml
@@ -253,6 +296,17 @@ clickhouse:
 ```
 
 使用 Native 协议（端口 9000），支持多节点地址列表。连接池参数 `max_open_conns`、`max_idle_conns`、`conn_max_lifetime` 在模板中有硬编码默认值（不通过 `.env` 配置），如需调整需直接修改 `server.yaml.tpl`。
+
+**高级参数**（可选）：
+
+```yaml
+clickhouse:
+  dial_timeout: "10s"       # 连接超时
+  read_timeout: "30s"       # 读超时
+  write_timeout: "30s"      # 写超时
+  batch_size: 10000         # 批量写入条数阈值
+  flush_timeout: "5s"       # 批量写入时间间隔
+```
 
 ### metrics（Prometheus）
 
@@ -333,6 +387,18 @@ plugins:
 
 - `dir`：服务端插件文件存放目录（容器内路径）
 - `base_url`：Agent 下载插件时使用的 URL 前缀，**必须是 Agent 网络可达的地址**，不能使用 `localhost`
+- `sign_private_key`：Ed25519 签名私钥文件路径（可选），用于对插件 SHA256 进行签名验证，Agent 下载插件时校验签名防篡改
+
+### llm（可选）
+
+```yaml
+llm:
+  api_url: "https://api.anthropic.com/v1"   # LLM API 地址
+  api_key: ""                                 # API Key
+  model: "claude-sonnet-4-20250514"          # 模型名称
+```
+
+启用后，Manager 可通过 LLM 对告警事件进行辅助分析，生成告警摘要和处置建议。未配置 `api_key` 时该功能自动禁用。
 
 ---
 
@@ -363,7 +429,7 @@ Agent 内置以下默认配置，不需要外部配置文件：
 |------|--------|
 | 日志路径 | /var/log/mxsec-agent/agent.log |
 | 日志轮转 | 每天一个文件（agent.log.YYYY-MM-DD） |
-| 日志保留 | 30 天 |
+| 日志保留 | 7 天 |
 | Agent ID 文件 | /var/lib/mxsec-agent/agent_id |
 | 证书目录 | /var/lib/mxsec-agent/certs/（由 Server 下发） |
 
@@ -422,8 +488,7 @@ upstream mxsec-manager {
 | `deploy/docker-compose.yml` | Docker Compose 编排 |
 | `configs/server.yaml.example` | 本地开发配置示例（完整注释版） |
 | `configs/agent.yaml.example` | Agent 配置说明 |
-| `configs/rules/` | 内置告警规则 |
-| `configs/policies/` | 基线策略规则文件 |
+| `configs/rules/` | 内置 CEL 检测规则（通过 go:embed 嵌入二进制） |
 
 ---
 

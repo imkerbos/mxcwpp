@@ -6,7 +6,7 @@
 
 ### 前置要求
 
-- Go >= 1.21
+- Go >= 1.25
 - Node.js >= 18（前端开发）
 - Docker >= 20.10, Docker Compose >= 2.0
 - protoc（Protobuf 编译器）
@@ -38,8 +38,9 @@ make dev-docker-logs
 
 ```bash
 make proto           # 生成 Protobuf 代码
-make build-agent     # 构建 Agent
-make build-server    # 构建 Server
+make build-server    # 构建 Server（manager + agentcenter）
+make build-consumer  # 构建 Consumer
+make package-agent   # 构建 Agent（打包为 RPM/DEB）
 make test            # 运行测试
 make fmt             # 格式化代码
 make lint            # 代码检查
@@ -71,7 +72,7 @@ make lint            # 代码检查
 
 ## CI/CD 检查项
 
-代码提交后会自动执行以下检查，本地开发时应提前验证：
+提交前建议手动执行以下检查：
 
 ### 后端
 
@@ -86,8 +87,8 @@ make lint            # 代码检查
 
 | 检查项 | 说明 |
 |--------|------|
-| ESLint | JavaScript / TypeScript 代码规范检查 |
-| TypeScript 类型检查 | 确保类型安全，无编译错误 |
+| ESLint | `npm run lint`，JavaScript / TypeScript 代码规范检查 |
+| TypeScript 类型检查 | `npm run build`（内含 vue-tsc），确保类型安全 |
 
 建议在提交前按顺序执行：
 
@@ -100,7 +101,7 @@ make test
 
 # 前端（在 ui/ 目录下）
 npm run lint
-npm run type-check
+npm run build    # 包含 vue-tsc 类型检查
 ```
 
 ## 数据库迁移指南
@@ -149,7 +150,7 @@ ALTER TABLE hosts DROP COLUMN region;
 make dev-docker-up
 ```
 
-该命令启动完整开发环境，包含 Manager API、UI 前端及 MySQL 等基础设施服务。
+该命令启动完整开发环境，包含 Manager、AgentCenter、Consumer、UI 前端及 MySQL / Redis / Kafka / ClickHouse 等基础设施服务。
 
 ### 架构说明
 
@@ -180,9 +181,10 @@ make dev-docker-up
 ```
 plugins/<plugin-name>/
 ├── main.go          # 入口
-├── engine/          # 核心逻辑
-└── go.mod           # 独立 module
+└── engine/          # 核心逻辑（部分插件有）
 ```
+
+所有插件共用项目根目录的 `go.mod`，不是独立 module。当前已有 6 个插件：baseline、collector、fim、scanner、remediation、sensor。
 
 ### 插件 SDK
 
@@ -201,11 +203,15 @@ client, err := plugins.NewClient()
 
 | 编号范围 | 模块 | 说明 |
 |----------|------|------|
+| 1000-1001 | 心跳 | Agent 心跳与插件状态 |
 | 3000-3002 | eBPF | 内核级事件采集 |
 | 5050-5060 | 资产采集 | 主机资产信息上报 |
 | 6001-6002 | FIM | 文件完整性监控 |
-| 7001-7004 | Scanner | 漏洞扫描 |
+| 7000-7004 | Scanner | 病毒扫描结果 |
 | 8000-8004 | 基线检查 | 安全基线合规检测 |
+| 9000-9001 | Remediation | 漏洞修复任务与结果 |
+| 9100 | 依赖安装 | 依赖安装结果（如 Tetragon） |
+| 9999 | 命令回包 | Agent 命令执行结果 |
 
 新增插件时请在上述范围之外分配编号，并在团队内协调避免冲突。
 
@@ -227,15 +233,16 @@ make package-plugins-all
 
 在开始编码之前，先确认对应的 Issue 存在。如果是新功能或你发现的 Bug，先创建 Issue 描述清楚需求或问题。
 
-### 2. Fork 并开发
+### 2. 开发
+
+**内部开发者**：直接在 main 分支开发，不创建功能分支。
+
+**外部贡献者**：Fork 仓库后通过 PR 提交。
 
 ```bash
-# Fork 仓库后克隆你的 fork
+# 外部贡献者：Fork 后克隆
 git clone https://github.com/<your-username>/mxsec-platform.git
 cd mxsec-platform
-
-# 创建功能分支
-git checkout -b feat/your-feature
 
 # 开发并测试
 make test
