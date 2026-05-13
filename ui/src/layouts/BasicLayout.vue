@@ -4,12 +4,10 @@
     <div class="navbar">
       <div class="navbar-left">
         <img
-          v-if="siteConfigStore.siteLogo"
-          :src="siteConfigStore.siteLogo"
+          :src="siteConfigStore.siteLogo || '/logo.png'"
           alt="Logo"
           class="navbar-logo"
         />
-        <div v-else class="navbar-logo-placeholder">M</div>
         <h1 class="navbar-title">{{ siteConfigStore.siteName }}</h1>
         <span class="navbar-version">{{ appVersion }}</span>
       </div>
@@ -341,18 +339,6 @@ const resetChangePasswordForm = () => {
   object-fit: contain;
 }
 
-.navbar-logo-placeholder {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #165DFF, #0E42D2);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-}
 
 .navbar-title {
   font-size: 18px;

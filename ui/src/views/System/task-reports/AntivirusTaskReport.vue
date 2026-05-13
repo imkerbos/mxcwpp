@@ -89,7 +89,7 @@
         <div class="report-page cover-page">
           <div class="cover-content">
             <div class="cover-logo">
-              <SafetyCertificateOutlined style="font-size: 64px; color: #165DFF" />
+              <img src="/logo.png" alt="Logo" style="width: 80px; height: 80px; object-fit: contain;" />
             </div>
             <h1 class="cover-title">{{ report.meta.reportTitle }}</h1>
             <div class="cover-subtitle">Antivirus Scan Report</div>
@@ -361,7 +361,6 @@ import { message } from 'ant-design-vue'
 import {
   FileTextOutlined,
   FilePdfOutlined,
-  SafetyCertificateOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   ArrowLeftOutlined,
