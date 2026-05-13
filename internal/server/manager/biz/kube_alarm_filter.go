@@ -88,17 +88,17 @@ func (s *KubeAlarmService) CreateAlarmWithFilter(alarm *model.KubeAlarm) (bool, 
 		}
 
 		// 找到同指纹 pending 告警 → UPSERT count+1 / last_seen_at
-		updates := map[string]interface{}{
-			"count":         gorm.Expr("count + 1"),
-			"last_seen_at":  now,
-			"severity":      alarm.Severity,
-			"message":       alarm.Message,
-			"cluster_name":  alarm.ClusterName,
-			"pod_name":      alarm.PodName,
-			"node_name":     alarm.NodeName,
-			"container_id":  alarm.ContainerID,
-			"image_name":    alarm.ImageName,
-			"raw_data":      alarm.RawData,
+		updates := map[string]any{
+			"count":        gorm.Expr("count + 1"),
+			"last_seen_at": now,
+			"severity":     alarm.Severity,
+			"message":      alarm.Message,
+			"cluster_name": alarm.ClusterName,
+			"pod_name":     alarm.PodName,
+			"node_name":    alarm.NodeName,
+			"container_id": alarm.ContainerID,
+			"image_name":   alarm.ImageName,
+			"raw_data":     alarm.RawData,
 		}
 
 		// 通知限流：距上次通知超过 throttle 窗口才再次通知
@@ -180,8 +180,10 @@ func (s *KubeAlarmService) matchWhitelist(alarm *model.KubeAlarm) bool {
 
 	for _, rule := range rules {
 		if s.ruleMatches(&rule, alarm) {
-			// 更新命中计数
-			s.db.Model(&rule).UpdateColumn("hit_count", gorm.Expr("hit_count + 1"))
+			// 更新命中计数（SQL 原子操作，无需事务）
+			if err := s.db.Model(&rule).UpdateColumn("hit_count", gorm.Expr("hit_count + 1")).Error; err != nil {
+				s.logger.Warn("更新白名单命中计数失败", zap.Uint("rule_id", rule.ID), zap.Error(err))
+			}
 			return true
 		}
 	}

@@ -37,11 +37,11 @@ func NewLLMAssist(db *gorm.DB, logger *zap.Logger, apiURL, apiKey, modelName str
 
 // AnalysisResult LLM 分析结果
 type AnalysisResult struct {
-	Summary        string   `json:"summary"`
-	RiskLevel      string   `json:"riskLevel"`
-	AttackVector   string   `json:"attackVector"`
+	Summary         string   `json:"summary"`
+	RiskLevel       string   `json:"riskLevel"`
+	AttackVector    string   `json:"attackVector"`
 	Recommendations []string `json:"recommendations"`
-	MitreMapping   []string `json:"mitreMapping"`
+	MitreMapping    []string `json:"mitreMapping"`
 }
 
 // AnalyzeAlert 分析单个告警

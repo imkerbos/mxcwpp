@@ -4,7 +4,7 @@
       <h2>基线修复</h2>
       <a-space>
         <a-button
-          v-if="selectedRowKeys.length > 0 || selectAllFiltered"
+          v-if="isAdmin && (selectedRowKeys.length > 0 || selectAllFiltered)"
           type="primary"
           @click="handleBatchFix"
           :loading="fixing"
@@ -203,7 +203,7 @@
               查看详情
             </a-button>
             <a-popconfirm
-              v-if="record.has_fix"
+              v-if="isAdmin && record.has_fix"
               title="确定要修复此项吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -277,7 +277,7 @@
           </div>
         </a-descriptions-item>
       </a-descriptions>
-      <div style="margin-top: 16px; text-align: right;" v-if="selectedItem?.has_fix">
+      <div style="margin-top: 16px; text-align: right;" v-if="isAdmin && selectedItem?.has_fix">
         <a-popconfirm
           title="确定要执行修复吗？"
           ok-text="确定"
@@ -356,9 +356,12 @@ import {
 } from '@ant-design/icons-vue'
 import { fixApi } from '@/api/fix'
 import { hostsApi } from '@/api/hosts'
+import { useAuthStore } from '@/stores/auth'
 import type { FixableItem, Host, FixResult, FixTaskHostStatus } from '@/api/types'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const fixing = ref(false)

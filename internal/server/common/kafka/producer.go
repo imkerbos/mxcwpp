@@ -19,11 +19,20 @@ type Producer interface {
 	Close() error
 }
 
+const (
+	// 降级队列消息最大重试次数
+	fallbackMaxRetries = 5
+	// 降级队列消息过期时间（超过此时间丢弃）
+	fallbackMsgTTL = 5 * time.Minute
+)
+
 // pendingMsg 是降级队列中暂存的消息
 type pendingMsg struct {
-	topic string
-	key   string
-	msg   *MQMessage
+	topic      string
+	key        string
+	msg        *MQMessage
+	retryCount int
+	enqueuedAt time.Time
 }
 
 // AsyncProducer 封装 sarama AsyncProducer，含降级内存队列
@@ -129,14 +138,28 @@ func (p *AsyncProducer) Send(topic, key string, msg *MQMessage) error {
 	}
 }
 
-// enqueueToFallback 写入降级内存队列
+// enqueueToFallback 写入降级内存队列（首次入队）
 func (p *AsyncProducer) enqueueToFallback(topic, key string, msg *MQMessage) error {
+	return p.enqueueToFallbackWithRetry(topic, key, msg, 0)
+}
+
+// enqueueToFallbackWithRetry 写入降级内存队列（含重试计数）
+func (p *AsyncProducer) enqueueToFallbackWithRetry(topic, key string, msg *MQMessage, retryCount int) error {
+	if retryCount >= fallbackMaxRetries {
+		p.logger.Warn("Kafka 降级队列消息超过最大重试次数，丢弃",
+			zap.String("topic", topic),
+			zap.Int32("data_type", msg.DataType),
+			zap.String("agent_id", msg.AgentID),
+			zap.Int("retry_count", retryCount),
+		)
+		return fmt.Errorf("kafka fallback max retries exceeded, message dropped")
+	}
+
 	select {
-	case p.fallback <- &pendingMsg{topic: topic, key: key, msg: msg}:
+	case p.fallback <- &pendingMsg{topic: topic, key: key, msg: msg, retryCount: retryCount, enqueuedAt: time.Now()}:
 		atomic.AddInt64(&p.fallbackLen, 1)
 		return nil
 	default:
-		// 降级队列也满了，丢弃并记录
 		p.logger.Warn("Kafka 降级队列已满，消息丢弃",
 			zap.String("topic", topic),
 			zap.Int32("data_type", msg.DataType),
@@ -154,11 +177,21 @@ func (p *AsyncProducer) replayLoop() {
 			return
 		case pm := <-p.fallback:
 			atomic.AddInt64(&p.fallbackLen, -1)
-			// 重放：直接放入 Kafka 输入通道，如失败再放回队列（简单重试）
+
+			// 检查消息是否已过期
+			if time.Since(pm.enqueuedAt) > fallbackMsgTTL {
+				p.logger.Warn("Kafka 降级队列消息已过期，丢弃",
+					zap.String("topic", pm.topic),
+					zap.Duration("age", time.Since(pm.enqueuedAt)),
+					zap.Int("retry_count", pm.retryCount),
+				)
+				continue
+			}
+
+			// 重放：直接放入 Kafka 输入通道，如失败再放回队列
 			if err := p.Send(pm.topic, pm.key, pm.msg); err != nil {
-				// 重放失败，等 1s 后再试
 				time.Sleep(1 * time.Second)
-				_ = p.enqueueToFallback(pm.topic, pm.key, pm.msg)
+				_ = p.enqueueToFallbackWithRetry(pm.topic, pm.key, pm.msg, pm.retryCount+1)
 			}
 		}
 	}

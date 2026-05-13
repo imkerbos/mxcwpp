@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"time"
 
@@ -35,10 +36,22 @@ func Logger(logger *zap.Logger) gin.HandlerFunc {
 }
 
 // CORS 是 CORS 中间件
-func CORS() gin.HandlerFunc {
+// allowedOrigins 为空时仅允许同源请求（不设置 Allow-Origin 头）
+func CORS(allowedOrigins []string) gin.HandlerFunc {
+	originSet := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		originSet[o] = struct{}{}
+	}
+
 	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		origin := c.GetHeader("Origin")
+		if origin != "" && len(originSet) > 0 {
+			if _, ok := originSet[origin]; ok {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				c.Writer.Header().Set("Vary", "Origin")
+			}
+		}
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
@@ -47,6 +60,24 @@ func CORS() gin.HandlerFunc {
 			return
 		}
 
+		c.Next()
+	}
+}
+
+// InternalAuth 内部服务通信认证中间件
+// 验证请求头 X-Internal-Secret 是否匹配共享密钥
+func InternalAuth(secret string) gin.HandlerFunc {
+	secretBytes := []byte(secret)
+	return func(c *gin.Context) {
+		provided := c.GetHeader("X-Internal-Secret")
+		if subtle.ConstantTimeCompare([]byte(provided), secretBytes) != 1 {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"message": "unauthorized",
+			})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

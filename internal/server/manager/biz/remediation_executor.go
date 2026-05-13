@@ -40,14 +40,22 @@ type RemediationTaskPayload struct {
 	DryRun       bool   `json:"dry_run"`
 }
 
-// remediationTaskTimeout 修复任务超时时间（running 状态超过此时间视为失败）
-const remediationTaskTimeout = 30 * time.Minute
+const (
+	// remediationPendingTimeout 待确认超时：创建后 24 小时无人确认则自动取消
+	remediationPendingTimeout = 24 * time.Hour
+	// remediationConfirmedTimeout 等待 Agent 超时：确认后 1 小时 Agent 未拉取则标记失败
+	remediationConfirmedTimeout = 1 * time.Hour
+	// remediationRunningTimeout 执行超时：running 状态超过 30 分钟视为失败
+	remediationRunningTimeout = 30 * time.Minute
+)
 
 // DispatchConfirmedTasks 分发已确认的修复任务到 Agent
 func (e *RemediationExecutor) DispatchConfirmedTasks(transferService interface {
 	SendCommand(agentID string, cmd *grpcProto.Command) error
 }) error {
-	// 超时处理：将 running 超过 30 分钟的任务标记为失败
+	// 超时处理
+	e.timeoutPendingTasks()
+	e.timeoutConfirmedTasks()
 	e.timeoutRunningTasks()
 
 	// 查询已确认待执行的任务
@@ -76,9 +84,42 @@ func (e *RemediationExecutor) DispatchConfirmedTasks(transferService interface {
 	return nil
 }
 
+// timeoutPendingTasks 将超时的 pending 任务自动取消
+func (e *RemediationExecutor) timeoutPendingTasks() {
+	cutoff := time.Now().Add(-remediationPendingTimeout)
+
+	result := e.db.Model(&model.RemediationTask{}).
+		Where("status = ? AND created_at < ?", "pending", cutoff).
+		Updates(map[string]any{
+			"status": "cancelled",
+		})
+
+	if result.RowsAffected > 0 {
+		e.logger.Warn("待确认修复任务超时自动取消", zap.Int64("count", result.RowsAffected))
+	}
+}
+
+// timeoutConfirmedTasks 将超时的 confirmed 任务标记为 failed
+func (e *RemediationExecutor) timeoutConfirmedTasks() {
+	cutoff := time.Now().Add(-remediationConfirmedTimeout)
+	now := model.Now()
+
+	result := e.db.Model(&model.RemediationTask{}).
+		Where("status = ? AND confirmed_at < ?", "confirmed", cutoff).
+		Updates(map[string]any{
+			"status":      "failed",
+			"exec_output": "任务超时：确认后 Agent 未在规定时间内拉取任务，请检查目标主机 Agent 是否在线",
+			"finished_at": now,
+		})
+
+	if result.RowsAffected > 0 {
+		e.logger.Warn("已确认修复任务等待 Agent 超时", zap.Int64("count", result.RowsAffected))
+	}
+}
+
 // timeoutRunningTasks 将超时的 running 任务标记为 failed
 func (e *RemediationExecutor) timeoutRunningTasks() {
-	cutoff := time.Now().Add(-remediationTaskTimeout)
+	cutoff := time.Now().Add(-remediationRunningTimeout)
 	now := model.Now()
 
 	result := e.db.Model(&model.RemediationTask{}).
@@ -238,13 +279,29 @@ func (e *RemediationExecutor) HandleResult(agentID string, data map[string]strin
 		return fmt.Errorf("update task status failed: %w", err)
 	}
 
-	// 修复成功时，更新漏洞主机关联状态
+	// 修复成功时，先尝试自动验证版本，再更新状态
 	if status == "success" {
-		remSvc := NewRemediationService(e.db, e.logger)
-		if err := remSvc.PatchVulnerability(task.VulnID, []string{task.HostID}); err != nil {
-			e.logger.Error("更新漏洞修复状态失败",
+		verifier := NewRemediationVerifier(e.db, e.logger)
+		verifyResult, verifyErr := verifier.VerifyHost(task.VulnID, task.HostID)
+
+		if verifyErr == nil && verifyResult != nil && verifyResult.Verified {
+			e.logger.Info("修复任务验证通过，版本已更新",
 				zap.Uint("task_id", task.ID),
-				zap.Error(err))
+				zap.String("current_version", verifyResult.CurrentVersion),
+				zap.String("fixed_version", verifyResult.FixedVersion))
+			// VerifyHost 内部已自动更新 patched 状态
+		} else {
+			// 验证失败或无法验证（无 fixed_version / 软件清单未更新）
+			// 仍然标记为 patched（命令执行成功），但记录日志提示需人工复核
+			e.logger.Warn("修复任务执行成功但自动验证未通过，按执行结果标记修复",
+				zap.Uint("task_id", task.ID),
+				zap.Error(verifyErr))
+			remSvc := NewRemediationService(e.db, e.logger)
+			if err := remSvc.PatchVulnerability(task.VulnID, []string{task.HostID}); err != nil {
+				e.logger.Error("更新漏洞修复状态失败",
+					zap.Uint("task_id", task.ID),
+					zap.Error(err))
+			}
 		}
 	}
 

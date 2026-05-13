@@ -107,7 +107,7 @@ type createDetectionRuleRequest struct {
 func (h *DetectionRulesHandler) CreateRule(c *gin.Context) {
 	var req createDetectionRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *DetectionRulesHandler) UpdateRule(c *gin.Context) {
 
 	var req createDetectionRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 

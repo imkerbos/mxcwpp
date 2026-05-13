@@ -4,7 +4,7 @@
       <h2>任务执行</h2>
       <a-space>
         <a-button
-          v-if="selectedRowKeys.length > 0"
+          v-if="isAdmin && selectedRowKeys.length > 0"
           type="primary"
           @click="handleBatchRun"
           :loading="batchRunning"
@@ -15,7 +15,7 @@
           批量执行 ({{ selectedRowKeys.length }})
         </a-button>
         <a-button
-          v-if="selectedRowKeys.length > 0"
+          v-if="isAdmin && selectedRowKeys.length > 0"
           danger
           @click="handleBatchCancel"
           :loading="batchCanceling"
@@ -26,7 +26,7 @@
           批量取消 ({{ selectedRowKeys.length }})
         </a-button>
         <a-button
-          v-if="selectedRowKeys.length > 0"
+          v-if="isAdmin && selectedRowKeys.length > 0"
           @click="handleBatchDelete"
           :loading="batchDeleting"
         >
@@ -35,7 +35,7 @@
           </template>
           批量删除 ({{ selectedRowKeys.length }})
         </a-button>
-        <a-button type="primary" @click="handleCreate">
+        <a-button v-if="isAdmin" type="primary" @click="handleCreate">
           <template #icon>
             <PlusOutlined />
           </template>
@@ -146,9 +146,9 @@
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space size="small">
-            <!-- 已创建或待执行状态才能执行 -->
+            <!-- 已创建或失败状态才能执行（仅管理员） -->
             <a-popconfirm
-              v-if="record.status === 'created' || record.status === 'pending'"
+              v-if="isAdmin && (record.status === 'created' || record.status === 'failed')"
               title="确定要执行此任务吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -162,9 +162,9 @@
                 执行
               </a-button>
             </a-popconfirm>
-            <!-- 已创建、待执行或执行中状态都可以取消 -->
+            <!-- 已创建、待执行或执行中状态都可以取消（仅管理员） -->
             <a-popconfirm
-              v-if="record.status === 'created' || record.status === 'pending' || record.status === 'running'"
+              v-if="isAdmin && (record.status === 'created' || record.status === 'pending' || record.status === 'running')"
               title="确定要取消此任务吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -236,9 +236,9 @@
             </template>
             {{ getStatusText(selectedTask.status) }}
           </a-tag>
-          <!-- 执行中显示取消按钮 -->
+          <!-- 执行中显示取消按钮（仅管理员） -->
           <a-popconfirm
-            v-if="selectedTask.status === 'running'"
+            v-if="isAdmin && selectedTask.status === 'running'"
             title="确定要取消此任务吗？"
             ok-text="确定"
             cancel-text="取消"
@@ -514,8 +514,12 @@ import {
 import { tasksApi } from '@/api/tasks'
 import { resultsApi } from '@/api/results'
 import { hostsApi } from '@/api/hosts'
+import { useAuthStore } from '@/stores/auth'
 import type { ScanTask } from '@/api/types'
 import TaskModal from './components/TaskModal.vue'
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 interface TaskLog {
   time: string

@@ -32,10 +32,10 @@ type ManagerServices struct {
 	ScoreCache       *biz.BaselineScoreCache
 	RedisScoreCache  *biz.BaselineScoreCacheRedis
 	MetricsService   *biz.MetricsService
-	PrometheusClient *prometheus.Client // Prometheus 查询客户端（可为 nil）
-	ACRegistry       *sd.Registry       // AC 服务发现注册表
-	ACDispatcher     *sd.ACDispatcher   // AC 命令分发器
-	TaskScheduler    *biz.TaskScheduler // Manager 侧任务调度器（多实例安全）
+	PrometheusClient *prometheus.Client  // Prometheus 查询客户端（可为 nil）
+	ACRegistry       *sd.Registry        // AC 服务发现注册表
+	ACDispatcher     *sd.ACDispatcher    // AC 命令分发器
+	TaskScheduler    *biz.TaskScheduler  // Manager 侧任务调度器（多实例安全）
 	VirusDBUpdater   *biz.VirusDBUpdater // 病毒库自动更新器
 }
 

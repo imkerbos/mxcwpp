@@ -98,7 +98,7 @@ type NetInterfaceAsset struct {
 	State         string   `json:"state"`                   // 状态（up、down）
 	BytesRecv     uint64   `json:"bytes_recv,omitempty"`    // 累计接收字节数（/proc/net/dev）
 	BytesSent     uint64   `json:"bytes_sent,omitempty"`    // 累计发送字节数
-	PacketsDrop   uint64   `json:"packets_drop,omitempty"` // 接收丢包数
+	PacketsDrop   uint64   `json:"packets_drop,omitempty"`  // 接收丢包数
 	PacketsError  uint64   `json:"packets_error,omitempty"` // 接收错误数
 }
 

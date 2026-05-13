@@ -631,8 +631,8 @@ func (c *ServiceStatusChecker) formatActualStatus(serviceName string, result *se
 	expectedStatus = strings.ToLower(strings.TrimSpace(expectedStatus))
 
 	// 获取中文描述
-		activeDesc := c.getActiveStatusDesc(result.status)
-		enabledDesc := c.getEnabledStatusDesc(result.enabled)
+	activeDesc := c.getActiveStatusDesc(result.status)
+	enabledDesc := c.getEnabledStatusDesc(result.enabled)
 
 	// 如果期望的是运行状态（active/inactive）
 	if expectedStatus == "active" || expectedStatus == "running" || expectedStatus == "started" ||
@@ -640,7 +640,7 @@ func (c *ServiceStatusChecker) formatActualStatus(serviceName string, result *se
 		// 显示运行状态和中文描述
 		if result.enabled != "" && result.enabled != "not_found" {
 			return fmt.Sprintf("服务 %s 状态: %s（%s，%s）", serviceName, result.status, activeDesc, enabledDesc)
-	}
+		}
 		return fmt.Sprintf("服务 %s 状态: %s（%s）", serviceName, result.status, activeDesc)
 	}
 
@@ -783,7 +783,7 @@ func (c *ServiceStatusChecker) checkSystemdServiceDetailed(ctx context.Context, 
 				default:
 					// 有些系统返回空或其他值，默认设为 disabled
 					if enabledStatus == "" {
-					result.enabled = "disabled"
+						result.enabled = "disabled"
 					} else {
 						result.enabled = enabledStatus
 					}

@@ -41,6 +41,16 @@ func (w *MySQLWriter) WriteBaseline(msg *kafka.MQMessage) error {
 		return fmt.Errorf("解析基线结果失败: %w", err)
 	}
 
+	// 丢弃已取消任务的结果
+	if taskID := fields["task_id"]; taskID != "" {
+		var status string
+		if err := w.db.Model(&model.ScanTask{}).Select("status").
+			Where("task_id = ?", taskID).Scan(&status).Error; err == nil && status == string(model.TaskStatusCancelled) {
+			w.logger.Debug("丢弃已取消任务的结果", zap.String("task_id", taskID))
+			return nil
+		}
+	}
+
 	result := &model.ScanResult{
 		TaskID:        fields["task_id"],
 		HostID:        msg.AgentID,
@@ -177,6 +187,14 @@ func (w *MySQLWriter) WriteTaskCompletion(msg *kafka.MQMessage) error {
 	taskID := fields["task_id"]
 	if taskID == "" {
 		return fmt.Errorf("任务完成信号缺少 task_id")
+	}
+
+	// 丢弃已取消任务的完成信号
+	var taskStatus string
+	if err := w.db.Model(&model.ScanTask{}).Select("status").
+		Where("task_id = ?", taskID).Scan(&taskStatus).Error; err == nil && taskStatus == string(model.TaskStatusCancelled) {
+		w.logger.Debug("丢弃已取消任务的完成信号", zap.String("task_id", taskID))
+		return nil
 	}
 
 	now := model.LocalTime(time.Now())
@@ -372,7 +390,7 @@ func (w *MySQLWriter) WriteFIMTaskComplete(msg *kafka.MQMessage) error {
 			Where("task_id = ? AND host_id = ?", taskID, msg.AgentID).
 			Updates(map[string]interface{}{
 				"status":        fields["status"],
-				"total_entries":  totalEntries,
+				"total_entries": totalEntries,
 				"added_count":   addedCount,
 				"removed_count": removedCount,
 				"changed_count": changedCount,
@@ -479,9 +497,11 @@ func (w *MySQLWriter) WriteScanResult(msg *kafka.MQMessage) error {
 	}
 
 	// 递增任务的 threat_count
-	w.db.Model(&model.AntivirusScanTask{}).
+	if err := w.db.Model(&model.AntivirusScanTask{}).
 		Where("id = ?", taskID).
-		UpdateColumn("threat_count", gorm.Expr("threat_count + 1"))
+		UpdateColumn("threat_count", gorm.Expr("threat_count + 1")).Error; err != nil {
+		w.logger.Warn("递增 threat_count 失败", zap.Uint64("task_id", taskID), zap.Error(err))
+	}
 
 	// 异步发送病毒查杀告警通知
 	go func(r *model.AntivirusScanResult) {

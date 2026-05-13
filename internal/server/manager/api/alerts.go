@@ -3,7 +3,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -31,21 +30,21 @@ func NewAlertsHandler(db *gorm.DB, logger *zap.Logger) *AlertsHandler {
 
 // ListAlertsRequest 获取告警列表请求
 type ListAlertsRequest struct {
-	Page      int    `form:"page" binding:"omitempty,min=1"`
-	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=100"`
-	Status    string `form:"status"`     // active, resolved, ignored
-	Severity  string `form:"severity"`   // critical, high, medium, low
-	HostID    string `form:"host_id"`
-	RuleID    string `form:"rule_id"`
-	Category  string `form:"category"`
-	AlertType     string `form:"alert_type"`     // baseline, runtime, agent_offline
-	Keyword       string `form:"keyword"`        // 搜索标题或描述
-	ResultID      string `form:"result_id"`      // 根据 result_id 查询
-	RuntimeType   string `form:"runtime_type"`   // vm, docker, k8s
-	BusinessLine  string `form:"business_line"`  // 按业务线过滤
-	MitreID       string `form:"mitre_id"`       // 按 MITRE ATT&CK ID 过滤
-	StartTime     string `form:"start_time"`     // 时间范围起 (RFC3339)
-	EndTime       string `form:"end_time"`       // 时间范围止 (RFC3339)
+	Page         int    `form:"page" binding:"omitempty,min=1"`
+	PageSize     int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Status       string `form:"status"`   // active, resolved, ignored
+	Severity     string `form:"severity"` // critical, high, medium, low
+	HostID       string `form:"host_id"`
+	RuleID       string `form:"rule_id"`
+	Category     string `form:"category"`
+	AlertType    string `form:"alert_type"`    // baseline, runtime, agent, vulnerability, fim, virus, kube
+	Keyword      string `form:"keyword"`       // 搜索标题或描述
+	ResultID     string `form:"result_id"`     // 根据 result_id 查询
+	RuntimeType  string `form:"runtime_type"`  // vm, docker, k8s
+	BusinessLine string `form:"business_line"` // 按业务线过滤
+	MitreID      string `form:"mitre_id"`      // 按 MITRE ATT&CK ID 过滤
+	StartTime    string `form:"start_time"`    // 时间范围起 (RFC3339)
+	EndTime      string `form:"end_time"`      // 时间范围止 (RFC3339)
 }
 
 // ListAlerts 获取告警列表
@@ -53,10 +52,7 @@ type ListAlertsRequest struct {
 func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	var req ListAlertsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -93,13 +89,7 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 		query = query.Where("category = ?", req.Category)
 	}
 	if req.AlertType != "" {
-		if req.AlertType == "agent_offline" {
-			query = query.Where("category = ?", "agent_offline")
-		} else if req.AlertType == "runtime" {
-			query = query.Where("rule_id LIKE ?", "cel-%")
-		} else if req.AlertType == "baseline" {
-			query = query.Where("category != ? AND (rule_id NOT LIKE ? OR rule_id = '')", "agent_offline", "cel-%")
-		}
+		query = query.Where("source = ?", req.AlertType)
 	}
 	if req.ResultID != "" {
 		query = query.Where("result_id = ?", req.ResultID)
@@ -136,10 +126,7 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询告警总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询告警列表失败",
-		})
+		InternalError(c, "查询告警列表失败")
 		return
 	}
 
@@ -148,22 +135,16 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 	offset := (req.Page - 1) * req.PageSize
 	if err := query.Order("last_seen_at DESC").Offset(offset).Limit(req.PageSize).Find(&alerts).Error; err != nil {
 		h.logger.Error("查询告警列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询告警列表失败",
-		})
+		InternalError(c, "查询告警列表失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items":      alerts,
-			"total":      total,
-			"page":       req.Page,
-			"page_size":  req.PageSize,
-			"total_page": (int(total) + req.PageSize - 1) / req.PageSize,
-		},
+	Success(c, gin.H{
+		"items":      alerts,
+		"total":      total,
+		"page":       req.Page,
+		"page_size":  req.PageSize,
+		"total_page": (int(total) + req.PageSize - 1) / req.PageSize,
 	})
 }
 
@@ -172,34 +153,22 @@ func (h *AlertsHandler) ListAlerts(c *gin.Context) {
 func (h *AlertsHandler) GetAlert(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的告警ID",
-		})
+		BadRequest(c, "无效的告警ID")
 		return
 	}
 
 	var alert model.Alert
 	if err := h.db.Preload("Host").Preload("Rule").First(&alert, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "告警不存在",
-			})
+			NotFound(c, "告警不存在")
 			return
 		}
 		h.logger.Error("查询告警失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询告警失败",
-		})
+		InternalError(c, "查询告警失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": alert,
-	})
+	Success(c, alert)
 }
 
 // ResolveAlertRequest 解决告警请求
@@ -212,36 +181,24 @@ type ResolveAlertRequest struct {
 func (h *AlertsHandler) ResolveAlert(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的告警ID",
-		})
+		BadRequest(c, "无效的告警ID")
 		return
 	}
 
 	var req ResolveAlertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	var alert model.Alert
 	if err := h.db.First(&alert, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "告警不存在",
-			})
+			NotFound(c, "告警不存在")
 			return
 		}
 		h.logger.Error("查询告警失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询告警失败",
-		})
+		InternalError(c, "查询告警失败")
 		return
 	}
 
@@ -254,18 +211,11 @@ func (h *AlertsHandler) ResolveAlert(c *gin.Context) {
 
 	if err := h.db.Save(&alert).Error; err != nil {
 		h.logger.Error("更新告警失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "解决告警失败",
-		})
+		InternalError(c, "解决告警失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "告警已解决",
-		"data":    alert,
-	})
+	SuccessWithMessage(c, "告警已解决", alert)
 }
 
 // IgnoreAlert 忽略告警
@@ -273,27 +223,18 @@ func (h *AlertsHandler) ResolveAlert(c *gin.Context) {
 func (h *AlertsHandler) IgnoreAlert(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的告警ID",
-		})
+		BadRequest(c, "无效的告警ID")
 		return
 	}
 
 	var alert model.Alert
 	if err := h.db.First(&alert, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "告警不存在",
-			})
+			NotFound(c, "告警不存在")
 			return
 		}
 		h.logger.Error("查询告警失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询告警失败",
-		})
+		InternalError(c, "查询告警失败")
 		return
 	}
 
@@ -301,18 +242,11 @@ func (h *AlertsHandler) IgnoreAlert(c *gin.Context) {
 
 	if err := h.db.Save(&alert).Error; err != nil {
 		h.logger.Error("更新告警失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "忽略告警失败",
-		})
+		InternalError(c, "忽略告警失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "告警已忽略",
-		"data":    alert,
-	})
+	SuccessWithMessage(c, "告警已忽略", alert)
 }
 
 // GetAlertStatistics 获取告警统计
@@ -371,16 +305,13 @@ func (h *AlertsHandler) GetAlertStatistics(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": stats,
-	})
+	Success(c, stats)
 }
 
 // GetRuntimeAlertStatistics 获取运行时告警统计
 // GET /api/v1/alerts/runtime-statistics
 func (h *AlertsHandler) GetRuntimeAlertStatistics(c *gin.Context) {
-	runtimeCondition := "rule_id LIKE 'cel-%'"
+	runtimeCondition := "source = 'runtime'"
 
 	var stats struct {
 		Total    int64 `json:"total"`
@@ -439,10 +370,7 @@ func (h *AlertsHandler) GetRuntimeAlertStatistics(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": stats,
-	})
+	Success(c, stats)
 }
 
 // BatchAlertRequest 批量操作请求
@@ -456,7 +384,7 @@ type BatchAlertRequest struct {
 func (h *AlertsHandler) BatchResolveAlerts(c *gin.Context) {
 	var req BatchAlertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -494,7 +422,7 @@ func (h *AlertsHandler) BatchResolveAlerts(c *gin.Context) {
 func (h *AlertsHandler) BatchIgnoreAlerts(c *gin.Context) {
 	var req BatchAlertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -526,7 +454,7 @@ func (h *AlertsHandler) BatchIgnoreAlerts(c *gin.Context) {
 func (h *AlertsHandler) BatchDeleteAlerts(c *gin.Context) {
 	var req BatchAlertRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

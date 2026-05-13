@@ -16,20 +16,25 @@
       </a-col>
       <a-col :span="4">
         <a-card size="small">
+          <a-statistic title="待确认" :value="stats.pending" :value-style="{ color: '#FF7D00' }" />
+        </a-card>
+      </a-col>
+      <a-col :span="3">
+        <a-card size="small">
           <a-statistic title="严重" :value="stats.critical" :value-style="{ color: '#CB2634' }" />
         </a-card>
       </a-col>
-      <a-col :span="4">
+      <a-col :span="3">
         <a-card size="small">
           <a-statistic title="高危" :value="stats.high" :value-style="{ color: '#fa541c' }" />
         </a-card>
       </a-col>
-      <a-col :span="4">
+      <a-col :span="3">
         <a-card size="small">
           <a-statistic title="中危" :value="stats.medium" :value-style="{ color: '#FF7D00' }" />
         </a-card>
       </a-col>
-      <a-col :span="4">
+      <a-col :span="3">
         <a-card size="small">
           <a-statistic title="低危" :value="stats.low" :value-style="{ color: '#165DFF' }" />
         </a-card>
@@ -60,6 +65,17 @@
         allow-clear
         @change="handleSearch"
       />
+      <a-select
+        v-model:value="filters.status"
+        placeholder="确认状态"
+        style="width: 120px; margin-left: 8px"
+        allow-clear
+        @change="handleSearch"
+      >
+        <a-select-option value="pending">待确认</a-select-option>
+        <a-select-option value="confirmed">已确认</a-select-option>
+        <a-select-option value="escalated">已升级</a-select-option>
+      </a-select>
       <a-select
         v-model:value="filters.change_type"
         placeholder="变更类型"
@@ -103,6 +119,20 @@
       />
     </div>
 
+    <!-- 批量操作栏 -->
+    <div v-if="selectedRowKeys.length > 0" class="batch-action-bar">
+      <span>已选择 {{ selectedRowKeys.length }} 项</span>
+      <a-button
+        type="primary"
+        size="small"
+        :loading="batchConfirmLoading"
+        @click="handleBatchConfirm"
+      >
+        批量确认
+      </a-button>
+      <a-button size="small" @click="selectedRowKeys = []">取消选择</a-button>
+    </div>
+
     <!-- 事件表格 -->
     <a-table
       :columns="columns"
@@ -110,6 +140,11 @@
       :loading="loading"
       :pagination="pagination"
       row-key="event_id"
+      :row-selection="{
+        selectedRowKeys,
+        onChange: (keys: string[]) => selectedRowKeys = keys,
+        getCheckboxProps: (record: FIMEvent) => ({ disabled: record.status !== 'pending' }),
+      }"
       @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
@@ -136,8 +171,16 @@
         <template v-if="column.key === 'category'">
           <a-tag>{{ getCategoryText(record.category) }}</a-tag>
         </template>
+        <template v-if="column.key === 'status'">
+          <a-tag :color="getStatusColor(record.status)" :bordered="false">
+            {{ getStatusText(record.status) }}
+          </a-tag>
+        </template>
         <template v-if="column.key === 'action'">
-          <a @click="showDetail(record)">详情</a>
+          <a-space>
+            <a @click="showDetail(record)">详情</a>
+            <a v-if="record.status === 'pending'" @click="openConfirmModal(record)">确认</a>
+          </a-space>
         </template>
       </template>
     </a-table>
@@ -155,8 +198,10 @@
             <span style="font-family: monospace; font-size: 12px">{{ selectedEvent.event_id }}</span>
           </a-descriptions-item>
           <a-descriptions-item label="主机名">{{ selectedEvent.hostname }}</a-descriptions-item>
-          <a-descriptions-item label="主机 ID">
-            <span style="font-family: monospace; font-size: 12px">{{ selectedEvent.host_id }}</span>
+          <a-descriptions-item label="状态">
+            <a-tag :color="getStatusColor(selectedEvent.status)" :bordered="false">
+              {{ getStatusText(selectedEvent.status) }}
+            </a-tag>
           </a-descriptions-item>
           <a-descriptions-item label="文件路径" :span="2">
             <code>{{ selectedEvent.file_path }}</code>
@@ -173,6 +218,11 @@
           </a-descriptions-item>
           <a-descriptions-item label="分类">{{ getCategoryText(selectedEvent.category) }}</a-descriptions-item>
           <a-descriptions-item label="检测时间">{{ selectedEvent.detected_at }}</a-descriptions-item>
+          <template v-if="selectedEvent.confirmed_by">
+            <a-descriptions-item label="确认人">{{ selectedEvent.confirmed_by }}</a-descriptions-item>
+            <a-descriptions-item label="确认时间">{{ selectedEvent.confirmed_at }}</a-descriptions-item>
+            <a-descriptions-item label="确认原因" :span="2">{{ selectedEvent.confirm_reason || '-' }}</a-descriptions-item>
+          </template>
         </a-descriptions>
 
         <a-divider>变更详情</a-divider>
@@ -193,6 +243,18 @@
               {{ selectedEvent.change_detail.permission_changed ? '是' : '否' }}
             </a-tag>
           </a-descriptions-item>
+          <template v-if="selectedEvent.change_detail.hash_before">
+            <a-descriptions-item label="哈希（前）" :span="2">
+              <code style="font-size: 11px; word-break: break-all">{{ selectedEvent.change_detail.hash_before }}</code>
+            </a-descriptions-item>
+            <a-descriptions-item label="哈希（后）" :span="2">
+              <code style="font-size: 11px; word-break: break-all">{{ selectedEvent.change_detail.hash_after }}</code>
+            </a-descriptions-item>
+          </template>
+          <template v-if="selectedEvent.change_detail.mode_before">
+            <a-descriptions-item label="权限（前）">{{ selectedEvent.change_detail.mode_before }}</a-descriptions-item>
+            <a-descriptions-item label="权限（后）">{{ selectedEvent.change_detail.mode_after }}</a-descriptions-item>
+          </template>
           <a-descriptions-item label="属主变更">
             <a-tag :color="selectedEvent.change_detail.owner_changed ? 'red' : 'green'">
               {{ selectedEvent.change_detail.owner_changed ? '是' : '否' }}
@@ -204,12 +266,26 @@
         </a-descriptions>
       </template>
     </a-modal>
+
+    <!-- 确认弹窗 -->
+    <a-modal
+      v-model:open="confirmModalVisible"
+      title="确认变更为合法"
+      @ok="doConfirm"
+      :confirm-loading="confirmLoading"
+    >
+      <p>确认文件 <code>{{ confirmTarget?.file_path }}</code> 的变更为合法操作？</p>
+      <a-form-item label="确认原因">
+        <a-textarea v-model:value="confirmReason" :rows="3" placeholder="请输入确认原因（如：运维更新配置）" />
+      </a-form-item>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { message } from 'ant-design-vue'
 import { fimApi } from '@/api/fim'
 import type { FIMEvent, FIMEventStats } from '@/api/types'
 import type { Dayjs } from 'dayjs'
@@ -219,9 +295,18 @@ const events = ref<FIMEvent[]>([])
 const detailVisible = ref(false)
 const selectedEvent = ref<FIMEvent | null>(null)
 const dateRange = ref<[Dayjs, Dayjs] | null>(null)
+const selectedRowKeys = ref<string[]>([])
+const batchConfirmLoading = ref(false)
+
+// 确认弹窗
+const confirmModalVisible = ref(false)
+const confirmTarget = ref<FIMEvent | null>(null)
+const confirmReason = ref('')
+const confirmLoading = ref(false)
 
 const stats = reactive<FIMEventStats>({
   total: 0,
+  pending: 0,
   critical: 0,
   high: 0,
   medium: 0,
@@ -237,6 +322,7 @@ const stats = reactive<FIMEventStats>({
 const filters = reactive({
   hostname: '',
   file_path: '',
+  status: undefined as string | undefined,
   change_type: undefined as string | undefined,
   severity: undefined as string | undefined,
   category: undefined as string | undefined,
@@ -258,58 +344,44 @@ const columns = [
   { title: '变更类型', key: 'change_type', width: 90, align: 'center' as const },
   { title: '严重等级', key: 'severity', width: 90, align: 'center' as const },
   { title: '分类', key: 'category', width: 90, align: 'center' as const },
+  { title: '状态', key: 'status', width: 90, align: 'center' as const },
   { title: '检测时间', dataIndex: 'detected_at', width: 170 },
-  { title: '操作', key: 'action', width: 70 },
+  { title: '操作', key: 'action', width: 100 },
 ]
 
 const getSeverityColor = (severity: string) => {
-  const colors: Record<string, string> = {
-    critical: 'red',
-    high: 'orange',
-    medium: 'gold',
-    low: 'blue',
-  }
+  const colors: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold', low: 'blue' }
   return colors[severity] || 'default'
 }
 
 const getSeverityText = (severity: string) => {
-  const texts: Record<string, string> = {
-    critical: '严重',
-    high: '高危',
-    medium: '中危',
-    low: '低危',
-  }
+  const texts: Record<string, string> = { critical: '严重', high: '高危', medium: '中危', low: '低危' }
   return texts[severity] || severity
 }
 
 const getChangeTypeColor = (type: string) => {
-  const colors: Record<string, string> = {
-    added: 'green',
-    removed: 'red',
-    changed: 'orange',
-  }
+  const colors: Record<string, string> = { added: 'green', removed: 'red', changed: 'orange' }
   return colors[type] || 'default'
 }
 
 const getChangeTypeText = (type: string) => {
-  const texts: Record<string, string> = {
-    added: '新增',
-    removed: '删除',
-    changed: '变更',
-  }
+  const texts: Record<string, string> = { added: '新增', removed: '删除', changed: '变更' }
   return texts[type] || type
 }
 
 const getCategoryText = (category: string) => {
-  const texts: Record<string, string> = {
-    binary: '二进制',
-    config: '配置文件',
-    auth: '认证文件',
-    ssh: 'SSH',
-    log: '日志',
-    other: '其他',
-  }
+  const texts: Record<string, string> = { binary: '二进制', config: '配置文件', auth: '认证文件', ssh: 'SSH', log: '日志', other: '其他' }
   return texts[category] || category || '-'
+}
+
+const getStatusColor = (status: string) => {
+  const colors: Record<string, string> = { pending: 'warning', confirmed: 'success', escalated: 'error' }
+  return colors[status] || 'default'
+}
+
+const getStatusText = (status: string) => {
+  const texts: Record<string, string> = { pending: '待确认', confirmed: '已确认', escalated: '已升级' }
+  return texts[status] || status
 }
 
 const fetchEvents = async () => {
@@ -320,6 +392,7 @@ const fetchEvents = async () => {
       page_size: pagination.pageSize,
       hostname: filters.hostname || undefined,
       file_path: filters.file_path || undefined,
+      status: filters.status,
       change_type: filters.change_type,
       severity: filters.severity,
       category: filters.category,
@@ -371,6 +444,47 @@ const showDetail = (event: FIMEvent) => {
   detailVisible.value = true
 }
 
+const openConfirmModal = (event: FIMEvent) => {
+  confirmTarget.value = event
+  confirmReason.value = ''
+  confirmModalVisible.value = true
+}
+
+const doConfirm = async () => {
+  if (!confirmTarget.value) return
+  confirmLoading.value = true
+  try {
+    await fimApi.confirmEvent(confirmTarget.value.event_id, { reason: confirmReason.value })
+    message.success('事件已确认')
+    confirmModalVisible.value = false
+    fetchEvents()
+    fetchStats()
+  } catch {
+    message.error('确认失败')
+  } finally {
+    confirmLoading.value = false
+  }
+}
+
+const handleBatchConfirm = async () => {
+  if (selectedRowKeys.value.length === 0) return
+  batchConfirmLoading.value = true
+  try {
+    const pendingIds = events.value
+      .filter(e => selectedRowKeys.value.includes(e.event_id) && e.status === 'pending')
+      .map(e => e.event_id)
+    const res = await fimApi.batchConfirmEvents(pendingIds, '批量确认')
+    message.success(`已确认 ${res.confirmed} 个事件`)
+    selectedRowKeys.value = []
+    fetchEvents()
+    fetchStats()
+  } catch {
+    message.error('批量确认失败')
+  } finally {
+    batchConfirmLoading.value = false
+  }
+}
+
 onMounted(() => {
   fetchEvents()
   fetchStats()
@@ -378,9 +492,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.fim-events {
-  padding: 0;
-}
+.fim-events { padding: 0; }
 
 .page-header {
   display: flex;
@@ -389,14 +501,8 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.page-header h2 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.stat-cards {
-  margin-bottom: 16px;
-}
+.page-header h2 { margin: 0; font-size: 20px; }
+.stat-cards { margin-bottom: 16px; }
 
 .filter-bar {
   display: flex;
@@ -406,8 +512,17 @@ onMounted(() => {
   gap: 4px;
 }
 
-.file-path {
-  font-family: monospace;
+.batch-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: #E8F3FF;
+  border: 1px solid #BEDAFF;
+  border-radius: 6px;
   font-size: 13px;
 }
+
+.file-path { font-family: monospace; font-size: 13px; }
 </style>

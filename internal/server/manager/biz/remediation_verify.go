@@ -155,24 +155,59 @@ func (v *RemediationVerifier) BatchVerify(vulnID uint) ([]VerifyResult, error) {
 	return results, nil
 }
 
-// compareVersionStrings 简单版本比较（支持 x.y.z 格式）
+// compareVersionStrings 版本比较（支持 epoch:version-release 格式）
+// 比较顺序：epoch → version → release（与 RPM/DEB 标准一致）
 func compareVersionStrings(v1, v2 string) int {
-	// 移除 epoch（如 1:2.3.4 中的 1:）
-	if idx := strings.Index(v1, ":"); idx >= 0 {
-		v1 = v1[idx+1:]
-	}
-	if idx := strings.Index(v2, ":"); idx >= 0 {
-		v2 = v2[idx+1:]
-	}
-
-	// 移除 release suffix（如 1.2.3-4.el7 中的 -4.el7）
-	if idx := strings.IndexByte(v1, '-'); idx >= 0 {
-		v1 = v1[:idx]
-	}
-	if idx := strings.IndexByte(v2, '-'); idx >= 0 {
-		v2 = v2[:idx]
+	// 提取 epoch（默认 0）
+	e1, v1 := splitEpoch(v1)
+	e2, v2 := splitEpoch(v2)
+	if e1 != e2 {
+		if e1 < e2 {
+			return -1
+		}
+		return 1
 	}
 
+	// 分离 version 和 release（如 1.2.3-4.el7）
+	ver1, rel1 := splitRelease(v1)
+	ver2, rel2 := splitRelease(v2)
+
+	// 比较主版本号
+	if cmp := compareSegments(ver1, ver2); cmp != 0 {
+		return cmp
+	}
+
+	// 主版本相同时比较 release（有 release 的视为更新）
+	if rel1 == "" && rel2 == "" {
+		return 0
+	}
+	if rel1 == "" {
+		return -1
+	}
+	if rel2 == "" {
+		return 1
+	}
+	return compareSegments(rel1, rel2)
+}
+
+// splitEpoch 提取 epoch 部分（如 "1:2.3.4" → epoch=1, rest="2.3.4"）
+func splitEpoch(v string) (int, string) {
+	if idx := strings.Index(v, ":"); idx >= 0 {
+		return parseVersionPart(v[:idx]), v[idx+1:]
+	}
+	return 0, v
+}
+
+// splitRelease 分离 version 和 release（如 "1.2.3-4.el7" → "1.2.3", "4.el7"）
+func splitRelease(v string) (string, string) {
+	if idx := strings.IndexByte(v, '-'); idx >= 0 {
+		return v[:idx], v[idx+1:]
+	}
+	return v, ""
+}
+
+// compareSegments 按点号分割后逐段比较版本号
+func compareSegments(v1, v2 string) int {
 	parts1 := strings.Split(v1, ".")
 	parts2 := strings.Split(v2, ".")
 

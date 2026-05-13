@@ -185,7 +185,7 @@ type BatchDeleteQuarantineRequest struct {
 func (h *QuarantineHandler) BatchDelete(c *gin.Context) {
 	var req BatchDeleteQuarantineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

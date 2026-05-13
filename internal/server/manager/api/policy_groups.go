@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,10 +39,7 @@ func (h *PolicyGroupsHandler) ListPolicyGroups(c *gin.Context) {
 
 	if err := query.Find(&groups).Error; err != nil {
 		h.logger.Error("查询策略组列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略组列表失败",
-		})
+		InternalError(c, "查询策略组列表失败")
 		return
 	}
 
@@ -98,13 +94,7 @@ func (h *PolicyGroupsHandler) ListPolicyGroups(c *gin.Context) {
 		result[i].HostCount = int(hostCount)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": len(result),
-			"items": result,
-		},
-	})
+	SuccessPaginated(c, int64(len(result)), result)
 }
 
 // GetPolicyGroup 获取策略组详情
@@ -122,24 +112,15 @@ func (h *PolicyGroupsHandler) GetPolicyGroup(c *gin.Context) {
 
 	if err := query.First(&group).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略组不存在",
-			})
+			NotFound(c, "策略组不存在")
 			return
 		}
 		h.logger.Error("查询策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略组失败",
-		})
+		InternalError(c, "查询策略组失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": group,
-	})
+	Success(c, group)
 }
 
 // CreatePolicyGroupRequest 创建策略组请求
@@ -158,10 +139,7 @@ type CreatePolicyGroupRequest struct {
 func (h *PolicyGroupsHandler) CreatePolicyGroup(c *gin.Context) {
 	var req CreatePolicyGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -175,10 +153,7 @@ func (h *PolicyGroupsHandler) CreatePolicyGroup(c *gin.Context) {
 	var count int64
 	h.db.Model(&model.PolicyGroup{}).Where("id = ?", id).Count(&count)
 	if count > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "策略组 ID 已存在",
-		})
+		Conflict(c, "策略组 ID 已存在")
 		return
 	}
 
@@ -200,19 +175,13 @@ func (h *PolicyGroupsHandler) CreatePolicyGroup(c *gin.Context) {
 
 	if err := h.db.Create(group).Error; err != nil {
 		h.logger.Error("创建策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建策略组失败",
-		})
+		InternalError(c, "创建策略组失败")
 		return
 	}
 
 	h.logger.Info("策略组已创建", zap.String("group_id", group.ID))
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": group,
-	})
+	Created(c, group)
 }
 
 // UpdatePolicyGroupRequest 更新策略组请求
@@ -233,26 +202,17 @@ func (h *PolicyGroupsHandler) UpdatePolicyGroup(c *gin.Context) {
 	var group model.PolicyGroup
 	if err := h.db.Where("id = ?", id).First(&group).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略组不存在",
-			})
+			NotFound(c, "策略组不存在")
 			return
 		}
 		h.logger.Error("查询策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略组失败",
-		})
+		InternalError(c, "查询策略组失败")
 		return
 	}
 
 	var req UpdatePolicyGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -280,10 +240,7 @@ func (h *PolicyGroupsHandler) UpdatePolicyGroup(c *gin.Context) {
 
 	if err := h.db.Model(&group).Updates(updates).Error; err != nil {
 		h.logger.Error("更新策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新策略组失败",
-		})
+		InternalError(c, "更新策略组失败")
 		return
 	}
 
@@ -292,10 +249,7 @@ func (h *PolicyGroupsHandler) UpdatePolicyGroup(c *gin.Context) {
 
 	h.logger.Info("策略组已更新", zap.String("group_id", id))
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": group,
-	})
+	Success(c, group)
 }
 
 // DeletePolicyGroup 删除策略组
@@ -306,17 +260,11 @@ func (h *PolicyGroupsHandler) DeletePolicyGroup(c *gin.Context) {
 	var group model.PolicyGroup
 	if err := h.db.Where("id = ?", id).First(&group).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略组不存在",
-			})
+			NotFound(c, "策略组不存在")
 			return
 		}
 		h.logger.Error("查询策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略组失败",
-		})
+		InternalError(c, "查询策略组失败")
 		return
 	}
 
@@ -324,28 +272,19 @@ func (h *PolicyGroupsHandler) DeletePolicyGroup(c *gin.Context) {
 	var policyCount int64
 	h.db.Model(&model.Policy{}).Where("group_id = ?", id).Count(&policyCount)
 	if policyCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "策略组下存在策略，无法删除",
-		})
+		Conflict(c, "策略组下存在策略，无法删除")
 		return
 	}
 
 	if err := h.db.Delete(&group).Error; err != nil {
 		h.logger.Error("删除策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除策略组失败",
-		})
+		InternalError(c, "删除策略组失败")
 		return
 	}
 
 	h.logger.Info("策略组已删除", zap.String("group_id", id))
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "策略组已删除",
-	})
+	SuccessMessage(c, "策略组已删除")
 }
 
 // GetPolicyGroupStatistics 获取策略组统计信息
@@ -356,17 +295,11 @@ func (h *PolicyGroupsHandler) GetPolicyGroupStatistics(c *gin.Context) {
 	var group model.PolicyGroup
 	if err := h.db.Where("id = ?", id).First(&group).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略组不存在",
-			})
+			NotFound(c, "策略组不存在")
 			return
 		}
 		h.logger.Error("查询策略组失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略组失败",
-		})
+		InternalError(c, "查询策略组失败")
 		return
 	}
 
@@ -421,18 +354,15 @@ func (h *PolicyGroupsHandler) GetPolicyGroupStatistics(c *gin.Context) {
 		lastCheckTime = &lastResult.CheckedAt
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"group_id":        id,
-			"policy_count":    len(policies),
-			"rule_count":      ruleCount,
-			"host_count":      hostCount,
-			"pass_rate":       passRate,
-			"pass_count":      passResults,
-			"fail_count":      failResults,
-			"risk_count":      failResults,
-			"last_check_time": lastCheckTime,
-		},
+	Success(c, gin.H{
+		"group_id":        id,
+		"policy_count":    len(policies),
+		"rule_count":      ruleCount,
+		"host_count":      hostCount,
+		"pass_rate":       passRate,
+		"pass_count":      passResults,
+		"fail_count":      failResults,
+		"risk_count":      failResults,
+		"last_check_time": lastCheckTime,
 	})
 }

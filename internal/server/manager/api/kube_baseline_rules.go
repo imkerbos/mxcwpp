@@ -137,14 +137,14 @@ func (h *KubeBaselineRulesHandler) GetRule(c *gin.Context) {
 }
 
 type createKubeBaselineRuleRequest struct {
-	CheckID     string                  `json:"checkId" binding:"required"`
-	CheckName   string                  `json:"checkName" binding:"required"`
-	Category    string                  `json:"category" binding:"required"`
-	Severity    string                  `json:"severity" binding:"required"`
-	Description string                  `json:"description"`
-	Remediation string                  `json:"remediation"`
-	Benchmark   string                  `json:"benchmark"`
-	CheckConfig *model.KubeCheckConfig  `json:"checkConfig"`
+	CheckID     string                 `json:"checkId" binding:"required"`
+	CheckName   string                 `json:"checkName" binding:"required"`
+	Category    string                 `json:"category" binding:"required"`
+	Severity    string                 `json:"severity" binding:"required"`
+	Description string                 `json:"description"`
+	Remediation string                 `json:"remediation"`
+	Benchmark   string                 `json:"benchmark"`
+	CheckConfig *model.KubeCheckConfig `json:"checkConfig"`
 }
 
 // CreateRule 新增基线规则
@@ -152,14 +152,14 @@ type createKubeBaselineRuleRequest struct {
 func (h *KubeBaselineRulesHandler) CreateRule(c *gin.Context) {
 	var req createKubeBaselineRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
 	// 验证 CEL 表达式
 	if req.CheckConfig != nil && req.CheckConfig.Expression != "" && h.ruleEngine != nil {
 		if err := h.ruleEngine.CompileExpression(req.CheckConfig.Expression); err != nil {
-			BadRequest(c, "CEL 表达式无效: "+err.Error())
+			BadRequest(c, "CEL 表达式无效")
 			return
 		}
 	}
@@ -222,14 +222,14 @@ func (h *KubeBaselineRulesHandler) UpdateRule(c *gin.Context) {
 
 	var req updateKubeBaselineRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
 	// 验证 CEL 表达式
 	if req.CheckConfig != nil && req.CheckConfig.Expression != "" && h.ruleEngine != nil {
 		if err := h.ruleEngine.CompileExpression(req.CheckConfig.Expression); err != nil {
-			BadRequest(c, "CEL 表达式无效: "+err.Error())
+			BadRequest(c, "CEL 表达式无效")
 			return
 		}
 	}
@@ -390,14 +390,14 @@ type createExpressionTemplateRequest struct {
 func (h *KubeBaselineRulesHandler) CreateExpressionTemplate(c *gin.Context) {
 	var req createExpressionTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
 	// 验证 CEL 表达式
 	if h.ruleEngine != nil {
 		if err := h.ruleEngine.CompileExpression(req.Expression); err != nil {
-			BadRequest(c, "CEL 表达式无效: "+err.Error())
+			BadRequest(c, "CEL 表达式无效")
 			return
 		}
 	}
@@ -458,14 +458,14 @@ func (h *KubeBaselineRulesHandler) UpdateExpressionTemplate(c *gin.Context) {
 
 	var req updateExpressionTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
 	// 验证 CEL 表达式
 	if req.Expression != nil && *req.Expression != "" && h.ruleEngine != nil {
 		if err := h.ruleEngine.CompileExpression(*req.Expression); err != nil {
-			BadRequest(c, "CEL 表达式无效: "+err.Error())
+			BadRequest(c, "CEL 表达式无效")
 			return
 		}
 	}
@@ -601,7 +601,7 @@ func (h *KubeBaselineRulesHandler) ImportRules(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&imported); err != nil {
-		BadRequest(c, "JSON 格式错误: "+err.Error())
+		BadRequest(c, "JSON 格式错误")
 		return
 	}
 

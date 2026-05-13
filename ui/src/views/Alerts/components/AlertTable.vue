@@ -27,16 +27,21 @@
       </a-select>
       <a-select
         v-model:value="localFilters.alert_type"
-        placeholder="告警类型"
+        placeholder="告警来源"
         allow-clear
         style="width: 150px"
         @change="handleAlertTypeChange"
       >
         <a-select-option value="baseline">基线安全</a-select-option>
         <a-select-option value="runtime">运行时检测</a-select-option>
-        <a-select-option value="agent_offline">Agent 离线</a-select-option>
+        <a-select-option value="agent">Agent 状态</a-select-option>
+        <a-select-option value="vulnerability">漏洞管理</a-select-option>
+        <a-select-option value="fim">文件完整性</a-select-option>
+        <a-select-option value="virus">病毒查杀</a-select-option>
+        <a-select-option value="kube">容器安全</a-select-option>
       </a-select>
       <a-select
+        v-if="localFilters.alert_type && localFilters.alert_type !== 'agent'"
         v-model:value="localFilters.category"
         placeholder="类别"
         allow-clear
@@ -60,12 +65,42 @@
           <a-select-option value="malware">恶意软件</a-select-option>
           <a-select-option value="ransomware">勒索软件</a-select-option>
         </template>
-        <template v-else>
+        <template v-else-if="localFilters.alert_type === 'baseline'">
           <a-select-option value="ssh">SSH</a-select-option>
           <a-select-option value="password">密码策略</a-select-option>
           <a-select-option value="file_permission">文件权限</a-select-option>
           <a-select-option value="sysctl">内核参数</a-select-option>
           <a-select-option value="service">服务状态</a-select-option>
+        </template>
+        <template v-else-if="localFilters.alert_type === 'vulnerability'">
+          <a-select-option value="os_package">操作系统包</a-select-option>
+          <a-select-option value="middleware">中间件</a-select-option>
+          <a-select-option value="library">依赖库</a-select-option>
+          <a-select-option value="kernel">内核</a-select-option>
+        </template>
+        <template v-else-if="localFilters.alert_type === 'fim'">
+          <a-select-option value="file_created">文件创建</a-select-option>
+          <a-select-option value="file_modified">文件修改</a-select-option>
+          <a-select-option value="file_deleted">文件删除</a-select-option>
+          <a-select-option value="permission_changed">权限变更</a-select-option>
+          <a-select-option value="ownership_changed">属主变更</a-select-option>
+        </template>
+        <template v-else-if="localFilters.alert_type === 'virus'">
+          <a-select-option value="trojan">木马</a-select-option>
+          <a-select-option value="worm">蠕虫</a-select-option>
+          <a-select-option value="ransomware">勒索软件</a-select-option>
+          <a-select-option value="backdoor">后门</a-select-option>
+          <a-select-option value="miner">挖矿程序</a-select-option>
+          <a-select-option value="rootkit">Rootkit</a-select-option>
+          <a-select-option value="pua">潜在有害</a-select-option>
+        </template>
+        <template v-else-if="localFilters.alert_type === 'kube'">
+          <a-select-option value="container_escape">容器逃逸</a-select-option>
+          <a-select-option value="image_vuln">镜像漏洞</a-select-option>
+          <a-select-option value="rbac_misconfig">RBAC 配置</a-select-option>
+          <a-select-option value="privileged_container">特权容器</a-select-option>
+          <a-select-option value="secret_exposure">密钥泄露</a-select-option>
+          <a-select-option value="network_policy">网络策略</a-select-option>
         </template>
       </a-select>
       <a-select
@@ -121,7 +156,12 @@
       @change="handleTableChange"
     >
       <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'severity'">
+        <template v-if="column.key === 'source'">
+          <a-tag :color="getSourceColor(record.source)">
+            {{ getSourceText(record.source) }}
+          </a-tag>
+        </template>
+        <template v-else-if="column.key === 'severity'">
           <a-tag :color="getSeverityColor(record.severity)">
             {{ getSeverityText(record.severity) }}
           </a-tag>
@@ -343,6 +383,11 @@ const columns = [
     ellipsis: true,
   },
   {
+    title: '告警来源',
+    key: 'source',
+    width: 110,
+  },
+  {
     title: '严重级别',
     key: 'severity',
     width: 100,
@@ -380,6 +425,32 @@ const columns = [
     fixed: 'right',
   },
 ]
+
+const getSourceColor = (source: string) => {
+  const colors: Record<string, string> = {
+    baseline: 'blue',
+    runtime: 'red',
+    agent: 'orange',
+    vulnerability: 'volcano',
+    fim: 'purple',
+    virus: 'magenta',
+    kube: 'cyan',
+  }
+  return colors[source] || 'default'
+}
+
+const getSourceText = (source: string) => {
+  const texts: Record<string, string> = {
+    baseline: '基线安全',
+    runtime: '运行时检测',
+    agent: 'Agent 状态',
+    vulnerability: '漏洞管理',
+    fim: '文件完整性',
+    virus: '病毒查杀',
+    kube: '容器安全',
+  }
+  return texts[source] || source || '未知'
+}
 
 const getSeverityColor = (severity: string) => {
   const colors: Record<string, string> = {

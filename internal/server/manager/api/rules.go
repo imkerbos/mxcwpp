@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -38,37 +37,22 @@ func (h *RulesHandler) ListRules(c *gin.Context) {
 	_, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
 		return
 	}
 
 	rules, err := h.service.ListRules(policyID)
 	if err != nil {
 		h.logger.Error("查询规则列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询规则列表失败",
-		})
+		InternalError(c, "查询规则列表失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": rules,
-			"total": len(rules),
-		},
-	})
+	SuccessPaginated(c, int64(len(rules)), rules)
 }
 
 // GetRule 获取规则详情
@@ -79,24 +63,15 @@ func (h *RulesHandler) GetRule(c *gin.Context) {
 	rule, err := h.service.GetRule(ruleID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "规则不存在",
-			})
+			NotFound(c, "规则不存在")
 			return
 		}
 		h.logger.Error("查询规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询规则失败",
-		})
+		InternalError(c, "查询规则失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": rule,
-	})
+	Success(c, rule)
 }
 
 // CreateRuleRequest 创建规则请求
@@ -120,36 +95,24 @@ func (h *RulesHandler) CreateRule(c *gin.Context) {
 	_, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
 		return
 	}
 
 	var req CreateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 检查规则 ID 是否已存在
 	_, err = h.service.GetRule(req.RuleID)
 	if err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "规则 ID 已存在",
-		})
+		Conflict(c, "规则 ID 已存在")
 		return
 	}
 
@@ -178,20 +141,14 @@ func (h *RulesHandler) CreateRule(c *gin.Context) {
 
 	if err := h.service.CreateRule(rule); err != nil {
 		h.logger.Error("创建规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建规则失败",
-		})
+		InternalError(c, "创建规则失败")
 		return
 	}
 
 	// 重新查询规则
 	createdRule, _ := h.service.GetRule(req.RuleID)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": createdRule,
-	})
+	Created(c, createdRule)
 }
 
 // UpdateRuleRequest 更新规则请求
@@ -214,26 +171,17 @@ func (h *RulesHandler) UpdateRule(c *gin.Context) {
 	rule, err := h.service.GetRule(ruleID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "规则不存在",
-			})
+			NotFound(c, "规则不存在")
 			return
 		}
 		h.logger.Error("查询规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询规则失败",
-		})
+		InternalError(c, "查询规则失败")
 		return
 	}
 
 	var req UpdateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -262,20 +210,14 @@ func (h *RulesHandler) UpdateRule(c *gin.Context) {
 
 	if err := h.service.UpdateRule(rule); err != nil {
 		h.logger.Error("更新规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新规则失败",
-		})
+		InternalError(c, "更新规则失败")
 		return
 	}
 
 	// 重新查询规则
 	updatedRule, _ := h.service.GetRule(ruleID)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": updatedRule,
-	})
+	Success(c, updatedRule)
 }
 
 // DeleteRule 删除规则
@@ -287,31 +229,19 @@ func (h *RulesHandler) DeleteRule(c *gin.Context) {
 	_, err := h.service.GetRule(ruleID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "规则不存在",
-			})
+			NotFound(c, "规则不存在")
 			return
 		}
 		h.logger.Error("查询规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询规则失败",
-		})
+		InternalError(c, "查询规则失败")
 		return
 	}
 
 	if err := h.service.DeleteRule(ruleID); err != nil {
 		h.logger.Error("删除规则失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除规则失败",
-		})
+		InternalError(c, "删除规则失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "规则已删除",
-	})
+	SuccessMessage(c, "规则已删除")
 }

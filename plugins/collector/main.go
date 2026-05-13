@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/collector/engine"
@@ -36,8 +35,8 @@ func main() {
 	}
 	defer client.Close()
 
-	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/collector.log）
-	logger, err := newPluginLogger()
+	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到日志文件）
+	logger, err := plugins.NewPluginLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -78,7 +77,7 @@ func main() {
 
 	// 7. 启动任务接收循环
 	taskCh := make(chan *bridge.Task, 10)
-	go receiveTasks(ctx, client, taskCh, logger)
+	go plugins.ReceiveTaskLoop(ctx, client, taskCh, logger)
 
 	// 8. 启动采集引擎（定时采集）
 	go collectEngine.Run(ctx)
@@ -96,33 +95,6 @@ func main() {
 		case task := <-taskCh:
 			if err := handleTask(ctx, task, collectEngine, logger); err != nil {
 				logger.Error("failed to handle task", zap.Error(err))
-			}
-		}
-	}
-}
-
-// receiveTasks 接收任务
-func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *bridge.Task, logger *zap.Logger) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			task, err := client.ReceiveTask()
-			if err != nil {
-				if err.Error() == "EOF" {
-					logger.Info("pipe closed, exiting")
-					return
-				}
-				logger.Error("failed to receive task", zap.Error(err))
-				time.Sleep(time.Second)
-				continue
-			}
-
-			select {
-			case taskCh <- task:
-			case <-ctx.Done():
-				return
 			}
 		}
 	}
@@ -167,21 +139,4 @@ func handleCollectTask(ctx context.Context, task *bridge.Task, taskData map[stri
 
 	logger.Info("collect task completed", zap.String("type", collectType))
 	return nil
-}
-
-// newPluginLogger 创建插件专用的 logger
-// 输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/collector.log
-func newPluginLogger() (*zap.Logger, error) {
-	config := zap.NewProductionConfig()
-	// 输出到 stderr（Agent 会重定向到日志文件）
-	config.OutputPaths = []string{"stderr"}
-	config.ErrorOutputPaths = []string{"stderr"}
-	// 使用 JSON 格式，便于解析
-	config.Encoding = "json"
-	// 设置日志级别为 Info
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	// 使用人类可读的时间格式
-	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	return config.Build()
 }

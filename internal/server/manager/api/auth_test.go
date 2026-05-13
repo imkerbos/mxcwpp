@@ -406,6 +406,57 @@ func TestLogout(t *testing.T) {
 	assert.Equal(t, "登出成功", resp["message"])
 }
 
+// --- GetCaptcha 测试 ---
+
+func TestGetCaptcha_Success(t *testing.T) {
+	h := newTestAuthHandler()
+
+	w := httptest.NewRecorder()
+	_, r := gin.CreateTestContext(w)
+	r.GET("/auth/captcha", h.GetCaptcha)
+
+	req := httptest.NewRequest("GET", "/auth/captcha", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, 200, w.Code)
+
+	var resp map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+
+	data, ok := resp["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotEmpty(t, data["captcha_id"])
+	assert.NotEmpty(t, data["captcha_image"])
+	// base64 图片应以 data:image 开头
+	assert.Contains(t, data["captcha_image"].(string), "data:image")
+}
+
+// --- Login 验证码校验测试 ---
+
+func TestLogin_WrongCaptcha(t *testing.T) {
+	h := newTestAuthHandler()
+
+	w := httptest.NewRecorder()
+	_, r := gin.CreateTestContext(w)
+	r.POST("/auth/login", h.Login)
+
+	body, _ := json.Marshal(map[string]string{
+		"username":     "admin",
+		"password":     "password123",
+		"captcha_id":   "non-existent-id",
+		"captcha_code": "00000",
+	})
+	req := httptest.NewRequest("POST", "/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Contains(t, resp["message"], "验证码")
+}
+
 // --- Login 请求绑定测试（不需要数据库） ---
 
 func TestLogin_MissingFields(t *testing.T) {
@@ -415,8 +466,10 @@ func TestLogin_MissingFields(t *testing.T) {
 		name string
 		body interface{}
 	}{
-		{"缺少 username", map[string]string{"password": "123456"}},
-		{"缺少 password", map[string]string{"username": "admin"}},
+		{"缺少 username", map[string]string{"password": "123456", "captcha_id": "x", "captcha_code": "1"}},
+		{"缺少 password", map[string]string{"username": "admin", "captcha_id": "x", "captcha_code": "1"}},
+		{"缺少 captcha_id", map[string]string{"username": "admin", "password": "123456", "captcha_code": "1"}},
+		{"缺少 captcha_code", map[string]string{"username": "admin", "password": "123456", "captcha_id": "x"}},
 		{"空 body", map[string]string{}},
 	}
 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # UI 生产镜像
-FROM --platform=linux/amd64 node:18-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:18-alpine AS builder
 
 WORKDIR /app
 COPY ui/package*.json ./
@@ -11,14 +11,17 @@ COPY ui/ .
 RUN --mount=type=cache,target=/root/.npm \
     npm run build
 
-FROM --platform=linux/amd64 nginx:alpine
+FROM nginx:alpine
 
-RUN apk add --no-cache tzdata
+RUN apk add --no-cache tzdata && \
+    mkdir -p /etc/nginx/ssl /var/cache/nginx /var/run && \
+    chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /var/log/nginx /var/run
 
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-RUN mkdir -p /etc/nginx/ssl
+COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
 EXPOSE 80 443
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1/health || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

@@ -25,7 +25,7 @@ type KubeBaselineAlert struct {
 	Remediation       string                  `gorm:"column:remediation;type:text" json:"remediation"`
 	AffectedResources AffectedResources       `gorm:"column:affected_resources;type:json" json:"affectedResources"`
 	Fingerprint       string                  `gorm:"column:fingerprint;type:varchar(128);not null;uniqueIndex" json:"fingerprint"`
-	Status            KubeBaselineAlertStatus  `gorm:"column:status;type:varchar(20);not null;default:'active';index" json:"status"`
+	Status            KubeBaselineAlertStatus `gorm:"column:status;type:varchar(20);not null;default:'active';index" json:"status"`
 	FirstSeenAt       LocalTime               `gorm:"column:first_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"firstSeenAt"`
 	LastSeenAt        LocalTime               `gorm:"column:last_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"lastSeenAt"`
 	ResolvedAt        *LocalTime              `gorm:"column:resolved_at;type:timestamp" json:"resolvedAt"`

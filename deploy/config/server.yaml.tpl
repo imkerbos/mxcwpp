@@ -12,6 +12,8 @@ server:
   jwt_secret: "__JWT_SECRET__"
   manager_addr: "__MANAGER_ADDR__"
   instance_id: "__INSTANCE_ID__"
+  cors_origins: __CORS_ORIGINS__
+  internal_secret: "__INTERNAL_SECRET__"
 
 database:
   type: "mysql"
@@ -65,6 +67,8 @@ clickhouse:
   conn_max_lifetime: 1h
 
 metrics:
+  basic_auth_user: "__METRICS_BASIC_AUTH_USER__"
+  basic_auth_password: "__METRICS_BASIC_AUTH_PASSWORD__"
   prometheus:
     enabled: __PROMETHEUS_ENABLED__
     query_url: "__PROMETHEUS_QUERY_URL__"

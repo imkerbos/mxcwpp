@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/scanner/engine"
@@ -29,13 +27,6 @@ var (
 )
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "PANIC in main: %v\nStack trace:\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	// 1. 初始化插件客户端
 	client, err := plugins.NewClient()
 	if err != nil {
@@ -45,7 +36,7 @@ func main() {
 	defer client.Close()
 
 	// 2. 初始化日志
-	logger, err := newPluginLogger()
+	logger, err := plugins.NewPluginLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -73,7 +64,7 @@ func main() {
 
 	// 6. 启动任务接收循环
 	taskCh := make(chan *bridge.Task, 10)
-	go receiveTasks(ctx, client, taskCh, logger)
+	go plugins.ReceiveTaskLoop(ctx, client, taskCh, logger)
 
 	logger.Info("scanner plugin initialization completed, entering main loop")
 
@@ -95,51 +86,9 @@ func main() {
 	}
 }
 
-// receiveTasks 接收任务
-func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *bridge.Task, logger *zap.Logger) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in receiveTasks goroutine",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			task, err := client.ReceiveTask()
-			if err != nil {
-				if err.Error() == "EOF" || err.Error() == "io: read/write on closed pipe" {
-					logger.Warn("pipe closed, plugin will exit", zap.Error(err))
-					return
-				}
-				logger.Error("failed to receive task, will retry", zap.Error(err))
-				time.Sleep(time.Second)
-				continue
-			}
-
-			select {
-			case taskCh <- task:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-}
-
 // handleTask 处理任务
 func handleTask(ctx context.Context, task *bridge.Task, scanEngine *engine.Engine, client *plugins.Client, logger *zap.Logger) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in handleTask",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-			err = fmt.Errorf("panic in handleTask: %v", r)
-		}
-	}()
+	defer plugins.RecoverAndLog(logger, "handleTask")()
 
 	logger.Info("received task",
 		zap.Int32("data_type", task.DataType),
@@ -263,17 +212,6 @@ func handleQuarantineTask(ctx context.Context, task *bridge.Task, scanEngine *en
 	}
 
 	return nil
-}
-
-// newPluginLogger 创建插件专用的 logger
-func newPluginLogger() (*zap.Logger, error) {
-	config := zap.NewProductionConfig()
-	config.OutputPaths = []string{"stderr"}
-	config.ErrorOutputPaths = []string{"stderr"}
-	config.Encoding = "json"
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	return config.Build()
 }
 
 // logDependencyStatus 打印扫描引擎依赖的可用性状态

@@ -73,9 +73,31 @@
               size="large"
               placeholder="密码"
               :prefix="h(LockOutlined)"
-              @pressEnter="handleLogin"
               class="login-input"
             />
+          </a-form-item>
+          <a-form-item name="captcha_code">
+            <div class="captcha-row">
+              <a-input
+                v-model:value="form.captcha_code"
+                size="large"
+                placeholder="验证码"
+                :prefix="h(SafetyCertificateOutlined)"
+                @pressEnter="handleLogin"
+                class="captcha-input"
+              />
+              <img
+                v-if="captchaImage"
+                :src="captchaImage"
+                alt="验证码"
+                class="captcha-image"
+                @click="refreshCaptcha"
+                title="点击刷新验证码"
+              />
+              <div v-else class="captcha-placeholder" @click="refreshCaptcha">
+                加载中...
+              </div>
+            </div>
           </a-form-item>
           <a-form-item>
             <a-button
@@ -94,6 +116,36 @@
         <div v-if="error" class="error-message">
           <a-alert :message="error" type="error" show-icon />
         </div>
+
+        <!-- 强制修改密码弹窗 -->
+        <a-modal
+          v-model:open="showChangePassword"
+          title="首次登录 — 请修改默认密码"
+          :closable="false"
+          :maskClosable="false"
+          :footer="null"
+        >
+          <p style="color: #86909C; margin-bottom: 16px;">为确保账户安全，请设置新密码（至少 8 位）</p>
+          <a-form layout="vertical" @finish="handleChangePassword">
+            <a-form-item label="新密码" required>
+              <a-input-password
+                v-model:value="changePasswordForm.new_password"
+                placeholder="请输入新密码（至少 8 位）"
+              />
+            </a-form-item>
+            <a-form-item label="确认新密码" required>
+              <a-input-password
+                v-model:value="changePasswordForm.confirm_password"
+                placeholder="请再次输入新密码"
+              />
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" html-type="submit" block :loading="changePwdLoading">
+                确认修改
+              </a-button>
+            </a-form-item>
+          </a-form>
+        </a-modal>
       </div>
 
       <!-- 页脚 -->
@@ -107,18 +159,33 @@
 <script setup lang="ts">
 import { ref, reactive, h, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
+import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteConfigStore } from '@/stores/site-config'
+import { authApi } from '@/api/auth'
 import type { Rule } from 'ant-design-vue/es/form'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const siteConfigStore = useSiteConfigStore()
 
-// 初始化站点配置
+const captchaId = ref('')
+const captchaImage = ref('')
+
+const refreshCaptcha = async () => {
+  try {
+    const res = await authApi.getCaptcha()
+    captchaId.value = res.captcha_id
+    captchaImage.value = res.captcha_image
+  } catch (e) {
+    console.error('获取验证码失败:', e)
+  }
+}
+
+// 初始化站点配置和验证码
 onMounted(() => {
   siteConfigStore.init()
+  refreshCaptcha()
 })
 
 const loading = ref(false)
@@ -127,26 +194,71 @@ const error = ref('')
 const form = reactive({
   username: '',
   password: '',
+  captcha_code: '',
 })
 
 const rules: Record<string, Rule[]> = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  captcha_code: [{ required: true, message: '请输入验证码', trigger: 'blur' }],
 }
+
+const showChangePassword = ref(false)
+const changePasswordForm = reactive({
+  old_password: '',
+  new_password: '',
+  confirm_password: '',
+})
+const changePwdLoading = ref(false)
 
 const handleLogin = async () => {
   error.value = ''
   loading.value = true
   try {
-    await authStore.login({
+    const response = await authStore.login({
       username: form.username,
       password: form.password,
+      captcha_id: captchaId.value,
+      captcha_code: form.captcha_code,
     })
-    router.push('/')
+    if (response.need_change_password) {
+      showChangePassword.value = true
+      changePasswordForm.old_password = form.password
+    } else {
+      router.push('/')
+    }
   } catch (err: any) {
     error.value = err.message || '登录失败，请检查用户名和密码'
+    // 登录失败后刷新验证码（旧验证码已被消费）
+    form.captcha_code = ''
+    refreshCaptcha()
   } finally {
     loading.value = false
+  }
+}
+
+const handleChangePassword = async () => {
+  if (changePasswordForm.new_password !== changePasswordForm.confirm_password) {
+    error.value = '两次输入的密码不一致'
+    return
+  }
+  if (changePasswordForm.new_password.length < 8) {
+    error.value = '新密码长度至少 8 位'
+    return
+  }
+  changePwdLoading.value = true
+  error.value = ''
+  try {
+    await authApi.changePassword({
+      old_password: changePasswordForm.old_password,
+      new_password: changePasswordForm.new_password,
+    })
+    showChangePassword.value = false
+    router.push('/')
+  } catch (err: any) {
+    error.value = err.message || '修改密码失败'
+  } finally {
+    changePwdLoading.value = false
   }
 }
 </script>
@@ -362,6 +474,54 @@ const handleLogin = async () => {
 .login-button:hover {
   box-shadow: 0 6px 16px rgba(22, 93, 255, 0.45);
   transform: translateY(-1px);
+}
+
+.captcha-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.captcha-input {
+  flex: 1;
+  height: 48px;
+  border-radius: 8px;
+}
+
+.captcha-input :deep(.ant-input) {
+  font-size: 15px;
+}
+
+.captcha-input :deep(.anticon) {
+  color: #86909C;
+  font-size: 16px;
+}
+
+.captcha-image {
+  height: 48px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #e5e6eb;
+  flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+
+.captcha-image:hover {
+  opacity: 0.75;
+}
+
+.captcha-placeholder {
+  height: 48px;
+  width: 150px;
+  border-radius: 8px;
+  border: 1px solid #e5e6eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #86909C;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .error-message {

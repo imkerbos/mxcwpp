@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +11,9 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -22,15 +23,17 @@ type TasksHandler struct {
 	policyService *service.PolicyService
 	db            *gorm.DB
 	logger        *zap.Logger
+	acDispatcher  *sd.ACDispatcher // 用于向 Agent 发送取消命令
 }
 
 // NewTasksHandler 创建任务处理器
-func NewTasksHandler(db *gorm.DB, logger *zap.Logger) *TasksHandler {
+func NewTasksHandler(db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) *TasksHandler {
 	return &TasksHandler{
 		taskService:   service.NewTaskService(db, logger),
 		policyService: service.NewPolicyService(db, logger),
 		db:            db,
 		logger:        logger,
+		acDispatcher:  acDispatcher,
 	}
 }
 
@@ -138,10 +141,7 @@ func (h *TasksHandler) enrichTaskWithTargetHosts(task *model.ScanTask) *TaskResp
 func (h *TasksHandler) CreateTask(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -151,10 +151,7 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 		policyIDs = []string{req.PolicyID}
 	}
 	if len(policyIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请至少指定一个策略 (policy_id 或 policy_ids)",
-		})
+		BadRequest(c, "请至少指定一个策略 (policy_id 或 policy_ids)")
 		return
 	}
 
@@ -163,17 +160,11 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 		_, err := h.policyService.GetPolicy(policyID)
 		if err != nil {
 			if strings.Contains(err.Error(), "不存在") {
-				c.JSON(http.StatusNotFound, gin.H{
-					"code":    404,
-					"message": "策略不存在: " + policyID,
-				})
+				NotFound(c, "策略不存在: "+policyID)
 				return
 			}
 			h.logger.Error("查询策略失败", zap.String("policy_id", policyID), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "查询策略失败",
-			})
+			InternalError(c, "查询策略失败")
 			return
 		}
 	}
@@ -181,10 +172,7 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 	// 解析目标配置
 	targetType, ok := req.Targets["type"].(string)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "targets.type 必须为字符串",
-		})
+		BadRequest(c, "targets.type 必须为字符串")
 		return
 	}
 
@@ -201,10 +189,7 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 	case "host_ids":
 		hostIDsInterface, ok := req.Targets["host_ids"].([]interface{})
 		if !ok {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "targets.host_ids 必须为数组",
-			})
+			BadRequest(c, "targets.host_ids 必须为数组")
 			return
 		}
 		hostIDs := make([]string, 0, len(hostIDsInterface))
@@ -217,10 +202,7 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 	case "os_family":
 		osFamilyInterface, ok := req.Targets["os_family"].([]interface{})
 		if !ok {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "targets.os_family 必须为数组",
-			})
+			BadRequest(c, "targets.os_family 必须为数组")
 			return
 		}
 		osFamily := make([]string, 0, len(osFamilyInterface))
@@ -231,10 +213,7 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 		}
 		targetConfig.OSFamily = osFamily
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的 target_type: " + targetType,
-		})
+		BadRequest(c, "无效的 target_type: "+targetType)
 		return
 	}
 
@@ -253,19 +232,13 @@ func (h *TasksHandler) CreateTask(c *gin.Context) {
 
 	if err := h.db.Create(task).Error; err != nil {
 		h.logger.Error("创建任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建任务失败",
-		})
+		InternalError(c, "创建任务失败")
 		return
 	}
 
 	h.logger.Info("任务已创建", zap.String("task_id", task.TaskID))
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": h.enrichTaskWithTargetHosts(task),
-	})
+	Created(c, h.enrichTaskWithTargetHosts(task))
 }
 
 // ListTasks 获取任务列表
@@ -292,10 +265,7 @@ func (h *TasksHandler) ListTasks(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询任务总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务列表失败",
-		})
+		InternalError(c, "查询任务列表失败")
 		return
 	}
 
@@ -304,10 +274,7 @@ func (h *TasksHandler) ListTasks(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&tasks).Error; err != nil {
 		h.logger.Error("查询任务列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务列表失败",
-		})
+		InternalError(c, "查询任务列表失败")
 		return
 	}
 
@@ -317,13 +284,7 @@ func (h *TasksHandler) ListTasks(c *gin.Context) {
 		enrichedTasks[i] = h.enrichTaskWithTargetHosts(&tasks[i])
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": enrichedTasks,
-		},
-	})
+	SuccessPaginated(c, total, enrichedTasks)
 }
 
 // GetTask 获取任务详情
@@ -334,24 +295,15 @@ func (h *TasksHandler) GetTask(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "任务不存在",
-			})
+			NotFound(c, "任务不存在")
 			return
 		}
 		h.logger.Error("查询任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务失败",
-		})
+		InternalError(c, "查询任务失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": h.enrichTaskWithTargetHosts(&task),
-	})
+	Success(c, h.enrichTaskWithTargetHosts(&task))
 }
 
 // RunTask 执行任务
@@ -362,30 +314,20 @@ func (h *TasksHandler) RunTask(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "任务不存在",
-			})
+			NotFound(c, "任务不存在")
 			return
 		}
 		h.logger.Error("查询任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务失败",
-		})
+		InternalError(c, "查询任务失败")
 		return
 	}
 
-	// 检查任务状态
-	if task.Status == model.TaskStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "任务正在执行中，无法重复执行",
-		})
+	// 只有 created 和 failed 状态的任务可以（重新）执行
+	if task.Status != model.TaskStatusCreated && task.Status != model.TaskStatusFailed {
+		Conflict(c, "任务状态为 "+string(task.Status)+"，无法执行（仅允许 created/failed 状态）")
 		return
 	}
 
-	// created 或其他状态的任务都可以执行
 	// 重置任务状态为 pending，等待调度器处理
 	// 设置 executed_at 为执行请求时间（用于计算超时）
 	now := time.Now()
@@ -399,10 +341,7 @@ func (h *TasksHandler) RunTask(c *gin.Context) {
 		"updated_at":            now,
 	}).Error; err != nil {
 		h.logger.Error("更新任务状态失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新任务状态失败",
-		})
+		InternalError(c, "更新任务状态失败")
 		return
 	}
 
@@ -411,11 +350,7 @@ func (h *TasksHandler) RunTask(c *gin.Context) {
 	// 重新查询更新后的任务
 	h.db.Where("task_id = ?", taskID).First(&task)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "任务已标记为待执行，等待调度器处理",
-		"data":    h.enrichTaskWithTargetHosts(&task),
-	})
+	SuccessWithMessage(c, "任务已标记为待执行，等待调度器处理", h.enrichTaskWithTargetHosts(&task))
 }
 
 // CancelTask 取消任务
@@ -426,42 +361,42 @@ func (h *TasksHandler) CancelTask(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "任务不存在",
-			})
+			NotFound(c, "任务不存在")
 			return
 		}
 		h.logger.Error("查询任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务失败",
-		})
+		InternalError(c, "查询任务失败")
 		return
 	}
 
 	// 检查任务状态，只有 created、pending 或 running 状态的任务可以取消
 	if task.Status != model.TaskStatusCreated && task.Status != model.TaskStatusPending && task.Status != model.TaskStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "任务状态为 " + string(task.Status) + "，无法取消",
-		})
+		Conflict(c, "任务状态为 "+string(task.Status)+"，无法取消")
 		return
 	}
 
-	// 更新任务状态为 cancelled
+	// CAS：仅当状态仍为原值时更新，防止与调度器竞争
 	now := time.Now()
-	if err := h.db.Model(&task).Updates(map[string]interface{}{
-		"status":       model.TaskStatusCancelled,
-		"completed_at": now,
-		"updated_at":   now,
-	}).Error; err != nil {
-		h.logger.Error("取消任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "取消任务失败",
+	result := h.db.Model(&model.ScanTask{}).
+		Where("task_id = ? AND status = ?", taskID, task.Status).
+		Updates(map[string]interface{}{
+			"status":       model.TaskStatusCancelled,
+			"completed_at": now,
+			"updated_at":   now,
 		})
+	if result.Error != nil {
+		h.logger.Error("取消任务失败", zap.Error(result.Error))
+		InternalError(c, "取消任务失败")
 		return
+	}
+	if result.RowsAffected == 0 {
+		Conflict(c, "任务状态已变更，请刷新后重试")
+		return
+	}
+
+	// 向已下发的 Agent 发送取消信号（尽力而为，不阻塞响应）
+	if task.Status == model.TaskStatusRunning && h.acDispatcher != nil {
+		go h.sendCancelToAgents(taskID)
 	}
 
 	h.logger.Info("任务已取消", zap.String("task_id", taskID))
@@ -469,11 +404,34 @@ func (h *TasksHandler) CancelTask(c *gin.Context) {
 	// 重新查询更新后的任务
 	h.db.Where("task_id = ?", taskID).First(&task)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "任务已取消",
-		"data":    h.enrichTaskWithTargetHosts(&task),
-	})
+	SuccessWithMessage(c, "任务已取消", h.enrichTaskWithTargetHosts(&task))
+}
+
+// sendCancelToAgents 向任务关联的所有 Agent 发送取消信号
+func (h *TasksHandler) sendCancelToAgents(taskID string) {
+	var hostStatuses []model.TaskHostStatus
+	if err := h.db.Where("task_id = ? AND status = ?", taskID, model.TaskHostStatusDispatched).
+		Find(&hostStatuses).Error; err != nil {
+		h.logger.Error("查询任务主机状态失败", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+
+	cancelCmd := &grpcProto.Command{
+		Tasks: []*grpcProto.Task{{
+			DataType:   9900, // 取消信号
+			ObjectName: "baseline",
+			Token:      taskID,
+		}},
+	}
+
+	for _, hs := range hostStatuses {
+		if err := h.acDispatcher.SendCommand(hs.HostID, cancelCmd); err != nil {
+			h.logger.Debug("发送取消信号失败（Agent 可能已离线）",
+				zap.String("task_id", taskID),
+				zap.String("host_id", hs.HostID),
+				zap.Error(err))
+		}
+	}
 }
 
 // DeleteTask 删除任务
@@ -484,45 +442,38 @@ func (h *TasksHandler) DeleteTask(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "任务不存在",
-			})
+			NotFound(c, "任务不存在")
 			return
 		}
 		h.logger.Error("查询任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询任务失败",
-		})
+		InternalError(c, "查询任务失败")
 		return
 	}
 
-	// 检查任务状态，running 状态的任务不能删除
-	if task.Status == model.TaskStatusRunning {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "任务正在执行中，无法删除",
-		})
+	// running 和 pending 状态的任务不能删除
+	if task.Status == model.TaskStatusRunning || task.Status == model.TaskStatusPending {
+		Conflict(c, "任务状态为 "+string(task.Status)+"，无法删除")
 		return
 	}
 
-	// 删除任务
-	if err := h.db.Delete(&task).Error; err != nil {
+	// 事务中级联删除任务及关联数据
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("task_id = ?", task.TaskID).Delete(&model.TaskHostStatus{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_id = ?", task.TaskID).Delete(&model.ScanResult{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&task).Error
+	}); err != nil {
 		h.logger.Error("删除任务失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除任务失败",
-		})
+		InternalError(c, "删除任务失败")
 		return
 	}
 
-	h.logger.Info("任务已删除", zap.String("task_id", taskID))
+	h.logger.Info("任务已删除（含关联数据）", zap.String("task_id", taskID))
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "任务已删除",
-	})
+	SuccessMessage(c, "任务已删除")
 }
 
 // GetTaskHostStatus 获取任务的主机执行状态
@@ -557,4 +508,3 @@ func (h *TasksHandler) GetTaskHostStatus(c *gin.Context) {
 		"hosts":   hostStatuses,
 	})
 }
-

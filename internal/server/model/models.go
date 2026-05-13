@@ -4,10 +4,28 @@ package model
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// JSONValue 通用 JSON 序列化为 driver.Value（用于 GORM 自定义类型的 Value 方法）
+func JSONValue(v any) (driver.Value, error) {
+	return json.Marshal(v)
+}
+
+// JSONScan 通用 JSON 反序列化（用于 GORM 自定义类型的 Scan 方法）
+func JSONScan(dest any, value any) error {
+	if value == nil {
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(bytes, dest)
+}
 
 // TimeFormat 统一的时间格式，不带时区
 const TimeFormat = "2006-01-02 15:04:05"
@@ -181,6 +199,8 @@ var (
 		&FIMEvent{},
 		&FIMTask{},
 		&FIMTaskHostStatus{},
+		&FIMBaseline{},
+		&FIMBaselineEntry{},
 		&KubeCluster{},
 		&KubeAlarm{},
 		&KubeEvent{},

@@ -1,9 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-)
+import "database/sql/driver"
 
 // CheckConfig 检查配置（JSON 格式）
 type CheckConfig struct {
@@ -25,41 +22,10 @@ type FixConfig struct {
 	RestartServices []string `json:"restart_services,omitempty"` // 修复后需重启的服务
 }
 
-// Value 实现 driver.Valuer 接口
-func (c CheckConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
-}
-
-// Scan 实现 sql.Scanner 接口
-func (c *CheckConfig) Scan(value interface{}) error {
-	if value == nil {
-		*c = CheckConfig{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(bytes, c)
-}
-
-// Value 实现 driver.Valuer 接口
-func (f FixConfig) Value() (driver.Value, error) {
-	return json.Marshal(f)
-}
-
-// Scan 实现 sql.Scanner 接口
-func (f *FixConfig) Scan(value interface{}) error {
-	if value == nil {
-		*f = FixConfig{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(bytes, f)
-}
+func (c CheckConfig) Value() (driver.Value, error) { return JSONValue(c) }
+func (c *CheckConfig) Scan(value any) error        { return JSONScan(c, value) }
+func (f FixConfig) Value() (driver.Value, error)   { return JSONValue(f) }
+func (f *FixConfig) Scan(value any) error          { return JSONScan(f, value) }
 
 // Rule 规则模型
 type Rule struct {

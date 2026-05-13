@@ -9,7 +9,9 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/service"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -19,15 +21,17 @@ type FixHandler struct {
 	logger        *zap.Logger
 	taskService   *service.TaskService
 	policyService *service.PolicyService
+	acDispatcher  *sd.ACDispatcher
 }
 
 // NewFixHandler 创建修复处理器
-func NewFixHandler(db *gorm.DB, logger *zap.Logger) *FixHandler {
+func NewFixHandler(db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) *FixHandler {
 	return &FixHandler{
 		db:            db,
 		logger:        logger,
 		taskService:   service.NewTaskService(db, logger),
 		policyService: service.NewPolicyService(db, logger),
+		acDispatcher:  acDispatcher,
 	}
 }
 
@@ -207,7 +211,7 @@ type CreateFixTaskRequest struct {
 func (h *FixHandler) CreateFixTask(c *gin.Context) {
 	var req CreateFixTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "参数错误")
 		return
 	}
 
@@ -581,16 +585,42 @@ func (h *FixHandler) CancelFixTask(c *gin.Context) {
 		return
 	}
 
-	// TODO: 通知 Agent 取消任务
-
-	// 更新任务状态
-	if err := h.db.Model(&task).Updates(map[string]interface{}{
-		"status":       model.FixTaskStatusFailed,
-		"completed_at": model.Now(),
-	}).Error; err != nil {
-		h.logger.Error("取消修复任务失败", zap.Error(err))
+	// CAS：仅当状态仍为原值时更新
+	result := h.db.Model(&model.FixTask{}).
+		Where("task_id = ? AND status = ?", taskID, task.Status).
+		Updates(map[string]interface{}{
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": model.Now(),
+		})
+	if result.Error != nil {
+		h.logger.Error("取消修复任务失败", zap.Error(result.Error))
 		InternalError(c, "取消任务失败")
 		return
+	}
+	if result.RowsAffected == 0 {
+		Conflict(c, "任务状态已变更，请刷新后重试")
+		return
+	}
+
+	// 向 Agent 发送取消信号（尽力而为）
+	if task.Status == model.FixTaskStatusRunning && h.acDispatcher != nil {
+		go func() {
+			var hostStatuses []model.FixTaskHostStatus
+			if err := h.db.Where("task_id = ? AND status = ?", taskID, model.FixTaskHostStatusDispatched).
+				Find(&hostStatuses).Error; err != nil {
+				return
+			}
+			cancelCmd := &grpcProto.Command{
+				Tasks: []*grpcProto.Task{{
+					DataType:   9900,
+					ObjectName: "baseline",
+					Token:      taskID,
+				}},
+			}
+			for _, hs := range hostStatuses {
+				_ = h.acDispatcher.SendCommand(hs.HostID, cancelCmd)
+			}
+		}()
 	}
 
 	h.logger.Info("取消修复任务成功", zap.String("task_id", taskID))

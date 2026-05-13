@@ -110,7 +110,7 @@ func (h *MonitorHandler) GetHostMonitor(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("计算 Monitor 指标失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "指标查询失败"})
+		InternalError(c, "指标查询失败")
 		return
 	}
 
@@ -125,14 +125,14 @@ func (h *MonitorHandler) GetHostMonitor(c *gin.Context) {
 }
 
 type hostOverview struct {
-	CPU         float64 `json:"cpu"`
-	Memory      float64 `json:"memory"`
-	Disk        float64 `json:"disk"`
-	Load        float64 `json:"load"`
-	CPUTrend    float64 `json:"cpuTrend"`
-	MemoryTrend float64 `json:"memoryTrend"`
-	DiskTrend   float64 `json:"diskTrend"`
-	LoadTrend   float64 `json:"loadTrend"`
+	CPU             float64 `json:"cpu"`
+	Memory          float64 `json:"memory"`
+	Disk            float64 `json:"disk"`
+	Load            float64 `json:"load"`
+	CPUTrend        float64 `json:"cpuTrend"`
+	MemoryTrend     float64 `json:"memoryTrend"`
+	DiskTrend       float64 `json:"diskTrend"`
+	LoadTrend       float64 `json:"loadTrend"`
 	AgentCPU        float64 `json:"agentCpu"`
 	AgentMemMB      float64 `json:"agentMemMB"`
 	AgentMemPercent float64 `json:"agentMemPercent"`
@@ -189,13 +189,13 @@ func (h *MonitorHandler) queryHostMetricsFromPrometheus(ctx context.Context, sta
 
 	// 聚合所有主机的平均值
 	queries := map[string]string{
-		"cpu":        `avg(mxsec_host_cpu_usage)`,
-		"mem":        `avg(mxsec_host_mem_usage)`,
-		"disk_usage": `avg(mxsec_host_disk_usage)`,
-		"net_in":     `sum(mxsec_host_net_in)`,
-		"net_out":    `sum(mxsec_host_net_out)`,
-		"disk_read":  `sum(mxsec_host_disk_read_bytes)`,
-		"disk_write": `sum(mxsec_host_disk_write_bytes)`,
+		"cpu":               `avg(mxsec_host_cpu_usage)`,
+		"mem":               `avg(mxsec_host_mem_usage)`,
+		"disk_usage":        `avg(mxsec_host_disk_usage)`,
+		"net_in":            `sum(mxsec_host_net_in)`,
+		"net_out":           `sum(mxsec_host_net_out)`,
+		"disk_read":         `sum(mxsec_host_disk_read_bytes)`,
+		"disk_write":        `sum(mxsec_host_disk_write_bytes)`,
 		"agent_cpu":         `avg(mxsec_agent_cpu_usage)`,
 		"agent_mem":         `avg(mxsec_agent_mem_rss)`,
 		"agent_mem_percent": `avg(mxsec_agent_mem_percent)`,
@@ -297,14 +297,11 @@ func (h *MonitorHandler) GetServicesMonitor(c *gin.Context) {
 	services := h.collectServiceStatus()
 	connections := h.collectConnectionStats()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"services":    services,
-			"qps":         []gin.H{}, // QPS 需要 Prometheus 集成，当前返回空
-			"latency":     []gin.H{}, // 延迟分位数同上
-			"connections": connections,
-		},
+	Success(c, gin.H{
+		"services":    services,
+		"qps":         []gin.H{}, // QPS 需要 Prometheus 集成，当前返回空
+		"latency":     []gin.H{}, // 延迟分位数同上
+		"connections": connections,
 	})
 }
 
@@ -914,17 +911,14 @@ func (h *MonitorHandler) GetServiceAlerts(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": items,
-			"total": total,
-			"stats": gin.H{
-				"critical": critical,
-				"warning":  warning,
-				"info":     info,
-				"resolved": resolved,
-			},
+	Success(c, gin.H{
+		"items": items,
+		"total": total,
+		"stats": gin.H{
+			"critical": critical,
+			"warning":  warning,
+			"info":     info,
+			"resolved": resolved,
 		},
 	})
 }
@@ -944,15 +938,15 @@ func (h *MonitorHandler) AckServiceAlert(c *gin.Context) {
 
 	if result.Error != nil {
 		h.logger.Error("确认服务告警失败", zap.String("id", id), zap.Error(result.Error))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "操作失败"})
+		InternalError(c, "操作失败")
 		return
 	}
 	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "告警不存在或已处理"})
+		NotFound(c, "告警不存在或已处理")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "已确认"})
+	SuccessMessage(c, "已确认")
 }
 
 // ---- 工具函数 ----

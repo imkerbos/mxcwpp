@@ -1,10 +1,7 @@
 // Package model 提供数据库模型定义
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-)
+import "database/sql/driver"
 
 // NotificationType 通知类型
 type NotificationType string
@@ -56,36 +53,24 @@ type NotificationConfig struct {
 }
 
 // Value 实现 driver.Valuer 接口
-func (c NotificationConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
-}
+func (c NotificationConfig) Value() (driver.Value, error) { return JSONValue(c) }
 
 // Scan 实现 sql.Scanner 接口
-func (c *NotificationConfig) Scan(value interface{}) error {
-	if value == nil {
-		*c = NotificationConfig{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(bytes, c)
-}
+func (c *NotificationConfig) Scan(value any) error { return JSONScan(c, value) }
 
 // Notification 通知配置模型
 type Notification struct {
 	ID             uint               `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	Name           string             `gorm:"column:name;type:varchar(100);not null" json:"name"`                              // 通知名称（自定义名称）
-	Description    string             `gorm:"column:description;type:text" json:"description"`                                 // 描述
-	NotifyCategory NotifyCategory     `gorm:"column:notify_category;type:varchar(30);not null;index" json:"notify_category"`   // 通知类别（baseline_alert/agent_offline）
-	Enabled        bool               `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`                         // 是否启用
-	Type           NotificationType   `gorm:"column:type;type:varchar(20);not null" json:"type"`                               // 通知类型（lark/webhook）
-	Severities     StringArray        `gorm:"column:severities;type:json" json:"severities"`                                   // 通知等级（仅基线告警：critical、high、medium、low）
-	Scope          NotificationScope  `gorm:"column:scope;type:varchar(20);not null;default:'global'" json:"scope"`            // 主机范围类型
-	ScopeValue     string             `gorm:"column:scope_value;type:text" json:"scope_value"`                                 // 主机范围值（JSON，根据 scope 类型存储不同数据）
-	FrontendURL    string             `gorm:"column:frontend_url;type:varchar(500)" json:"frontend_url"`                       // 前端地址（告警带上告警uri）
-	Config         NotificationConfig `gorm:"column:config;type:json" json:"config"`                                           // 通知配置（Webhook URL、Secret 等）
+	Name           string             `gorm:"column:name;type:varchar(100);not null" json:"name"`                            // 通知名称（自定义名称）
+	Description    string             `gorm:"column:description;type:text" json:"description"`                               // 描述
+	NotifyCategory NotifyCategory     `gorm:"column:notify_category;type:varchar(30);not null;index" json:"notify_category"` // 通知类别（baseline_alert/agent_offline）
+	Enabled        bool               `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`                       // 是否启用
+	Type           NotificationType   `gorm:"column:type;type:varchar(20);not null" json:"type"`                             // 通知类型（lark/webhook）
+	Severities     StringArray        `gorm:"column:severities;type:json" json:"severities"`                                 // 通知等级（仅基线告警：critical、high、medium、low）
+	Scope          NotificationScope  `gorm:"column:scope;type:varchar(20);not null;default:'global'" json:"scope"`          // 主机范围类型
+	ScopeValue     string             `gorm:"column:scope_value;type:text" json:"scope_value"`                               // 主机范围值（JSON，根据 scope 类型存储不同数据）
+	FrontendURL    string             `gorm:"column:frontend_url;type:varchar(500)" json:"frontend_url"`                     // 前端地址（告警带上告警uri）
+	Config         NotificationConfig `gorm:"column:config;type:json" json:"config"`                                         // 通知配置（Webhook URL、Secret 等）
 	CreatedAt      LocalTime          `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt      LocalTime          `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
 }

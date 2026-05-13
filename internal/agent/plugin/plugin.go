@@ -6,9 +6,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,8 +24,9 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
-	"github.com/imkerbos/mxsec-platform/internal/common/signing"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
+	"github.com/imkerbos/mxsec-platform/internal/common/fileutil"
+	"github.com/imkerbos/mxsec-platform/internal/common/signing"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -51,16 +50,16 @@ type Plugin struct {
 	tx           *os.File       // 发送管道（Agent 向插件写入任务）
 	logWriter    io.WriteCloser // 日志写入器（支持日志轮转）
 	workDir      string         // 插件工作目录
-	status    Status         // 插件状态
-	mu        sync.RWMutex   // 保护状态
-	startTime time.Time      // 启动时间
-	lastPong  time.Time      // 最后一次收到插件 pong 的时间（用于健康检查）
-	pingCh    chan struct{}   // 通知 sendTask 发送 ping
-	stopCh       chan struct{}   // 停止信号
+	status       Status         // 插件状态
+	mu           sync.RWMutex   // 保护状态
+	startTime    time.Time      // 启动时间
+	lastPong     time.Time      // 最后一次收到插件 pong 的时间（用于健康检查）
+	pingCh       chan struct{}  // 通知 sendTask 发送 ping
+	stopCh       chan struct{}  // 停止信号
 	logger       *zap.Logger
-	restartCount int            // 连续重启计数（稳定运行 10min 后重置）
-	dormantSince time.Time      // 进入休眠的时间
-	exitCode     int            // 最后退出码
+	restartCount int       // 连续重启计数（稳定运行 10min 后重置）
+	dormantSince time.Time // 进入休眠的时间
+	exitCode     int       // 最后退出码
 }
 
 // Status 是插件状态
@@ -108,8 +107,13 @@ func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.
 		taskTracker: taskTracker,
 	}
 
-	// 启动定时清理过期任务
+	// 注册任务取消回调
 	if taskTracker != nil {
+		transportMgr.SetTaskCancelCallback(func(token string) {
+			if err := taskTracker.MarkCancelled(token); err != nil {
+				logger.Debug("cancel signal for unknown task", zap.String("token", token))
+			}
+		})
 		go mgr.taskCleanupLoop()
 	}
 
@@ -327,11 +331,11 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	}
 
 	logWriter, err := rotatelogs.New(
-		logFile+".%Y-%m-%d",                      // 轮转后的文件名格式：{plugin}.log.YYYY-MM-DD
-		rotatelogs.WithLinkName(logFile),         // 当前日志文件链接
-		rotatelogs.WithMaxAge(maxAge),            // 保留时间（默认7天）
+		logFile+".%Y-%m-%d",                       // 轮转后的文件名格式：{plugin}.log.YYYY-MM-DD
+		rotatelogs.WithLinkName(logFile),          // 当前日志文件链接
+		rotatelogs.WithMaxAge(maxAge),             // 保留时间（默认7天）
 		rotatelogs.WithRotationTime(24*time.Hour), // 每24小时轮转一次
-		rotatelogs.WithRotationCount(0),          // 不限制文件数量，由 MaxAge 控制
+		rotatelogs.WithRotationCount(0),           // 不限制文件数量，由 MaxAge 控制
 	)
 	if err != nil {
 		rx_r.Close()
@@ -818,15 +822,14 @@ func (m *Manager) copyFile(srcPath, destPath string) error {
 
 // verifySignature 验证插件签名
 func (m *Manager) verifySignature(sha256Hex, signature string) error {
-	// 签名为空 → 向后兼容，warn + 跳过
-	if signature == "" {
-		m.logger.Warn("plugin signature is empty, skipping verification (backward compatible)")
-		return nil
-	}
-	// 公钥为空 → 未配置签名验证，warn + 跳过
+	// 公钥未配置 → 未启用签名验证，跳过
 	if m.cfg.SignPublicKey == "" {
 		m.logger.Warn("sign public key not configured, skipping signature verification")
 		return nil
+	}
+	// 公钥已配置但签名为空 → 拒绝加载（防止绕过签名验证）
+	if signature == "" {
+		return fmt.Errorf("plugin signature is empty but sign public key is configured, refusing to load unsigned plugin")
 	}
 
 	if err := signing.VerifySHA256(m.cfg.SignPublicKey, sha256Hex, signature); err != nil {
@@ -888,18 +891,7 @@ func (m *Manager) restoreFromBackup(name string) error {
 
 // calculateSHA256 计算文件的 SHA256 校验和
 func (m *Manager) calculateSHA256(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return fileutil.SHA256Sum(filePath)
 }
 
 // waitProcess 等待插件进程退出，根据退出码决定后续行为
@@ -1211,6 +1203,22 @@ func (m *Manager) forceRestartPlugin(name string) {
 	m.restartPlugin(plugin)
 }
 
+// isCompletionSignal 判断 DataType 是否为任务完成信号
+func isCompletionSignal(dataType int32) bool {
+	switch dataType {
+	case 8001, 8004: // baseline 完成/失败
+		return true
+	case 6002: // FIM 任务完成
+		return true
+	case 7002: // Scanner 扫描完成
+		return true
+	case 9200: // Remediation 修复结果
+		return true
+	default:
+		return false
+	}
+}
+
 // receiveData 接收插件数据（从 Pipe 读取）
 func (m *Manager) receiveData(plugin *Plugin) {
 	reader := bufio.NewReader(plugin.rx)
@@ -1264,8 +1272,9 @@ func (m *Manager) receiveData(plugin *Plugin) {
 				continue
 			}
 
-			// 检查是否是任务完成信号（DataType 8001 或 8004）
-			if m.taskTracker != nil && (record.DataType == 8001 || record.DataType == 8004) {
+			// 检查是否是任务完成信号
+			// 8001/8004=基线, 6002=FIM, 7002=Scanner, 9200=Remediation
+			if m.taskTracker != nil && isCompletionSignal(record.DataType) {
 				// 从 payload 中提取 task_id
 				if record.Data != nil && record.Data.Fields != nil {
 					if taskID, ok := record.Data.Fields["task_id"]; ok && taskID != "" {
@@ -1529,7 +1538,7 @@ func getProcessRSS(pid int) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return resident * 4096, nil // 页面大小通常为 4096 字节
+	return resident * uint64(os.Getpagesize()), nil
 }
 
 // getProcessFDCount 读取进程打开的文件描述符数量
@@ -1571,26 +1580,26 @@ func (m *Manager) retryPendingTasks(plugin *Plugin) {
 	}
 }
 
-// taskCleanupLoop 定时清理超过 24 小时的僵尸任务
+// taskCleanupLoop 定时清理超过 2 小时的僵尸任务
 func (m *Manager) taskCleanupLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(30 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
-			m.taskTracker.CleanupOldTasks(24 * time.Hour)
+			m.taskTracker.CleanupOldTasks(2 * time.Hour)
 		}
 	}
 }
 
 // rateLimitedReader 限速 Reader，用于控制下载速率
 type rateLimitedReader struct {
-	reader    io.Reader
+	reader      io.Reader
 	bytesPerSec int64
-	lastTime  time.Time
-	bytesRead int64
+	lastTime    time.Time
+	bytesRead   int64
 }
 
 func newRateLimitedReader(r io.Reader, bytesPerSec int64) *rateLimitedReader {

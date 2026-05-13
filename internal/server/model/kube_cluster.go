@@ -3,7 +3,6 @@ package model
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
 )
 
 // KubeClusterStatus 集群状态
@@ -19,29 +18,10 @@ const (
 type RawJSON json.RawMessage
 
 // Value 实现 driver.Valuer 接口
-func (j RawJSON) Value() (driver.Value, error) {
-	if len(j) == 0 {
-		return nil, nil
-	}
-	return string(j), nil
-}
+func (j RawJSON) Value() (driver.Value, error) { return JSONValue(j) }
 
 // Scan 实现 sql.Scanner 接口
-func (j *RawJSON) Scan(value interface{}) error {
-	if value == nil {
-		*j = nil
-		return nil
-	}
-	switch v := value.(type) {
-	case []byte:
-		*j = append((*j)[0:0], v...)
-	case string:
-		*j = RawJSON(v)
-	default:
-		return fmt.Errorf("无法扫描类型 %T 到 RawJSON", value)
-	}
-	return nil
-}
+func (j *RawJSON) Scan(value any) error { return JSONScan(j, value) }
 
 // MarshalJSON 实现 json.Marshaler 接口
 func (j RawJSON) MarshalJSON() ([]byte, error) {
@@ -76,12 +56,12 @@ type KubeCluster struct {
 	HealthScore    int               `gorm:"column:health_score;type:int;default:100" json:"healthScore"`
 	Remark         string            `gorm:"column:remark;type:text" json:"remark"`
 	// GCP Pub/Sub 配置（GKE 审计日志接入，per-cluster）
-	GCPEnabled        bool   `gorm:"column:gcp_enabled;type:tinyint(1);default:0" json:"gcpEnabled"`
-	GCPProjectID      string `gorm:"column:gcp_project_id;type:varchar(255)" json:"gcpProjectId,omitempty"`
-	GCPSubscription   string `gorm:"column:gcp_subscription;type:varchar(255)" json:"gcpSubscription,omitempty"`
-	GCPCredentialsJSON string `gorm:"column:gcp_credentials_json;type:text" json:"-"` // SA JSON Key 内容，API 不直接暴露
-	CreatedAt      LocalTime         `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt      LocalTime         `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updatedAt"`
+	GCPEnabled         bool      `gorm:"column:gcp_enabled;type:tinyint(1);default:0" json:"gcpEnabled"`
+	GCPProjectID       string    `gorm:"column:gcp_project_id;type:varchar(255)" json:"gcpProjectId,omitempty"`
+	GCPSubscription    string    `gorm:"column:gcp_subscription;type:varchar(255)" json:"gcpSubscription,omitempty"`
+	GCPCredentialsJSON string    `gorm:"column:gcp_credentials_json;type:text" json:"-"` // SA JSON Key 内容，API 不直接暴露
+	CreatedAt          LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt          LocalTime `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updatedAt"`
 }
 
 func (KubeCluster) TableName() string {

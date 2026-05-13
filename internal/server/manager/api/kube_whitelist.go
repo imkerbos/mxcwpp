@@ -102,7 +102,7 @@ func (h *KubeWhitelistHandler) CreateWhitelist(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -163,7 +163,7 @@ func (h *KubeWhitelistHandler) UpdateWhitelist(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

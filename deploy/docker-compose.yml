@@ -16,7 +16,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "${MYSQL_HOST_PORT:-13306}:3306"
+      - "127.0.0.1:${MYSQL_HOST_PORT:-13306}:3306"
     volumes:
       - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -50,7 +50,7 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     ports:
-      - "16379:6379"
+      - "127.0.0.1:16379:6379"
     volumes:
       - ${DATA_DIR:-./data}/redis:/data
     healthcheck:
@@ -211,6 +211,11 @@ services:
   agentcenter:
     image: mxsec-agentcenter:${VERSION:-latest}
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -242,6 +247,11 @@ services:
   manager:
     image: mxsec-manager:${VERSION:-latest}
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -274,6 +284,11 @@ services:
   consumer:
     image: mxsec-consumer:${VERSION:-latest}
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -306,6 +321,8 @@ services:
     image: mxsec-ui:${VERSION:-latest}
     container_name: mxsec-ui
     restart: always
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       manager:
         condition: service_healthy

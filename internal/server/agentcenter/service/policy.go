@@ -307,10 +307,10 @@ func compareVersion(v1, v2 string) int {
 func getCompatibleOSFamilies(osFamily string) []string {
 	// 定义 OS Family 兼容性映射
 	compatibilityMap := map[string][]string{
-		"rocky":  {"rocky", "centos", "rhel"},  // Rocky Linux 兼容 CentOS 和 RHEL
-		"centos": {"centos", "rocky", "rhel"},  // CentOS 兼容 Rocky Linux 和 RHEL
-		"rhel":   {"rhel", "rocky", "centos"},  // RHEL 兼容 Rocky Linux 和 CentOS
-		"oracle": {"oracle", "rhel"},           // Oracle Linux 兼容 RHEL
+		"rocky":  {"rocky", "centos", "rhel"}, // Rocky Linux 兼容 CentOS 和 RHEL
+		"centos": {"centos", "rocky", "rhel"}, // CentOS 兼容 Rocky Linux 和 RHEL
+		"rhel":   {"rhel", "rocky", "centos"}, // RHEL 兼容 Rocky Linux 和 CentOS
+		"oracle": {"oracle", "rhel"},          // Oracle Linux 兼容 RHEL
 	}
 
 	// 如果有兼容性映射，返回兼容列表

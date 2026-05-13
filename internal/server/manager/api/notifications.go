@@ -59,10 +59,7 @@ func (h *NotificationsHandler) ListNotifications(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询通知总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询通知列表失败",
-		})
+		InternalError(c, "查询通知列表失败")
 		return
 	}
 
@@ -70,20 +67,11 @@ func (h *NotificationsHandler) ListNotifications(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&notifications).Error; err != nil {
 		h.logger.Error("查询通知列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询通知列表失败",
-		})
+		InternalError(c, "查询通知列表失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": notifications,
-		},
-	})
+	SuccessPaginated(c, total, notifications)
 }
 
 // GetNotification 获取通知详情
@@ -91,34 +79,22 @@ func (h *NotificationsHandler) ListNotifications(c *gin.Context) {
 func (h *NotificationsHandler) GetNotification(c *gin.Context) {
 	id, err := h.parseID(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的通知ID",
-		})
+		BadRequest(c, "无效的通知ID")
 		return
 	}
 
 	var notification model.Notification
 	if err := h.db.First(&notification, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "通知不存在",
-			})
+			NotFound(c, "通知不存在")
 			return
 		}
 		h.logger.Error("查询通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询通知失败",
-		})
+		InternalError(c, "查询通知失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": notification,
-	})
+	Success(c, notification)
 }
 
 // CreateNotificationRequest 创建通知请求
@@ -140,27 +116,18 @@ type CreateNotificationRequest struct {
 func (h *NotificationsHandler) CreateNotification(c *gin.Context) {
 	var req CreateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	if err := h.validateNotificationRequest(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": err.Error(),
-		})
+		BadRequest(c, "请求参数校验失败")
 		return
 	}
 
 	scopeValueJSON, err := json.Marshal(req.ScopeValue)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "主机范围值格式错误: " + err.Error(),
-		})
+		BadRequest(c, "主机范围值格式错误")
 		return
 	}
 
@@ -179,18 +146,11 @@ func (h *NotificationsHandler) CreateNotification(c *gin.Context) {
 
 	if err := h.db.Create(&notification).Error; err != nil {
 		h.logger.Error("创建通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建通知失败",
-		})
+		InternalError(c, "创建通知失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "创建成功",
-		"data":    notification,
-	})
+	SuccessWithMessage(c, "创建成功", notification)
 }
 
 // UpdateNotificationRequest 更新通知请求
@@ -212,36 +172,24 @@ type UpdateNotificationRequest struct {
 func (h *NotificationsHandler) UpdateNotification(c *gin.Context) {
 	id, err := h.parseID(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的通知ID",
-		})
+		BadRequest(c, "无效的通知ID")
 		return
 	}
 
 	var req UpdateNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	var notification model.Notification
 	if err := h.db.First(&notification, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "通知不存在",
-			})
+			NotFound(c, "通知不存在")
 			return
 		}
 		h.logger.Error("查询通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询通知失败",
-		})
+		InternalError(c, "查询通知失败")
 		return
 	}
 
@@ -249,18 +197,11 @@ func (h *NotificationsHandler) UpdateNotification(c *gin.Context) {
 
 	if err := h.db.Save(&notification).Error; err != nil {
 		h.logger.Error("更新通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新通知失败",
-		})
+		InternalError(c, "更新通知失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "更新成功",
-		"data":    notification,
-	})
+	SuccessWithMessage(c, "更新成功", notification)
 }
 
 // DeleteNotification 删除通知
@@ -268,52 +209,37 @@ func (h *NotificationsHandler) UpdateNotification(c *gin.Context) {
 func (h *NotificationsHandler) DeleteNotification(c *gin.Context) {
 	id, err := h.parseID(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的通知ID",
-		})
+		BadRequest(c, "无效的通知ID")
 		return
 	}
 
 	var notification model.Notification
 	if err := h.db.First(&notification, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "通知不存在",
-			})
+			NotFound(c, "通知不存在")
 			return
 		}
 		h.logger.Error("查询通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询通知失败",
-		})
+		InternalError(c, "查询通知失败")
 		return
 	}
 
 	if err := h.db.Delete(&notification).Error; err != nil {
 		h.logger.Error("删除通知失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除通知失败",
-		})
+		InternalError(c, "删除通知失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "删除成功",
-	})
+	SuccessMessage(c, "删除成功")
 }
 
 // TestNotificationRequest 测试通知请求
 type TestNotificationRequest struct {
 	Type           model.NotificationType   `json:"type" binding:"required"`
 	Config         model.NotificationConfig `json:"config" binding:"required"`
-	FrontendURL    string                   `json:"frontend_url"`       // 可选，用于测试跳转链接
-	NotificationID *uint                    `json:"notification_id"`    // 可选，如果提供则使用完整的通知配置
-	NotifyCategory model.NotifyCategory     `json:"notify_category"`    // 可选，指定测试的通知类别
+	FrontendURL    string                   `json:"frontend_url"`    // 可选，用于测试跳转链接
+	NotificationID *uint                    `json:"notification_id"` // 可选，如果提供则使用完整的通知配置
+	NotifyCategory model.NotifyCategory     `json:"notify_category"` // 可选，指定测试的通知类别
 }
 
 // TestNotification 测试通知
@@ -321,18 +247,12 @@ type TestNotificationRequest struct {
 func (h *NotificationsHandler) TestNotification(c *gin.Context) {
 	var req TestNotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	if req.Config.WebhookURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Webhook URL 不能为空",
-		})
+		BadRequest(c, "Webhook URL 不能为空")
 		return
 	}
 
@@ -400,10 +320,8 @@ func (h *NotificationsHandler) TestNotification(c *gin.Context) {
 
 	body, err := json.Marshal(testMessage)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "序列化消息失败: " + err.Error(),
-		})
+		h.logger.Error("序列化消息失败", zap.Error(err))
+		InternalError(c, "序列化消息失败")
 		return
 	}
 
@@ -419,23 +337,14 @@ func (h *NotificationsHandler) TestNotification(c *gin.Context) {
 			strings.Contains(errMsg, "Webhook 地址不存在") ||
 			strings.Contains(errMsg, "Webhook 认证失败") ||
 			strings.Contains(errMsg, "Webhook 返回错误") {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": errMsg,
-			})
+			BadRequest(c, errMsg)
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "发送测试通知失败: " + errMsg,
-			})
+			InternalError(c, "发送测试通知失败: "+errMsg)
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "测试通知发送成功",
-	})
+	SuccessMessage(c, "测试通知发送成功")
 }
 
 // 辅助方法

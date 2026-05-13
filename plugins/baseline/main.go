@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/baseline/engine"
@@ -27,14 +25,6 @@ var (
 )
 
 func main() {
-	// 添加 panic 恢复机制
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "PANIC in main: %v\nStack trace:\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	// 1. 初始化插件客户端（通过 Pipe 与 Agent 通信）
 	client, err := plugins.NewClient()
 	if err != nil {
@@ -43,8 +33,8 @@ func main() {
 	}
 	defer client.Close()
 
-	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/baseline.log）
-	logger, err := newPluginLogger()
+	// 2. 初始化日志（输出到 stderr，由 Agent 重定向到日志文件）
+	logger, err := plugins.NewPluginLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -76,7 +66,7 @@ func main() {
 	// 6. 启动任务接收循环
 	taskCh := make(chan *bridge.Task, 10)
 	logger.Info("starting task receiver goroutine")
-	go receiveTasks(ctx, client, taskCh, logger)
+	go plugins.ReceiveTaskLoop(ctx, client, taskCh, logger)
 	logger.Info("task receiver goroutine started")
 
 	logger.Info("baseline plugin initialization completed, entering main loop")
@@ -99,66 +89,9 @@ func main() {
 	}
 }
 
-// receiveTasks 接收任务
-func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *bridge.Task, logger *zap.Logger) {
-	// 添加 panic 恢复机制
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in receiveTasks goroutine",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-		}
-	}()
-
-	logger.Info("receiveTasks goroutine started, waiting for tasks")
-
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("receive tasks goroutine stopping due to context cancellation")
-			return
-		default:
-			logger.Debug("calling ReceiveTask, waiting for data from pipe")
-			task, err := client.ReceiveTask()
-			if err != nil {
-				// 检查是否是真正的管道关闭（EOF）
-				if err.Error() == "EOF" || err.Error() == "io: read/write on closed pipe" {
-					logger.Warn("pipe closed, plugin will exit", zap.Error(err))
-					return
-				}
-				// 其他错误（如临时网络错误、解析错误等）记录后继续重试
-				logger.Error("failed to receive task, will retry",
-					zap.Error(err),
-					zap.String("error_type", fmt.Sprintf("%T", err)))
-				time.Sleep(time.Second)
-				continue
-			}
-
-			logger.Debug("task received successfully from pipe")
-
-			// 成功接收任务，发送到处理通道
-			select {
-			case taskCh <- task:
-				logger.Debug("task forwarded to processing channel")
-			case <-ctx.Done():
-				logger.Info("receive tasks goroutine stopping while forwarding task")
-				return
-			}
-		}
-	}
-}
-
 // handleTask 处理任务
 func handleTask(ctx context.Context, task *bridge.Task, checkEngine *engine.Engine, fixer *engine.Fixer, client *plugins.Client, logger *zap.Logger) (err error) {
-	// 添加 panic 恢复机制
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in handleTask",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-			err = fmt.Errorf("panic in handleTask: %v", r)
-		}
-	}()
+	defer plugins.RecoverAndLog(logger, "handleTask")()
 
 	logger.Info("received task", zap.String("data_type", fmt.Sprintf("%d", task.DataType)), zap.String("object_name", task.ObjectName))
 
@@ -284,23 +217,6 @@ func parsePolicies(raw interface{}) ([]*engine.Policy, error) {
 		return nil, fmt.Errorf("failed to unmarshal policies: %w", err)
 	}
 	return policies, nil
-}
-
-// newPluginLogger 创建插件专用的 logger
-// 输出到 stderr，由 Agent 重定向到 /var/log/mxsec/plugins/baseline.log
-func newPluginLogger() (*zap.Logger, error) {
-	config := zap.NewProductionConfig()
-	// 输出到 stderr（Agent 会重定向到日志文件）
-	config.OutputPaths = []string{"stderr"}
-	config.ErrorOutputPaths = []string{"stderr"}
-	// 使用 JSON 格式，便于解析
-	config.Encoding = "json"
-	// 设置日志级别为 Info
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	// 使用人类可读的时间格式
-	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-
-	return config.Build()
 }
 
 // handleFixTask 处理基线修复任务

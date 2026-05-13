@@ -5,10 +5,11 @@
 // 使用 sync.Pool 复用 writer/reader 减少 GC 压力。
 //
 // 使用方式：
-//   Agent 端: import _ "github.com/imkerbos/mxsec-platform/internal/common/compressor"
-//             client.Transfer(ctx, grpc.UseCompressor("snappy"))
-//   Server 端: import _ "github.com/imkerbos/mxsec-platform/internal/common/compressor"
-//             （注册解压器，自动协商）
+//
+//	Agent 端: import _ "github.com/imkerbos/mxsec-platform/internal/common/compressor"
+//	          client.Transfer(ctx, grpc.UseCompressor("snappy"))
+//	Server 端: import _ "github.com/imkerbos/mxsec-platform/internal/common/compressor"
+//	          （注册解压器，自动协商）
 package compressor
 
 import (

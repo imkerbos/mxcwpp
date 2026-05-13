@@ -64,9 +64,20 @@ func NewTaskTracker(workDir string, logger *zap.Logger) (*TaskTracker, error) {
 }
 
 // TrackTask tracks a new task
+// 幂等：如果 token 已存在且状态为 received/dispatched，跳过（防止重启重放覆盖时间戳）
 func (t *TaskTracker) TrackTask(task *grpc.Task, pluginName string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// 去重：已存在的未完成任务不覆盖
+	if existing, ok := t.tasks[task.Token]; ok {
+		if existing.Status == TaskStatusReceived || existing.Status == TaskStatusDispatched {
+			t.logger.Info("task already tracked, skipping duplicate",
+				zap.String("token", task.Token),
+				zap.String("status", string(existing.Status)))
+			return nil
+		}
+	}
 
 	tracked := &TrackedTask{
 		Task:       task,
@@ -223,7 +234,7 @@ func (t *TaskTracker) loadTasks() error {
 	}
 
 	now := time.Now()
-	const maxTaskAge = 24 * time.Hour
+	const maxTaskAge = 2 * time.Hour
 
 	loadedCount := 0
 	cleanedCount := 0
@@ -280,6 +291,32 @@ func (t *TaskTracker) loadTasks() error {
 	}
 
 	return nil
+}
+
+// MarkCancelled marks a task as cancelled and removes it from tracking
+func (t *TaskTracker) MarkCancelled(token string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if _, ok := t.tasks[token]; !ok {
+		return fmt.Errorf("task not found: %s", token)
+	}
+
+	delete(t.tasks, token)
+	if err := t.removeTask(token); err != nil {
+		t.logger.Warn("failed to remove cancelled task file", zap.String("token", token), zap.Error(err))
+	}
+
+	t.logger.Info("task marked as cancelled", zap.String("token", token))
+	return nil
+}
+
+// HasTask checks if a task token is being tracked (received or dispatched)
+func (t *TaskTracker) HasTask(token string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	_, ok := t.tasks[token]
+	return ok
 }
 
 // CleanupOldTasks removes tasks older than the specified duration

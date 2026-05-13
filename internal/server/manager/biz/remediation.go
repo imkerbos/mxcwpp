@@ -24,13 +24,13 @@ func NewRemediationService(db *gorm.DB, logger *zap.Logger) *RemediationService 
 
 // RemediationAdvice 修复建议
 type RemediationAdvice struct {
-	VulnID      uint                 `json:"vulnId"`
-	CveID       string               `json:"cveId"`
-	Component   string               `json:"component"`
-	FixedVersion string              `json:"fixedVersion"`
-	Commands    []RemediationCommand `json:"commands"`
-	References  []string             `json:"references"`
-	Workaround  string               `json:"workaround"`
+	VulnID       uint                 `json:"vulnId"`
+	CveID        string               `json:"cveId"`
+	Component    string               `json:"component"`
+	FixedVersion string               `json:"fixedVersion"`
+	Commands     []RemediationCommand `json:"commands"`
+	References   []string             `json:"references"`
+	Workaround   string               `json:"workaround"`
 }
 
 // RemediationCommand 修复命令
@@ -163,13 +163,13 @@ func (s *RemediationService) generateWorkaround(vuln *model.Vulnerability) strin
 
 // RemediationStats 修复统计
 type RemediationStats struct {
-	TotalVulns      int64              `json:"totalVulns"`
-	PatchedVulns    int64              `json:"patchedVulns"`
-	UnpatchedVulns  int64              `json:"unpatchedVulns"`
-	IgnoredVulns    int64              `json:"ignoredVulns"`
-	RemediationRate float64            `json:"remediationRate"` // 百分比
-	MTTR            float64            `json:"mttr"`            // 平均修复时间（小时）
-	BySeverity      []SeverityStats    `json:"bySeverity"`
+	TotalVulns      int64                  `json:"totalVulns"`
+	PatchedVulns    int64                  `json:"patchedVulns"`
+	UnpatchedVulns  int64                  `json:"unpatchedVulns"`
+	IgnoredVulns    int64                  `json:"ignoredVulns"`
+	RemediationRate float64                `json:"remediationRate"` // 百分比
+	MTTR            float64                `json:"mttr"`            // 平均修复时间（小时）
+	BySeverity      []SeverityStats        `json:"bySeverity"`
 	TopUnpatched    []HostRemediationStats `json:"topUnpatched"` // Top 10 未修复最多的主机
 }
 
@@ -276,9 +276,9 @@ func (s *RemediationService) GetRemediationStats() (*RemediationStats, error) {
 
 // DailyTrend 每日修复趋势
 type DailyTrend struct {
-	Date     string `json:"date"`
-	Patched  int64  `json:"patched"`
-	Discovered int64 `json:"discovered"`
+	Date       string `json:"date"`
+	Patched    int64  `json:"patched"`
+	Discovered int64  `json:"discovered"`
 }
 
 // GetRemediationTrend 获取近 N 天修复趋势
@@ -344,7 +344,7 @@ func (s *RemediationService) PatchVulnerability(vulnID uint, hostIDs []string) e
 			if err := tx.Model(&model.HostVulnerability{}).
 				Where("vuln_id = ? AND host_id IN ? AND status = ?", vulnID, hostIDs, "unpatched").
 				Updates(map[string]any{
-					"status":    "patched",
+					"status":     "patched",
 					"patched_at": now,
 				}).Error; err != nil {
 				return err
@@ -354,7 +354,7 @@ func (s *RemediationService) PatchVulnerability(vulnID uint, hostIDs []string) e
 			if err := tx.Model(&model.HostVulnerability{}).
 				Where("vuln_id = ? AND status = ?", vulnID, "unpatched").
 				Updates(map[string]any{
-					"status":    "patched",
+					"status":     "patched",
 					"patched_at": now,
 				}).Error; err != nil {
 				return err

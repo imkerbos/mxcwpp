@@ -17,8 +17,8 @@ type ResourceLimits struct {
 	// 设置过低（如 512MB）会导致 Go 进程立即崩溃。
 	// 如需限制，建议至少 4096MB。生产环境推荐用 cgroup memory limit 代替。
 	MaxMemoryMB   uint64 `json:"max_memory_mb"`
-	MaxNoFile     uint64 `json:"max_nofile"`       // RLIMIT_NOFILE，默认 1024
-	MaxCPUSeconds uint64 `json:"max_cpu_seconds"`  // RLIMIT_CPU，默认 0(不限)
+	MaxNoFile     uint64 `json:"max_nofile"`      // RLIMIT_NOFILE，默认 1024
+	MaxCPUSeconds uint64 `json:"max_cpu_seconds"` // RLIMIT_CPU，默认 0(不限)
 }
 
 // defaultResourceLimits 返回默认资源限制
@@ -78,9 +78,9 @@ func setPrlimit(pid, resource int, soft, hard uint64) error {
 
 // Linux resource constants
 const (
-	rlimitAS     = 9  // RLIMIT_AS (address space / virtual memory)
-	rlimitNOFILE = 7  // RLIMIT_NOFILE
-	rlimitCPU    = 0  // RLIMIT_CPU
+	rlimitAS     = 9 // RLIMIT_AS (address space / virtual memory)
+	rlimitNOFILE = 7 // RLIMIT_NOFILE
+	rlimitCPU    = 0 // RLIMIT_CPU
 )
 
 // applyResourceLimits 对指定 PID 应用资源限制

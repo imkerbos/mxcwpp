@@ -60,7 +60,8 @@ func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger
 
 	mgr := NewManager(cfg, logger, transportMgr, agentID, pluginMgr)
 
-	ticker := time.NewTicker(cfg.GetHeartbeatInterval())
+	currentInterval := cfg.GetHeartbeatInterval()
+	ticker := time.NewTicker(currentInterval)
 	defer ticker.Stop()
 
 	// 立即发送一次心跳
@@ -73,6 +74,17 @@ func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger
 			return
 		case <-ticker.C:
 			mgr.sendHeartbeat()
+
+			// 检查心跳间隔是否被 Server 远程更新
+			newInterval := cfg.GetHeartbeatInterval()
+			if newInterval != currentInterval {
+				logger.Info("heartbeat interval changed, resetting ticker",
+					zap.Duration("old", currentInterval),
+					zap.Duration("new", newInterval),
+				)
+				ticker.Reset(newInterval)
+				currentInterval = newInterval
+			}
 		}
 	}
 }
@@ -276,7 +288,7 @@ func (m *Manager) sendHeartbeat() {
 		return
 	}
 
-	m.logger.Info("heartbeat sent successfully",
+	m.logger.Debug("heartbeat sent successfully",
 		zap.String("agent_id", m.agentID),
 		zap.String("hostname", hostInfo.Hostname),
 		zap.Int("record_count", len(packagedData.Records)),

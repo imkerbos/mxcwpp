@@ -298,11 +298,11 @@ func (c *TetragonClient) parseProcessExit(data json.RawMessage) *TetragonEvent {
 // parseKprobe 解析 process_kprobe 事件（文件和网络事件通过 kprobe 上报）
 func (c *TetragonClient) parseKprobe(data json.RawMessage) *TetragonEvent {
 	var kprobe struct {
-		Process    tetragonProcess `json:"process"`
-		Parent     tetragonProcess `json:"parent"`
-		FunctionName string        `json:"function_name"`
-		Args       []tetragonArg   `json:"args"`
-		Time       string          `json:"time"`
+		Process      tetragonProcess `json:"process"`
+		Parent       tetragonProcess `json:"parent"`
+		FunctionName string          `json:"function_name"`
+		Args         []tetragonArg   `json:"args"`
+		Time         string          `json:"time"`
 	}
 
 	if err := json.Unmarshal(data, &kprobe); err != nil {

@@ -189,10 +189,17 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 		zap.Int("original_count", len(hosts)),
 	)
 
-	// 在确认有匹配主机后，更新任务状态为 running
-	// 注意：executed_at 已在 API 中设置（用户点击执行时），这里不再更新
-	if err := s.db.Model(task).Update("status", model.TaskStatusRunning).Error; err != nil {
-		return fmt.Errorf("更新任务状态失败: %w", err)
+	// CAS：仅当任务仍为 pending 时才转为 running（防止与取消操作竞争）
+	casResult := s.db.Model(&model.ScanTask{}).
+		Where("task_id = ? AND status = ?", task.TaskID, model.TaskStatusPending).
+		Update("status", model.TaskStatusRunning)
+	if casResult.Error != nil {
+		return fmt.Errorf("更新任务状态失败: %w", casResult.Error)
+	}
+	if casResult.RowsAffected == 0 {
+		s.logger.Info("任务状态已变更（可能已被取消），跳过下发",
+			zap.String("task_id", task.TaskID))
+		return nil
 	}
 
 	// 查询所有策略和规则
@@ -326,14 +333,18 @@ func (s *TaskService) dispatchTask(task *model.ScanTask, transferService interfa
 	// 更新已下发主机数
 	s.db.Model(task).Update("dispatched_host_count", successCount)
 
-	// 如果没有成功下发到任何主机，保持 pending 状态让调度器下一轮重试
+	// 如果没有成功下发到任何主机，回滚为 pending 让调度器下一轮重试
 	// （可能是 Agent 正在更新重启，稍后会重新上线）
 	// 超时由 task_timeout_scheduler 统一处理
 	if successCount == 0 {
-		s.logger.Warn("任务本轮下发失败，保持 pending 等待下一轮重试",
+		s.logger.Warn("任务本轮下发失败，回滚为 pending 等待下一轮重试",
 			zap.String("task_id", task.TaskID),
 			zap.Int("matched_hosts", len(matchedHosts)),
 		)
+		// 回滚状态为 pending（仅当仍为 running 时，防止覆盖取消操作）
+		s.db.Model(&model.ScanTask{}).
+			Where("task_id = ? AND status = ?", task.TaskID, model.TaskStatusRunning).
+			Update("status", model.TaskStatusPending)
 		// 清理本轮产生的失败记录，避免下一轮重复创建
 		s.db.Where("task_id = ? AND status = ?", task.TaskID, model.TaskHostStatusFailed).
 			Delete(&model.TaskHostStatus{})
@@ -713,8 +724,8 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			zap.Int("requested_hosts", len(fixTask.HostIDs)),
 		)
 		s.db.Model(fixTask).Updates(map[string]interface{}{
-			"status":        model.FixTaskStatusFailed,
-			"completed_at":  model.Now(),
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": model.Now(),
 		})
 		return fmt.Errorf("没有在线主机")
 	}
@@ -732,8 +743,8 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			zap.String("task_id", fixTask.TaskID),
 		)
 		s.db.Model(fixTask).Updates(map[string]interface{}{
-			"status":        model.FixTaskStatusFailed,
-			"completed_at":  model.Now(),
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": model.Now(),
 		})
 		return fmt.Errorf("没有找到规则")
 	}
@@ -779,8 +790,8 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			zap.String("task_id", fixTask.TaskID),
 		)
 		s.db.Model(fixTask).Updates(map[string]interface{}{
-			"status":        model.FixTaskStatusFailed,
-			"completed_at":  model.Now(),
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": model.Now(),
 		})
 		return fmt.Errorf("没有有效的策略")
 	}
@@ -821,12 +832,12 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 
 		// 构建任务数据（JSON）
 		taskData := map[string]interface{}{
-			"task_id":      fmt.Sprintf("%s-%s", fixTask.TaskID, host.HostID), // 子任务ID
-			"fix_task_id":  fixTask.TaskID,                                     // 修复任务ID
-			"policies":     policiesData,
-			"rule_ids":     fixTask.RuleIDs,
-			"os_family":    host.OSFamily,
-			"os_version":   host.OSVersion,
+			"task_id":     fmt.Sprintf("%s-%s", fixTask.TaskID, host.HostID), // 子任务ID
+			"fix_task_id": fixTask.TaskID,                                    // 修复任务ID
+			"policies":    policiesData,
+			"rule_ids":    fixTask.RuleIDs,
+			"os_family":   host.OSFamily,
+			"os_version":  host.OSVersion,
 		}
 
 		taskDataJSON, err := json.Marshal(taskData)
@@ -900,8 +911,8 @@ func (s *TaskService) DispatchFixTask(fixTask *model.FixTask, transferService in
 			zap.Int("matched_hosts", len(hosts)),
 		)
 		s.db.Model(fixTask).Updates(map[string]interface{}{
-			"status":        model.FixTaskStatusFailed,
-			"completed_at":  model.Now(),
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": model.Now(),
 		})
 		return fmt.Errorf("没有成功下发到任何主机")
 	}

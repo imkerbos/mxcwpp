@@ -1,7 +1,11 @@
 # Agent Dockerfile
 # 用于在 Docker 容器中运行 Agent（使用 Rocky Linux 9，更接近生产环境）
+# 注意：Agent 需要 root 权限执行主机级操作（基线检查、文件监控等）
 
-FROM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 # 安装构建依赖
 RUN apt-get update && apt-get install -y \
@@ -25,12 +29,10 @@ ARG VERSION=dev
 ARG BUILD_TIME
 
 # 构建 Agent
-# 注意：ldflags 中的变量名需要与 main.go 中定义的变量名完全匹配
-# 设置默认 BUILD_TIME（如果未提供）
 ARG BUILD_TIME_DEFAULT=""
 RUN BUILD_TIME_FINAL=${BUILD_TIME:-${BUILD_TIME_DEFAULT}} && \
     if [ -z "$BUILD_TIME_FINAL" ]; then BUILD_TIME_FINAL=$(date -u +"%Y-%m-%dT%H:%M:%SZ"); fi && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags "-X main.serverHost=$SERVER_HOST -X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME_FINAL -s -w" \
     -o /build/mxcsec-agent \
     ./cmd/agent
@@ -57,8 +59,5 @@ RUN chmod +x /usr/local/bin/mxcsec-agent
 # 设置工作目录
 WORKDIR /var/lib/mxcsec-agent
 
-# 暴露端口（如果需要）
-# EXPOSE 端口
-
-# 运行 Agent
+# 运行 Agent（以 root 运行，需要主机级操作权限）
 ENTRYPOINT ["/usr/local/bin/mxcsec-agent"]

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -25,14 +24,15 @@ func NewFIMPoliciesHandler(db *gorm.DB, logger *zap.Logger) *FIMPoliciesHandler 
 
 // CreateFIMPolicyRequest 创建 FIM 策略请求
 type CreateFIMPolicyRequest struct {
-	Name               string              `json:"name" binding:"required"`
-	Description        string              `json:"description"`
-	WatchPaths         model.WatchPaths    `json:"watch_paths" binding:"required"`
-	ExcludePaths       model.StringArray   `json:"exclude_paths"`
-	CheckIntervalHours int                 `json:"check_interval_hours"`
-	TargetType         string              `json:"target_type"`
-	TargetConfig       model.TargetConfig  `json:"target_config"`
-	Enabled            *bool               `json:"enabled"`
+	Name                 string             `json:"name" binding:"required"`
+	Description          string             `json:"description"`
+	WatchPaths           model.WatchPaths   `json:"watch_paths" binding:"required"`
+	ExcludePaths         model.StringArray  `json:"exclude_paths"`
+	CheckIntervalHours   int                `json:"check_interval_hours"`
+	TargetType           string             `json:"target_type"`
+	TargetConfig         model.TargetConfig `json:"target_config"`
+	EscalationTimeoutMin *int               `json:"escalation_timeout_min"`
+	Enabled              *bool              `json:"enabled"`
 }
 
 // ListFIMPolicies 获取 FIM 策略列表
@@ -97,7 +97,7 @@ func (h *FIMPoliciesHandler) GetFIMPolicy(c *gin.Context) {
 func (h *FIMPoliciesHandler) CreateFIMPolicy(c *gin.Context) {
 	var req CreateFIMPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -121,18 +121,24 @@ func (h *FIMPoliciesHandler) CreateFIMPolicy(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 
+	escalationTimeout := 1440
+	if req.EscalationTimeoutMin != nil && *req.EscalationTimeoutMin > 0 {
+		escalationTimeout = *req.EscalationTimeoutMin
+	}
+
 	policy := model.FIMPolicy{
-		PolicyID:           uuid.New().String(),
-		Name:               req.Name,
-		Description:        req.Description,
-		WatchPaths:         req.WatchPaths,
-		ExcludePaths:       req.ExcludePaths,
-		CheckIntervalHours: checkInterval,
-		TargetType:         targetType,
-		TargetConfig:       req.TargetConfig,
-		Enabled:            enabled,
-		CreatedAt:          model.Now(),
-		UpdatedAt:          model.Now(),
+		PolicyID:             uuid.New().String(),
+		Name:                 req.Name,
+		Description:          req.Description,
+		WatchPaths:           req.WatchPaths,
+		ExcludePaths:         req.ExcludePaths,
+		CheckIntervalHours:   checkInterval,
+		TargetType:           targetType,
+		TargetConfig:         req.TargetConfig,
+		EscalationTimeoutMin: escalationTimeout,
+		Enabled:              enabled,
+		CreatedAt:            model.Now(),
+		UpdatedAt:            model.Now(),
 	}
 
 	if err := h.db.Create(&policy).Error; err != nil {
@@ -141,10 +147,7 @@ func (h *FIMPoliciesHandler) CreateFIMPolicy(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": policy,
-	})
+	Created(c, policy)
 }
 
 // UpdateFIMPolicy 更新 FIM 策略
@@ -164,7 +167,7 @@ func (h *FIMPoliciesHandler) UpdateFIMPolicy(c *gin.Context) {
 
 	var req CreateFIMPolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -186,6 +189,9 @@ func (h *FIMPoliciesHandler) UpdateFIMPolicy(c *gin.Context) {
 	if req.TargetType != "" {
 		updates["target_type"] = req.TargetType
 		updates["target_config"] = req.TargetConfig
+	}
+	if req.EscalationTimeoutMin != nil && *req.EscalationTimeoutMin > 0 {
+		updates["escalation_timeout_min"] = *req.EscalationTimeoutMin
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled

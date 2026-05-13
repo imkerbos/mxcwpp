@@ -70,8 +70,31 @@
 
         <div v-if="selectedRowKeys.length > 0" class="batch-action-bar">
           <span>已选择 {{ selectedRowKeys.length }} 项</span>
-          <a-button type="primary" size="small" :loading="batchConfirmLoading" @click="handleBatchConfirm">
-            批量确认执行
+          <a-button
+            v-if="selectedHasStatus('pending')"
+            type="primary"
+            size="small"
+            :loading="batchConfirmLoading"
+            @click="handleBatchConfirm"
+          >
+            批量确认
+          </a-button>
+          <a-button
+            v-if="selectedHasStatus('failed')"
+            size="small"
+            :loading="batchRetryLoading"
+            @click="handleBatchRetry"
+          >
+            批量重试
+          </a-button>
+          <a-button
+            v-if="selectedHasStatus('pending') || selectedHasStatus('confirmed')"
+            danger
+            size="small"
+            :loading="batchCancelLoading"
+            @click="handleBatchCancel"
+          >
+            批量取消
           </a-button>
           <a-button size="small" @click="selectedRowKeys = []">取消选择</a-button>
         </div>
@@ -83,14 +106,12 @@
           :pagination="pagination"
           size="middle"
           row-key="id"
-          :row-selection="{ selectedRowKeys, onChange: onSelectChange, getCheckboxProps: (record: RemediationTaskItem) => ({ disabled: record.status !== 'pending' }) }"
+          :row-selection="{ selectedRowKeys, onChange: onSelectChange, getCheckboxProps: (record: RemediationTaskItem) => ({ disabled: record.status === 'running' || record.status === 'success' }) }"
           @change="handleTableChange"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'cve'">
-              <a :href="`https://nvd.nist.gov/vuln/detail/${record.cveId}`" target="_blank" rel="noopener">
-                {{ record.cveId }}
-              </a>
+              <RouterLink :to="`/vuln-remediation/tasks/${record.id}`">{{ record.cveId }}</RouterLink>
             </template>
             <template v-else-if="column.key === 'host'">
               <RouterLink :to="`/hosts/${record.hostId}`">{{ record.hostname || record.hostId }}</RouterLink>
@@ -133,54 +154,15 @@
                 >
                   取消
                 </a-button>
-                <a-button type="link" size="small" @click="handleViewDetail(record)">详情</a-button>
+                <RouterLink :to="`/vuln-remediation/tasks/${record.id}`">
+                  <a-button type="link" size="small">详情</a-button>
+                </RouterLink>
               </a-space>
             </template>
           </template>
         </a-table>
       </div>
     </div>
-
-    <!-- 任务详情抽屉 -->
-    <a-drawer
-      v-model:open="showDetail"
-      :title="`修复任务 #${detailTask?.id}`"
-      width="600"
-      placement="right"
-    >
-      <template v-if="detailTask">
-        <a-descriptions :column="1" bordered size="small">
-          <a-descriptions-item label="漏洞编号">{{ detailTask.cveId }}</a-descriptions-item>
-          <a-descriptions-item label="目标主机">{{ detailTask.hostname }} ({{ detailTask.ip }})</a-descriptions-item>
-          <a-descriptions-item label="组件">{{ detailTask.component }}</a-descriptions-item>
-          <a-descriptions-item label="修复版本">{{ detailTask.fixedVersion || '最新版本' }}</a-descriptions-item>
-          <a-descriptions-item label="状态">
-            <a-tag :color="taskStatusColor(detailTask.status)" :bordered="false">
-              {{ taskStatusText(detailTask.status) }}
-            </a-tag>
-          </a-descriptions-item>
-          <a-descriptions-item label="修复命令">
-            <div class="detail-command">
-              <code>{{ detailTask.command }}</code>
-            </div>
-          </a-descriptions-item>
-          <a-descriptions-item label="创建者">{{ detailTask.createdBy || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="确认者">{{ detailTask.confirmedBy || '-' }}</a-descriptions-item>
-          <a-descriptions-item label="创建时间">{{ detailTask.createdAt }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailTask.confirmedAt" label="确认时间">{{ detailTask.confirmedAt }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailTask.startedAt" label="开始时间">{{ detailTask.startedAt }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailTask.finishedAt" label="完成时间">{{ detailTask.finishedAt }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailTask.exitCode != null" label="退出码">
-            <a-tag :color="detailTask.exitCode === 0 ? 'green' : 'red'">{{ detailTask.exitCode }}</a-tag>
-          </a-descriptions-item>
-        </a-descriptions>
-
-        <template v-if="detailTask.execOutput">
-          <a-divider>执行输出</a-divider>
-          <pre class="exec-output">{{ detailTask.execOutput }}</pre>
-        </template>
-      </template>
-    </a-drawer>
 
     <!-- 确认执行弹窗 -->
     <a-modal
@@ -221,15 +203,14 @@ const pagination = ref({
   showTotal: (total: number) => `共 ${total} 条`,
 })
 
-const showDetail = ref(false)
-const detailTask = ref<RemediationTaskItem | null>(null)
-
 const confirmModalVisible = ref(false)
 const confirmTask = ref<RemediationTaskItem | null>(null)
 const confirmCommand = ref('')
 const confirmLoading = ref(false)
 const selectedRowKeys = ref<number[]>([])
 const batchConfirmLoading = ref(false)
+const batchRetryLoading = ref(false)
+const batchCancelLoading = ref(false)
 
 const columns = [
   { title: 'ID', dataIndex: 'id', width: 60 },
@@ -302,11 +283,6 @@ const handleTableChange = (pag: any) => {
   loadTasks()
 }
 
-const handleViewDetail = (record: RemediationTaskItem) => {
-  detailTask.value = record
-  showDetail.value = true
-}
-
 const handleConfirm = (record: RemediationTaskItem) => {
   confirmTask.value = record
   confirmCommand.value = record.command
@@ -355,11 +331,18 @@ const onSelectChange = (keys: number[]) => {
   selectedRowKeys.value = keys
 }
 
+const selectedHasStatus = (status: string) => {
+  return tasks.value.some(t => selectedRowKeys.value.includes(t.id) && t.status === status)
+}
+
 const handleBatchConfirm = async () => {
   if (selectedRowKeys.value.length === 0) return
   batchConfirmLoading.value = true
   try {
-    const res = await remediationTasksApi.batchConfirm(selectedRowKeys.value)
+    const ids = tasks.value
+      .filter(t => selectedRowKeys.value.includes(t.id) && t.status === 'pending')
+      .map(t => t.id)
+    const res = await remediationTasksApi.batchConfirm(ids)
     message.success(`已确认 ${res.confirmed} 个任务，等待 Agent 执行`)
     selectedRowKeys.value = []
     loadTasks()
@@ -368,6 +351,44 @@ const handleBatchConfirm = async () => {
     message.error('批量确认失败')
   } finally {
     batchConfirmLoading.value = false
+  }
+}
+
+const handleBatchRetry = async () => {
+  if (selectedRowKeys.value.length === 0) return
+  batchRetryLoading.value = true
+  try {
+    const ids = tasks.value
+      .filter(t => selectedRowKeys.value.includes(t.id) && t.status === 'failed')
+      .map(t => t.id)
+    const res = await remediationTasksApi.batchRetry(ids)
+    message.success(`已重试 ${res.retried} 个任务`)
+    selectedRowKeys.value = []
+    loadTasks()
+    loadStats()
+  } catch {
+    message.error('批量重试失败')
+  } finally {
+    batchRetryLoading.value = false
+  }
+}
+
+const handleBatchCancel = async () => {
+  if (selectedRowKeys.value.length === 0) return
+  batchCancelLoading.value = true
+  try {
+    const ids = tasks.value
+      .filter(t => selectedRowKeys.value.includes(t.id) && (t.status === 'pending' || t.status === 'confirmed'))
+      .map(t => t.id)
+    const res = await remediationTasksApi.batchCancel(ids)
+    message.success(`已取消 ${res.cancelled} 个任务`)
+    selectedRowKeys.value = []
+    loadTasks()
+    loadStats()
+  } catch {
+    message.error('批量取消失败')
+  } finally {
+    batchCancelLoading.value = false
   }
 }
 
@@ -423,29 +444,7 @@ onMounted(() => {
 
 .text-muted { font-size: 12px; color: #86909C; }
 
-.detail-command {
-  background: #F7F8FA;
-  padding: 8px 12px;
-  border-radius: 4px;
-  word-break: break-all;
-}
 
-.detail-command code {
-  font-family: 'SF Mono', 'Monaco', monospace;
-  font-size: 13px;
-}
-
-.exec-output {
-  background: #1D2129;
-  color: #E8F3E8;
-  padding: 12px;
-  border-radius: 6px;
-  font-family: 'SF Mono', 'Monaco', monospace;
-  font-size: 12px;
-  max-height: 300px;
-  overflow: auto;
-  white-space: pre-wrap;
-}
 
 .confirm-warning {
   margin-top: 12px;

@@ -174,11 +174,12 @@ func initDefaultUsers(db *gorm.DB, logger *zap.Logger) error {
 	}
 
 	defaultUser := &model.User{
-		Username: "admin",
-		Password: string(hashedPassword),
-		Email:    "admin@example.com",
-		Role:     model.UserRoleAdmin,
-		Status:   model.UserStatusActive,
+		Username:            "admin",
+		Password:            string(hashedPassword),
+		Email:               "admin@example.com",
+		Role:                model.UserRoleAdmin,
+		Status:              model.UserStatusActive,
+		ForceChangePassword: true,
 	}
 
 	if err := db.Create(defaultUser).Error; err != nil {

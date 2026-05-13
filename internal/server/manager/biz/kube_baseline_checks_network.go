@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
@@ -61,7 +63,7 @@ func (c *KubeBaselineChecker) checkDefaultDenyIngress(ctx context.Context) (stri
 			// 默认拒绝入站：podSelector 为空 + policyTypes 包含 Ingress + ingress 规则为空
 			if len(pol.Spec.PodSelector.MatchLabels) == 0 && len(pol.Spec.PodSelector.MatchExpressions) == 0 {
 				for _, pt := range pol.Spec.PolicyTypes {
-					if string(pt) == "Ingress" && len(pol.Spec.Ingress) == 0 {
+					if pt == networkingv1.PolicyTypeIngress && len(pol.Spec.Ingress) == 0 {
 						hasDefaultDeny = true
 						break
 					}
@@ -103,7 +105,7 @@ func (c *KubeBaselineChecker) checkDefaultDenyEgress(ctx context.Context) (strin
 		for _, pol := range policies.Items {
 			if len(pol.Spec.PodSelector.MatchLabels) == 0 && len(pol.Spec.PodSelector.MatchExpressions) == 0 {
 				for _, pt := range pol.Spec.PolicyTypes {
-					if string(pt) == "Egress" && len(pol.Spec.Egress) == 0 {
+					if pt == networkingv1.PolicyTypeEgress && len(pol.Spec.Egress) == 0 {
 						hasDefaultDeny = true
 						break
 					}
@@ -137,7 +139,7 @@ func (c *KubeBaselineChecker) checkNodePortServices(ctx context.Context) (string
 		if isSystemNamespace(svc.Namespace) {
 			continue
 		}
-		if string(svc.Spec.Type) == "NodePort" {
+		if svc.Spec.Type == corev1.ServiceTypeNodePort {
 			affected = append(affected, model.AffectedResource{Kind: "Service", Name: svc.Name, Namespace: svc.Namespace})
 		}
 	}
@@ -161,7 +163,7 @@ func (c *KubeBaselineChecker) checkLoadBalancerServices(ctx context.Context) (st
 		if isSystemNamespace(svc.Namespace) {
 			continue
 		}
-		if string(svc.Spec.Type) == "LoadBalancer" {
+		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
 			affected = append(affected, model.AffectedResource{Kind: "Service", Name: svc.Name, Namespace: svc.Namespace})
 		}
 	}
@@ -230,7 +232,7 @@ func (c *KubeBaselineChecker) checkServiceWithoutSelector(ctx context.Context) (
 			continue
 		}
 		// ExternalName 类型 Service 没有 selector 是正常的
-		if string(svc.Spec.Type) == "ExternalName" {
+		if svc.Spec.Type == corev1.ServiceTypeExternalName {
 			continue
 		}
 		if len(svc.Spec.Selector) == 0 {
@@ -428,7 +430,7 @@ func (c *KubeBaselineChecker) checkSATokenSecrets(ctx context.Context) (string, 
 		if isSystemNamespace(secret.Namespace) {
 			continue
 		}
-		if string(secret.Type) == "kubernetes.io/service-account-token" {
+		if secret.Type == corev1.SecretTypeServiceAccountToken {
 			affected = append(affected, model.AffectedResource{Kind: "Secret", Name: secret.Name, Namespace: secret.Namespace})
 		}
 	}

@@ -3,8 +3,6 @@ package updater
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/common/fileutil"
 )
 
 // --- 公共函数（供 gRPC push 和 CLI selfupdate 共用） ---
@@ -60,18 +59,7 @@ func DownloadFile(ctx context.Context, url string, destPath string) (int64, erro
 
 // CalculateSHA256 计算文件的 SHA256 哈希值
 func CalculateSHA256(filePath string) (string, error) {
-	f, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return fileutil.SHA256Sum(filePath)
 }
 
 // InstallPackage 使用系统包管理器安装包

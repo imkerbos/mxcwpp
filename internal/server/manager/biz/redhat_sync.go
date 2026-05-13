@@ -40,27 +40,34 @@ var rpmNameRegexp = regexp.MustCompile(`^([a-zA-Z0-9_+.-]+?)-\d`)
 
 // SyncRedHat 从 Red Hat Security Data API 同步最近的 CVE 数据
 func (v *VulnScanner) SyncRedHat() error {
+	return v.SyncRedHatWithSoftware(nil)
+}
+
+// SyncRedHatWithSoftware 使用预加载的软件列表执行 Red Hat 同步，避免重复查询
+func (v *VulnScanner) SyncRedHatWithSoftware(softwareByName map[string][]installedSoftware) error {
 	v.logger.Info("开始 Red Hat Security Data 同步")
 
-	// 1. 查询已安装软件
-	var software []installedSoftware
-	if err := v.db.Table("software AS s").
-		Select("s.name, s.version, s.host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
-		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
-		Where("s.name != ''").
-		Scan(&software).Error; err != nil {
-		return fmt.Errorf("查询已安装软件失败: %w", err)
-	}
+	// 如果调用方未提供软件列表，自行查询
+	if softwareByName == nil {
+		var software []installedSoftware
+		if err := v.db.Table("software AS s").
+			Select("s.name, s.version, s.host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+			Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
+			Where("s.name != ''").
+			Scan(&software).Error; err != nil {
+			return fmt.Errorf("查询已安装软件失败: %w", err)
+		}
 
-	if len(software) == 0 {
-		v.logger.Info("没有已安装软件，跳过 Red Hat 同步")
-		return nil
-	}
+		if len(software) == 0 {
+			v.logger.Info("没有已安装软件，跳过 Red Hat 同步")
+			return nil
+		}
 
-	softwareByName := make(map[string][]installedSoftware)
-	for _, sw := range software {
-		key := strings.ToLower(sw.Name)
-		softwareByName[key] = append(softwareByName[key], sw)
+		softwareByName = make(map[string][]installedSoftware)
+		for _, sw := range software {
+			key := strings.ToLower(sw.Name)
+			softwareByName[key] = append(softwareByName[key], sw)
+		}
 	}
 
 	// 2. 查询 Red Hat API
@@ -127,34 +134,38 @@ func (v *VulnScanner) SyncRedHat() error {
 			continue
 		}
 
-		// 创建主机关联
+		// 创建主机关联（复用公共方法）
+		entries := make([]hostVulnEntry, 0)
 		hostSeen := make(map[string]struct{})
 		for _, sw := range matches {
 			if _, ok := hostSeen[sw.HostID]; ok {
 				continue
 			}
 			hostSeen[sw.HostID] = struct{}{}
-
-			hostVuln := &model.HostVulnerability{
-				VulnID:         vulnRecord.ID,
-				HostID:         sw.HostID,
-				Hostname:       sw.Hostname,
-				IP:             sw.IP,
-				CurrentVersion: sw.Version,
-				Status:         "unpatched",
-			}
-			v.db.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
-			}).Create(hostVuln)
+			entries = append(entries, hostVulnEntry{
+				HostID:   sw.HostID,
+				Hostname: sw.Hostname,
+				IP:       sw.IP,
+				Version:  sw.Version,
+			})
 		}
+		v.upsertHostVulnsBatch(vulnRecord.ID, entries)
 
-		// 更新受影响主机数
-		var affectedCount int64
-		v.db.Model(&model.HostVulnerability{}).
-			Where("vuln_id = ? AND status = ?", vulnRecord.ID, "unpatched").
-			Count(&affectedCount)
-		v.db.Model(vulnRecord).Update("affected_hosts", affectedCount)
+		// 发送漏洞告警通知
+		if len(matches) > 0 {
+			go func(vuln *model.Vulnerability, sw installedSoftware) {
+				var affected int64
+				v.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vuln.ID, "unpatched").Count(&affected)
+				ns := NewNotificationService(v.db, v.logger)
+				_ = ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
+					HostID: sw.HostID, Hostname: sw.Hostname, IP: sw.IP,
+					CveID: vuln.CveID, Severity: vuln.Severity, CvssScore: vuln.CvssScore,
+					Component: vuln.Component, CurrentVersion: vuln.CurrentVersion,
+					FixedVersion: vuln.FixedVersion, Description: vuln.Description,
+					AffectedHosts: int(affected),
+				})
+			}(vulnRecord, matches[0])
+		}
 
 		existingCVEs[item.CVE] = struct{}{}
 		newCount++

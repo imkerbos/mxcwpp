@@ -26,6 +26,20 @@
         </a-col>
       </a-row>
 
+      <a-row :gutter="16">
+        <a-col :span="12">
+          <a-form-item label="超时升级时间（分钟）" name="escalation_timeout_min">
+            <a-input-number
+              v-model:value="form.escalation_timeout_min"
+              :min="60"
+              :max="43200"
+              style="width: 100%"
+              placeholder="默认 1440（24小时）"
+            />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
       <a-form-item label="描述" name="description">
         <a-textarea v-model:value="form.description" :rows="2" placeholder="策略描述" />
       </a-form-item>
@@ -134,6 +148,7 @@ const getDefaultForm = () => ({
   watch_paths: [{ path: '', level: 'NORMAL', comment: '' }],
   exclude_paths: [] as string[],
   check_interval_hours: 24,
+  escalation_timeout_min: 1440,
   target_type: 'all',
   enabled: true,
 })
@@ -158,6 +173,7 @@ watch(
             : [{ path: '', level: 'NORMAL', comment: '' }],
           exclude_paths: props.policy.exclude_paths ? [...props.policy.exclude_paths] : [],
           check_interval_hours: props.policy.check_interval_hours || 24,
+          escalation_timeout_min: props.policy.escalation_timeout_min || 1440,
           target_type: props.policy.target_type || 'all',
           enabled: props.policy.enabled,
         }
@@ -198,6 +214,7 @@ const handleSubmit = async () => {
       watch_paths: watchPaths,
       exclude_paths: excludePaths,
       check_interval_hours: form.value.check_interval_hours,
+      escalation_timeout_min: form.value.escalation_timeout_min,
       target_type: form.value.target_type,
       enabled: form.value.enabled,
     }

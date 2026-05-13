@@ -31,11 +31,11 @@ type timelineEvent struct {
 	Timestamp string `json:"timestamp"`
 	EventType string `json:"eventType"`
 	Source    string `json:"source"` // ebpf, fim, scanner
-	Detail   string `json:"detail"`
-	PID      string `json:"pid,omitempty"`
-	Exe      string `json:"exe,omitempty"`
-	Cmdline  string `json:"cmdline,omitempty"`
-	FilePath string `json:"filePath,omitempty"`
+	Detail    string `json:"detail"`
+	PID       string `json:"pid,omitempty"`
+	Exe       string `json:"exe,omitempty"`
+	Cmdline   string `json:"cmdline,omitempty"`
+	FilePath  string `json:"filePath,omitempty"`
 }
 
 // processNode 进程树节点
@@ -100,9 +100,9 @@ func (h *AlertContextHandler) GetAlertContext(c *gin.Context) {
 	sortTimeline(timeline)
 
 	Success(c, gin.H{
-		"alert":       alert,
-		"timeline":    timeline,
-		"processTree": processes,
+		"alert":        alert,
+		"timeline":     timeline,
+		"processTree":  processes,
 		"networkConns": connections,
 		"timeRange": gin.H{
 			"start": startTime.Format(model.TimeFormat),
@@ -158,11 +158,11 @@ func (h *AlertContextHandler) queryClickHouseContext(hostID string, start, end t
 			Timestamp: ts.Format(model.TimeFormat),
 			EventType: eventType,
 			Source:    "ebpf",
-			Detail:   detail,
-			PID:      pid,
-			Exe:      exe,
-			Cmdline:  cmdline,
-			FilePath: filePath,
+			Detail:    detail,
+			PID:       pid,
+			Exe:       exe,
+			Cmdline:   cmdline,
+			FilePath:  filePath,
 		})
 
 		// 构建进程树

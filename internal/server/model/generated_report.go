@@ -1,10 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-)
+import "database/sql/driver"
 
 // ReportType 报告类型
 type ReportType string
@@ -22,34 +18,10 @@ const (
 type ReportJSON map[string]any
 
 // Value 实现 driver.Valuer 接口
-func (r ReportJSON) Value() (driver.Value, error) {
-	if r == nil {
-		return "null", nil
-	}
-	data, err := json.Marshal(r)
-	if err != nil {
-		return nil, fmt.Errorf("序列化报告数据失败: %w", err)
-	}
-	return string(data), nil
-}
+func (r ReportJSON) Value() (driver.Value, error) { return JSONValue(r) }
 
 // Scan 实现 sql.Scanner 接口
-func (r *ReportJSON) Scan(value any) error {
-	if value == nil {
-		*r = nil
-		return nil
-	}
-	var bytes []byte
-	switch v := value.(type) {
-	case string:
-		bytes = []byte(v)
-	case []byte:
-		bytes = v
-	default:
-		return fmt.Errorf("无法扫描报告数据: %T", value)
-	}
-	return json.Unmarshal(bytes, r)
-}
+func (r *ReportJSON) Scan(value any) error { return JSONScan(r, value) }
 
 // GeneratedReport 已生成的报告记录
 type GeneratedReport struct {

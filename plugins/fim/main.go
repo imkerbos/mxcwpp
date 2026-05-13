@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/fim/engine"
@@ -27,13 +25,6 @@ var (
 )
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "PANIC in main: %v\nStack trace:\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	// 1. 初始化插件客户端
 	client, err := plugins.NewClient()
 	if err != nil {
@@ -43,7 +34,7 @@ func main() {
 	defer client.Close()
 
 	// 2. 初始化日志
-	logger, err := newPluginLogger()
+	logger, err := plugins.NewPluginLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -68,7 +59,7 @@ func main() {
 
 	// 6. 启动任务接收循环
 	taskCh := make(chan *bridge.Task, 10)
-	go receiveTasks(ctx, client, taskCh, logger)
+	go plugins.ReceiveTaskLoop(ctx, client, taskCh, logger)
 
 	logger.Info("fim plugin initialized, entering main loop")
 
@@ -90,50 +81,9 @@ func main() {
 	}
 }
 
-// receiveTasks 接收任务
-func receiveTasks(ctx context.Context, client *plugins.Client, taskCh chan<- *bridge.Task, logger *zap.Logger) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in receiveTasks",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			task, err := client.ReceiveTask()
-			if err != nil {
-				if err.Error() == "EOF" || err.Error() == "io: read/write on closed pipe" {
-					logger.Warn("pipe closed, plugin will exit", zap.Error(err))
-					return
-				}
-				logger.Error("failed to receive task", zap.Error(err))
-				time.Sleep(time.Second)
-				continue
-			}
-			select {
-			case taskCh <- task:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-}
-
 // handleTask 处理任务路由
 func handleTask(ctx context.Context, task *bridge.Task, fimEngine *engine.Engine, client *plugins.Client, logger *zap.Logger) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in handleTask",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-			err = fmt.Errorf("panic in handleTask: %v", r)
-		}
-	}()
+	defer plugins.RecoverAndLog(logger, "handleTask")()
 
 	logger.Info("received task",
 		zap.Int32("data_type", task.DataType),
@@ -142,8 +92,8 @@ func handleTask(ctx context.Context, task *bridge.Task, fimEngine *engine.Engine
 	switch task.DataType {
 	case 6000: // FIM 检查任务
 		return handleFIMCheckTask(ctx, task, fimEngine, client, logger)
-	case 6003: // 策略更新
-		return handlePolicyUpdate(task, fimEngine, logger)
+	case 6003: // 基线下发（服务端审批后推送）
+		return handleBaselineDelivery(task, fimEngine, logger)
 	default:
 		logger.Warn("unknown task type", zap.Int32("data_type", task.DataType))
 		return nil
@@ -180,6 +130,29 @@ func handleFIMCheckTask(ctx context.Context, task *bridge.Task, fimEngine *engin
 		return fmt.Errorf("FIM 检查失败: %w", err)
 	}
 
+	// 首次扫描：上报基线快照供服务端审批
+	if result.IsInitialBaseline {
+		snapshotJSON, _ := json.Marshal(result.Snapshot)
+		snapshotRecord := &bridge.Record{
+			DataType:  6004, // FIM 基线快照
+			Timestamp: time.Now().UnixNano(),
+			Data: &bridge.Payload{
+				Fields: map[string]string{
+					"task_id":     taskID,
+					"policy_id":   result.PolicyID,
+					"snapshot":    string(snapshotJSON),
+					"entry_count": fmt.Sprintf("%d", len(result.Snapshot)),
+				},
+			},
+		}
+		if err := client.SendRecord(snapshotRecord); err != nil {
+			logger.Error("failed to send baseline snapshot", zap.Error(err))
+		}
+		logger.Info("baseline snapshot sent for approval",
+			zap.String("policy_id", result.PolicyID),
+			zap.Int("entry_count", len(result.Snapshot)))
+	}
+
 	// 逐条发送 FIM 事件
 	for _, event := range result.Events {
 		detailJSON, _ := json.Marshal(event.ChangeDetail)
@@ -211,9 +184,9 @@ func handleFIMCheckTask(ctx context.Context, task *bridge.Task, fimEngine *engin
 		Timestamp: time.Now().UnixNano(),
 		Data: &bridge.Payload{
 			Fields: map[string]string{
-				"task_id":        taskID,
-				"status":         "completed",
-				"total_entries":  fmt.Sprintf("%d", result.Summary.TotalEntries),
+				"task_id":       taskID,
+				"status":        "completed",
+				"total_entries": fmt.Sprintf("%d", result.Summary.TotalEntries),
 				"added_count":   fmt.Sprintf("%d", result.Summary.AddedEntries),
 				"removed_count": fmt.Sprintf("%d", result.Summary.RemovedEntries),
 				"changed_count": fmt.Sprintf("%d", result.Summary.ChangedEntries),
@@ -233,23 +206,12 @@ func handleFIMCheckTask(ctx context.Context, task *bridge.Task, fimEngine *engin
 	return nil
 }
 
-// handlePolicyUpdate 处理策略更新（仅重新渲染配置）
-func handlePolicyUpdate(task *bridge.Task, fimEngine *engine.Engine, logger *zap.Logger) error {
-	logger.Info("updating FIM policy config")
-	if err := fimEngine.RenderConfig(json.RawMessage(task.Data)); err != nil {
-		return fmt.Errorf("策略更新失败: %w", err)
+// handleBaselineDelivery 处理服务端下发的审批基线
+func handleBaselineDelivery(task *bridge.Task, fimEngine *engine.Engine, logger *zap.Logger) error {
+	logger.Info("接收服务端下发的审批基线")
+	if err := fimEngine.SaveBaseline(json.RawMessage(task.Data)); err != nil {
+		return fmt.Errorf("保存基线失败: %w", err)
 	}
-	logger.Info("FIM policy config updated")
+	logger.Info("审批基线已保存")
 	return nil
-}
-
-// newPluginLogger 创建插件专用 logger
-func newPluginLogger() (*zap.Logger, error) {
-	config := zap.NewProductionConfig()
-	config.OutputPaths = []string{"stderr"}
-	config.ErrorOutputPaths = []string{"stderr"}
-	config.Encoding = "json"
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	return config.Build()
 }

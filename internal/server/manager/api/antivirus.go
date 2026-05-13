@@ -15,9 +15,9 @@ import (
 
 // AntivirusHandler 病毒查杀 API 处理器
 type AntivirusHandler struct {
-	db              *gorm.DB
-	logger          *zap.Logger
-	virusDBUpdater  *biz.VirusDBUpdater
+	db             *gorm.DB
+	logger         *zap.Logger
+	virusDBUpdater *biz.VirusDBUpdater
 }
 
 // NewAntivirusHandler 创建病毒查杀处理器
@@ -109,7 +109,7 @@ type CreateAntivirusTaskRequest struct {
 func (h *AntivirusHandler) CreateTask(c *gin.Context) {
 	var req CreateAntivirusTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

@@ -5,6 +5,8 @@ import type {
   FIMTask,
   FIMTaskHostStatus,
   FIMEventStats,
+  FIMBaseline,
+  FIMBaselineEntry,
   PaginatedResponse,
 } from './types'
 
@@ -92,6 +94,7 @@ export const fimApi = {
     change_type?: string
     severity?: string
     category?: string
+    status?: string
     task_id?: string
     date_from?: string
     date_to?: string
@@ -105,5 +108,44 @@ export const fimApi = {
 
   async getEventStats(days?: number): Promise<FIMEventStats> {
     return apiClient.get<FIMEventStats>('/fim/events/stats', { params: { days } })
+  },
+
+  async confirmEvent(eventId: string, data: { reason: string; update_baseline?: boolean }): Promise<void> {
+    await apiClient.post(`/fim/events/${eventId}/confirm`, data)
+  },
+
+  async batchConfirmEvents(eventIds: string[], reason: string): Promise<{ confirmed: number }> {
+    return apiClient.post<{ confirmed: number }>('/fim/events/batch-confirm', { event_ids: eventIds, reason })
+  },
+
+  // === 基线管理 ===
+
+  async listBaselines(params?: {
+    page?: number
+    page_size?: number
+    policy_id?: string
+    host_id?: string
+    status?: string
+  }): Promise<PaginatedResponse<FIMBaseline>> {
+    return apiClient.get<PaginatedResponse<FIMBaseline>>('/fim/baselines', { params })
+  },
+
+  async getBaseline(id: number, params?: {
+    entry_page?: number
+    entry_page_size?: number
+  }): Promise<{ baseline: FIMBaseline; entries: FIMBaselineEntry[]; entry_total: number }> {
+    return apiClient.get<{ baseline: FIMBaseline; entries: FIMBaselineEntry[]; entry_total: number }>(`/fim/baselines/${id}`, { params })
+  },
+
+  async approveBaseline(id: number): Promise<void> {
+    await apiClient.post(`/fim/baselines/${id}/approve`)
+  },
+
+  async batchApproveBaselines(ids: number[]): Promise<{ approved: number }> {
+    return apiClient.post<{ approved: number }>('/fim/baselines/batch-approve', { ids })
+  },
+
+  async rejectBaseline(id: number): Promise<void> {
+    await apiClient.post(`/fim/baselines/${id}/reject`)
   },
 }

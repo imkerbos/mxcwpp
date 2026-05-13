@@ -97,10 +97,10 @@ func parseProcNetDevContent(content string) map[string][4]uint64 {
 			continue
 		}
 		var vals [4]uint64
-		vals[0] = parseU64(fields[0])  // bytes recv
-		vals[1] = parseU64(fields[2])  // errs recv
-		vals[2] = parseU64(fields[3])  // drop recv
-		vals[3] = parseU64(fields[8])  // bytes sent
+		vals[0] = parseU64(fields[0]) // bytes recv
+		vals[1] = parseU64(fields[2]) // errs recv
+		vals[2] = parseU64(fields[3]) // drop recv
+		vals[3] = parseU64(fields[8]) // bytes sent
 		stats[name] = vals
 	}
 	return stats

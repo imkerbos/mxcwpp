@@ -49,11 +49,11 @@ func (h *KubeStatsHandler) GetSummary(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"clusters":        clusterCount,
-		"onlineClusters":  onlineCount,
-		"pendingAlarms":   pendingAlarms,
-		"criticalAlarms":  criticalAlarms,
-		"unhandledEvents": unhandledEvents,
+		"clusters":         clusterCount,
+		"onlineClusters":   onlineCount,
+		"pendingAlarms":    pendingAlarms,
+		"criticalAlarms":   criticalAlarms,
+		"unhandledEvents":  unhandledEvents,
 		"baselinePassRate": passRate,
 	})
 }

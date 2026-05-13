@@ -15,7 +15,7 @@
 
     <!-- 统计卡片 -->
     <a-row :gutter="16" class="stat-cards">
-      <a-col :span="6">
+      <a-col :span="4">
         <a-card>
           <a-statistic title="总变更事件" :value="stats.total" :value-style="{ fontSize: '28px' }">
             <template #prefix>
@@ -24,16 +24,34 @@
           </a-statistic>
         </a-card>
       </a-col>
-      <a-col :span="6">
+      <a-col :span="4">
         <a-card>
-          <a-statistic title="严重/高危事件" :value="stats.critical + stats.high" :value-style="{ color: '#CB2634', fontSize: '28px' }">
+          <a-statistic title="待确认事件" :value="stats.pending" :value-style="{ color: '#FF7D00', fontSize: '28px' }">
+            <template #prefix>
+              <ClockCircleOutlined style="color: #FF7D00" />
+            </template>
+          </a-statistic>
+        </a-card>
+      </a-col>
+      <a-col :span="4">
+        <a-card>
+          <a-statistic title="待审批基线" :value="pendingBaselines" :value-style="{ color: '#722ED1', fontSize: '28px' }">
+            <template #prefix>
+              <AuditOutlined style="color: #722ED1" />
+            </template>
+          </a-statistic>
+        </a-card>
+      </a-col>
+      <a-col :span="4">
+        <a-card>
+          <a-statistic title="严重/高危" :value="stats.critical + stats.high" :value-style="{ color: '#CB2634', fontSize: '28px' }">
             <template #prefix>
               <WarningOutlined style="color: #CB2634" />
             </template>
           </a-statistic>
         </a-card>
       </a-col>
-      <a-col :span="6">
+      <a-col :span="4">
         <a-card>
           <a-statistic title="新增文件" :value="stats.added" :value-style="{ color: '#00B42A', fontSize: '28px' }">
             <template #prefix>
@@ -42,7 +60,7 @@
           </a-statistic>
         </a-card>
       </a-col>
-      <a-col :span="6">
+      <a-col :span="4">
         <a-card>
           <a-statistic title="删除文件" :value="stats.removed" :value-style="{ color: '#F53F3F', fontSize: '28px' }">
             <template #prefix>
@@ -111,14 +129,19 @@ import {
   WarningOutlined,
   PlusCircleOutlined,
   MinusCircleOutlined,
+  ClockCircleOutlined,
+  AuditOutlined,
 } from '@ant-design/icons-vue'
 import { fimApi } from '@/api/fim'
 import type { FIMEventStats } from '@/api/types'
 
 const days = ref(7)
 
+const pendingBaselines = ref(0)
+
 const stats = reactive<FIMEventStats>({
   total: 0,
+  pending: 0,
   critical: 0,
   high: 0,
   medium: 0,
@@ -219,8 +242,18 @@ const fetchStats = async () => {
   }
 }
 
+const fetchPendingBaselines = async () => {
+  try {
+    const res = await fimApi.listBaselines({ page: 1, page_size: 1, status: 'pending' })
+    pendingBaselines.value = res.total
+  } catch {
+    // 静默处理
+  }
+}
+
 onMounted(() => {
   fetchStats()
+  fetchPendingBaselines()
 })
 </script>
 

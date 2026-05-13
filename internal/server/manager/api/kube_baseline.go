@@ -137,7 +137,7 @@ func (h *KubeBaselineHandler) RunBaselineCheck(c *gin.Context) {
 	results, err := h.checker.RunChecks(*req.ClusterID)
 	if err != nil {
 		h.logger.Error("执行基线检查失败", zap.Error(err))
-		InternalError(c, err.Error())
+		InternalError(c, "内部服务错误")
 		return
 	}
 
@@ -156,5 +156,3 @@ func (h *KubeBaselineHandler) RunBaselineCheck(c *gin.Context) {
 		"items":    results,
 	})
 }
-
-

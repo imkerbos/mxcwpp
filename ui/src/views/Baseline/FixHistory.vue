@@ -77,7 +77,7 @@
               查看详情
             </a-button>
             <a-popconfirm
-              v-if="record.status !== 'running'"
+              v-if="isAdmin && record.status !== 'running'"
               title="确定要删除此任务吗？"
               ok-text="确定"
               cancel-text="取消"
@@ -198,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   ReloadOutlined,
@@ -206,7 +206,11 @@ import {
   SyncOutlined,
 } from '@ant-design/icons-vue'
 import { fixApi } from '@/api/fix'
+import { useAuthStore } from '@/stores/auth'
 import type { FixTask, FixResult, FixTaskHostStatus } from '@/api/types'
+
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const loading = ref(false)
 const tasks = ref<FixTask[]>([])

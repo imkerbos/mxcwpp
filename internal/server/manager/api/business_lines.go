@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -62,10 +61,7 @@ func (h *BusinessLinesHandler) ListBusinessLines(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询业务线总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询业务线列表失败",
-		})
+		InternalError(c, "查询业务线列表失败")
 		return
 	}
 
@@ -74,10 +70,7 @@ func (h *BusinessLinesHandler) ListBusinessLines(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&businessLines).Error; err != nil {
 		h.logger.Error("查询业务线列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询业务线列表失败",
-		})
+		InternalError(c, "查询业务线列表失败")
 		return
 	}
 
@@ -93,13 +86,7 @@ func (h *BusinessLinesHandler) ListBusinessLines(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": items,
-		},
-	})
+	SuccessPaginated(c, total, items)
 }
 
 // GetBusinessLine 获取业务线详情
@@ -108,27 +95,18 @@ func (h *BusinessLinesHandler) GetBusinessLine(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的业务线ID",
-		})
+		BadRequest(c, "无效的业务线ID")
 		return
 	}
 
 	var businessLine model.BusinessLine
 	if err := h.db.First(&businessLine, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "业务线不存在",
-			})
+			NotFound(c, "业务线不存在")
 			return
 		}
 		h.logger.Error("查询业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询业务线失败",
-		})
+		InternalError(c, "查询业务线失败")
 		return
 	}
 
@@ -137,10 +115,7 @@ func (h *BusinessLinesHandler) GetBusinessLine(c *gin.Context) {
 	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Code).Count(&hostCount)
 	businessLine.HostCount = int(hostCount)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": businessLine,
-	})
+	Success(c, businessLine)
 }
 
 // CreateBusinessLineRequest 创建业务线请求
@@ -158,29 +133,20 @@ type CreateBusinessLineRequest struct {
 func (h *BusinessLinesHandler) CreateBusinessLine(c *gin.Context) {
 	var req CreateBusinessLineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 检查代码是否已存在
 	var existing model.BusinessLine
 	if err := h.db.Where("code = ?", req.Code).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "业务线代码已存在",
-		})
+		Conflict(c, "业务线代码已存在")
 		return
 	}
 
 	// 检查名称是否已存在
 	if err := h.db.Where("name = ?", req.Name).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "业务线名称已存在",
-		})
+		Conflict(c, "业务线名称已存在")
 		return
 	}
 
@@ -196,18 +162,11 @@ func (h *BusinessLinesHandler) CreateBusinessLine(c *gin.Context) {
 
 	if err := h.db.Create(&businessLine).Error; err != nil {
 		h.logger.Error("创建业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建业务线失败",
-		})
+		InternalError(c, "创建业务线失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "创建成功",
-		"data":    businessLine,
-	})
+	SuccessWithMessage(c, "创建成功", businessLine)
 }
 
 // UpdateBusinessLineRequest 更新业务线请求
@@ -225,19 +184,13 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的业务线ID",
-		})
+		BadRequest(c, "无效的业务线ID")
 		return
 	}
 
 	var req UpdateBusinessLineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -245,17 +198,11 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 	var businessLine model.BusinessLine
 	if err := h.db.First(&businessLine, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "业务线不存在",
-			})
+			NotFound(c, "业务线不存在")
 			return
 		}
 		h.logger.Error("查询业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询业务线失败",
-		})
+		InternalError(c, "查询业务线失败")
 		return
 	}
 
@@ -263,10 +210,7 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 	if req.Name != "" && req.Name != businessLine.Name {
 		var existing model.BusinessLine
 		if err := h.db.Where("name = ? AND id != ?", req.Name, id).First(&existing).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{
-				"code":    409,
-				"message": "业务线名称已存在",
-			})
+			Conflict(c, "业务线名称已存在")
 			return
 		}
 		businessLine.Name = req.Name
@@ -288,21 +232,14 @@ func (h *BusinessLinesHandler) UpdateBusinessLine(c *gin.Context) {
 
 	if err := h.db.Save(&businessLine).Error; err != nil {
 		h.logger.Error("更新业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新业务线失败",
-		})
+		InternalError(c, "更新业务线失败")
 		return
 	}
 
 	// 注意：主机的 business_line 字段存储的是业务线代码（code），而不是名称（name）
 	// 由于 code 不可变，因此名称变更不需要同步更新主机
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "更新成功",
-		"data":    businessLine,
-	})
+	SuccessWithMessage(c, "更新成功", businessLine)
 }
 
 // DeleteBusinessLine 删除业务线
@@ -311,10 +248,7 @@ func (h *BusinessLinesHandler) DeleteBusinessLine(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的业务线ID",
-		})
+		BadRequest(c, "无效的业务线ID")
 		return
 	}
 
@@ -322,17 +256,11 @@ func (h *BusinessLinesHandler) DeleteBusinessLine(c *gin.Context) {
 	var businessLine model.BusinessLine
 	if err := h.db.First(&businessLine, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "业务线不存在",
-			})
+			NotFound(c, "业务线不存在")
 			return
 		}
 		h.logger.Error("查询业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询业务线失败",
-		})
+		InternalError(c, "查询业务线失败")
 		return
 	}
 
@@ -340,25 +268,16 @@ func (h *BusinessLinesHandler) DeleteBusinessLine(c *gin.Context) {
 	var hostCount int64
 	h.db.Model(&model.Host{}).Where("business_line = ?", businessLine.Code).Count(&hostCount)
 	if hostCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "该业务线下还有主机，无法删除",
-		})
+		Conflict(c, "该业务线下还有主机，无法删除")
 		return
 	}
 
 	// 删除业务线
 	if err := h.db.Delete(&businessLine).Error; err != nil {
 		h.logger.Error("删除业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除业务线失败",
-		})
+		InternalError(c, "删除业务线失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "删除成功",
-	})
+	SuccessMessage(c, "删除成功")
 }

@@ -106,9 +106,9 @@ func (h *NetworkBlockHandler) CreateRule(c *gin.Context) {
 		Protocol:  req.Protocol,
 		Direction: req.Direction,
 		Reason:    req.Reason,
-		Source:     "manual",
-		Status:     "pending",
-		CreatedBy:  fmt.Sprintf("%v", username),
+		Source:    "manual",
+		Status:    "pending",
+		CreatedBy: fmt.Sprintf("%v", username),
 	}
 
 	if err := h.db.Create(&rule).Error; err != nil {

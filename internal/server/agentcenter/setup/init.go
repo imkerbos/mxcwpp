@@ -30,21 +30,21 @@ import (
 
 // AgentCenterServices 包含 AgentCenter 服务所需的所有组件
 type AgentCenterServices struct {
-	Config                 *config.Config
-	Logger                 *zap.Logger
-	DB                     *gorm.DB
-	GRPCServer             *grpc.Server
-	HTTPServer             *http.Server   // HTTP 管理端口（健康探测、命令下发）
-	TransferService        *transfer.Service
-	TaskService            *service.TaskService
-	PluginUpdateScheduler  *scheduler.PluginUpdateScheduler
-	AgentUpdateScheduler   *scheduler.AgentUpdateScheduler
-	AgentRestartScheduler  *scheduler.AgentRestartScheduler
-	KafkaProducer          kafka.Producer    // 可选，Kafka 未启用时为 nil
-	SDClient               *sdclient.Client  // 可选，manager_addr 未配置时为 nil
-	StatusCtx              context.Context
-	StatusCancel           context.CancelFunc
-	Listener               net.Listener
+	Config                *config.Config
+	Logger                *zap.Logger
+	DB                    *gorm.DB
+	GRPCServer            *grpc.Server
+	HTTPServer            *http.Server // HTTP 管理端口（健康探测、命令下发）
+	TransferService       *transfer.Service
+	TaskService           *service.TaskService
+	PluginUpdateScheduler *scheduler.PluginUpdateScheduler
+	AgentUpdateScheduler  *scheduler.AgentUpdateScheduler
+	AgentRestartScheduler *scheduler.AgentRestartScheduler
+	KafkaProducer         kafka.Producer   // 可选，Kafka 未启用时为 nil
+	SDClient              *sdclient.Client // 可选，manager_addr 未配置时为 nil
+	StatusCtx             context.Context
+	StatusCancel          context.CancelFunc
+	Listener              net.Listener
 }
 
 // Initialize 初始化 AgentCenter 服务的所有组件
@@ -234,6 +234,7 @@ func (s *AgentCenterServices) Cleanup() {
 	// 标记服务正在关闭，避免 unregisterConnection 将所有主机标记为离线
 	if s.TransferService != nil {
 		s.TransferService.GracefulShutdown()
+		s.TransferService.StopMetricsBuffer()
 	}
 	if s.Listener != nil {
 		s.Listener.Close()

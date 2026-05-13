@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,6 +29,11 @@ func NewClient(baseURL, username, password string) (*Client, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		return nil, fmt.Errorf("地址必须以 http:// 或 https:// 开头")
+	}
+
+	// SSRF 防护：禁止访问内网地址和云元数据端点
+	if err := validateExternalURL(baseURL); err != nil {
+		return nil, err
 	}
 
 	c := &Client{
@@ -77,7 +83,7 @@ func (c *Client) login() error {
 	}
 
 	var out struct {
-		Code    int `json:"code"`
+		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
 			Token string `json:"token"`
@@ -247,4 +253,55 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// privateIPBlocks 定义需要阻止的内网和特殊地址段
+var privateIPBlocks []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
+		"127.0.0.0/8",    // loopback
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"169.254.0.0/16", // link-local / cloud metadata
+		"::1/128",        // IPv6 loopback
+		"fc00::/7",       // IPv6 ULA
+		"fe80::/10",      // IPv6 link-local
+	} {
+		_, block, _ := net.ParseCIDR(cidr)
+		privateIPBlocks = append(privateIPBlocks, block)
+	}
+}
+
+// validateExternalURL 验证 URL 不指向内网地址或云元数据端点
+func validateExternalURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("无效的 URL")
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL 缺少主机名")
+	}
+
+	// 解析为 IP
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("无法解析主机名: %s", host)
+	}
+
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		for _, block := range privateIPBlocks {
+			if block.Contains(ip) {
+				return fmt.Errorf("不允许访问内网地址")
+			}
+		}
+	}
+	return nil
 }

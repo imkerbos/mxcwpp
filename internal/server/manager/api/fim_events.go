@@ -92,6 +92,10 @@ func (h *FIMEventsHandler) listFIMEventsFromCH(c *gin.Context, page, pageSize in
 		where += " AND category = ?"
 		args = append(args, category)
 	}
+	if status := c.Query("status"); status != "" {
+		where += " AND status = ?"
+		args = append(args, status)
+	}
 	if dateFrom := c.Query("date_from"); dateFrom != "" {
 		where += " AND timestamp >= ?"
 		args = append(args, dateFrom)
@@ -167,6 +171,9 @@ func (h *FIMEventsHandler) listFIMEventsFromMySQL(c *gin.Context, page, pageSize
 	if taskID := c.Query("task_id"); taskID != "" {
 		query = query.Where("task_id = ?", taskID)
 	}
+	if status := c.Query("status"); status != "" {
+		query = query.Where("status = ?", status)
+	}
 	if dateFrom := c.Query("date_from"); dateFrom != "" {
 		query = query.Where("detected_at >= ?", dateFrom)
 	}
@@ -213,6 +220,7 @@ func (h *FIMEventsHandler) GetFIMEvent(c *gin.Context) {
 // FIMEventStats FIM 事件统计响应
 type FIMEventStats struct {
 	Total    int64 `json:"total"`
+	Pending  int64 `json:"pending"`
 	Critical int64 `json:"critical"`
 	High     int64 `json:"high"`
 	Medium   int64 `json:"medium"`
@@ -356,6 +364,7 @@ func (h *FIMEventsHandler) getFIMEventStatsFromMySQL(c *gin.Context, days int) {
 	}
 
 	h.db.Model(&model.FIMEvent{}).Count(&stats.Total)
+	h.db.Model(&model.FIMEvent{}).Where("status = ?", "pending").Count(&stats.Pending)
 	h.db.Model(&model.FIMEvent{}).Where("severity = ?", "critical").Count(&stats.Critical)
 	h.db.Model(&model.FIMEvent{}).Where("severity = ?", "high").Count(&stats.High)
 	h.db.Model(&model.FIMEvent{}).Where("severity = ?", "medium").Count(&stats.Medium)
@@ -399,4 +408,83 @@ func (h *FIMEventsHandler) getFIMEventStatsFromMySQL(c *gin.Context, days int) {
 	}
 
 	Success(c, stats)
+}
+
+// ConfirmFIMEventRequest 确认 FIM 事件请求
+type ConfirmFIMEventRequest struct {
+	Reason         string `json:"reason"`
+	UpdateBaseline bool   `json:"update_baseline"`
+}
+
+// ConfirmFIMEvent 确认 FIM 事件为合法变更
+func (h *FIMEventsHandler) ConfirmFIMEvent(c *gin.Context) {
+	eventID := c.Param("id")
+	username, _ := c.Get("username")
+
+	var req ConfirmFIMEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误")
+		return
+	}
+
+	var event model.FIMEvent
+	if err := h.db.Where("event_id = ?", eventID).First(&event).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "事件不存在")
+			return
+		}
+		InternalError(c, "查询失败")
+		return
+	}
+
+	if event.Status != "pending" {
+		BadRequest(c, "仅待确认的事件可以确认")
+		return
+	}
+
+	now := model.Now()
+	if err := h.db.Model(&event).Updates(map[string]any{
+		"status":         "confirmed",
+		"confirmed_by":   username,
+		"confirmed_at":   &now,
+		"confirm_reason": req.Reason,
+	}).Error; err != nil {
+		h.logger.Error("确认 FIM 事件失败", zap.Error(err))
+		InternalError(c, "确认失败")
+		return
+	}
+
+	Success(c, gin.H{"message": "事件已确认"})
+}
+
+// BatchConfirmFIMEvents 批量确认 FIM 事件
+func (h *FIMEventsHandler) BatchConfirmFIMEvents(c *gin.Context) {
+	var req struct {
+		EventIDs []string `json:"event_ids" binding:"required"`
+		Reason   string   `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.EventIDs) == 0 {
+		BadRequest(c, "请提供事件 ID 列表")
+		return
+	}
+
+	username, _ := c.Get("username")
+	now := model.Now()
+
+	result := h.db.Model(&model.FIMEvent{}).
+		Where("event_id IN ? AND status = ?", req.EventIDs, "pending").
+		Updates(map[string]any{
+			"status":         "confirmed",
+			"confirmed_by":   username,
+			"confirmed_at":   &now,
+			"confirm_reason": req.Reason,
+		})
+
+	if result.Error != nil {
+		h.logger.Error("批量确认 FIM 事件失败", zap.Error(result.Error))
+		InternalError(c, "批量确认失败")
+		return
+	}
+
+	Success(c, gin.H{"confirmed": result.RowsAffected})
 }

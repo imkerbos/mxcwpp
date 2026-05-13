@@ -4,14 +4,14 @@ package model
 // DetectionRule CEL 检测规则模型
 // 用于 Consumer 端基于 CEL 表达式对 Kafka 事件进行实时检测并生成告警
 type DetectionRule struct {
-	ID          uint        `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name        string      `gorm:"type:varchar(200);not null;uniqueIndex" json:"name"`
-	Expression  string      `gorm:"type:text;not null" json:"expression"` // CEL 表达式
-	Severity    string      `gorm:"type:varchar(20);not null;index" json:"severity"`
-	MitreID     string      `gorm:"type:varchar(50)" json:"mitreId"`
-	Category    string      `gorm:"type:varchar(100);index" json:"category"`
-	Description string      `gorm:"type:text" json:"description"`
-	DataTypes   StringArray `gorm:"type:json" json:"dataTypes"` // 适用的 DataType 列表（如 "3000", "3001"）
+	ID           uint        `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name         string      `gorm:"type:varchar(200);not null;uniqueIndex" json:"name"`
+	Expression   string      `gorm:"type:text;not null" json:"expression"` // CEL 表达式
+	Severity     string      `gorm:"type:varchar(20);not null;index" json:"severity"`
+	MitreID      string      `gorm:"type:varchar(50)" json:"mitreId"`
+	Category     string      `gorm:"type:varchar(100);index" json:"category"`
+	Description  string      `gorm:"type:text" json:"description"`
+	DataTypes    StringArray `gorm:"type:json" json:"dataTypes"` // 适用的 DataType 列表（如 "3000", "3001"）
 	Enabled      bool        `gorm:"default:true;index" json:"enabled"`
 	Builtin      bool        `gorm:"default:false" json:"builtin"`
 	UserModified bool        `gorm:"column:user_modified;default:false" json:"userModified"`

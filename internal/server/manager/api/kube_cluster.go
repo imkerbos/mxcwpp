@@ -132,7 +132,7 @@ func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -282,9 +282,9 @@ func (h *KubeClusterHandler) GetCluster(c *gin.Context) {
 		"auditToken": cluster.AuditToken,
 		"webhookURL": h.buildWebhookURL(cluster.AuditToken),
 		// GCP Pub/Sub 配置
-		"gcpEnabled":      cluster.GCPEnabled,
-		"gcpProjectId":    cluster.GCPProjectID,
-		"gcpSubscription": cluster.GCPSubscription,
+		"gcpEnabled":        cluster.GCPEnabled,
+		"gcpProjectId":      cluster.GCPProjectID,
+		"gcpSubscription":   cluster.GCPSubscription,
 		"gcpHasCredentials": cluster.GCPCredentialsJSON != "",
 	}
 
@@ -318,7 +318,7 @@ func (h *KubeClusterHandler) UpdateCluster(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -435,7 +435,7 @@ func (h *KubeClusterHandler) GetClusterNodes(c *gin.Context) {
 	nodes, err := h.kubeClient.GetNodes(uint(id))
 	if err != nil {
 		h.logger.Error("查询节点列表失败", zap.Uint64("cluster_id", id), zap.Error(err))
-		InternalError(c, "查询节点列表失败: "+err.Error())
+		InternalError(c, "查询节点列表失败")
 		return
 	}
 
@@ -459,7 +459,7 @@ func (h *KubeClusterHandler) GetClusterPods(c *gin.Context) {
 	pods, total, pErr := h.kubeClient.GetPods(uint(id), namespace, search, status, page, pageSize)
 	if pErr != nil {
 		h.logger.Error("查询 Pod 列表失败", zap.Uint64("cluster_id", id), zap.Error(pErr))
-		InternalError(c, "查询 Pod 列表失败: "+pErr.Error())
+		InternalError(c, "查询 Pod 列表失败")
 		return
 	}
 
@@ -483,7 +483,7 @@ func (h *KubeClusterHandler) GetClusterWorkloads(c *gin.Context) {
 	workloads, wErr := h.kubeClient.GetWorkloads(uint(id))
 	if wErr != nil {
 		h.logger.Error("查询 Workload 列表失败", zap.Uint64("cluster_id", id), zap.Error(wErr))
-		InternalError(c, "查询 Workload 列表失败: "+wErr.Error())
+		InternalError(c, "查询 Workload 列表失败")
 		return
 	}
 
@@ -555,7 +555,7 @@ func (h *KubeClusterHandler) UpdateGCPConfig(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

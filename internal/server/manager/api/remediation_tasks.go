@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -309,43 +310,71 @@ func (h *RemediationTasksHandler) BatchCreate(c *gin.Context) {
 	username, _ := c.Get("username")
 	createdBy, _ := username.(string)
 
-	var totalCreated int
+	// 批量查询所有漏洞
+	var vulns []model.Vulnerability
+	h.db.Where("id IN ?", req.VulnIDs).Find(&vulns)
+	vulnMap := make(map[uint]model.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		vulnMap[v.ID] = v
+	}
+
+	// 批量查询所有相关 host_vulnerabilities
+	var allHostVulns []model.HostVulnerability
+	h.db.Where("vuln_id IN ? AND status = ?", req.VulnIDs, "unpatched").Find(&allHostVulns)
+	hostVulnsByVuln := make(map[uint][]model.HostVulnerability)
+	allHostIDs := make(map[string]struct{})
+	for _, hv := range allHostVulns {
+		hostVulnsByVuln[hv.VulnID] = append(hostVulnsByVuln[hv.VulnID], hv)
+		allHostIDs[hv.HostID] = struct{}{}
+	}
+
+	// 批量查询所有主机 OS 信息
+	hostIDList := make([]string, 0, len(allHostIDs))
+	for id := range allHostIDs {
+		hostIDList = append(hostIDList, id)
+	}
+	var hosts []model.Host
+	if len(hostIDList) > 0 {
+		h.db.Select("host_id, os_family").Where("host_id IN ?", hostIDList).Find(&hosts)
+	}
+	osMap := make(map[string]string, len(hosts))
+	for _, host := range hosts {
+		osMap[host.HostID] = host.OSFamily
+	}
+
+	// 批量查询已有进行中的任务
+	var existingTasks []model.RemediationTask
+	h.db.Select("vuln_id, host_id").
+		Where("vuln_id IN ? AND status IN ?", req.VulnIDs, []string{"pending", "confirmed", "running"}).
+		Find(&existingTasks)
+	existingSet := make(map[string]struct{}, len(existingTasks))
+	for _, t := range existingTasks {
+		existingSet[fmt.Sprintf("%d:%s", t.VulnID, t.HostID)] = struct{}{}
+	}
+
+	remSvc := biz.NewRemediationService(h.db, h.logger)
+	var allTasks []model.RemediationTask
+
 	for _, vulnID := range req.VulnIDs {
-		var vuln model.Vulnerability
-		if err := h.db.First(&vuln, vulnID).Error; err != nil {
+		vuln, ok := vulnMap[vulnID]
+		if !ok {
+			continue
+		}
+		hostVulns := hostVulnsByVuln[vulnID]
+		if len(hostVulns) == 0 {
 			continue
 		}
 
-		var hostVulns []model.HostVulnerability
-		h.db.Where("vuln_id = ? AND status = ?", vulnID, "unpatched").Find(&hostVulns)
-
-		remSvc := biz.NewRemediationService(h.db, h.logger)
 		advice := remSvc.GetAdvice(&vuln)
 
-		// 查询主机 OS 信息
-		batchHostIDs := make([]string, 0, len(hostVulns))
 		for _, hv := range hostVulns {
-			batchHostIDs = append(batchHostIDs, hv.HostID)
-		}
-		var batchHosts []model.Host
-		h.db.Select("host_id, os_family").Where("host_id IN ?", batchHostIDs).Find(&batchHosts)
-		batchOsMap := make(map[string]string, len(batchHosts))
-		for _, host := range batchHosts {
-			batchOsMap[host.HostID] = host.OSFamily
-		}
-
-		for _, hv := range hostVulns {
-			var existing int64
-			h.db.Model(&model.RemediationTask{}).
-				Where("vuln_id = ? AND host_id = ? AND status IN ?", vulnID, hv.HostID, []string{"pending", "confirmed", "running"}).
-				Count(&existing)
-			if existing > 0 {
+			key := fmt.Sprintf("%d:%s", vulnID, hv.HostID)
+			if _, exists := existingSet[key]; exists {
 				continue
 			}
 
-			cmd := selectCommandForHost(advice.Commands, batchOsMap[hv.HostID])
-
-			task := model.RemediationTask{
+			cmd := selectCommandForHost(advice.Commands, osMap[hv.HostID])
+			allTasks = append(allTasks, model.RemediationTask{
 				VulnID:       vuln.ID,
 				CveID:        vuln.CveID,
 				HostID:       hv.HostID,
@@ -356,11 +385,18 @@ func (h *RemediationTasksHandler) BatchCreate(c *gin.Context) {
 				Command:      cmd,
 				Status:       "pending",
 				CreatedBy:    createdBy,
-			}
-			if err := h.db.Create(&task).Error; err == nil {
-				totalCreated++
-			}
+			})
 		}
+	}
+
+	totalCreated := 0
+	if len(allTasks) > 0 {
+		if err := h.db.Create(&allTasks).Error; err != nil {
+			h.logger.Error("批量创建修复任务失败", zap.Error(err))
+			InternalError(c, "批量创建修复任务失败")
+			return
+		}
+		totalCreated = len(allTasks)
 	}
 
 	Success(c, gin.H{"created": totalCreated})
@@ -444,6 +480,60 @@ func (h *RemediationTasksHandler) BatchConfirm(c *gin.Context) {
 	}
 
 	Success(c, gin.H{"confirmed": confirmed})
+}
+
+// BatchRetry 批量重试失败的修复任务
+// POST /api/v1/remediation-tasks/batch-retry
+func (h *RemediationTasksHandler) BatchRetry(c *gin.Context) {
+	var req struct {
+		TaskIDs []uint `json:"taskIds" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数无效：需要 taskIds")
+		return
+	}
+
+	var retried int
+	for _, id := range req.TaskIDs {
+		result := h.db.Model(&model.RemediationTask{}).
+			Where("id = ? AND status = ?", id, "failed").
+			Updates(map[string]any{
+				"status":      "pending",
+				"exec_output": "",
+				"exit_code":   nil,
+				"started_at":  nil,
+				"finished_at": nil,
+			})
+		if result.RowsAffected > 0 {
+			retried++
+		}
+	}
+
+	Success(c, gin.H{"retried": retried})
+}
+
+// BatchCancel 批量取消修复任务
+// POST /api/v1/remediation-tasks/batch-cancel
+func (h *RemediationTasksHandler) BatchCancel(c *gin.Context) {
+	var req struct {
+		TaskIDs []uint `json:"taskIds" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数无效：需要 taskIds")
+		return
+	}
+
+	var cancelled int
+	for _, id := range req.TaskIDs {
+		result := h.db.Model(&model.RemediationTask{}).
+			Where("id = ? AND status IN ?", id, []string{"pending", "confirmed"}).
+			Update("status", "cancelled")
+		if result.RowsAffected > 0 {
+			cancelled++
+		}
+	}
+
+	Success(c, gin.H{"cancelled": cancelled})
 }
 
 // GetTaskStats 获取修复任务统计

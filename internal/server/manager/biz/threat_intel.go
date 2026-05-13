@@ -55,7 +55,7 @@ func NewThreatIntel(db *gorm.DB, redisClient *redis.Client, logger *zap.Logger) 
 
 // IOC 威胁指标
 type IOC struct {
-	Type  string   `json:"type"`  // ip, domain, hash, url
+	Type  string   `json:"type"` // ip, domain, hash, url
 	Value string   `json:"value"`
 	Tags  []string `json:"tags,omitempty"`
 }

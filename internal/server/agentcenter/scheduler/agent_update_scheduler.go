@@ -463,11 +463,13 @@ func (s *AgentUpdateScheduler) autoCheckAndPushUpdates(ctx context.Context) {
 			failedCount := len(failedHostIDs)
 			updates := map[string]interface{}{
 				"status":        model.ComponentPushStatusPushing,
+				"target_hosts":  model.StringArray(targetHostIDs),
+				"total_count":   len(targetHostIDs),
 				"success_count": successCount,
 				"failed_count":  failedCount,
 				"failed_hosts":  model.StringArray(failedHostIDs),
 			}
-			if successCount+failedCount >= pushRecord.TotalCount {
+			if successCount+failedCount >= len(targetHostIDs) {
 				// 推送完成
 				now := model.ToLocalTime(time.Now())
 				updates["status"] = model.ComponentPushStatusSuccess

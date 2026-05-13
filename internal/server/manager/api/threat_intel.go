@@ -97,7 +97,7 @@ func (h *ThreatIntelHandler) CheckIOC(c *gin.Context) {
 		Value string `json:"value" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

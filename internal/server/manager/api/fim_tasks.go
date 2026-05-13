@@ -1,7 +1,6 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -98,7 +97,7 @@ func (h *FIMTasksHandler) GetFIMTask(c *gin.Context) {
 func (h *FIMTasksHandler) CreateFIMTask(c *gin.Context) {
 	var req CreateFIMTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -136,10 +135,7 @@ func (h *FIMTasksHandler) CreateFIMTask(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": task,
-	})
+	Created(c, task)
 }
 
 // RunFIMTask 执行 FIM 任务（标记为 running，实际调度由 AgentCenter 处理）

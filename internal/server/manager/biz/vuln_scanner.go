@@ -182,6 +182,10 @@ func (v *VulnScanner) GetSyncHistory(page, pageSize int) ([]model.SecurityDBSync
 func (v *VulnScanner) ScanAll() error {
 	startedAt := time.Now()
 
+	// 记录扫描前的漏洞数（用于计算新增数量）
+	var beforeCount int64
+	v.db.Model(&model.Vulnerability{}).Count(&beforeCount)
+
 	// 插入 running 记录
 	record := model.SecurityDBSyncRecord{
 		DBType:    "osv",
@@ -195,7 +199,7 @@ func (v *VulnScanner) ScanAll() error {
 	err := v.doScanAll()
 	duration := int(time.Since(startedAt).Seconds())
 
-	updates := map[string]interface{}{"duration": duration}
+	updates := map[string]any{"duration": duration}
 	if err != nil {
 		updates["status"] = "failed"
 		updates["error_msg"] = err.Error()
@@ -203,8 +207,29 @@ func (v *VulnScanner) ScanAll() error {
 		return err
 	}
 
+	// 生成扫描摘要
+	var afterCount int64
+	v.db.Model(&model.Vulnerability{}).Count(&afterCount)
+	var criticalCount, highCount int64
+	v.db.Model(&model.Vulnerability{}).Where("status = ? AND severity = ?", "unpatched", "critical").Count(&criticalCount)
+	v.db.Model(&model.Vulnerability{}).Where("status = ? AND severity = ?", "unpatched", "high").Count(&highCount)
+	var affectedHosts int64
+	v.db.Model(&model.HostVulnerability{}).Where("status = ?", "unpatched").Distinct("host_id").Count(&affectedHosts)
+
+	newVulns := afterCount - beforeCount
+	summary := fmt.Sprintf("新增 %d 个漏洞，当前 Critical %d / High %d，影响 %d 台主机",
+		newVulns, criticalCount, highCount, affectedHosts)
+
 	updates["status"] = "success"
-	updates["version"] = time.Now().Format("20060102.150405")
+	updates["version"] = fmt.Sprintf("%s | %s", time.Now().Format("20060102.150405"), summary)
+
+	v.logger.Info("全量漏洞扫描完成",
+		zap.Int64("new_vulns", newVulns),
+		zap.Int64("critical", criticalCount),
+		zap.Int64("high", highCount),
+		zap.Int64("affected_hosts", affectedHosts),
+		zap.Int("duration_seconds", duration))
+
 	v.db.Model(&record).Updates(updates)
 	return nil
 }
@@ -295,13 +320,26 @@ func (v *VulnScanner) doScanAll() error {
 		zap.Int("total_purls", len(uniquePURLs)),
 		zap.Int("total_vulns", totalVulns))
 
+	// 构建 software name → 安装信息映射，供 NVD/RedHat 同步复用（避免重复查询 software 表）
+	softwareByName := make(map[string][]installedSoftware)
+	for _, pkg := range packages {
+		key := strings.ToLower(pkg.Name)
+		softwareByName[key] = append(softwareByName[key], installedSoftware{
+			Name:     pkg.Name,
+			Version:  pkg.Version,
+			HostID:   pkg.HostID,
+			Hostname: pkg.Hostname,
+			IP:       pkg.IP,
+		})
+	}
+
 	// NVD 补充同步：覆盖 OSV.dev 尚未收录的最新 CVE
-	if err := v.SyncNVD(); err != nil {
+	if err := v.SyncNVDWithSoftware(softwareByName); err != nil {
 		v.logger.Warn("NVD 补充同步失败（不影响 OSV 数据）", zap.Error(err))
 	}
 
 	// Red Hat Security Data 补充同步
-	if err := v.SyncRedHat(); err != nil {
+	if err := v.SyncRedHatWithSoftware(softwareByName); err != nil {
 		v.logger.Warn("Red Hat 补充同步失败（不影响其他数据）", zap.Error(err))
 	}
 
@@ -489,34 +527,97 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 	return vulnCount, nil
 }
 
+// hostVulnEntry 主机漏洞关联条目（用于批量 upsert）
+type hostVulnEntry struct {
+	HostID   string
+	Hostname string
+	IP       string
+	Version  string
+}
+
 // upsertHostVulns 更新漏洞的主机关联和受影响主机数
 func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, hostnameMap, ipMap map[string]string) {
+	entries := make([]hostVulnEntry, 0)
 	hostSeen := make(map[string]struct{})
 	for _, hostID := range purlHosts[purl] {
 		if _, exists := hostSeen[hostID]; exists {
 			continue
 		}
 		hostSeen[hostID] = struct{}{}
+		entries = append(entries, hostVulnEntry{
+			HostID:   hostID,
+			Hostname: hostnameMap[hostID],
+			IP:       ipMap[hostID],
+			Version:  version,
+		})
+	}
+	v.upsertHostVulnsBatch(vulnID, entries)
+}
 
-		hostVuln := &model.HostVulnerability{
-			VulnID:         vulnID,
-			HostID:         hostID,
-			Hostname:       hostnameMap[hostID],
-			IP:             ipMap[hostID],
-			CurrentVersion: version,
-			Status:         "unpatched",
+// upsertHostVulnsBatch 批量更新主机-漏洞关联
+// 处理已修复漏洞在新扫描中重新出现的场景：如果主机版本仍然是旧版本，重新标记为 unpatched
+func (v *VulnScanner) upsertHostVulnsBatch(vulnID uint, entries []hostVulnEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	// 查询该漏洞的修复版本（用于判断是否需要重新打开已修复的关联）
+	var vuln model.Vulnerability
+	v.db.Select("fixed_version").First(&vuln, vulnID)
+
+	// 批量写入（每 100 条一批）
+	const batchSize = 100
+	for i := 0; i < len(entries); i += batchSize {
+		end := i + batchSize
+		if end > len(entries) {
+			end = len(entries)
+		}
+		batch := entries[i:end]
+
+		records := make([]model.HostVulnerability, 0, len(batch))
+		for _, e := range batch {
+			records = append(records, model.HostVulnerability{
+				VulnID:         vulnID,
+				HostID:         e.HostID,
+				Hostname:       e.Hostname,
+				IP:             e.IP,
+				CurrentVersion: e.Version,
+				Status:         "unpatched",
+			})
 		}
 		v.db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
-		}).Create(hostVuln)
+		}).Create(&records)
+
+		// 处理已修复漏洞重新出现：当前版本仍低于修复版本时，重新标记为 unpatched
+		if vuln.FixedVersion != "" {
+			for _, e := range batch {
+				if compareVersionStrings(e.Version, vuln.FixedVersion) < 0 {
+					v.db.Model(&model.HostVulnerability{}).
+						Where("vuln_id = ? AND host_id = ? AND status = ?", vulnID, e.HostID, "patched").
+						Updates(map[string]any{
+							"status":     "unpatched",
+							"patched_at": nil,
+						})
+				}
+			}
+		}
 	}
 
+	// 更新受影响主机数
 	var affectedCount int64
 	v.db.Model(&model.HostVulnerability{}).
 		Where("vuln_id = ? AND status = ?", vulnID, "unpatched").
 		Count(&affectedCount)
 	v.db.Model(&model.Vulnerability{}).Where("id = ?", vulnID).Update("affected_hosts", affectedCount)
+
+	// 如果漏洞之前被标记为 patched 但现在又有 unpatched 主机，重新标记漏洞
+	if affectedCount > 0 {
+		v.db.Model(&model.Vulnerability{}).
+			Where("id = ? AND status = ?", vulnID, "patched").
+			Update("status", "unpatched")
+	}
 }
 
 // fetchVulnDetail 获取单个漏洞的完整详情（querybatch 仅返回 id + modified）

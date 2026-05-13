@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 # Manager 生产镜像
-FROM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG VERSION=dev
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 RUN apk add --no-cache git protobuf protobuf-dev && \
     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
@@ -27,26 +29,34 @@ RUN mkdir -p api/proto/bridge api/proto/grpc && \
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X github.com/imkerbos/mxsec-platform/internal/server/manager/api.BuildVersion=${VERSION}" \
     -o manager ./cmd/server/manager
 
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata curl clamav && \
+    addgroup -g 10001 -S mxsec && adduser -u 10001 -S mxsec -G mxsec && \
     mkdir -p /var/lib/clamav && \
+    chown mxsec:mxsec /var/lib/clamav && \
     sed -i 's/^DatabaseOwner.*//' /etc/clamav/freshclam.conf 2>/dev/null || true && \
-    echo "DatabaseOwner root" >> /etc/clamav/freshclam.conf
+    echo "DatabaseOwner mxsec" >> /etc/clamav/freshclam.conf
 
 COPY --from=builder /app/manager /usr/bin/manager
 COPY --from=builder /app/plugins/baseline/config/examples /opt/mxsec-platform/policies
 COPY --from=builder /app/scripts /opt/mxsec-platform/scripts
 
-RUN mkdir -p /etc/mxsec-platform /var/log/mxsec-platform /opt/mxsec-platform/plugins
+RUN mkdir -p /etc/mxsec-platform /var/log/mxsec-platform /opt/mxsec-platform/plugins /opt/mxsec-platform/uploads && \
+    chown -R mxsec:mxsec /var/log/mxsec-platform /opt/mxsec-platform
 
 WORKDIR /opt/mxsec-platform
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+USER mxsec
 
 ENTRYPOINT ["/usr/bin/manager"]
 CMD ["-config", "/etc/mxsec-platform/server.yaml"]

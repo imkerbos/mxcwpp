@@ -5,9 +5,9 @@ package mvp1
 
 // apiResponse MVP1 统一 API 响应
 type apiResponse struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message,omitempty"`
-	Data    interface{}     `json:"data,omitempty"`
+	Code    int         `json:"code"`
+	Message string      `json:"message,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
 // paginatedData MVP1 分页数据

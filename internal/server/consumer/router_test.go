@@ -35,9 +35,9 @@ type mockAlertGenerator struct {
 }
 
 type alertGenCall struct {
-	hostID  string
-	rules   []model.DetectionRule
-	fields  map[string]string
+	hostID string
+	rules  []model.DetectionRule
+	fields map[string]string
 }
 
 // mockAutoResponder 模拟自动响应器，记录调用

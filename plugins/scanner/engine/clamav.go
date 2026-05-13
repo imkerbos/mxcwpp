@@ -97,9 +97,9 @@ func (s *ClamAVScanner) findVirusDBDir() string {
 func (s *ClamAVScanner) scanPath(ctx context.Context, scanPath string, excludePaths []string) ([]ScanResult, error) {
 	args := []string{
 		"--recursive",
-		"--infected",       // 只输出感染文件
-		"--no-summary",     // 不输出统计信息
-		"--stdout",         // 输出到 stdout
+		"--infected",   // 只输出感染文件
+		"--no-summary", // 不输出统计信息
+		"--stdout",     // 输出到 stdout
 		"--max-filesize=50M",
 		"--max-scansize=200M",
 	}

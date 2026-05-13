@@ -210,6 +210,29 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 	})
 }
 
+// GetVulnerability 获取单个漏洞详情
+// GET /api/v1/vulnerabilities/:id
+func (h *VulnerabilitiesHandler) GetVulnerability(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的漏洞 ID")
+		return
+	}
+
+	var vuln model.Vulnerability
+	if err := h.db.Preload("Hosts").First(&vuln, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "漏洞不存在")
+			return
+		}
+		h.logger.Error("查询漏洞详情失败", zap.Error(err))
+		InternalError(c, "查询漏洞详情失败")
+		return
+	}
+
+	Success(c, vuln)
+}
+
 // IgnoreVulnerability 忽略漏洞
 // POST /api/v1/vulnerabilities/:id/ignore
 func (h *VulnerabilitiesHandler) IgnoreVulnerability(c *gin.Context) {
@@ -230,6 +253,9 @@ func (h *VulnerabilitiesHandler) IgnoreVulnerability(c *gin.Context) {
 		return
 	}
 
+	username, _ := c.Get("username")
+	ignoredBy, _ := username.(string)
+
 	txErr := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&vuln).Update("status", "ignored").Error; err != nil {
 			return err
@@ -247,12 +273,80 @@ func (h *VulnerabilitiesHandler) IgnoreVulnerability(c *gin.Context) {
 		return
 	}
 
+	h.logger.Info("漏洞已忽略",
+		zap.Uint64("vuln_id", id),
+		zap.String("cve_id", vuln.CveID),
+		zap.String("severity", vuln.Severity),
+		zap.String("ignored_by", ignoredBy))
+
 	SuccessMessage(c, "漏洞已忽略")
+}
+
+// UnignoreVulnerability 取消忽略漏洞
+// POST /api/v1/vulnerabilities/:id/unignore
+func (h *VulnerabilitiesHandler) UnignoreVulnerability(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		BadRequest(c, "无效的漏洞 ID")
+		return
+	}
+
+	var vuln model.Vulnerability
+	if err := h.db.First(&vuln, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "漏洞不存在")
+			return
+		}
+		h.logger.Error("查询漏洞失败", zap.Error(err))
+		InternalError(c, "查询漏洞失败")
+		return
+	}
+
+	if vuln.Status != "ignored" {
+		BadRequest(c, "只有已忽略的漏洞才能取消忽略")
+		return
+	}
+
+	txErr := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&vuln).Update("status", "unpatched").Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.HostVulnerability{}).
+			Where("vuln_id = ? AND status = ?", vuln.ID, "ignored").
+			Update("status", "unpatched").Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if txErr != nil {
+		h.logger.Error("取消忽略漏洞失败", zap.Uint("id", vuln.ID), zap.Error(txErr))
+		InternalError(c, "取消忽略失败")
+		return
+	}
+
+	username, _ := c.Get("username")
+	unignoredBy, _ := username.(string)
+	h.logger.Info("漏洞已取消忽略",
+		zap.Uint64("vuln_id", id),
+		zap.String("cve_id", vuln.CveID),
+		zap.String("unignored_by", unignoredBy))
+
+	SuccessMessage(c, "漏洞已取消忽略")
 }
 
 // TriggerSync 触发漏洞库同步（仅同步 NVD + Red Hat 数据，不执行主机扫描）
 // POST /api/v1/vulnerabilities/sync
 func (h *VulnerabilitiesHandler) TriggerSync(c *gin.Context) {
+	// 并发保护：检查是否有正在运行的同步/扫描任务
+	var running int64
+	h.db.Model(&model.SecurityDBSyncRecord{}).
+		Where("db_type IN ? AND status = ?", []string{"osv", "vuln-sync"}, "running").
+		Count(&running)
+	if running > 0 {
+		BadRequest(c, "已有同步或扫描任务正在运行，请等待完成后再试")
+		return
+	}
+
 	scanner := biz.NewVulnScanner(h.db, h.logger)
 
 	go func() {
@@ -267,9 +361,18 @@ func (h *VulnerabilitiesHandler) TriggerSync(c *gin.Context) {
 // TriggerScan 触发漏洞扫描（包含漏洞库同步 + 主机扫描）
 // POST /api/v1/vulnerabilities/scan
 func (h *VulnerabilitiesHandler) TriggerScan(c *gin.Context) {
+	// 并发保护：检查是否有正在运行的同步/扫描任务
+	var running int64
+	h.db.Model(&model.SecurityDBSyncRecord{}).
+		Where("db_type IN ? AND status = ?", []string{"osv", "vuln-sync"}, "running").
+		Count(&running)
+	if running > 0 {
+		BadRequest(c, "已有同步或扫描任务正在运行，请等待完成后再试")
+		return
+	}
+
 	scanner := biz.NewVulnScanner(h.db, h.logger)
 
-	// 异步执行扫描
 	go func() {
 		if err := scanner.ScanAll(); err != nil {
 			h.logger.Error("漏洞扫描失败", zap.Error(err))

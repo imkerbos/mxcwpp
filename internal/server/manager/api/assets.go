@@ -283,27 +283,13 @@ func applyLikeSearch(query *gorm.DB, search string, clauses ...string) *gorm.DB 
 }
 
 func (h *AssetsHandler) respondAssetList(c *gin.Context, query *gorm.DB, orderBy string, page, pageSize int, dest interface{}) {
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		h.logger.Error("failed to count assets", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
-		return
-	}
-
-	offset := (page - 1) * pageSize
-	if err := query.Order(orderBy).Offset(offset).Limit(pageSize).Find(dest).Error; err != nil {
+	total, err := Paginate(query, page, pageSize, orderBy, dest)
+	if err != nil {
 		h.logger.Error("failed to query assets", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": dest,
-		},
-	})
+	SuccessPaginated(c, total, dest)
 }
 
 func (h *AssetsHandler) collectStatistics(hostID, businessLine string) (AssetStatistics, int64, error) {
@@ -1409,8 +1395,7 @@ func buildAssetCollectionMessage(hostID string, status AssetCollectorStatus, has
 // GET /api/v1/assets/processes
 func (h *AssetsHandler) ListProcesses(c *gin.Context) {
 	params := h.parseAssetListParams(c)
-	query := h.db.Model(&model.Process{})
-	query = h.buildQuery(&model.Process{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Process{}, params.HostID, params.BusinessLine)
 	query = applyLikeSearch(query, params.Search,
 		"pid LIKE ?",
 		"ppid LIKE ?",
@@ -1428,8 +1413,7 @@ func (h *AssetsHandler) ListPorts(c *gin.Context) {
 	params := h.parseAssetListParams(c)
 	protocol := c.Query("protocol")
 
-	query := h.db.Model(&model.Port{})
-	query = h.buildQuery(&model.Port{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Port{}, params.HostID, params.BusinessLine)
 	if protocol != "" {
 		query = query.Where("protocol = ?", protocol)
 	}
@@ -1471,8 +1455,7 @@ func (h *AssetsHandler) ListSoftware(c *gin.Context) {
 	params := h.parseAssetListParams(c)
 	packageType := c.Query("package_type")
 
-	query := h.db.Model(&model.Software{})
-	query = h.buildQuery(&model.Software{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Software{}, params.HostID, params.BusinessLine)
 	if packageType != "" {
 		query = query.Where("package_type = ?", packageType)
 	}
@@ -1494,8 +1477,7 @@ func (h *AssetsHandler) ListContainers(c *gin.Context) {
 	runtime := c.Query("runtime")
 	status := c.Query("status")
 
-	query := h.db.Model(&model.Container{})
-	query = h.buildQuery(&model.Container{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Container{}, params.HostID, params.BusinessLine)
 	if runtime != "" {
 		query = query.Where("runtime = ?", runtime)
 	}
@@ -1519,8 +1501,7 @@ func (h *AssetsHandler) ListApps(c *gin.Context) {
 	params := h.parseAssetListParams(c)
 	appType := c.Query("app_type")
 
-	query := h.db.Model(&model.App{})
-	query = h.buildQuery(&model.App{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.App{}, params.HostID, params.BusinessLine)
 	if appType != "" {
 		query = query.Where("app_type = ?", appType)
 	}
@@ -1796,7 +1777,7 @@ func (h *AssetsHandler) GetTopN(c *gin.Context) {
 	items, err := h.queryTopN(assetType, hostID, businessLine, limit)
 	if err != nil {
 		h.logger.Warn("failed to query asset topn", zap.String("type", assetType), zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "请求参数错误"})
 		return
 	}
 

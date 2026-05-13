@@ -92,7 +92,7 @@ const routes: RouteRecordRaw[] = [
         path: 'system/components',
         name: 'SystemComponents',
         component: () => import('@/views/System/Components.vue'),
-        meta: { title: '组件列表' },
+        meta: { title: '组件列表', adminOnly: true },
       },
       {
         path: 'system/install',
@@ -104,19 +104,19 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'Users',
         component: () => import('@/views/Users/index.vue'),
-        meta: { title: '用户管理' },
+        meta: { title: '用户管理', adminOnly: true },
       },
       {
         path: 'system/settings',
         name: 'SystemSettings',
         component: () => import('@/views/System/Settings.vue'),
-        meta: { title: '基本设置' },
+        meta: { title: '基本设置', adminOnly: true },
       },
       {
         path: 'system/notification',
         name: 'SystemNotification',
         component: () => import('@/views/System/Notification.vue'),
-        meta: { title: '通知管理' },
+        meta: { title: '通知管理', adminOnly: true },
       },
       {
         path: 'system/reports',
@@ -173,6 +173,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/FIM/Tasks/index.vue'),
         meta: { title: 'FIM 任务' },
       },
+      {
+        path: 'fim/baselines',
+        name: 'FIMBaselines',
+        component: () => import('@/views/FIM/Baselines/index.vue'),
+        meta: { title: '基线管理' },
+      },
       // === 以下功能开发中，暂用占位页 ===
       // 资产指纹 (全局维度)
       {
@@ -196,6 +202,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '漏洞列表' },
       },
       {
+        path: 'vuln-list/:id',
+        name: 'VulnDetail',
+        component: () => import('@/views/VulnList/Detail.vue'),
+        meta: { title: '漏洞详情' },
+      },
+      {
         path: 'vuln-remediation',
         name: 'VulnRemediation',
         component: () => import('@/views/VulnRemediation/index.vue'),
@@ -206,6 +218,12 @@ const routes: RouteRecordRaw[] = [
         name: 'RemediationTasks',
         component: () => import('@/views/VulnRemediation/Tasks.vue'),
         meta: { title: '修复任务' },
+      },
+      {
+        path: 'vuln-remediation/tasks/:id',
+        name: 'RemediationTaskDetail',
+        component: () => import('@/views/VulnRemediation/TaskDetail.vue'),
+        meta: { title: '任务详情' },
       },
       // 病毒查杀
       {
@@ -246,14 +264,14 @@ const routes: RouteRecordRaw[] = [
         path: 'system/migration',
         name: 'SystemMigration',
         component: () => import('@/views/System/Migration.vue'),
-        meta: { title: '迁移助手' },
+        meta: { title: '迁移助手', adminOnly: true },
       },
       // 系统管理 — 配置备份
       {
         path: 'system/backup',
         name: 'SystemBackup',
         component: () => import('@/views/System/Backup.vue'),
-        meta: { title: '配置备份' },
+        meta: { title: '配置备份', adminOnly: true },
       },
       // 系统监控
       {
@@ -279,7 +297,7 @@ const routes: RouteRecordRaw[] = [
         path: 'audit-log',
         name: 'AuditLog',
         component: () => import('@/views/AuditLog/index.vue'),
-        meta: { title: '审计日志' },
+        meta: { title: '审计日志', adminOnly: true },
       },
       // 容器集群
       {
@@ -412,6 +430,12 @@ router.beforeEach(async (to, _from, next) => {
       console.error('认证初始化失败:', error)
       // 认证失败，跳转到登录页
       next('/login')
+      return
+    }
+
+    // 管理员路由权限检查
+    if (to.meta.adminOnly && authStore.user?.role !== 'admin') {
+      next('/dashboard')
       return
     }
   }

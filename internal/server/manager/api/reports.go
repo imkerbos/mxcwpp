@@ -277,7 +277,7 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 		return
 	}
 
-	// 构建查询
+	// 构建基础查询（用于后续 detailQuery）
 	query := h.db.Model(&model.ScanResult{}).
 		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime)
 
@@ -930,17 +930,6 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 			"message": "无效的 interval 参数，应为: hour, day, week, month",
 		})
 		return
-	}
-
-	// 构建查询
-	query := h.db.Model(&model.ScanResult{}).
-		Where("checked_at >= ? AND checked_at <= ?", startTime, endTime)
-
-	if hostID != "" {
-		query = query.Where("host_id = ?", hostID)
-	}
-	if policyID != "" {
-		query = query.Where("policy_id = ?", policyID)
 	}
 
 	// 按时间分组查询结果
@@ -2897,24 +2886,6 @@ func getScanTypeLabel(scanType string) string {
 	return scanType
 }
 
-// getThreatTypeLabel 获取威胁类型中文标签
-func getThreatTypeLabel(threatType string) string {
-	labels := map[string]string{
-		"virus":      "病毒",
-		"trojan":     "木马",
-		"worm":       "蠕虫",
-		"ransomware": "勒索软件",
-		"rootkit":    "Rootkit",
-		"miner":      "挖矿程序",
-		"backdoor":   "后门",
-		"other":      "其他",
-	}
-	if label, ok := labels[threatType]; ok {
-		return label
-	}
-	return threatType
-}
-
 // GetAntivirusExecutiveReport 获取病毒查杀 Executive 报告
 // GET /api/v1/reports/antivirus/:task_id/executive
 func (h *ReportsHandler) GetAntivirusExecutiveReport(c *gin.Context) {
@@ -3645,8 +3616,8 @@ func (h *ReportsHandler) GetKubeExecutiveReport(c *gin.Context) {
 		},
 		"failedCheckDetails": failedCheckDetails,
 		"baselineRiskItems":  baselineRiskItems,
-		"clusterDetails": clusterDetails,
-		"topAlarms":      topAlarms,
+		"clusterDetails":     clusterDetails,
+		"topAlarms":          topAlarms,
 		"recommendation": gin.H{
 			"overallAssessment": fmt.Sprintf("报告周期内 %d 个集群共产生 %d 个告警，%s", clusterCount, totalAlarms, baselineOverview),
 			"actionSuggestions": actionSuggestions,
@@ -3872,14 +3843,14 @@ func (h *ReportsHandler) GetRuntimeExecutiveReport(c *gin.Context) {
 			"hasHighAlert":      hasHigh,
 		},
 		"statistics": gin.H{
-			"totalAlerts":   totalAlerts,
-			"activeAlerts":  activeAlerts,
+			"totalAlerts":    totalAlerts,
+			"activeAlerts":   activeAlerts,
 			"resolvedAlerts": resolvedAlerts,
-			"todayAlerts":   todayAlerts,
-			"affectedHosts": affectedHosts,
-			"bySeverity":    bySeverity,
-			"byCategory":    byCategory,
-			"byMitre":       byMitre,
+			"todayAlerts":    todayAlerts,
+			"affectedHosts":  affectedHosts,
+			"bySeverity":     bySeverity,
+			"byCategory":     byCategory,
+			"byMitre":        byMitre,
 		},
 		"hostDetails": hostDetails,
 		"topRules":    topRulesOut,

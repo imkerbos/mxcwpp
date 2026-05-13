@@ -28,14 +28,14 @@ func NewPolicyImportExportHandler(db *gorm.DB, logger *zap.Logger) *PolicyImport
 
 // PolicyExportFormat 策略导出格式（匹配 JSON 配置文件格式）
 type PolicyExportFormat struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	Version     string                   `json:"version"`
-	Description string                   `json:"description"`
-	OSFamily    []string                 `json:"os_family"`
-	OSVersion   string                   `json:"os_version,omitempty"`
-	Enabled     bool                     `json:"enabled"`
-	Rules       []RuleExportFormat       `json:"rules"`
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Version     string             `json:"version"`
+	Description string             `json:"description"`
+	OSFamily    []string           `json:"os_family"`
+	OSVersion   string             `json:"os_version,omitempty"`
+	Enabled     bool               `json:"enabled"`
+	Rules       []RuleExportFormat `json:"rules"`
 }
 
 // RuleExportFormat 规则导出格式

@@ -24,10 +24,16 @@ const (
 	dispatchLockTTL = 8 * time.Second
 	// FIM 周期策略检查间隔（避免每 5 秒都扫策略表）
 	fimPolicyCheckInterval = 5 * time.Minute
+	// FIM 事件超时升级检查间隔
+	fimEscalationCheckInterval = 5 * time.Minute
 	// 漏洞扫描周期（一天一次；也会在首次启动发现库为空时立刻跑）
 	vulnScanInterval = 24 * time.Hour
 	// 漏洞扫描检查间隔（避免每 5 秒都判断一次）
 	vulnScanCheckInterval = 10 * time.Minute
+	// 僵尸任务超时时间（running 状态超过此时长自动标记为 failed）
+	zombieTaskTimeout = 2 * time.Hour
+	// 僵尸任务检查间隔
+	zombieTaskCheckInterval = 5 * time.Minute
 )
 
 // managerInstanceID 当前 Manager 实例的唯一标识（进程启动时生成一次）
@@ -39,14 +45,16 @@ var managerInstanceID = func() string {
 // TaskScheduler 在 Manager 侧周期性调度任务下发
 // 使用 Redis 分布式锁保证多 Manager 实例下只有一个执行调度
 type TaskScheduler struct {
-	db                *gorm.DB
-	taskService       *service.TaskService
-	dispatcher        *sd.ACDispatcher
-	redisClient       *redis.Client
-	logger            *zap.Logger
-	lastFIMCheck      time.Time // 上次 FIM 策略扫描时间（用于节流）
-	lastVulnCheck     time.Time // 上次漏洞扫描判断时间（节流）
-	lastVulnScanStart time.Time // 上次实际触发漏洞扫描的时间
+	db                     *gorm.DB
+	taskService            *service.TaskService
+	dispatcher             *sd.ACDispatcher
+	redisClient            *redis.Client
+	logger                 *zap.Logger
+	lastFIMCheck           time.Time // 上次 FIM 策略扫描时间（用于节流）
+	lastFIMEscalationCheck time.Time // 上次 FIM 事件超时升级检查时间
+	lastVulnCheck          time.Time // 上次漏洞扫描判断时间（节流）
+	lastVulnScanStart      time.Time // 上次实际触发漏洞扫描的时间
+	lastZombieCheck        time.Time // 上次僵尸任务检查时间
 }
 
 // NewTaskScheduler 创建 TaskScheduler
@@ -106,16 +114,34 @@ func (s *TaskScheduler) runOnce(ctx context.Context) {
 		s.logger.Error("分发病毒扫描任务失败", zap.Error(err))
 	}
 
+	// 分发已确认的漏洞修复任务
+	remExecutor := NewRemediationExecutor(s.db, s.logger)
+	if err := remExecutor.DispatchConfirmedTasks(s.dispatcher); err != nil {
+		s.logger.Error("分发漏洞修复任务失败", zap.Error(err))
+	}
+
 	// FIM 周期策略检查（节流：默认 5 分钟扫一次策略表）
 	if time.Since(s.lastFIMCheck) >= fimPolicyCheckInterval {
 		s.scheduleFIMPeriodicTasks()
 		s.lastFIMCheck = time.Now()
 	}
 
+	// FIM 事件超时升级检查（节流：默认 5 分钟检查一次）
+	if time.Since(s.lastFIMEscalationCheck) >= fimEscalationCheckInterval {
+		EscalatePendingFIMEvents(s.db, s.logger)
+		s.lastFIMEscalationCheck = time.Now()
+	}
+
 	// 漏洞扫描周期判断（节流：默认 10 分钟判断一次）
 	if time.Since(s.lastVulnCheck) >= vulnScanCheckInterval {
 		s.maybeTriggerVulnScan()
 		s.lastVulnCheck = time.Now()
+	}
+
+	// 僵尸任务超时检查（节流：默认 5 分钟检查一次）
+	if time.Since(s.lastZombieCheck) >= zombieTaskCheckInterval {
+		s.timeoutZombieTasks()
+		s.lastZombieCheck = time.Now()
 	}
 }
 
@@ -189,6 +215,66 @@ func (s *TaskScheduler) scheduleFIMPeriodicTasks() {
 			zap.String("policy_name", p.Name),
 			zap.String("task_id", task.TaskID),
 			zap.Int("check_interval_hours", p.CheckIntervalHours))
+	}
+}
+
+// timeoutZombieTasks 将超时的 running 任务标记为 failed
+// 覆盖: ScanTask、FixTask、FIMTask、AntivirusScanTask
+func (s *TaskScheduler) timeoutZombieTasks() {
+	if s.db == nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-zombieTaskTimeout)
+	now := model.LocalTime(time.Now())
+
+	// 基线检查任务
+	result := s.db.Model(&model.ScanTask{}).
+		Where("status = ? AND updated_at < ?", model.TaskStatusRunning, cutoff).
+		Updates(map[string]interface{}{
+			"status":        model.TaskStatusFailed,
+			"failed_reason": "任务超时（超过 2 小时未完成）",
+			"completed_at":  &now,
+		})
+	if result.RowsAffected > 0 {
+		s.logger.Warn("基线检查僵尸任务已超时",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// 修复任务
+	result = s.db.Model(&model.FixTask{}).
+		Where("status = ? AND updated_at < ?", model.FixTaskStatusRunning, cutoff).
+		Updates(map[string]interface{}{
+			"status":       model.FixTaskStatusFailed,
+			"completed_at": &now,
+		})
+	if result.RowsAffected > 0 {
+		s.logger.Warn("修复僵尸任务已超时",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// FIM 任务
+	result = s.db.Model(&model.FIMTask{}).
+		Where("status = ? AND updated_at < ?", "running", cutoff).
+		Updates(map[string]interface{}{
+			"status":       "failed",
+			"completed_at": &now,
+		})
+	if result.RowsAffected > 0 {
+		s.logger.Warn("FIM 僵尸任务已超时",
+			zap.Int64("count", result.RowsAffected))
+	}
+
+	// 病毒扫描任务
+	result = s.db.Model(&model.AntivirusScanTask{}).
+		Where("status = ? AND updated_at < ?", "running", cutoff).
+		Updates(map[string]interface{}{
+			"status":      "failed",
+			"finished_at": &now,
+		})
+	if result.RowsAffected > 0 {
+		s.logger.Warn("病毒扫描僵尸任务已超时",
+			zap.Int64("count", result.RowsAffected))
 	}
 }
 

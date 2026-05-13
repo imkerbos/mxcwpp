@@ -1,12 +1,15 @@
 import apiClient from './client'
 import type { PaginatedResponse } from './types'
 
+export type AlertSource = 'baseline' | 'runtime' | 'agent' | 'vulnerability' | 'fim' | 'virus' | 'kube'
+
 export interface Alert {
   id: number
   result_id: string
   host_id: string
   rule_id: string
   policy_id: string
+  source: AlertSource
   severity: 'critical' | 'high' | 'medium' | 'low'
   category: string
   title: string
@@ -52,7 +55,7 @@ export interface ListAlertsParams {
   host_id?: string
   rule_id?: string
   category?: string
-  alert_type?: 'baseline' | 'runtime' | 'agent_offline'
+  alert_type?: AlertSource
   keyword?: string
   result_id?: string
   runtime_type?: string

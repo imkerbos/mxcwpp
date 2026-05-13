@@ -15,11 +15,11 @@ import (
 
 // SequenceRule 序列检测规则
 type SequenceRule struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
+	ID       string         `json:"id"`
+	Name     string         `json:"name"`
 	Steps    []SequenceStep `json:"steps"`
-	Window   time.Duration `json:"window"`   // 滑动窗口
-	Severity string        `json:"severity"`
+	Window   time.Duration  `json:"window"` // 滑动窗口
+	Severity string         `json:"severity"`
 }
 
 // SequenceStep 序列检测的单个步骤
@@ -31,11 +31,11 @@ type SequenceStep struct {
 
 // SequenceState 序列检测的中间状态
 type SequenceState struct {
-	RuleID      string    `json:"rule_id"`
-	HostID      string    `json:"host_id"`
-	CurrentStep int       `json:"current_step"`
-	StartTime   time.Time `json:"start_time"`
-	MatchedSteps []int    `json:"matched_steps"`
+	RuleID       string    `json:"rule_id"`
+	HostID       string    `json:"host_id"`
+	CurrentStep  int       `json:"current_step"`
+	StartTime    time.Time `json:"start_time"`
+	MatchedSteps []int     `json:"matched_steps"`
 }
 
 // SequenceDetector 行为序列检测器
@@ -148,10 +148,14 @@ func (d *SequenceDetector) getState(ctx context.Context, key string) *SequenceSt
 	}
 	data, err := d.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
+		if err != redis.Nil {
+			d.logger.Warn("读取序列状态失败", zap.String("key", key), zap.Error(err))
+		}
 		return nil
 	}
 	var state SequenceState
 	if err := json.Unmarshal(data, &state); err != nil {
+		d.logger.Warn("解析序列状态失败", zap.String("key", key), zap.Error(err))
 		return nil
 	}
 	return &state

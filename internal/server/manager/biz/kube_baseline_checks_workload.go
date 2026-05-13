@@ -51,11 +51,6 @@ func (c *KubeBaselineChecker) checkPDBCoverage(ctx context.Context) (string, mod
 	if err != nil {
 		return "error", nil
 	}
-	// 收集有 PDB 的 Namespace
-	nsPDBLabels := make(map[string]bool)
-	for _, pdb := range pdbs.Items {
-		nsPDBLabels[pdb.Namespace] = true
-	}
 	var affected model.AffectedResources
 	for _, dep := range deployments.Items {
 		if isSystemNamespace(dep.Namespace) {
@@ -65,7 +60,22 @@ func (c *KubeBaselineChecker) checkPDBCoverage(ctx context.Context) (string, mod
 		if dep.Spec.Replicas == nil || *dep.Spec.Replicas <= 1 {
 			continue
 		}
-		if !nsPDBLabels[dep.Namespace] {
+		// 检查是否有 PDB 的 selector 覆盖该 Deployment 的 Pod
+		covered := false
+		for _, pdb := range pdbs.Items {
+			if pdb.Namespace != dep.Namespace {
+				continue
+			}
+			if pdb.Spec.Selector == nil {
+				continue
+			}
+			// PDB selector 的所有 matchLabels 必须是 Deployment selector 的子集
+			if dep.Spec.Selector != nil && labelsMatch(pdb.Spec.Selector.MatchLabels, dep.Spec.Selector.MatchLabels) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
 			affected = append(affected, model.AffectedResource{Kind: "Deployment", Name: dep.Name, Namespace: dep.Namespace})
 		}
 	}
@@ -364,4 +374,18 @@ func (c *KubeBaselineChecker) checkDeploymentHPA(ctx context.Context) (string, m
 		return "fail", affected
 	}
 	return "pass", nil
+}
+
+// labelsMatch 检查 pdbLabels 是否为 depLabels 的子集
+// 即 PDB selector 覆盖了 Deployment selector 对应的 Pod
+func labelsMatch(pdbLabels, depLabels map[string]string) bool {
+	if len(pdbLabels) == 0 {
+		return false
+	}
+	for k, v := range pdbLabels {
+		if depLabels[k] != v {
+			return false
+		}
+	}
+	return true
 }

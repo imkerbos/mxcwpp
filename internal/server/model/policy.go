@@ -1,9 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-)
+import "database/sql/driver"
 
 // OSRequirement OS 版本要求（详细）
 type OSRequirement struct {
@@ -16,25 +13,10 @@ type OSRequirement struct {
 type OSRequirements []OSRequirement
 
 // Value 实现 driver.Valuer 接口
-func (o OSRequirements) Value() (driver.Value, error) {
-	if o == nil {
-		return "[]", nil
-	}
-	return json.Marshal(o)
-}
+func (o OSRequirements) Value() (driver.Value, error) { return JSONValue(o) }
 
 // Scan 实现 sql.Scanner 接口
-func (o *OSRequirements) Scan(value interface{}) error {
-	if value == nil {
-		*o = OSRequirements{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(bytes, o)
-}
+func (o *OSRequirements) Scan(value any) error { return JSONScan(o, value) }
 
 // Policy 策略集模型
 type Policy struct {

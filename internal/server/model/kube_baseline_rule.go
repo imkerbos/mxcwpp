@@ -1,10 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-)
+import "database/sql/driver"
 
 // KubeCheckConfig CEL 检查配置
 type KubeCheckConfig struct {
@@ -16,33 +12,10 @@ type KubeCheckConfig struct {
 }
 
 // Value 实现 driver.Valuer 接口
-func (c *KubeCheckConfig) Value() (driver.Value, error) {
-	if c == nil {
-		return nil, nil
-	}
-	data, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	return string(data), nil
-}
+func (c KubeCheckConfig) Value() (driver.Value, error) { return JSONValue(c) }
 
 // Scan 实现 sql.Scanner 接口
-func (c *KubeCheckConfig) Scan(value any) error {
-	if value == nil {
-		return nil
-	}
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("无法扫描类型 %T 到 KubeCheckConfig", value)
-	}
-	return json.Unmarshal(bytes, c)
-}
+func (c *KubeCheckConfig) Scan(value any) error { return JSONScan(c, value) }
 
 // KubeBaselineRule 容器基线检查规则定义
 type KubeBaselineRule struct {

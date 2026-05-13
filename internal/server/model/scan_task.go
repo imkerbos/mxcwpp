@@ -1,9 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-)
+import "database/sql/driver"
 
 // TaskType 任务类型
 type TaskType string
@@ -41,22 +38,10 @@ type TargetConfig struct {
 }
 
 // Value 实现 driver.Valuer 接口
-func (t TargetConfig) Value() (driver.Value, error) {
-	return json.Marshal(t)
-}
+func (t TargetConfig) Value() (driver.Value, error) { return JSONValue(t) }
 
 // Scan 实现 sql.Scanner 接口
-func (t *TargetConfig) Scan(value interface{}) error {
-	if value == nil {
-		*t = TargetConfig{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(bytes, t)
-}
+func (t *TargetConfig) Scan(value any) error { return JSONScan(t, value) }
 
 // ScanTask 扫描任务模型
 type ScanTask struct {

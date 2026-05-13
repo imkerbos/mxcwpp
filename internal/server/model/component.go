@@ -58,14 +58,14 @@ func (Component) TableName() string {
 // 存储组件的版本信息
 type ComponentVersion struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
-	ComponentID uint           `gorm:"not null;index:idx_version_component" json:"component_id"`                         // 关联的组件 ID
-	Version     string         `gorm:"size:32;not null;index:idx_version_component,priority:2" json:"version"`           // 版本号 (1.0.0, 1.8.5.31)
-	Changelog   string         `gorm:"type:text" json:"changelog"`                                                       // 更新日志
-	IsLatest    bool           `gorm:"default:false;index:idx_version_latest" json:"is_latest"`                          // 是否是最新版本
-	CreatedBy   string         `gorm:"size:64" json:"created_by"`                                                        // 创建者/上传者
-	CreatedAt   LocalTime      `json:"created_at"`                                                                       // 创建时间
-	UpdatedAt   LocalTime      `json:"updated_at"`                                                                       // 更新时间
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`                                                                   // 软删除
+	ComponentID uint           `gorm:"not null;index:idx_version_component" json:"component_id"`               // 关联的组件 ID
+	Version     string         `gorm:"size:32;not null;index:idx_version_component,priority:2" json:"version"` // 版本号 (1.0.0, 1.8.5.31)
+	Changelog   string         `gorm:"type:text" json:"changelog"`                                             // 更新日志
+	IsLatest    bool           `gorm:"default:false;index:idx_version_latest" json:"is_latest"`                // 是否是最新版本
+	CreatedBy   string         `gorm:"size:64" json:"created_by"`                                              // 创建者/上传者
+	CreatedAt   LocalTime      `json:"created_at"`                                                             // 创建时间
+	UpdatedAt   LocalTime      `json:"updated_at"`                                                             // 更新时间
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`                                                         // 软删除
 
 	// 关联
 	Component *Component         `gorm:"foreignKey:ComponentID" json:"component,omitempty"`
@@ -81,18 +81,18 @@ func (ComponentVersion) TableName() string {
 // 存储组件版本的具体文件（不同平台、架构）
 type ComponentPackage struct {
 	ID         uint           `gorm:"primaryKey" json:"id"`
-	VersionID  uint           `gorm:"not null;uniqueIndex:idx_unique_package" json:"version_id"`         // 关联的版本 ID
-	OS         string         `gorm:"size:32;not null;default:linux" json:"os"`                          // 操作系统 (linux)
-	Arch       string         `gorm:"size:32;not null;uniqueIndex:idx_unique_package" json:"arch"`       // 架构 (amd64, arm64)
-	PkgType    PackageType    `gorm:"size:16;not null;uniqueIndex:idx_unique_package" json:"pkg_type"`  // 包类型 (rpm, deb, binary)
-	FilePath   string         `gorm:"size:512;not null" json:"file_path"`                                // 文件存储路径
-	FileName   string         `gorm:"size:256;not null" json:"file_name"`                                // 原始文件名
-	FileSize   int64          `gorm:"not null" json:"file_size"`                                         // 文件大小 (字节)
-	SHA256     string         `gorm:"size:64" json:"sha256"`                                             // SHA256 校验和
-	Enabled    bool           `gorm:"default:true" json:"enabled"`                                       // 是否启用
-	UploadedBy string         `gorm:"size:64" json:"uploaded_by"`                                        // 上传用户
-	UploadedAt LocalTime      `json:"uploaded_at"`                                                       // 上传时间
-	DeletedAt  gorm.DeletedAt `gorm:"uniqueIndex:idx_unique_package" json:"-"`                           // 软删除（包含在唯一索引中，支持软删除后重新上传）
+	VersionID  uint           `gorm:"not null;uniqueIndex:idx_unique_package" json:"version_id"`       // 关联的版本 ID
+	OS         string         `gorm:"size:32;not null;default:linux" json:"os"`                        // 操作系统 (linux)
+	Arch       string         `gorm:"size:32;not null;uniqueIndex:idx_unique_package" json:"arch"`     // 架构 (amd64, arm64)
+	PkgType    PackageType    `gorm:"size:16;not null;uniqueIndex:idx_unique_package" json:"pkg_type"` // 包类型 (rpm, deb, binary)
+	FilePath   string         `gorm:"size:512;not null" json:"file_path"`                              // 文件存储路径
+	FileName   string         `gorm:"size:256;not null" json:"file_name"`                              // 原始文件名
+	FileSize   int64          `gorm:"not null" json:"file_size"`                                       // 文件大小 (字节)
+	SHA256     string         `gorm:"size:64" json:"sha256"`                                           // SHA256 校验和
+	Enabled    bool           `gorm:"default:true" json:"enabled"`                                     // 是否启用
+	UploadedBy string         `gorm:"size:64" json:"uploaded_by"`                                      // 上传用户
+	UploadedAt LocalTime      `json:"uploaded_at"`                                                     // 上传时间
+	DeletedAt  gorm.DeletedAt `gorm:"uniqueIndex:idx_unique_package" json:"-"`                         // 软删除（包含在唯一索引中，支持软删除后重新上传）
 
 	// 关联
 	Version *ComponentVersion `gorm:"foreignKey:VersionID" json:"version,omitempty"`

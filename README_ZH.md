@@ -11,6 +11,54 @@
 
 开源的企业级主机与容器安全管理平台。覆盖安全基线、资产管理、漏洞扫描、病毒查杀、运行时检测与合规审计，面向安全运营团队提供统一管控视图。
 
+## 社区版说明
+
+MxSec Platform **社区版** 包含完整的平台框架和全部核心安全能力，与内部版本架构一致。社区版完全免费，无需授权即可部署使用。当前已开源的能力主要包括：
+
+- **全部端上能力**：Agent 数据采集、资产指纹、eBPF 运行时探针、基线检查插件等；
+- **全部后端能力**：AgentCenter、Manager、Consumer、服务发现，均支持水平扩展；
+- **完整管理控制台**：安全概览、资产中心、告警管理、基线检查、漏洞管理、容器安全等全功能 UI；
+- **内置检测规则**：212 条 CIS 基线规则、80 条容器基线规则、CEL 运行时检测策略样例。
+
+如需构建更完善的安全运营体系，建议基于平台提供的 CEL 规则引擎进行策略扩展，并结合威胁情报进行二次加工。
+
+## 功能列表
+
+| 功能 | 社区版 | 企业版 |
+|------|--------|--------|
+| Linux 数据采集（eBPF） | :white_check_mark: | :white_check_mark: |
+| Agent 控制面（升级/配置/任务下发） | :white_check_mark: | :white_check_mark: |
+| 主机状态与详情 | :white_check_mark: | :white_check_mark: |
+| 资产采集（11 类） | :white_check_mark: | :white_check_mark: |
+| 资产指纹（全局视图） | :white_check_mark: | :white_check_mark: |
+| K8s 集群资产采集 | :white_check_mark: | :white_check_mark: |
+| 主机/容器入侵检测 | `内置样例` | :white_check_mark: |
+| 运行时检测（eBPF + CEL） | `内置样例` | :white_check_mark: |
+| K8s Audit 入侵检测 | `内置样例` | :white_check_mark: |
+| 行为序列检测 | :x: | :white_check_mark: |
+| 告警白名单 | :white_check_mark: | :white_check_mark: |
+| 告警聚合与溯源 | :white_check_mark: | :white_check_mark: |
+| 威胁处置（kill/隔离/网络封禁） | :white_check_mark: | :white_check_mark: |
+| 文件隔离箱 | :white_check_mark: | :white_check_mark: |
+| 漏洞检测（OSV.dev + CVSS） | :white_check_mark: | :white_check_mark: |
+| 漏洞情报热更新 | :x: | :white_check_mark: |
+| 基线检查（CIS Benchmark） | :white_check_mark: | :white_check_mark: |
+| 基线自动修复 | :white_check_mark: | :white_check_mark: |
+| 病毒扫描（ClamAV + YARA-X） | :white_check_mark: | :white_check_mark: |
+| 文件完整性监控（FIM） | :white_check_mark: | :white_check_mark: |
+| 威胁情报（MISP IOC） | :white_check_mark: | :white_check_mark: |
+| 容器 CIS 基线（80 规则） | :white_check_mark: | :white_check_mark: |
+| 审计日志 | :white_check_mark: | :white_check_mark: |
+| 组件管理与插件分发 | :white_check_mark: | :white_check_mark: |
+| 系统监控（Prometheus） | :white_check_mark: | :white_check_mark: |
+| 运维巡检与报告导出 | :white_check_mark: | :white_check_mark: |
+| Windows 支持 | :x: | :construction: |
+| 蜜罐 | :x: | :construction: |
+| 主动防御 | :x: | :construction: |
+| 云查杀 | :x: | :construction: |
+
+> :white_check_mark: 已支持 &nbsp; `内置样例` 含少量示例规则 &nbsp; :x: 未支持 &nbsp; :construction: 规划中
+
 ## 功能概览
 
 | 模块 | 说明 |

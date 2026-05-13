@@ -65,8 +65,8 @@ func (s *YARAScanner) findBinary() string {
 type yaraMatch struct {
 	Path  string `json:"path"`
 	Rules []struct {
-		Identifier string `json:"identifier"`
-		Namespace  string `json:"namespace"`
+		Identifier string   `json:"identifier"`
+		Namespace  string   `json:"namespace"`
 		Tags       []string `json:"tags,omitempty"`
 		Metadata   []struct {
 			Identifier string      `json:"identifier"`

@@ -43,7 +43,8 @@ func (h *MigrationHandler) TestConnection(c *gin.Context) {
 
 	client, err := mvp1.NewClient(req.URL, req.Username, req.Password)
 	if err != nil {
-		BadRequest(c, fmt.Sprintf("连接失败: %s", err.Error()))
+		h.logger.Warn("连接 MVP1 失败", zap.Error(err))
+		BadRequest(c, "连接失败")
 		return
 	}
 
@@ -51,13 +52,13 @@ func (h *MigrationHandler) TestConnection(c *gin.Context) {
 
 	// 统计各表记录数
 	tablePaths := map[string]string{
-		"users":         "/api/v1/users",
+		"users":          "/api/v1/users",
 		"business_lines": "/api/v1/business-lines",
-		"hosts":         "/api/v1/hosts",
-		"policies":      "/api/v1/policies",
-		"scan_tasks":    "/api/v1/tasks",
-		"scan_results":  "/api/v1/results",
-		"notifications": "/api/v1/notifications",
+		"hosts":          "/api/v1/hosts",
+		"policies":       "/api/v1/policies",
+		"scan_tasks":     "/api/v1/tasks",
+		"scan_results":   "/api/v1/results",
+		"notifications":  "/api/v1/notifications",
 	}
 
 	tables := make(map[string]int64)
@@ -118,7 +119,8 @@ func (h *MigrationHandler) StartJob(c *gin.Context) {
 	// 先建立连接验证凭据
 	client, err := mvp1.NewClient(req.URL, req.Username, req.Password)
 	if err != nil {
-		BadRequest(c, fmt.Sprintf("连接 MVP1 失败: %s", err.Error()))
+		h.logger.Warn("连接 MVP1 数据库失败", zap.Error(err))
+		BadRequest(c, "连接 MVP1 数据库失败")
 		return
 	}
 

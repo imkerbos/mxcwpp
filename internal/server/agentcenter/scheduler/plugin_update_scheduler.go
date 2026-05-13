@@ -22,8 +22,8 @@ type PluginUpdateScheduler struct {
 	logger          *zap.Logger
 	lastCheckTime   time.Time
 	// pluginVersions 记录每个插件上次广播时的版本和 SHA256，用于差异检测
-	pluginVersions  map[string]string // name -> "version|sha256"
-	mu              sync.Mutex
+	pluginVersions map[string]string // name -> "version|sha256"
+	mu             sync.Mutex
 }
 
 // NewPluginUpdateScheduler 创建插件更新调度器

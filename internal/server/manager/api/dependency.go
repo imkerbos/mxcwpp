@@ -47,7 +47,7 @@ type depInstallResult struct {
 func (h *DependencyHandler) Install(c *gin.Context) {
 	var req depInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -72,7 +72,7 @@ type depStatusRequest struct {
 func (h *DependencyHandler) Status(c *gin.Context) {
 	var req depStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

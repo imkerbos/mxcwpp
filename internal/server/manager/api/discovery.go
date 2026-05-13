@@ -22,7 +22,7 @@ func NewDiscoveryHandler(registry *sd.Registry, logger *zap.Logger) *DiscoveryHa
 
 // registerReq 是 AC 注册请求体
 type registerReq struct {
-	ID       string `json:"id" binding:"required"`       // AC 实例 ID（hostname 或配置值）
+	ID       string `json:"id" binding:"required"`        // AC 实例 ID（hostname 或配置值）
 	GRPCAddr string `json:"grpc_addr" binding:"required"` // AC gRPC 地址，供 Agent 连接
 	HTTPAddr string `json:"http_addr" binding:"required"` // AC HTTP 管理地址，供 Manager 探测
 }
@@ -33,7 +33,7 @@ type registerReq struct {
 func (h *DiscoveryHandler) Register(c *gin.Context) {
 	var req registerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
 		return
 	}
 	h.registry.Register(req.ID, req.GRPCAddr, req.HTTPAddr)
@@ -52,12 +52,12 @@ type heartbeatReq struct {
 func (h *DiscoveryHandler) Heartbeat(c *gin.Context) {
 	var req heartbeatReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
 		return
 	}
 	if err := h.registry.Heartbeat(req.ID, req.ConnCount); err != nil {
 		// 实例不存在，要求重新注册
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error(), "action": "re-register"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "实例未注册", "action": "re-register"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -74,7 +74,7 @@ type deregisterReq struct {
 func (h *DiscoveryHandler) Deregister(c *gin.Context) {
 	var req deregisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
 		return
 	}
 	h.registry.Deregister(req.ID)

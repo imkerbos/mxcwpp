@@ -11,6 +11,54 @@
 
 An open-source, enterprise-grade host and container security management platform. Covers security baselines, asset management, vulnerability scanning, antivirus, runtime detection, and compliance auditing — providing a unified management view for security operations teams.
 
+## Community Edition
+
+MxSec Platform **Community Edition** includes the complete platform framework and all core security capabilities, sharing the same architecture as the internal version. The Community Edition is fully free with no license required. Currently open-sourced capabilities include:
+
+- **Full on-device capabilities**: Agent data collection, asset fingerprinting, eBPF runtime probes, baseline check plugins, etc.
+- **Full backend capabilities**: AgentCenter, Manager, Consumer, service discovery — all horizontally scalable.
+- **Complete management console**: Security overview, asset center, alert management, baseline checks, vulnerability management, container security, and more.
+- **Built-in detection rules**: 212 CIS baseline rules, 80 container baseline rules, CEL runtime detection policy samples.
+
+To build a more comprehensive security operations system, we recommend extending policies via the built-in CEL rule engine and integrating threat intelligence for secondary processing.
+
+## Function List
+
+| Feature | Community Edition | Enterprise Edition |
+|---------|-------------------|--------------------|
+| Linux data collection (eBPF) | :white_check_mark: | :white_check_mark: |
+| Agent control plane (upgrade/config/task dispatch) | :white_check_mark: | :white_check_mark: |
+| Host status and details | :white_check_mark: | :white_check_mark: |
+| Asset collection (11 types) | :white_check_mark: | :white_check_mark: |
+| Asset fingerprint (global view) | :white_check_mark: | :white_check_mark: |
+| K8s cluster asset collection | :white_check_mark: | :white_check_mark: |
+| Host/container intrusion detection | `built-in samples` | :white_check_mark: |
+| Runtime detection (eBPF + CEL) | `built-in samples` | :white_check_mark: |
+| K8s Audit intrusion detection | `built-in samples` | :white_check_mark: |
+| Behavioral sequence detection | :x: | :white_check_mark: |
+| Alert whitelist | :white_check_mark: | :white_check_mark: |
+| Alert aggregation and tracing | :white_check_mark: | :white_check_mark: |
+| Threat response (kill/quarantine/network block) | :white_check_mark: | :white_check_mark: |
+| File quarantine | :white_check_mark: | :white_check_mark: |
+| Vulnerability detection (OSV.dev + CVSS) | :white_check_mark: | :white_check_mark: |
+| Vulnerability intelligence hot-update | :x: | :white_check_mark: |
+| Baseline check (CIS Benchmark) | :white_check_mark: | :white_check_mark: |
+| Baseline auto-remediation | :white_check_mark: | :white_check_mark: |
+| Virus scanning (ClamAV + YARA-X) | :white_check_mark: | :white_check_mark: |
+| File integrity monitoring (FIM) | :white_check_mark: | :white_check_mark: |
+| Threat intelligence (MISP IOC) | :white_check_mark: | :white_check_mark: |
+| Container CIS baseline (80 rules) | :white_check_mark: | :white_check_mark: |
+| Audit log | :white_check_mark: | :white_check_mark: |
+| Component management and plugin distribution | :white_check_mark: | :white_check_mark: |
+| System monitoring (Prometheus) | :white_check_mark: | :white_check_mark: |
+| Ops inspection and report export | :white_check_mark: | :white_check_mark: |
+| Windows support | :x: | :construction: |
+| Honeypot | :x: | :construction: |
+| Active defense | :x: | :construction: |
+| Cloud antivirus | :x: | :construction: |
+
+> :white_check_mark: Supported &nbsp; `built-in samples` includes sample rules &nbsp; :x: Not supported &nbsp; :construction: Planned
+
 ## Features
 
 | Module | Description |

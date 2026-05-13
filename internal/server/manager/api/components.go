@@ -30,7 +30,7 @@ type ComponentsHandler struct {
 	uploadDir   string          // 上传文件存储目录
 	urlPrefix   string          // 文件访问 URL 前缀
 	signer      *signing.Signer // Ed25519 签名器（可选）
-	downloadSem chan struct{}    // 并发下载信号量，限制同时下载数
+	downloadSem chan struct{}   // 并发下载信号量，限制同时下载数
 }
 
 // NewComponentsHandler 创建组件管理处理器
@@ -81,28 +81,19 @@ type CreateComponentRequest struct {
 func (h *ComponentsHandler) CreateComponent(c *gin.Context) {
 	var req CreateComponentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 验证组件名称（只允许字母、数字、下划线、横线）
 	if !isValidComponentName(req.Name) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "组件名称只能包含字母、数字、下划线和横线",
-		})
+		BadRequest(c, "组件名称只能包含字母、数字、下划线和横线")
 		return
 	}
 
 	// 验证分类
 	if req.Category != "agent" && req.Category != "plugin" && req.Category != "dependency" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的组件分类，支持: agent, plugin, dependency",
-		})
+		BadRequest(c, "无效的组件分类，支持: agent, plugin, dependency")
 		return
 	}
 
@@ -110,10 +101,7 @@ func (h *ComponentsHandler) CreateComponent(c *gin.Context) {
 	var existingCount int64
 	h.db.Model(&model.Component{}).Where("name = ?", req.Name).Count(&existingCount)
 	if existingCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": fmt.Sprintf("组件 %s 已存在", req.Name),
-		})
+		Conflict(c, fmt.Sprintf("组件 %s 已存在", req.Name))
 		return
 	}
 
@@ -130,10 +118,7 @@ func (h *ComponentsHandler) CreateComponent(c *gin.Context) {
 
 	if err := h.db.Create(&component).Error; err != nil {
 		h.logger.Error("创建组件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建失败",
-		})
+		InternalError(c, "创建失败")
 		return
 	}
 
@@ -143,11 +128,7 @@ func (h *ComponentsHandler) CreateComponent(c *gin.Context) {
 		zap.String("created_by", username),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "创建成功",
-		"data":    component,
-	})
+	SuccessWithMessage(c, "创建成功", component)
 }
 
 // ListComponents 获取组件列表
@@ -156,10 +137,7 @@ func (h *ComponentsHandler) ListComponents(c *gin.Context) {
 	var components []model.Component
 	if err := h.db.Order("created_at DESC").Find(&components).Error; err != nil {
 		h.logger.Error("查询组件列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -194,10 +172,7 @@ func (h *ComponentsHandler) ListComponents(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": result,
-	})
+	Success(c, result)
 }
 
 // GetComponent 获取组件详情
@@ -208,24 +183,15 @@ func (h *ComponentsHandler) GetComponent(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "组件不存在",
-			})
+			NotFound(c, "组件不存在")
 			return
 		}
 		h.logger.Error("查询组件详情失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": component,
-	})
+	Success(c, component)
 }
 
 // DeleteComponent 删除组件
@@ -236,17 +202,11 @@ func (h *ComponentsHandler) DeleteComponent(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "组件不存在",
-			})
+			NotFound(c, "组件不存在")
 			return
 		}
 		h.logger.Error("查询组件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
@@ -254,20 +214,14 @@ func (h *ComponentsHandler) DeleteComponent(c *gin.Context) {
 	var versionCount int64
 	h.db.Model(&model.ComponentVersion{}).Where("component_id = ?", component.ID).Count(&versionCount)
 	if versionCount > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": fmt.Sprintf("组件下有 %d 个版本，请先删除所有版本", versionCount),
-		})
+		BadRequest(c, fmt.Sprintf("组件下有 %d 个版本，请先删除所有版本", versionCount))
 		return
 	}
 
 	// 删除组件
 	if err := h.db.Delete(&component).Error; err != nil {
 		h.logger.Error("删除组件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
@@ -276,10 +230,7 @@ func (h *ComponentsHandler) DeleteComponent(c *gin.Context) {
 		zap.String("name", component.Name),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "删除成功",
-	})
+	SuccessMessage(c, "删除成功")
 }
 
 // ==================== 版本管理 API ====================
@@ -299,19 +250,13 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 
 	var req ReleaseVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 验证版本号格式
 	if !isValidVersion(req.Version) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "版本号格式不正确，例如: 1.0.0 或 1.8.5.31",
-		})
+		BadRequest(c, "版本号格式不正确，例如: 1.0.0 或 1.8.5.31")
 		return
 	}
 
@@ -319,16 +264,10 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, componentID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "组件不存在",
-			})
+			NotFound(c, "组件不存在")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -338,10 +277,7 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 	if existErr == nil {
 		// 版本已存在
 		if !req.Force {
-			c.JSON(http.StatusConflict, gin.H{
-				"code":    409,
-				"message": fmt.Sprintf("版本 %s 已存在，如需覆盖请设置 force=true", req.Version),
-			})
+			Conflict(c, fmt.Sprintf("版本 %s 已存在，如需覆盖请设置 force=true", req.Version))
 			return
 		}
 
@@ -365,10 +301,7 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 		h.db.Delete(&existingVersion)
 	} else if existErr != gorm.ErrRecordNotFound {
 		h.logger.Error("查询版本失败", zap.Error(existErr))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -385,10 +318,7 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 			Update("is_latest", false).Error; err != nil {
 			tx.Rollback()
 			h.logger.Error("更新最新版本状态失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "发布失败",
-			})
+			InternalError(c, "发布失败")
 			return
 		}
 	}
@@ -405,10 +335,7 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 	if err := tx.Create(&version).Error; err != nil {
 		tx.Rollback()
 		h.logger.Error("创建版本失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "发布失败",
-		})
+		InternalError(c, "发布失败")
 		return
 	}
 
@@ -420,11 +347,7 @@ func (h *ComponentsHandler) ReleaseVersion(c *gin.Context) {
 		zap.String("created_by", username),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "发布成功",
-		"data":    version,
-	})
+	SuccessWithMessage(c, "发布成功", version)
 }
 
 // ListVersions 获取组件的版本列表
@@ -436,16 +359,10 @@ func (h *ComponentsHandler) ListVersions(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, componentID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "组件不存在",
-			})
+			NotFound(c, "组件不存在")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -455,10 +372,7 @@ func (h *ComponentsHandler) ListVersions(c *gin.Context) {
 		Order("created_at DESC").
 		Find(&versions).Error; err != nil {
 		h.logger.Error("查询版本列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -493,12 +407,9 @@ func (h *ComponentsHandler) ListVersions(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"component": component,
-			"versions":  result,
-		},
+	Success(c, gin.H{
+		"component": component,
+		"versions":  result,
 	})
 }
 
@@ -510,24 +421,15 @@ func (h *ComponentsHandler) GetVersion(c *gin.Context) {
 	var version model.ComponentVersion
 	if err := h.db.Preload("Packages").First(&version, versionID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "版本不存在",
-			})
+			NotFound(c, "版本不存在")
 			return
 		}
 		h.logger.Error("查询版本详情失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": version,
-	})
+	Success(c, version)
 }
 
 // SetLatestVersion 设置为最新版本
@@ -539,17 +441,11 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 	var version model.ComponentVersion
 	if err := h.db.First(&version, versionID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "版本不存在",
-			})
+			NotFound(c, "版本不存在")
 			return
 		}
 		h.logger.Error("查询版本失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "设置失败",
-		})
+		InternalError(c, "设置失败")
 		return
 	}
 
@@ -562,10 +458,7 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 		Update("is_latest", false).Error; err != nil {
 		tx.Rollback()
 		h.logger.Error("更新最新版本状态失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "设置失败",
-		})
+		InternalError(c, "设置失败")
 		return
 	}
 
@@ -573,10 +466,7 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 	if err := tx.Model(&version).Update("is_latest", true).Error; err != nil {
 		tx.Rollback()
 		h.logger.Error("设置最新版本失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "设置失败",
-		})
+		InternalError(c, "设置失败")
 		return
 	}
 
@@ -611,10 +501,7 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 		zap.String("version", version.Version),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "设置成功",
-	})
+	SuccessMessage(c, "设置成功")
 }
 
 // DeleteVersion 删除版本
@@ -625,17 +512,11 @@ func (h *ComponentsHandler) DeleteVersion(c *gin.Context) {
 	var version model.ComponentVersion
 	if err := h.db.First(&version, versionID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "版本不存在",
-			})
+			NotFound(c, "版本不存在")
 			return
 		}
 		h.logger.Error("查询版本失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
@@ -654,10 +535,7 @@ func (h *ComponentsHandler) DeleteVersion(c *gin.Context) {
 	// 删除版本记录
 	if err := h.db.Delete(&version).Error; err != nil {
 		h.logger.Error("删除版本记录失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
@@ -666,10 +544,7 @@ func (h *ComponentsHandler) DeleteVersion(c *gin.Context) {
 		zap.String("version", version.Version),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "删除成功",
-	})
+	SuccessMessage(c, "删除成功")
 }
 
 // ==================== 包上传 API ====================
@@ -687,18 +562,12 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 
 	// 验证参数
 	if arch != "amd64" && arch != "arm64" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的架构，支持: amd64, arm64",
-		})
+		BadRequest(c, "无效的架构，支持: amd64, arm64")
 		return
 	}
 
 	if pkgType != "rpm" && pkgType != "deb" && pkgType != "binary" && pkgType != "tgz" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的包类型，支持: rpm, deb, binary, tgz",
-		})
+		BadRequest(c, "无效的包类型，支持: rpm, deb, binary, tgz")
 		return
 	}
 
@@ -706,43 +575,28 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	var component model.Component
 	if err := h.db.First(&component, componentID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "组件不存在",
-			})
+			NotFound(c, "组件不存在")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
 	// Agent 必须是 rpm/deb，插件可以是 binary
 	if component.Category == model.ComponentCategoryAgent && pkgType != "rpm" && pkgType != "deb" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "Agent 包类型必须是 rpm 或 deb",
-		})
+		BadRequest(c, "Agent 包类型必须是 rpm 或 deb")
 		return
 	}
 
 	// Plugin 只允许 binary
 	if component.Category == model.ComponentCategoryPlugin && pkgType != "binary" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "插件包类型必须是 binary",
-		})
+		BadRequest(c, "插件包类型必须是 binary")
 		return
 	}
 
 	// Dependency 只允许 tgz
 	if component.Category == model.ComponentCategoryDependency && pkgType != "tgz" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "依赖包类型必须是 tgz",
-		})
+		BadRequest(c, "依赖包类型必须是 tgz")
 		return
 	}
 
@@ -750,16 +604,10 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	var version model.ComponentVersion
 	if err := h.db.First(&version, versionID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "版本不存在",
-			})
+			NotFound(c, "版本不存在")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -769,10 +617,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	if err == nil {
 		// 包已存在
 		if force != "true" {
-			c.JSON(http.StatusConflict, gin.H{
-				"code":    409,
-				"message": fmt.Sprintf("该版本已存在 %s/%s 包，如需覆盖请设置 force=true", pkgType, arch),
-			})
+			Conflict(c, fmt.Sprintf("该版本已存在 %s/%s 包，如需覆盖请设置 force=true", pkgType, arch))
 			return
 		}
 
@@ -788,28 +633,19 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		}
 		if err := h.db.Delete(&existingPkg).Error; err != nil {
 			h.logger.Error("删除旧包记录失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "删除旧包失败",
-			})
+			InternalError(c, "删除旧包失败")
 			return
 		}
 	} else if err != gorm.ErrRecordNotFound {
 		h.logger.Error("查询包失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
 	// 获取上传的文件
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请上传文件",
-		})
+		BadRequest(c, "请上传文件")
 		return
 	}
 	defer file.Close()
@@ -817,26 +653,17 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	// 验证文件扩展名
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if pkgType == "rpm" && ext != ".rpm" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "RPM 包文件扩展名必须是 .rpm",
-		})
+		BadRequest(c, "RPM 包文件扩展名必须是 .rpm")
 		return
 	}
 	if pkgType == "deb" && ext != ".deb" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "DEB 包文件扩展名必须是 .deb",
-		})
+		BadRequest(c, "DEB 包文件扩展名必须是 .deb")
 		return
 	}
 	if pkgType == "tgz" {
 		lowerName := strings.ToLower(header.Filename)
 		if !strings.HasSuffix(lowerName, ".tar.gz") && !strings.HasSuffix(lowerName, ".tgz") {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "tar.gz 包文件扩展名必须是 .tar.gz 或 .tgz",
-			})
+			BadRequest(c, "tar.gz 包文件扩展名必须是 .tar.gz 或 .tgz")
 			return
 		}
 	}
@@ -848,10 +675,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		pluginsDir := filepath.Join(h.uploadDir, "plugins", component.Name, version.Version)
 		if err := os.MkdirAll(pluginsDir, 0755); err != nil {
 			h.logger.Error("创建插件目录失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "保存文件失败",
-			})
+			InternalError(c, "保存文件失败")
 			return
 		}
 		// 文件名格式：{name}_{arch}（例如 baseline_amd64）
@@ -862,10 +686,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		packagesDir := filepath.Join(h.uploadDir, "packages", component.Name, version.Version)
 		if err := os.MkdirAll(packagesDir, 0755); err != nil {
 			h.logger.Error("创建依赖包目录失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "保存文件失败",
-			})
+			InternalError(c, "保存文件失败")
 			return
 		}
 		// 文件名: {name}-v{version}-{arch}.tar.gz
@@ -876,10 +697,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		packagesDir := filepath.Join(h.uploadDir, "packages", component.Name, version.Version)
 		if err := os.MkdirAll(packagesDir, 0755); err != nil {
 			h.logger.Error("创建组件包目录失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "保存文件失败",
-			})
+			InternalError(c, "保存文件失败")
 			return
 		}
 		fileName = fmt.Sprintf("mxsec-%s-%s-linux-%s.%s", component.Name, version.Version, arch, pkgType)
@@ -890,10 +708,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	dst, err := os.Create(filePath)
 	if err != nil {
 		h.logger.Error("创建文件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "保存文件失败",
-		})
+		InternalError(c, "保存文件失败")
 		return
 	}
 	defer dst.Close()
@@ -905,10 +720,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	if err != nil {
 		os.Remove(filePath)
 		h.logger.Error("写入文件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "保存文件失败",
-		})
+		InternalError(c, "保存文件失败")
 		return
 	}
 
@@ -935,10 +747,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 	if err := h.db.Create(&pkg).Error; err != nil {
 		os.Remove(filePath)
 		h.logger.Error("创建包记录失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "保存失败",
-		})
+		InternalError(c, "保存失败")
 		return
 	}
 
@@ -988,11 +797,7 @@ func (h *ComponentsHandler) UploadPackage(c *gin.Context) {
 		)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "上传成功",
-		"data":    pkg,
-	})
+	SuccessWithMessage(c, "上传成功", pkg)
 }
 
 // DeletePackage 删除包
@@ -1003,17 +808,11 @@ func (h *ComponentsHandler) DeletePackage(c *gin.Context) {
 	var pkg model.ComponentPackage
 	if err := h.db.First(&pkg, id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "包不存在",
-			})
+			NotFound(c, "包不存在")
 			return
 		}
 		h.logger.Error("查询包失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
@@ -1025,19 +824,13 @@ func (h *ComponentsHandler) DeletePackage(c *gin.Context) {
 	// 删除数据库记录
 	if err := h.db.Delete(&pkg).Error; err != nil {
 		h.logger.Error("删除包记录失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除失败",
-		})
+		InternalError(c, "删除失败")
 		return
 	}
 
 	h.logger.Info("删除包成功", zap.Uint("id", pkg.ID))
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "删除成功",
-	})
+	SuccessMessage(c, "删除成功")
 }
 
 // ==================== 下载 API ====================
@@ -1050,28 +843,19 @@ func (h *ComponentsHandler) DownloadAgentPackage(c *gin.Context) {
 
 	// 验证参数
 	if pkgType != "rpm" && pkgType != "deb" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的包类型，支持: rpm, deb",
-		})
+		BadRequest(c, "无效的包类型，支持: rpm, deb")
 		return
 	}
 
 	if arch != "amd64" && arch != "arm64" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的架构，支持: amd64, arm64",
-		})
+		BadRequest(c, "无效的架构，支持: amd64, arm64")
 		return
 	}
 
 	// 查找 agent 组件
 	var component model.Component
 	if err := h.db.Where("name = ?", "agent").First(&component).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "Agent 组件不存在",
-		})
+		NotFound(c, "Agent 组件不存在")
 		return
 	}
 
@@ -1081,10 +865,7 @@ func (h *ComponentsHandler) DownloadAgentPackage(c *gin.Context) {
 		// 如果没有标记为最新的，尝试获取最新上传的
 		if err := h.db.Where("component_id = ?", component.ID).
 			Order("created_at DESC").First(&latestVersion).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "未找到 Agent 版本",
-			})
+			NotFound(c, "未找到 Agent 版本")
 			return
 		}
 	}
@@ -1093,20 +874,14 @@ func (h *ComponentsHandler) DownloadAgentPackage(c *gin.Context) {
 	var pkg model.ComponentPackage
 	if err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
 		latestVersion.ID, pkgType, arch, true).First(&pkg).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": fmt.Sprintf("未找到 Agent %s 包 (%s)", pkgType, arch),
-		})
+		NotFound(c, fmt.Sprintf("未找到 Agent %s 包 (%s)", pkgType, arch))
 		return
 	}
 
 	// 检查文件是否存在
 	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
 		h.logger.Error("Agent 包文件不存在", zap.String("path", pkg.FilePath))
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "文件不存在",
-		})
+		NotFound(c, "文件不存在")
 		return
 	}
 
@@ -1215,20 +990,14 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 
 	// 验证架构
 	if arch != "amd64" && arch != "arm64" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的架构，支持: amd64, arm64",
-		})
+		BadRequest(c, "无效的架构，支持: amd64, arm64")
 		return
 	}
 
 	// 查找插件组件
 	var component model.Component
 	if err := h.db.Where("name = ? AND category = ?", name, model.ComponentCategoryPlugin).First(&component).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": fmt.Sprintf("插件 %s 不存在", name),
-		})
+		NotFound(c, fmt.Sprintf("插件 %s 不存在", name))
 		return
 	}
 
@@ -1237,10 +1006,7 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 	if err := h.db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&latestVersion).Error; err != nil {
 		if err := h.db.Where("component_id = ?", component.ID).
 			Order("created_at DESC").First(&latestVersion).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": fmt.Sprintf("插件 %s 没有可用版本", name),
-			})
+			NotFound(c, fmt.Sprintf("插件 %s 没有可用版本", name))
 			return
 		}
 	}
@@ -1252,10 +1018,7 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 		// fallback: 查 arch=all（如 virus-database 等不分架构的包）
 		if err2 := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
 			latestVersion.ID, "binary", "all", true).First(&pkg).Error; err2 != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": fmt.Sprintf("插件 %s 没有 %s 架构的包", name, arch),
-			})
+			NotFound(c, fmt.Sprintf("插件 %s 没有 %s 架构的包", name, arch))
 			return
 		}
 	}
@@ -1264,10 +1027,7 @@ func (h *ComponentsHandler) DownloadPluginPackage(c *gin.Context) {
 	fileInfo, err := os.Stat(pkg.FilePath)
 	if os.IsNotExist(err) {
 		h.logger.Error("插件包文件不存在", zap.String("path", pkg.FilePath))
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "文件不存在",
-		})
+		NotFound(c, "文件不存在")
 		return
 	}
 
@@ -1326,10 +1086,7 @@ func (h *ComponentsHandler) GetPluginSyncStatus(c *gin.Context) {
 	var pluginConfigs []model.PluginConfig
 	if err := h.db.Find(&pluginConfigs).Error; err != nil {
 		h.logger.Error("查询插件配置失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -1384,10 +1141,7 @@ func (h *ComponentsHandler) GetPluginSyncStatus(c *gin.Context) {
 		statuses = append(statuses, status)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": statuses,
-	})
+	Success(c, statuses)
 }
 
 // ==================== 辅助函数 ====================
@@ -1524,10 +1278,10 @@ func (h *ComponentsHandler) syncPluginConfigForVersion(version *model.ComponentV
 	if err == gorm.ErrRecordNotFound {
 		// 创建新的插件配置
 		pluginConfig = model.PluginConfig{
-			Name:    componentName,
-			Type:    pluginType,
-			Version: version.Version,
-			SHA256:  pkg.SHA256,
+			Name:      componentName,
+			Type:      pluginType,
+			Version:   version.Version,
+			SHA256:    pkg.SHA256,
 			Signature: pluginSignature,
 			DownloadURLs: model.StringArray{
 				downloadURL,
@@ -1597,10 +1351,7 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -1608,34 +1359,22 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 	var agentComponent model.Component
 	if err := h.db.Where("name = ? AND category = ?", "agent", model.ComponentCategoryAgent).First(&agentComponent).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "Agent 组件不存在",
-			})
+			NotFound(c, "Agent 组件不存在")
 			return
 		}
 		h.logger.Error("查询 Agent 组件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询 Agent 组件失败",
-		})
+		InternalError(c, "查询 Agent 组件失败")
 		return
 	}
 
 	var latestVersion model.ComponentVersion
 	if err := h.db.Where("component_id = ? AND is_latest = ?", agentComponent.ID, true).First(&latestVersion).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "未找到 Agent 最新版本",
-			})
+			NotFound(c, "未找到 Agent 最新版本")
 			return
 		}
 		h.logger.Error("查询 Agent 最新版本失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询 Agent 最新版本失败",
-		})
+		InternalError(c, "查询 Agent 最新版本失败")
 		return
 	}
 
@@ -1647,10 +1386,7 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 	}
 	if err := query.Find(&hosts).Error; err != nil {
 		h.logger.Error("查询主机失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机失败",
-		})
+		InternalError(c, "查询主机失败")
 		return
 	}
 
@@ -1667,16 +1403,12 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		if containerCount > 0 {
 			msg = fmt.Sprintf("没有需要更新的在线主机（已跳过 %d 台容器主机，容器环境请通过重建镜像更新）", containerCount)
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": msg,
-			"data": gin.H{
-				"total":             0,
-				"success":           0,
-				"failed":            0,
-				"skipped_container": containerCount,
-				"latest_version":    latestVersion.Version,
-			},
+		SuccessWithMessage(c, msg, gin.H{
+			"total":             0,
+			"success":           0,
+			"failed":            0,
+			"skipped_container": containerCount,
+			"latest_version":    latestVersion.Version,
 		})
 		return
 	}
@@ -1718,10 +1450,7 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 
 	if err := h.db.Create(&pushRecord).Error; err != nil {
 		h.logger.Error("创建推送记录失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建推送记录失败: " + err.Error(),
-		})
+		InternalError(c, "创建推送记录失败")
 		return
 	}
 
@@ -1742,16 +1471,12 @@ func (h *ComponentsHandler) PushAgentUpdate(c *gin.Context) {
 		msg = fmt.Sprintf("推送任务已创建，AgentCenter 将在 30 秒内开始推送（已跳过 %d 台容器主机）", containerCount)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": msg,
-		"data": gin.H{
-			"record_id":         pushRecord.ID,
-			"total":             len(hosts),
-			"need_update":       needUpdateCount,
-			"skipped_container": containerCount,
-			"latest_version":    latestVersion.Version,
-		},
+	SuccessWithMessage(c, msg, gin.H{
+		"record_id":         pushRecord.ID,
+		"total":             len(hosts),
+		"need_update":       needUpdateCount,
+		"skipped_container": containerCount,
+		"latest_version":    latestVersion.Version,
 	})
 }
 
@@ -1777,10 +1502,7 @@ func (h *ComponentsHandler) ListPushRecords(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询推送记录总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -1789,10 +1511,7 @@ func (h *ComponentsHandler) ListPushRecords(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&records).Error; err != nil {
 		h.logger.Error("查询推送记录列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -1828,13 +1547,7 @@ func (h *ComponentsHandler) ListPushRecords(c *gin.Context) {
 		response = append(response, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": response,
-		},
-	})
+	SuccessPaginated(c, total, response)
 }
 
 // GetPushRecord 获取推送记录详情
@@ -1843,27 +1556,18 @@ func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
 	id := c.Param("id")
 	recordID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的记录 ID",
-		})
+		BadRequest(c, "无效的记录 ID")
 		return
 	}
 
 	var record model.ComponentPushRecord
 	if err := h.db.First(&record, recordID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "推送记录不存在",
-			})
+			NotFound(c, "推送记录不存在")
 			return
 		}
 		h.logger.Error("查询推送记录失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询失败",
-		})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -1900,10 +1604,7 @@ func (h *ComponentsHandler) GetPushRecord(c *gin.Context) {
 		response["completed_at"] = record.CompletedAt.Time().Format("2006-01-02 15:04:05")
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": response,
-	})
+	Success(c, response)
 }
 
 // SyncAllPluginsToLatest 同步所有插件配置到最新版本
@@ -1915,20 +1616,13 @@ func (h *ComponentsHandler) SyncAllPluginsToLatest(c *gin.Context) {
 	var components []model.Component
 	if err := h.db.Where("category = ?", model.ComponentCategoryPlugin).Find(&components).Error; err != nil {
 		h.logger.Error("查询插件组件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询插件组件失败",
-		})
+		InternalError(c, "查询插件组件失败")
 		return
 	}
 
 	if len(components) == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "没有找到插件组件",
-			"data": gin.H{
-				"synced_count": 0,
-			},
+		SuccessWithMessage(c, "没有找到插件组件", gin.H{
+			"synced_count": 0,
 		})
 		return
 	}
@@ -1972,14 +1666,10 @@ func (h *ComponentsHandler) SyncAllPluginsToLatest(c *gin.Context) {
 		zap.Int("total_count", len(components)),
 		zap.Int("synced_count", syncedCount))
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "同步完成",
-		"data": gin.H{
-			"total_count":  len(components),
-			"synced_count": syncedCount,
-			"results":      syncResults,
-		},
+	SuccessWithMessage(c, "同步完成", gin.H{
+		"total_count":  len(components),
+		"synced_count": syncedCount,
+		"results":      syncResults,
 	})
 }
 
@@ -1992,20 +1682,13 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 	var pluginConfigs []model.PluginConfig
 	if err := h.db.Where("enabled = ?", true).Find(&pluginConfigs).Error; err != nil {
 		h.logger.Error("查询插件配置失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询插件配置失败",
-		})
+		InternalError(c, "查询插件配置失败")
 		return
 	}
 
 	if len(pluginConfigs) == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "没有启用的插件配置，无需广播",
-			"data": gin.H{
-				"plugin_count": 0,
-			},
+		SuccessWithMessage(c, "没有启用的插件配置，无需广播", gin.H{
+			"plugin_count": 0,
 		})
 		return
 	}
@@ -2014,10 +1697,7 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 	var onlineHosts []model.Host
 	if err := h.db.Where("status = ? AND is_container = ?", model.HostStatusOnline, false).Find(&onlineHosts).Error; err != nil {
 		h.logger.Error("查询在线主机失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询在线主机失败",
-		})
+		InternalError(c, "查询在线主机失败")
 		return
 	}
 	onlineCount := len(onlineHosts)
@@ -2104,10 +1784,7 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 
 	if result.Error != nil {
 		h.logger.Error("更新插件配置时间戳失败", zap.Error(result.Error))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "触发广播失败",
-		})
+		InternalError(c, "触发广播失败")
 		return
 	}
 
@@ -2121,15 +1798,11 @@ func (h *ComponentsHandler) BroadcastPluginConfigs(c *gin.Context) {
 		broadcastMsg = fmt.Sprintf("广播触发成功，将在30秒内推送到所有在线Agent（已跳过 %d 台容器主机）", containerCount)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": broadcastMsg,
-		"data": gin.H{
-			"plugin_count":       len(pluginConfigs),
-			"online_agent_count": onlineCount,
-			"skipped_container":  containerCount,
-			"plugins":            pluginConfigsToNames(pluginConfigs),
-		},
+	SuccessWithMessage(c, broadcastMsg, gin.H{
+		"plugin_count":       len(pluginConfigs),
+		"online_agent_count": onlineCount,
+		"skipped_container":  containerCount,
+		"plugins":            pluginConfigsToNames(pluginConfigs),
 	})
 }
 
@@ -2165,18 +1838,18 @@ func (h *ComponentsHandler) DownloadDependencyPackage(c *gin.Context) {
 	arch := c.DefaultQuery("arch", "amd64")
 
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "缺少参数"})
+		BadRequest(c, "缺少参数")
 		return
 	}
 	if arch != "amd64" && arch != "arm64" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "无效的架构，支持: amd64, arm64"})
+		BadRequest(c, "无效的架构，支持: amd64, arm64")
 		return
 	}
 
 	// 查找依赖组件
 	var component model.Component
 	if err := h.db.Where("name = ? AND category = ?", name, model.ComponentCategoryDependency).First(&component).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 不存在", name)})
+		NotFound(c, fmt.Sprintf("依赖 %s 不存在", name))
 		return
 	}
 
@@ -2185,7 +1858,7 @@ func (h *ComponentsHandler) DownloadDependencyPackage(c *gin.Context) {
 	if err := h.db.Where("component_id = ? AND is_latest = ?", component.ID, true).First(&latestVersion).Error; err != nil {
 		if err := h.db.Where("component_id = ?", component.ID).
 			Order("created_at DESC").First(&latestVersion).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 没有可用版本", name)})
+			NotFound(c, fmt.Sprintf("依赖 %s 没有可用版本", name))
 			return
 		}
 	}
@@ -2194,14 +1867,14 @@ func (h *ComponentsHandler) DownloadDependencyPackage(c *gin.Context) {
 	var pkg model.ComponentPackage
 	if err := h.db.Where("version_id = ? AND pkg_type = ? AND arch = ? AND enabled = ?",
 		latestVersion.ID, "tgz", arch, true).First(&pkg).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": fmt.Sprintf("依赖 %s 没有 %s 架构的包", name, arch)})
+		NotFound(c, fmt.Sprintf("依赖 %s 没有 %s 架构的包", name, arch))
 		return
 	}
 
 	// 检查文件是否存在
 	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
 		h.logger.Error("依赖包文件不存在", zap.String("path", pkg.FilePath))
-		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "文件不存在"})
+		NotFound(c, "文件不存在")
 		return
 	}
 

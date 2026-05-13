@@ -218,6 +218,11 @@ services:
         VERSION: ${VERSION:-dev}
     image: mxsec-agentcenter:dev
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -257,6 +262,11 @@ services:
         VERSION: ${VERSION:-dev}
     image: mxsec-manager:dev
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -293,6 +303,11 @@ services:
         VERSION: ${VERSION:-dev}
     image: mxsec-consumer:dev
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       mysql:
         condition: service_healthy
@@ -334,6 +349,8 @@ services:
     image: mxsec-ui:dev
     container_name: mxsec-ui
     restart: always
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       manager:
         condition: service_healthy

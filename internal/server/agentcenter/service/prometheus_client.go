@@ -52,7 +52,7 @@ func (c *PrometheusClient) WriteMetrics(ctx context.Context, hostID string, metr
 func (c *PrometheusClient) writeToPushgateway(ctx context.Context, hostID string, metrics map[string]float64, timestamp time.Time) error {
 	// Pushgateway 使用 Prometheus 文本格式
 	var buf bytes.Buffer
-	
+
 	for name, value := range metrics {
 		// Prometheus 指标格式：metric_name{labels} value timestamp
 		metricLine := fmt.Sprintf("mxsec_host_%s{host_id=\"%s\"} %f %d\n",
@@ -62,7 +62,7 @@ func (c *PrometheusClient) writeToPushgateway(ctx context.Context, hostID string
 
 	// Pushgateway API: POST /metrics/job/{job_name}/instance/{instance}
 	url := fmt.Sprintf("%s/metrics/job/%s/instance/%s", c.pushgatewayURL, c.jobName, hostID)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, &buf)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -88,7 +88,7 @@ func (c *PrometheusClient) writeToRemoteWrite(ctx context.Context, hostID string
 	// Prometheus Remote Write 使用 Protobuf 格式
 	// 为了简化，我们使用 JSON 格式（需要 Prometheus 支持 JSON 格式的 Remote Write）
 	// 或者使用 Prometheus 的 Go 客户端库
-	
+
 	// 这里使用简化的 JSON 格式（实际应该使用 Protobuf）
 	type TimeSeries struct {
 		Labels []struct {
@@ -102,7 +102,7 @@ func (c *PrometheusClient) writeToRemoteWrite(ctx context.Context, hostID string
 	}
 
 	var timeSeries []TimeSeries
-	
+
 	for name, value := range metrics {
 		ts := TimeSeries{
 			Labels: []struct {

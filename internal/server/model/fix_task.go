@@ -25,16 +25,16 @@ const (
 
 // FixTaskHostStatus 修复任务主机执行状态
 type FixTaskHostStatus struct {
-	ID           uint       `gorm:"primaryKey" json:"id"`
-	TaskID       string     `gorm:"type:varchar(64);not null;index:idx_fix_task_host,priority:1" json:"task_id"`
-	HostID       string     `gorm:"type:varchar(64);not null;index:idx_fix_task_host,priority:2" json:"host_id"`
-	Hostname     string     `gorm:"type:varchar(255)" json:"hostname"`
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	TaskID   string `gorm:"type:varchar(64);not null;index:idx_fix_task_host,priority:1" json:"task_id"`
+	HostID   string `gorm:"type:varchar(64);not null;index:idx_fix_task_host,priority:2" json:"host_id"`
+	Hostname string `gorm:"type:varchar(255)" json:"hostname"`
 	// 冗余存储主机信息，避免主机删除后数据丢失
-	IPAddress    string     `gorm:"type:varchar(255)" json:"ip_address"`    // 主机 IP 地址（IPv4）
-	BusinessLine string     `gorm:"type:varchar(255)" json:"business_line"` // 业务线
-	OSFamily     string     `gorm:"type:varchar(50)" json:"os_family"`      // OS 系列（如 rocky, ubuntu）
-	OSVersion    string     `gorm:"type:varchar(50)" json:"os_version"`     // OS 版本
-	RuntimeType  string     `gorm:"type:varchar(20)" json:"runtime_type"`   // 运行时类型（vm, docker, k8s）
+	IPAddress    string     `gorm:"type:varchar(255)" json:"ip_address"`                          // 主机 IP 地址（IPv4）
+	BusinessLine string     `gorm:"type:varchar(255)" json:"business_line"`                       // 业务线
+	OSFamily     string     `gorm:"type:varchar(50)" json:"os_family"`                            // OS 系列（如 rocky, ubuntu）
+	OSVersion    string     `gorm:"type:varchar(50)" json:"os_version"`                           // OS 版本
+	RuntimeType  string     `gorm:"type:varchar(20)" json:"runtime_type"`                         // 运行时类型（vm, docker, k8s）
 	Status       string     `gorm:"type:varchar(20);not null;default:'dispatched'" json:"status"` // dispatched, completed, timeout, failed
 	DispatchedAt *LocalTime `gorm:"type:datetime" json:"dispatched_at"`
 	CompletedAt  *LocalTime `gorm:"type:datetime" json:"completed_at"`
@@ -84,15 +84,15 @@ func (FixTask) TableName() string {
 // FixResult 修复结果模型
 // 复合主键 (task_id, host_id, rule_id) — 一次修复任务中每台主机的每条规则只有一条结果
 type FixResult struct {
-	TaskID    string          `gorm:"primaryKey;column:task_id;type:varchar(64);not null" json:"task_id"`
-	HostID    string          `gorm:"primaryKey;column:host_id;type:varchar(64);not null" json:"host_id"`
-	RuleID    string          `gorm:"primaryKey;column:rule_id;type:varchar(64);not null" json:"rule_id"`
-	Status    FixResultStatus `gorm:"column:status;type:varchar(20);not null" json:"status"`
-	Command   string          `gorm:"column:command;type:text" json:"command"`
-	Output    string          `gorm:"column:output;type:text" json:"output"`
-	ErrorMsg  string          `gorm:"column:error_msg;type:text" json:"error_msg"`
-	Message   string          `gorm:"column:message;type:varchar(500)" json:"message"`
-	FixedAt   LocalTime       `gorm:"column:fixed_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"fixed_at"`
+	TaskID   string          `gorm:"primaryKey;column:task_id;type:varchar(64);not null" json:"task_id"`
+	HostID   string          `gorm:"primaryKey;column:host_id;type:varchar(64);not null" json:"host_id"`
+	RuleID   string          `gorm:"primaryKey;column:rule_id;type:varchar(64);not null" json:"rule_id"`
+	Status   FixResultStatus `gorm:"column:status;type:varchar(20);not null" json:"status"`
+	Command  string          `gorm:"column:command;type:text" json:"command"`
+	Output   string          `gorm:"column:output;type:text" json:"output"`
+	ErrorMsg string          `gorm:"column:error_msg;type:text" json:"error_msg"`
+	Message  string          `gorm:"column:message;type:varchar(500)" json:"message"`
+	FixedAt  LocalTime       `gorm:"column:fixed_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"fixed_at"`
 }
 
 // TableName 指定表名

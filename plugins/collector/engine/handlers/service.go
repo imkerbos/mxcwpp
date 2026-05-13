@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -130,25 +131,23 @@ func (h *ServiceHandler) collectSysVServices(ctx context.Context) ([]interface{}
 
 	// 读取 /etc/init.d 目录
 	initDir := "/etc/init.d"
-	entries, err := exec.CommandContext(ctx, "ls", initDir).Output()
+	dirEntries, err := os.ReadDir(initDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list init.d directory: %w", err)
 	}
 
-	lines := strings.Split(string(entries), "\n")
-	for _, line := range lines {
+	for _, entry := range dirEntries {
 		select {
 		case <-ctx.Done():
 			return services, ctx.Err()
 		default:
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
+		if entry.IsDir() {
 			continue
 		}
 
-		serviceName := line
+		serviceName := entry.Name()
 
 		// 检查服务状态
 		status := h.getSysVServiceStatus(ctx, serviceName)
@@ -192,16 +191,12 @@ func (h *ServiceHandler) getSysVServiceStatus(ctx context.Context, serviceName s
 // isSysVServiceEnabled 检查 SysV 服务是否启用
 func (h *ServiceHandler) isSysVServiceEnabled(ctx context.Context, serviceName string) bool {
 	// 尝试使用 chkconfig（RHEL/CentOS）
-	cmd := exec.CommandContext(ctx, "chkconfig", "--list", serviceName)
-	err := cmd.Run()
+	output, err := exec.CommandContext(ctx, "chkconfig", "--list", serviceName).Output()
 	if err == nil {
-		output, _ := cmd.Output()
-		// 检查输出中是否包含 "on"
 		return strings.Contains(string(output), "on")
 	}
 
 	// 尝试使用 update-rc.d（Debian/Ubuntu）
-	cmd = exec.CommandContext(ctx, "update-rc.d", serviceName, "status")
-	err = cmd.Run()
+	err = exec.CommandContext(ctx, "update-rc.d", serviceName, "status").Run()
 	return err == nil
 }

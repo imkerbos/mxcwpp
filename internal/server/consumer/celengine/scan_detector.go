@@ -132,6 +132,7 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 		ResultID:    resultID,
 		HostID:      hostID,
 		RuleID:      "scan-detector",
+		Source:      model.AlertSourceRuntime,
 		Severity:    d.classifySeverity(portCount),
 		Category:    "port_scan",
 		Title:       fmt.Sprintf("端口扫描检测 - 来自 %s", remoteAddr),

@@ -2,16 +2,31 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"github.com/mojocn/base64Captcha"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
+)
+
+// captchaStore 验证码内存存储（自带过期清理，默认 10 分钟过期，每分钟清理一次）
+var captchaStore = base64Captcha.DefaultMemStore
+
+const (
+	jwtIssuer = "mxsec-platform"
+
+	// 登录安全策略
+	maxLoginFailCount = 5                // 最大连续失败次数
+	lockDuration      = 15 * time.Minute // 锁定时长
 )
 
 // AuthHandler 是认证 API 处理器
@@ -32,8 +47,10 @@ func NewAuthHandler(db *gorm.DB, logger *zap.Logger, secret []byte) *AuthHandler
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	CaptchaID   string `json:"captcha_id" binding:"required"`
+	CaptchaCode string `json:"captcha_code" binding:"required"`
 }
 
 // LoginResponse 登录响应
@@ -52,15 +69,35 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// GetCaptcha 生成图形验证码
+// GET /api/v1/auth/captcha
+func (h *AuthHandler) GetCaptcha(c *gin.Context) {
+	driver := base64Captcha.NewDriverDigit(80, 240, 5, 0.7, 80)
+	captcha := base64Captcha.NewCaptcha(driver, captchaStore)
+	id, b64s, _, err := captcha.Generate()
+	if err != nil {
+		h.logger.Error("生成验证码失败", zap.Error(err))
+		InternalError(c, "生成验证码失败")
+		return
+	}
+	Success(c, gin.H{
+		"captcha_id":    id,
+		"captcha_image": b64s,
+	})
+}
+
 // Login 用户登录
 // POST /api/v1/auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误",
-		})
+		BadRequest(c, "请求参数错误")
+		return
+	}
+
+	// 校验验证码（Verify 内部会自动删除已使用的验证码，防止重放）
+	if !captchaStore.Verify(req.CaptchaID, req.CaptchaCode, true) {
+		BadRequest(c, "验证码错误或已过期")
 		return
 	}
 
@@ -68,44 +105,63 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var user model.User
 	if err := h.db.Where("username = ? AND status = ?", req.Username, model.UserStatusActive).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "用户名或密码错误",
-			})
+			Unauthorized(c, "用户名或密码错误")
 			return
 		}
 		h.logger.Error("查询用户失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "登录失败",
+		InternalError(c, "登录失败")
+		return
+	}
+
+	// 检查账户是否被锁定
+	if user.LockedUntil != nil && time.Now().Before(time.Time(*user.LockedUntil)) {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    429,
+			"message": "账户已被临时锁定，请稍后再试",
 		})
 		return
 	}
 
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "用户名或密码错误",
-		})
+		// 登录失败，递增失败计数
+		user.LoginFailCount++
+		if user.LoginFailCount >= maxLoginFailCount {
+			lockedUntil := model.LocalTime(time.Now().Add(lockDuration))
+			user.LockedUntil = &lockedUntil
+			h.logger.Warn("用户登录失败次数过多，账户已锁定",
+				zap.String("username", user.Username),
+				zap.String("ip", c.ClientIP()),
+				zap.Duration("lock_duration", lockDuration),
+			)
+		}
+		h.db.Select("login_fail_count", "locked_until").Save(&user)
+
+		Unauthorized(c, "用户名或密码错误")
 		return
 	}
 
-	// 更新最后登录时间
-	now := model.Now()
-	user.LastLogin = &now
-	if err := h.db.Save(&user).Error; err != nil {
-		h.logger.Warn("更新最后登录时间失败", zap.Error(err))
+	// 登录成功，重置失败计数
+	user.LoginFailCount = 0
+	user.LockedUntil = nil
+	loginTime := model.Now()
+	user.LastLogin = &loginTime
+	if err := h.db.Select("login_fail_count", "locked_until", "last_login").Save(&user).Error; err != nil {
+		h.logger.Warn("更新登录状态失败", zap.Error(err))
 	}
 
 	// 生成 JWT Token
+	now := time.Now()
 	claims := Claims{
 		Username: user.Username,
 		Role:     string(user.Role),
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
+			Issuer:    jwtIssuer,
+			Subject:   user.Username,
+			ID:        uuid.New().String(),
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
 
@@ -113,25 +169,17 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	tokenString, err := token.SignedString(h.secret)
 	if err != nil {
 		h.logger.Error("生成Token失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "登录失败",
-		})
+		InternalError(c, "登录失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": LoginResponse{
-			Token: tokenString,
-			User: struct {
-				Username string `json:"username"`
-				Role     string `json:"role"`
-			}{
-				Username: user.Username,
-				Role:     string(user.Role),
-			},
+	Success(c, gin.H{
+		"token": tokenString,
+		"user": gin.H{
+			"username": user.Username,
+			"role":     string(user.Role),
 		},
+		"need_change_password": user.ForceChangePassword,
 	})
 }
 
@@ -140,99 +188,86 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// JWT 是无状态的，登出主要是客户端删除 token
 	// 可以在这里实现 token 黑名单（如果需要）
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "登出成功",
+	SuccessMessage(c, "登出成功")
+}
+
+// extractBearerToken 从 Authorization Header 中提取 Bearer Token
+// 严格要求 "Bearer " 前缀，不匹配时返回错误
+func extractBearerToken(c *gin.Context) (string, error) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("missing Authorization header")
+	}
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", fmt.Errorf("invalid Authorization header format")
+	}
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		return "", fmt.Errorf("empty token")
+	}
+	return token, nil
+}
+
+// parseToken 解析并验证 JWT Token，严格检查签名算法为 HS256
+func (h *AuthHandler) parseToken(tokenString string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		// 严格检查签名算法，防止 Algorithm Confusion Attack
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return h.secret, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token")
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok {
+		return nil, fmt.Errorf("invalid claims type")
+	}
+	// 验证 issuer
+	if claims.Issuer != jwtIssuer {
+		return nil, fmt.Errorf("invalid issuer")
+	}
+	return claims, nil
 }
 
 // GetCurrentUser 获取当前用户信息
 // GET /api/v1/auth/me
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
-	// 从 JWT Token 中提取用户信息
-	tokenString := c.GetHeader("Authorization")
-	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权",
-		})
+	tokenString, err := extractBearerToken(c)
+	if err != nil {
+		Unauthorized(c, "未授权")
 		return
 	}
 
-	// 移除 "Bearer " 前缀
-	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-		tokenString = tokenString[7:]
-	}
-
-	// 解析 Token
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return h.secret, nil
-	})
-
-	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "Token无效",
-		})
+	claims, err := h.parseToken(tokenString)
+	if err != nil {
+		Unauthorized(c, "Token无效")
 		return
 	}
 
-	claims, ok := token.Claims.(*Claims)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "Token解析失败",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"username": claims.Username,
-			"role":     claims.Role,
-		},
+	Success(c, gin.H{
+		"username": claims.Username,
+		"role":     claims.Role,
 	})
 }
 
 // AuthMiddleware JWT 认证中间件
 func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := c.GetHeader("Authorization")
-		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "未授权",
-			})
+		tokenString, err := extractBearerToken(c)
+		if err != nil {
+			Unauthorized(c, "未授权")
 			c.Abort()
 			return
 		}
 
-		// 移除 "Bearer " 前缀
-		if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
-			tokenString = tokenString[7:]
-		}
-
-		// 解析 Token
-		token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-			return h.secret, nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "Token无效",
-			})
-			c.Abort()
-			return
-		}
-
-		claims, ok := token.Claims.(*Claims)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "Token解析失败",
-			})
+		claims, err := h.parseToken(tokenString)
+		if err != nil {
+			Unauthorized(c, "Token无效")
 			c.Abort()
 			return
 		}
@@ -245,10 +280,33 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// RoleMiddleware 角色权限中间件，限制只有指定角色可以访问
+// 必须在 AuthMiddleware 之后使用（依赖 context 中的 "role" 字段）
+func RoleMiddleware(allowedRoles ...string) gin.HandlerFunc {
+	roleSet := make(map[string]struct{}, len(allowedRoles))
+	for _, r := range allowedRoles {
+		roleSet[r] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists {
+			Forbidden(c, "权限不足")
+			c.Abort()
+			return
+		}
+		if _, ok := roleSet[role.(string)]; !ok {
+			Forbidden(c, "权限不足，需要管理员角色")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // ChangePasswordRequest 修改密码请求
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	NewPassword string `json:"new_password" binding:"required,min=8"`
 }
 
 // ChangePassword 修改当前用户密码
@@ -257,19 +315,13 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	// 从上下文获取用户名
 	username, exists := c.Get("username")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"code":    401,
-			"message": "未授权",
-		})
+		Unauthorized(c, "未授权")
 		return
 	}
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误",
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -277,26 +329,17 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var user model.User
 	if err := h.db.Where("username = ?", username).First(&user).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "用户不存在",
-			})
+			NotFound(c, "用户不存在")
 			return
 		}
 		h.logger.Error("查询用户失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "修改密码失败",
-		})
+		InternalError(c, "修改密码失败")
 		return
 	}
 
 	// 验证旧密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "旧密码错误",
-		})
+		BadRequest(c, "旧密码错误")
 		return
 	}
 
@@ -304,26 +347,18 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		h.logger.Error("加密密码失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "修改密码失败",
-		})
+		InternalError(c, "修改密码失败")
 		return
 	}
 
-	// 更新密码
+	// 更新密码并清除强制改密标记
 	user.Password = string(hashedPassword)
-	if err := h.db.Save(&user).Error; err != nil {
+	user.ForceChangePassword = false
+	if err := h.db.Select("password", "force_change_password").Save(&user).Error; err != nil {
 		h.logger.Error("更新密码失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "修改密码失败",
-		})
+		InternalError(c, "修改密码失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "密码修改成功",
-	})
+	SuccessMessage(c, "密码修改成功")
 }

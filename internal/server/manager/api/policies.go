@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -42,10 +41,7 @@ func (h *PoliciesHandler) ListPolicies(c *gin.Context) {
 	policies, err := h.service.ListPolicies(enabledOnly)
 	if err != nil {
 		h.logger.Error("查询策略列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略列表失败",
-		})
+		InternalError(c, "查询策略列表失败")
 		return
 	}
 
@@ -94,11 +90,8 @@ func (h *PoliciesHandler) ListPolicies(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": items,
-		},
+	Success(c, gin.H{
+		"items": items,
 	})
 }
 
@@ -110,24 +103,15 @@ func (h *PoliciesHandler) GetPolicy(c *gin.Context) {
 	policy, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": policy,
-	})
+	Success(c, policy)
 }
 
 // CreatePolicyRequest 创建策略请求
@@ -161,39 +145,27 @@ type RuleData struct {
 func (h *PoliciesHandler) CreatePolicy(c *gin.Context) {
 	var req CreatePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 验证必填字段
 	if req.ID == "" || req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "策略 ID 和名称为必填项",
-		})
+		BadRequest(c, "策略 ID 和名称为必填项")
 		return
 	}
 
 	// 检查策略 ID 是否已存在
 	_, err := h.service.GetPolicy(req.ID)
 	if err == nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"code":    409,
-			"message": "策略 ID 已存在",
-		})
+		Conflict(c, "策略 ID 已存在")
 		return
 	}
 
 	// 验证规则数据
 	for i, ruleData := range req.Rules {
 		if ruleData.RuleID == "" || ruleData.Title == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "第 " + string(rune(i+1)) + " 条规则的 RuleID 和 Title 为必填项",
-			})
+			BadRequest(c, "第 "+string(rune(i+1))+" 条规则的 RuleID 和 Title 为必填项")
 			return
 		}
 	}
@@ -215,10 +187,7 @@ func (h *PoliciesHandler) CreatePolicy(c *gin.Context) {
 	// 创建策略
 	if err := h.service.CreatePolicy(policy); err != nil {
 		h.logger.Error("创建策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建策略失败",
-		})
+		InternalError(c, "创建策略失败")
 		return
 	}
 
@@ -249,10 +218,7 @@ func (h *PoliciesHandler) CreatePolicy(c *gin.Context) {
 		h.logger.Error("查询创建的策略失败", zap.Error(err))
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"code": 0,
-		"data": createdPolicy,
-	})
+	Created(c, createdPolicy)
 }
 
 // UpdatePolicyRequest 更新策略请求
@@ -278,27 +244,18 @@ func (h *PoliciesHandler) UpdatePolicy(c *gin.Context) {
 	policy, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
 		return
 	}
 
 	// 解析请求
 	var req UpdatePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -334,10 +291,7 @@ func (h *PoliciesHandler) UpdatePolicy(c *gin.Context) {
 	// 更新策略
 	if err := h.service.UpdatePolicy(policy); err != nil {
 		h.logger.Error("更新策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新策略失败",
-		})
+		InternalError(c, "更新策略失败")
 		return
 	}
 
@@ -376,10 +330,7 @@ func (h *PoliciesHandler) UpdatePolicy(c *gin.Context) {
 		h.logger.Error("查询更新的策略失败", zap.Error(err))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": updatedPolicy,
-	})
+	Success(c, updatedPolicy)
 }
 
 // DeletePolicy 删除策略
@@ -391,34 +342,34 @@ func (h *PoliciesHandler) DeletePolicy(c *gin.Context) {
 	_, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
+		return
+	}
+
+	// 检查是否有活跃任务引用该策略
+	var activeTaskCount int64
+	h.db.Model(&model.ScanTask{}).
+		Where("(policy_id = ? OR policy_ids LIKE ?) AND status IN ?",
+			policyID, "%"+policyID+"%",
+			[]string{string(model.TaskStatusPending), string(model.TaskStatusRunning)}).
+		Count(&activeTaskCount)
+	if activeTaskCount > 0 {
+		Conflict(c, "该策略有活跃任务正在执行，请先取消任务再删除")
 		return
 	}
 
 	// 删除策略（会级联删除规则）
 	if err := h.service.DeletePolicy(policyID); err != nil {
 		h.logger.Error("删除策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "删除策略失败",
-		})
+		InternalError(c, "删除策略失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "策略已删除",
-	})
+	SuccessMessage(c, "策略已删除")
 }
 
 // GetPolicyStatistics 获取策略统计信息
@@ -430,17 +381,11 @@ func (h *PoliciesHandler) GetPolicyStatistics(c *gin.Context) {
 	policy, err := h.service.GetPolicy(policyID)
 	if err != nil {
 		if strings.Contains(err.Error(), "不存在") {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "策略不存在",
-			})
+			NotFound(c, "策略不存在")
 			return
 		}
 		h.logger.Error("查询策略失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略失败",
-		})
+		InternalError(c, "查询策略失败")
 		return
 	}
 
@@ -458,10 +403,7 @@ func (h *PoliciesHandler) GetPolicyStatistics(c *gin.Context) {
 	}
 	if err := query.Find(&results).Error; err != nil {
 		h.logger.Error("查询策略统计失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询策略统计失败",
-		})
+		InternalError(c, "查询策略统计失败")
 		return
 	}
 
@@ -540,18 +482,15 @@ func (h *PoliciesHandler) GetPolicyStatistics(c *gin.Context) {
 		lastCheckTime = &latest
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"policy_id":       policyID,
-			"pass_rate":       passRate,
-			"host_count":      hostCount,
-			"host_pass_count": 0, // TODO: 计算通过的主机数
-			"rule_count":      ruleCount,
-			"risk_rule_count": riskRuleCount,
-			"last_check_time": lastCheckTime,
-			"rule_pass_rates": rulePassRates,
-		},
+	Success(c, gin.H{
+		"policy_id":       policyID,
+		"pass_rate":       passRate,
+		"host_count":      hostCount,
+		"host_pass_count": 0, // TODO: 计算通过的主机数
+		"rule_count":      ruleCount,
+		"risk_rule_count": riskRuleCount,
+		"last_check_time": lastCheckTime,
+		"rule_pass_rates": rulePassRates,
 	})
 }
 
@@ -584,6 +523,22 @@ func (h *PoliciesHandler) BatchDelete(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "参数错误")
+		return
+	}
+
+	// 检查是否有活跃任务引用这些策略
+	var activeTaskCount int64
+	for _, pid := range req.PolicyIDs {
+		var cnt int64
+		h.db.Model(&model.ScanTask{}).
+			Where("(policy_id = ? OR policy_ids LIKE ?) AND status IN ?",
+				pid, "%"+pid+"%",
+				[]string{string(model.TaskStatusPending), string(model.TaskStatusRunning)}).
+			Count(&cnt)
+		activeTaskCount += cnt
+	}
+	if activeTaskCount > 0 {
+		Conflict(c, "部分策略有活跃任务正在执行，请先取消任务再删除")
 		return
 	}
 

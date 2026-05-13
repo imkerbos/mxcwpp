@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,6 +24,7 @@ type KubeBaselineChecker struct {
 	kubeClient     *KubeClientManager
 	ruleEngine     *KubeRuleEngine
 	checkFuncs     map[string]CheckFunc
+	mu             sync.Mutex // 保护 currentCluster 防止并发 RunChecks 竞态
 	currentCluster uint
 }
 
@@ -51,93 +53,253 @@ func isSystemNamespace(ns string) bool {
 func (c *KubeBaselineChecker) registerCheckFuncs() map[string]CheckFunc {
 	return map[string]CheckFunc{
 		// RBAC 安全
-		"CIS-K8S-001": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkAnonymousRBAC(ctx) },
-		"CIS-K8S-005": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDefaultServiceAccount(ctx) },
-		"CIS-K8S-006": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkClusterAdminBinding(ctx) },
-		"CIS-K8S-007": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkWildcardRBAC(ctx) },
-		"CIS-K8S-008": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkExecAttachRBAC(ctx) },
-		"CIS-K8S-009": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSecretsAccessRBAC(ctx) },
-		"CIS-K8S-010": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkEscalateRBAC(ctx) },
-		"CIS-K8S-011": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSAAutoMount(ctx) },
-		"CIS-K8S-012": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSystemMastersBinding(ctx) },
+		"CIS-K8S-001": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkAnonymousRBAC(ctx)
+		},
+		"CIS-K8S-005": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDefaultServiceAccount(ctx)
+		},
+		"CIS-K8S-006": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkClusterAdminBinding(ctx)
+		},
+		"CIS-K8S-007": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkWildcardRBAC(ctx)
+		},
+		"CIS-K8S-008": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkExecAttachRBAC(ctx)
+		},
+		"CIS-K8S-009": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSecretsAccessRBAC(ctx)
+		},
+		"CIS-K8S-010": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkEscalateRBAC(ctx)
+		},
+		"CIS-K8S-011": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSAAutoMount(ctx)
+		},
+		"CIS-K8S-012": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSystemMastersBinding(ctx)
+		},
 		// Pod 安全
-		"CIS-K8S-003": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPrivilegedPods(ctx) },
-		"CIS-K8S-004": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkHostNamespacePods(ctx) },
-		"CIS-K8S-013": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkRunAsRoot(ctx) },
-		"CIS-K8S-014": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDangerousCapabilities(ctx) },
-		"CIS-K8S-015": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkReadOnlyRootFilesystem(ctx) },
-		"CIS-K8S-016": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkAllowPrivilegeEscalation(ctx) },
-		"CIS-K8S-017": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkHostPathVolumes(ctx) },
-		"CIS-K8S-018": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDockerSocketMount(ctx) },
-		"CIS-K8S-019": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSeccompProfile(ctx) },
-		"CIS-K8S-020": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkCPULimits(ctx) },
-		"CIS-K8S-021": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkMemoryLimits(ctx) },
-		"CIS-K8S-022": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkResourceRequests(ctx) },
-		"CIS-K8S-023": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLivenessProbe(ctx) },
-		"CIS-K8S-024": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkReadinessProbe(ctx) },
-		"CIS-K8S-025": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLatestImageTag(ctx) },
-		"CIS-K8S-026": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkImagePullPolicy(ctx) },
-		"CIS-K8S-027": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkHostPort(ctx) },
-		"CIS-K8S-028": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkAddedCapabilities(ctx) },
+		"CIS-K8S-003": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPrivilegedPods(ctx)
+		},
+		"CIS-K8S-004": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkHostNamespacePods(ctx)
+		},
+		"CIS-K8S-013": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkRunAsRoot(ctx)
+		},
+		"CIS-K8S-014": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDangerousCapabilities(ctx)
+		},
+		"CIS-K8S-015": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkReadOnlyRootFilesystem(ctx)
+		},
+		"CIS-K8S-016": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkAllowPrivilegeEscalation(ctx)
+		},
+		"CIS-K8S-017": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkHostPathVolumes(ctx)
+		},
+		"CIS-K8S-018": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDockerSocketMount(ctx)
+		},
+		"CIS-K8S-019": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSeccompProfile(ctx)
+		},
+		"CIS-K8S-020": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkCPULimits(ctx)
+		},
+		"CIS-K8S-021": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkMemoryLimits(ctx)
+		},
+		"CIS-K8S-022": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkResourceRequests(ctx)
+		},
+		"CIS-K8S-023": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLivenessProbe(ctx)
+		},
+		"CIS-K8S-024": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkReadinessProbe(ctx)
+		},
+		"CIS-K8S-025": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLatestImageTag(ctx)
+		},
+		"CIS-K8S-026": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkImagePullPolicy(ctx)
+		},
+		"CIS-K8S-027": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkHostPort(ctx)
+		},
+		"CIS-K8S-028": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkAddedCapabilities(ctx)
+		},
 		// 网络安全
-		"CIS-K8S-002": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNetworkPolicy(ctx) },
-		"CIS-K8S-029": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDefaultDenyIngress(ctx) },
-		"CIS-K8S-030": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDefaultDenyEgress(ctx) },
-		"CIS-K8S-031": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodePortServices(ctx) },
-		"CIS-K8S-032": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLoadBalancerServices(ctx) },
-		"CIS-K8S-033": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkExternalIPsServices(ctx) },
-		"CIS-K8S-034": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkIngressTLS(ctx) },
-		"CIS-K8S-035": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkServiceWithoutSelector(ctx) },
+		"CIS-K8S-002": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNetworkPolicy(ctx)
+		},
+		"CIS-K8S-029": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDefaultDenyIngress(ctx)
+		},
+		"CIS-K8S-030": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDefaultDenyEgress(ctx)
+		},
+		"CIS-K8S-031": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodePortServices(ctx)
+		},
+		"CIS-K8S-032": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLoadBalancerServices(ctx)
+		},
+		"CIS-K8S-033": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkExternalIPsServices(ctx)
+		},
+		"CIS-K8S-034": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkIngressTLS(ctx)
+		},
+		"CIS-K8S-035": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkServiceWithoutSelector(ctx)
+		},
 		// 密钥与配置
-		"CIS-K8S-036": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSecretsInEnv(ctx) },
-		"CIS-K8S-037": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDefaultNamespaceUsage(ctx) },
-		"CIS-K8S-038": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkTillerDeployment(ctx) },
-		"CIS-K8S-039": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLargeSecrets(ctx) },
-		"CIS-K8S-040": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLargeConfigMaps(ctx) },
-		"CIS-K8S-041": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNamespaceLabels(ctx) },
-		"CIS-K8S-042": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSATokenSecrets(ctx) },
-		"CIS-K8S-043": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPlaintextPasswords(ctx) },
+		"CIS-K8S-036": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSecretsInEnv(ctx)
+		},
+		"CIS-K8S-037": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDefaultNamespaceUsage(ctx)
+		},
+		"CIS-K8S-038": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkTillerDeployment(ctx)
+		},
+		"CIS-K8S-039": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLargeSecrets(ctx)
+		},
+		"CIS-K8S-040": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLargeConfigMaps(ctx)
+		},
+		"CIS-K8S-041": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNamespaceLabels(ctx)
+		},
+		"CIS-K8S-042": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSATokenSecrets(ctx)
+		},
+		"CIS-K8S-043": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPlaintextPasswords(ctx)
+		},
 		// 工作负载安全
-		"CIS-K8S-044": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkSingleReplicaDeployments(ctx) },
-		"CIS-K8S-045": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPDBCoverage(ctx) },
-		"CIS-K8S-046": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkCronJobDeadline(ctx) },
-		"CIS-K8S-047": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkUntrustedRegistries(ctx) },
-		"CIS-K8S-048": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkHPAMinReplicas(ctx) },
-		"CIS-K8S-049": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDaemonSetResourceLimits(ctx) },
-		"CIS-K8S-050": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkJobBackoffLimit(ctx) },
-		"CIS-K8S-051": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDeploymentStrategy(ctx) },
-		"CIS-K8S-052": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkStatefulSetStorage(ctx) },
-		"CIS-K8S-053": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPodAntiAffinity(ctx) },
-		"CIS-K8S-054": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkTopologySpreadConstraints(ctx) },
-		"CIS-K8S-055": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkDeploymentHPA(ctx) },
+		"CIS-K8S-044": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkSingleReplicaDeployments(ctx)
+		},
+		"CIS-K8S-045": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPDBCoverage(ctx)
+		},
+		"CIS-K8S-046": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkCronJobDeadline(ctx)
+		},
+		"CIS-K8S-047": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkUntrustedRegistries(ctx)
+		},
+		"CIS-K8S-048": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkHPAMinReplicas(ctx)
+		},
+		"CIS-K8S-049": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDaemonSetResourceLimits(ctx)
+		},
+		"CIS-K8S-050": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkJobBackoffLimit(ctx)
+		},
+		"CIS-K8S-051": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDeploymentStrategy(ctx)
+		},
+		"CIS-K8S-052": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkStatefulSetStorage(ctx)
+		},
+		"CIS-K8S-053": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPodAntiAffinity(ctx)
+		},
+		"CIS-K8S-054": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkTopologySpreadConstraints(ctx)
+		},
+		"CIS-K8S-055": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkDeploymentHPA(ctx)
+		},
 		// 节点安全
-		"CIS-K8S-056": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeNotReady(ctx) },
-		"CIS-K8S-057": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodePressure(ctx) },
-		"CIS-K8S-058": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeKernelVersion(ctx) },
-		"CIS-K8S-059": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeContainerRuntime(ctx) },
-		"CIS-K8S-060": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeResourceUtilization(ctx) },
-		"CIS-K8S-061": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeUnschedulable(ctx) },
-		"CIS-K8S-062": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodeTaints(ctx) },
-		"CIS-K8S-063": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkOrphanPods(ctx) },
-		"CIS-K8S-064": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNodePodCount(ctx) },
+		"CIS-K8S-056": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeNotReady(ctx)
+		},
+		"CIS-K8S-057": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodePressure(ctx)
+		},
+		"CIS-K8S-058": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeKernelVersion(ctx)
+		},
+		"CIS-K8S-059": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeContainerRuntime(ctx)
+		},
+		"CIS-K8S-060": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeResourceUtilization(ctx)
+		},
+		"CIS-K8S-061": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeUnschedulable(ctx)
+		},
+		"CIS-K8S-062": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodeTaints(ctx)
+		},
+		"CIS-K8S-063": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkOrphanPods(ctx)
+		},
+		"CIS-K8S-064": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNodePodCount(ctx)
+		},
 		// 集群配置
-		"CIS-K8S-065": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkK8sVersion(ctx) },
-		"CIS-K8S-066": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkLimitRange(ctx) },
-		"CIS-K8S-067": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkResourceQuota(ctx) },
-		"CIS-K8S-068": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPSSLabels(ctx) },
-		"CIS-K8S-069": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkAdmissionWebhooks(ctx) },
-		"CIS-K8S-070": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkMutatingWebhookTimeout(ctx) },
-		"CIS-K8S-071": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkNamespaceCount(ctx) },
-		"CIS-K8S-072": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPVReclaimPolicy(ctx) },
-		"CIS-K8S-073": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkStorageClassExpansion(ctx) },
+		"CIS-K8S-065": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkK8sVersion(ctx)
+		},
+		"CIS-K8S-066": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkLimitRange(ctx)
+		},
+		"CIS-K8S-067": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkResourceQuota(ctx)
+		},
+		"CIS-K8S-068": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPSSLabels(ctx)
+		},
+		"CIS-K8S-069": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkAdmissionWebhooks(ctx)
+		},
+		"CIS-K8S-070": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkMutatingWebhookTimeout(ctx)
+		},
+		"CIS-K8S-071": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkNamespaceCount(ctx)
+		},
+		"CIS-K8S-072": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPVReclaimPolicy(ctx)
+		},
+		"CIS-K8S-073": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkStorageClassExpansion(ctx)
+		},
 		// 供应链与运行时
-		"CIS-K8S-074": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkImageDigest(ctx) },
-		"CIS-K8S-075": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkInitContainerSecurity(ctx) },
-		"CIS-K8S-076": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkImagePullSecrets(ctx) },
-		"CIS-K8S-077": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPendingPods(ctx) },
-		"CIS-K8S-078": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkHighRestartPods(ctx) },
-		"CIS-K8S-079": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkCrashLoopPods(ctx) },
-		"CIS-K8S-080": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) { return ch.checkPodsWithoutOwner(ctx) },
+		"CIS-K8S-074": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkImageDigest(ctx)
+		},
+		"CIS-K8S-075": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkInitContainerSecurity(ctx)
+		},
+		"CIS-K8S-076": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkImagePullSecrets(ctx)
+		},
+		"CIS-K8S-077": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPendingPods(ctx)
+		},
+		"CIS-K8S-078": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkHighRestartPods(ctx)
+		},
+		"CIS-K8S-079": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkCrashLoopPods(ctx)
+		},
+		"CIS-K8S-080": func(ctx context.Context, ch *KubeBaselineChecker) (string, model.AffectedResources) {
+			return ch.checkPodsWithoutOwner(ctx)
+		},
 	}
 }
 
@@ -151,8 +313,11 @@ func (c *KubeBaselineChecker) GetRegisteredCheckIDs() []string {
 	return ids
 }
 
-// RunChecks 对指定集群执行所有基线检查
+// RunChecks 对指定集群执行所有基线检查（串行化防止 currentCluster 竞态）
 func (c *KubeBaselineChecker) RunChecks(clusterID uint) ([]model.KubeBaseline, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	var cluster model.KubeCluster
 	if err := c.db.First(&cluster, clusterID).Error; err != nil {
 		return nil, fmt.Errorf("集群不存在: %w", err)

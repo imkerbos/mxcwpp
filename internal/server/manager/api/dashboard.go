@@ -63,7 +63,7 @@ func (h *DashboardHandler) GetDashboardStats(c *gin.Context) {
 	})
 	if err != nil {
 		h.logger.Error("计算 Dashboard 统计失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "统计数据查询失败"})
+		InternalError(c, "统计数据查询失败")
 		return
 	}
 
@@ -286,8 +286,8 @@ func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 // 优化：单次聚合查询替代 5 条独立 COUNT
 func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 	var result struct {
-		PassCount          int64 `gorm:"column:pass_count"`
-		FailCount          int64 `gorm:"column:fail_count"`
+		PassCount           int64 `gorm:"column:pass_count"`
+		FailCount           int64 `gorm:"column:fail_count"`
 		MediumPlusFailCount int64 `gorm:"column:medium_plus_fail_count"`
 	}
 	h.db.Raw(`

@@ -19,9 +19,9 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/agent/buffer"
 	"github.com/imkerbos/mxsec-platform/internal/agent/cache"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
-	_ "github.com/imkerbos/mxsec-platform/internal/common/compressor" // 注册 Snappy 压缩器
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
 	"github.com/imkerbos/mxsec-platform/internal/agent/dependency"
+	_ "github.com/imkerbos/mxsec-platform/internal/common/compressor" // 注册 Snappy 压缩器
 )
 
 // sendInterval 批量发送间隔（与 Elkeid 一致）
@@ -51,8 +51,9 @@ type Manager struct {
 	taskChannels   map[string]chan *grpc.Task                       // 按插件名称分发的任务通道
 	taskChMu       sync.RWMutex                                     // 任务通道锁
 	onConfigUpdate func(*grpc.AgentConfig, *grpc.CertificateBundle) // 配置更新回调 (agentConfig, certBundle)
+	onTaskCancel   func(token string)                               // 任务取消回调
 	cacheMgr       *cache.Manager                                   // 缓存管理器
-	depMgr         *dependency.Manager                               // 依赖管理器
+	depMgr         *dependency.Manager                              // 依赖管理器
 	agentMeta      agentMetadata                                    // Agent 元信息缓存
 	agentMetaMu    sync.RWMutex                                     // 元信息读写锁
 	mu             sync.RWMutex
@@ -90,6 +91,11 @@ func (m *Manager) SetConfigUpdateCallback(callback func(*grpc.AgentConfig, *grpc
 	m.onConfigUpdate = callback
 }
 
+// SetTaskCancelCallback 设置任务取消回调
+func (m *Manager) SetTaskCancelCallback(callback func(token string)) {
+	m.onTaskCancel = callback
+}
+
 // Startup 启动传输模块（创建新的管理器）
 func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger *zap.Logger, connMgr *connection.Manager, agentID string) {
 	mgr, err := NewManager(cfg, logger, connMgr, agentID)
@@ -114,7 +120,7 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 	mgr.logger.Info("transport module starting, attempting to connect...")
 
 	// 指数退避重试配置
-	retryDelay := 1 * time.Second    // 初始延迟1秒
+	retryDelay := 1 * time.Second     // 初始延迟1秒
 	maxRetryDelay := 10 * time.Second // 最大延迟10秒
 	retryCount := 0
 
@@ -250,13 +256,24 @@ func (m *Manager) sendData(ctx context.Context, wg *sync.WaitGroup, stream grpc.
 			)
 
 			if err := m.sendWithTimeout(stream, data, sendTimeout); err != nil {
-				m.logger.Error("failed to send data, clearing buffer",
+				m.logger.Error("failed to send data, caching for retry",
 					zap.Error(err),
 					zap.String("error_type", fmt.Sprintf("%T", err)),
 					zap.Int("record_count", len(data.Records)),
 				)
-				// 发送失败，清空缓冲区（状态快照类数据重连后会发最新的）
-				m.ringBuffer.Clear()
+				// 发送失败，将数据写入本地缓存（重连后重发）而非直接丢弃
+				if m.cacheMgr != nil {
+					if cacheErr := m.cacheMgr.Put(data); cacheErr != nil {
+						m.logger.Error("failed to cache unsent data",
+							zap.Error(cacheErr),
+							zap.Int("lost_records", len(data.Records)),
+						)
+					} else {
+						m.logger.Info("unsent data cached for retry",
+							zap.Int("record_count", len(data.Records)),
+						)
+					}
+				}
 				return
 			}
 
@@ -411,6 +428,16 @@ func (m *Manager) receiveCommands(ctx context.Context, wg *sync.WaitGroup, strea
 			if len(cmd.Tasks) > 0 {
 				m.logger.Info("received tasks from server", zap.Int("count", len(cmd.Tasks)))
 				for _, task := range cmd.Tasks {
+					// DataType=9900 是任务取消信号，不分发到插件，直接回调
+					if task.DataType == 9900 {
+						m.logger.Info("received task cancel signal",
+							zap.String("token", task.Token))
+						if m.onTaskCancel != nil {
+							m.onTaskCancel(task.Token)
+						}
+						continue
+					}
+
 					// 优先尝试分发到专用通道
 					m.taskChMu.RLock()
 					ch, ok := m.taskChannels[task.ObjectName]

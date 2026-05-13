@@ -42,15 +42,15 @@ import (
 )
 
 var (
-	mysqlDSN      = flag.String("mysql-dsn", "", "MySQL DSN（必填）")
-	chAddr        = flag.String("clickhouse-addr", "127.0.0.1:9000", "ClickHouse 原生协议地址")
-	chDB          = flag.String("clickhouse-db", "mxsec", "ClickHouse 数据库名")
-	chUser        = flag.String("clickhouse-user", "default", "ClickHouse 用户名")
-	chPass        = flag.String("clickhouse-pass", "", "ClickHouse 密码")
-	batchSize     = flag.Int("batch-size", 5000, "每批读取/写入行数")
-	sinceStr      = flag.String("since", "", "仅迁移该时间之后的数据（RFC3339 格式，留空则全量）")
-	dryRun        = flag.Bool("dry-run", false, "仅统计行数，不写入 ClickHouse")
-	dialTimeout   = flag.Duration("dial-timeout", 10*time.Second, "数据库连接超时")
+	mysqlDSN    = flag.String("mysql-dsn", "", "MySQL DSN（必填）")
+	chAddr      = flag.String("clickhouse-addr", "127.0.0.1:9000", "ClickHouse 原生协议地址")
+	chDB        = flag.String("clickhouse-db", "mxsec", "ClickHouse 数据库名")
+	chUser      = flag.String("clickhouse-user", "default", "ClickHouse 用户名")
+	chPass      = flag.String("clickhouse-pass", "", "ClickHouse 密码")
+	batchSize   = flag.Int("batch-size", 5000, "每批读取/写入行数")
+	sinceStr    = flag.String("since", "", "仅迁移该时间之后的数据（RFC3339 格式，留空则全量）")
+	dryRun      = flag.Bool("dry-run", false, "仅统计行数，不写入 ClickHouse")
+	dialTimeout = flag.Duration("dial-timeout", 10*time.Second, "数据库连接超时")
 )
 
 // mysqlRow 对应 MySQL host_metrics 一行
@@ -117,7 +117,7 @@ func main() {
 				Username: *chUser,
 				Password: *chPass,
 			},
-			DialTimeout: *dialTimeout,
+			DialTimeout:  *dialTimeout,
 			MaxOpenConns: 5,
 		})
 		if err != nil {
@@ -255,15 +255,15 @@ func writeBatch(ctx context.Context, conn chdriver.Conn, batch []mysqlRow) (int,
 
 	for _, r := range batch {
 		if err := b.Append(
-			r.CollectedAt,  // timestamp
-			r.HostID,       // host_id
-			"",             // hostname（MySQL 无此字段）
+			r.CollectedAt, // timestamp
+			r.HostID,      // host_id
+			"",            // hostname（MySQL 无此字段）
 			float32(r.CPUUsage),
 			float32(r.MemUsage),
 			float32(r.DiskUsage),
-			float32(0), // load_1
-			float32(0), // load_5
-			float32(0), // load_15
+			float32(0),     // load_1
+			float32(0),     // load_5
+			float32(0),     // load_15
 			r.NetBytesRecv, // net_in  = bytes received
 			r.NetBytesSent, // net_out = bytes sent
 		); err != nil {

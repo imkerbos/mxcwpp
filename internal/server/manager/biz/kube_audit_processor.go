@@ -35,7 +35,11 @@ func (p *KubeAuditProcessor) ProcessAuditEvents(cluster model.KubeCluster, event
 			continue
 		}
 
-		rawData, _ := json.Marshal(event)
+		rawData, err := json.Marshal(event)
+		if err != nil {
+			p.logger.Warn("序列化审计事件失败", zap.Error(err))
+			continue
+		}
 
 		kubeEvent := model.KubeEvent{
 			ClusterID:   cluster.ID,

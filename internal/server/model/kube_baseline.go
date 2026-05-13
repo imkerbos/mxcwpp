@@ -1,10 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-)
+import "database/sql/driver"
 
 // AffectedResource 受影响的 K8s 资源
 type AffectedResource struct {
@@ -17,34 +13,10 @@ type AffectedResource struct {
 type AffectedResources []AffectedResource
 
 // Value 实现 driver.Valuer 接口
-func (a AffectedResources) Value() (driver.Value, error) {
-	if a == nil {
-		return nil, nil
-	}
-	data, err := json.Marshal(a)
-	if err != nil {
-		return nil, err
-	}
-	return string(data), nil
-}
+func (a AffectedResources) Value() (driver.Value, error) { return JSONValue(a) }
 
 // Scan 实现 sql.Scanner 接口
-func (a *AffectedResources) Scan(value interface{}) error {
-	if value == nil {
-		*a = nil
-		return nil
-	}
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("无法扫描类型 %T 到 AffectedResources", value)
-	}
-	return json.Unmarshal(bytes, a)
-}
+func (a *AffectedResources) Scan(value any) error { return JSONScan(a, value) }
 
 // KubeBaseline CIS 基线检查结果
 type KubeBaseline struct {

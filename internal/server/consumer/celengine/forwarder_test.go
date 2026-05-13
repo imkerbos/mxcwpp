@@ -127,9 +127,9 @@ func TestCommandForwarder_SendCommandTypeConversion(t *testing.T) {
 	// 使用一个直接的 HTTP 客户端来测试完整的 SendCommand
 	// 这里我们跳过 Redis 部分，直接测试 sendToInstance
 	tests := []struct {
-		name     string
-		cmd      interface{}
-		wantErr  bool
+		name    string
+		cmd     interface{}
+		wantErr bool
 	}{
 		{
 			name: "有效命令",

@@ -57,8 +57,8 @@ type connStatResp struct {
 
 // connListResp 是 /conn/list 的响应体
 type connListResp struct {
-	Count  int                     `json:"count"`
-	Agents []transfer.AgentDetail  `json:"agents"`
+	Count  int                    `json:"count"`
+	Agents []transfer.AgentDetail `json:"agents"`
 }
 
 // ConnList godoc

@@ -433,4 +433,3 @@ func toResourceItem(obj any, kind string) (resourceItem, error) {
 
 	return item, nil
 }
-

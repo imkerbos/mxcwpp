@@ -424,7 +424,7 @@ export interface ScanTask {
   policy_id: string // 兼容旧数据：单策略
   policy_ids?: string[] // 新字段：多策略
   rule_ids?: string[]
-  status: 'created' | 'pending' | 'running' | 'completed' | 'failed'
+  status: 'created' | 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   created_at: string
   executed_at?: string
   completed_at?: string
@@ -733,6 +733,7 @@ export interface FIMPolicy {
     host_ids?: string[]
     os_family?: string[]
   }
+  escalation_timeout_min: number
   enabled: boolean
   created_at: string
   updated_at: string
@@ -741,6 +742,10 @@ export interface FIMPolicy {
 export interface FIMChangeDetail {
   size_before?: string
   size_after?: string
+  hash_before?: string
+  hash_after?: string
+  mode_before?: string
+  mode_after?: string
   hash_changed: boolean
   permission_changed: boolean
   owner_changed: boolean
@@ -757,6 +762,11 @@ export interface FIMEvent {
   change_detail: FIMChangeDetail
   severity: 'critical' | 'high' | 'medium' | 'low'
   category: string // binary/config/auth/log/other
+  status: 'pending' | 'confirmed' | 'escalated'
+  confirmed_by?: string
+  confirmed_at?: string
+  confirm_reason?: string
+  alert_id?: number
   detected_at: string
   created_at: string
 }
@@ -807,6 +817,7 @@ export interface FIMEventTrendPoint {
 
 export interface FIMEventStats {
   total: number
+  pending: number
   critical: number
   high: number
   medium: number
@@ -817,6 +828,33 @@ export interface FIMEventStats {
   by_category: Record<string, number>
   top_hosts: FIMHostEventCount[]
   trend: FIMEventTrendPoint[]
+}
+
+export interface FIMBaseline {
+  id: number
+  policy_id: string
+  host_id: string
+  hostname: string
+  version: number
+  status: 'pending' | 'approved' | 'outdated'
+  entry_count: number
+  approved_by?: string
+  approved_at?: string
+  task_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface FIMBaselineEntry {
+  id: number
+  baseline_id: number
+  file_path: string
+  sha256: string
+  file_size: number
+  file_mode: string
+  uid: number
+  gid: number
+  mtime: number
 }
 
 export interface FixableItem {

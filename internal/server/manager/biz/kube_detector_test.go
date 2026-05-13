@@ -337,9 +337,9 @@ func TestKubeDetectorRules(t *testing.T) {
 
 		// 边界测试
 		{
-			name:   "空 ObjectRef 不匹配任何规则",
-			ruleID: "K8S-001",
-			event:  &model.AuditEvent{Verb: "create"},
+			name:      "空 ObjectRef 不匹配任何规则",
+			ruleID:    "K8S-001",
+			event:     &model.AuditEvent{Verb: "create"},
 			wantMatch: false,
 		},
 	}
@@ -367,9 +367,9 @@ func TestKubeDetectorRules(t *testing.T) {
 // TestBuildAlarmMessage 测试告警消息构建
 func TestBuildAlarmMessage(t *testing.T) {
 	tests := []struct {
-		name     string
-		ruleID   string
-		event    *model.AuditEvent
+		name         string
+		ruleID       string
+		event        *model.AuditEvent
 		wantContains string
 	}{
 		{

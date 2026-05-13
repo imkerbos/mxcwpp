@@ -2,7 +2,6 @@
 package api
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 
@@ -36,19 +35,13 @@ func (h *PluginsHandler) DownloadPlugin(c *gin.Context) {
 	// 安全检查：防止路径遍历
 	if pluginName == "" || pluginName == "." || pluginName == ".." ||
 		filepath.Base(pluginName) != pluginName {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的插件名称",
-		})
+		BadRequest(c, "无效的插件名称")
 		return
 	}
 
 	// 验证架构参数（如果提供）
 	if arch != "" && arch != "amd64" && arch != "arm64" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的架构参数，支持: amd64, arm64",
-		})
+		BadRequest(c, "无效的架构参数，支持: amd64, arm64")
 		return
 	}
 
@@ -101,10 +94,7 @@ func (h *PluginsHandler) DownloadPlugin(c *gin.Context) {
 			zap.String("upload_dir", h.uploadDir),
 			zap.String("plugins_dir", h.pluginsDir),
 		)
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "插件不存在",
-		})
+		NotFound(c, "插件不存在")
 		return
 	}
 
@@ -114,10 +104,7 @@ func (h *PluginsHandler) DownloadPlugin(c *gin.Context) {
 			zap.String("plugin_path", pluginPath),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "读取插件文件失败",
-		})
+		InternalError(c, "读取插件文件失败")
 		return
 	}
 
@@ -143,20 +130,14 @@ func (h *PluginsHandler) ListPlugins(c *gin.Context) {
 	entries, err := os.ReadDir(h.pluginsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			c.JSON(http.StatusOK, gin.H{
-				"code": 0,
-				"data": []interface{}{},
-			})
+			Success(c, []interface{}{})
 			return
 		}
 		h.logger.Error("读取插件目录失败",
 			zap.String("plugins_dir", h.pluginsDir),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "读取插件目录失败",
-		})
+		InternalError(c, "读取插件目录失败")
 		return
 	}
 
@@ -180,8 +161,5 @@ func (h *PluginsHandler) ListPlugins(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": plugins,
-	})
+	Success(c, plugins)
 }

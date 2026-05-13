@@ -34,7 +34,7 @@ type ListWhitelistRequest struct {
 func (h *AlertWhitelistHandler) ListWhitelist(c *gin.Context) {
 	var req ListWhitelistRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 	if req.Page <= 0 {
@@ -88,7 +88,7 @@ type CreateWhitelistRequest struct {
 func (h *AlertWhitelistHandler) CreateWhitelist(c *gin.Context) {
 	var req CreateWhitelistRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *AlertWhitelistHandler) UpdateWhitelist(c *gin.Context) {
 
 	var req UpdateWhitelistRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

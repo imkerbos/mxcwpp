@@ -402,8 +402,11 @@ func (h *AppHandler) extractPortFromProcess(proc map[string]string) int {
 	for _, pattern := range patterns {
 		idx := strings.Index(cmdline, pattern)
 		if idx != -1 {
-			portStr := strings.Fields(cmdline[idx+len(pattern):])[0]
-			if port, err := strconv.Atoi(portStr); err == nil {
+			parts := strings.Fields(cmdline[idx+len(pattern):])
+			if len(parts) == 0 {
+				continue
+			}
+			if port, err := strconv.Atoi(parts[0]); err == nil {
 				return port
 			}
 		}
@@ -468,16 +471,12 @@ func (h *AppHandler) getNginxVersion(ctx context.Context) string {
 
 // getApacheVersion 获取 Apache 版本
 func (h *AppHandler) getApacheVersion(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "httpd", "-v")
-	if cmd == nil {
-		cmd = exec.CommandContext(ctx, "apache2", "-v")
-	}
-	if cmd == nil {
-		return ""
-	}
-	output, err := cmd.Output()
+	output, err := exec.CommandContext(ctx, "httpd", "-v").Output()
 	if err != nil {
-		return ""
+		output, err = exec.CommandContext(ctx, "apache2", "-v").Output()
+		if err != nil {
+			return ""
+		}
 	}
 	lines := strings.Split(string(output), "\n")
 	if len(lines) > 0 {

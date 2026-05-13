@@ -142,7 +142,7 @@ func (h *RemediationHandler) VerifyRemediation(c *gin.Context) {
 		result, err := verifier.VerifyHost(uint(id), req.HostID)
 		if err != nil {
 			h.logger.Error("验证修复失败", zap.Error(err))
-			InternalError(c, err.Error())
+			InternalError(c, "验证修复失败")
 			return
 		}
 		Success(c, result)
@@ -170,7 +170,7 @@ func (h *RemediationHandler) VerifyTask(c *gin.Context) {
 	verifier := biz.NewRemediationVerifier(h.db, h.logger)
 	result, err := verifier.VerifyTask(uint(id))
 	if err != nil {
-		BadRequest(c, err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 	Success(c, result)

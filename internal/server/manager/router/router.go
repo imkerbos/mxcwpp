@@ -32,15 +32,23 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 中间件
 	router.Use(middleware.Logger(logger))
 	router.Use(gin.Recovery())
-	router.Use(middleware.CORS())
+	router.Use(middleware.CORS(cfg.Server.CORSOrigins))
 
 	// 健康检查（支持 GET 和 HEAD 方法，Docker healthcheck 可能使用 HEAD）
 	healthHandler := api.NewHealthHandler(db, logger)
 	router.GET("/health", healthHandler.Health)
 	router.HEAD("/health", healthHandler.Health)
 
-	// Prometheus metrics 端点
-	router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	// Prometheus metrics 端点（可选 BasicAuth 保护）
+	metricsHandler := gin.WrapH(metrics.Handler())
+	if cfg.Metrics.BasicAuthUser != "" && cfg.Metrics.BasicAuthPassword != "" {
+		metricsAuth := gin.BasicAuth(gin.Accounts{
+			cfg.Metrics.BasicAuthUser: cfg.Metrics.BasicAuthPassword,
+		})
+		router.GET("/metrics", metricsAuth, metricsHandler)
+	} else {
+		router.GET("/metrics", metricsHandler)
+	}
 
 	// Agent 安装脚本路由（不需要认证）
 	agentHandler := api.NewAgentHandler(logger, cfg.Server.GRPC.Address(), cfg.Server.HTTP.Address())
@@ -63,8 +71,8 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	router.GET("/api/v1/dependency/download/:name", componentsHandler.DownloadDependencyPackage)
 	router.HEAD("/api/v1/dependency/download/:name", componentsHandler.DownloadDependencyPackage)
 
-	// 静态文件服务（用于访问上传的 Logo 等文件）
-	router.Static("/uploads", "./uploads")
+	// 静态文件服务（用于访问上传的 Logo 等文件，禁止目录列出）
+	router.StaticFS("/uploads", gin.Dir("./uploads", false))
 
 	// K8s Audit Webhook（不需要认证，apiserver 通过 cluster_token 鉴权）
 	alarmService := biz.NewKubeAlarmService(db, logger)
@@ -74,6 +82,9 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// AC 内部注册接口（不需要 JWT，AC 到 Manager 的内部调用）
 	discoveryHandler := api.NewDiscoveryHandler(acRegistry, logger)
 	internalAC := router.Group("/api/v1/internal/ac")
+	if secret := cfg.Server.InternalSecret; secret != "" {
+		internalAC.Use(middleware.InternalAuth(secret))
+	}
 	internalAC.POST("/register", discoveryHandler.Register)
 	internalAC.POST("/heartbeat", discoveryHandler.Heartbeat)
 	internalAC.DELETE("/deregister", discoveryHandler.Deregister)
@@ -86,11 +97,11 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// 认证相关路由（不需要认证）
 	jwtSecret := cfg.Server.JWTSecret
-	if jwtSecret == "" {
-		jwtSecret = "default-secret-key-change-in-production" // 默认密钥，生产环境必须修改
-		logger.Warn("使用默认 JWT 密钥，生产环境请修改配置")
+	if len(jwtSecret) < 32 {
+		logger.Fatal("JWT 密钥未配置或长度不足: 请在配置文件中设置 server.jwt_secret（至少 32 字符）")
 	}
 	authHandler := api.NewAuthHandler(db, logger, []byte(jwtSecret))
+	apiV1.GET("/auth/captcha", authHandler.GetCaptcha)
 	apiV1.POST("/auth/login", authHandler.Login)
 	apiV1.POST("/auth/logout", authHandler.Logout)
 	apiV1.GET("/auth/me", authHandler.GetCurrentUser)
@@ -108,8 +119,13 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 服务发现查询（需要认证，运维 / 前端监控页面调用）
 	apiV1Auth.GET("/discovery/agentcenter", discoveryHandler.ListACInstances)
 
-	// 注册所有 API 路由
+	// 需要管理员权限的路由
+	apiV1Admin := apiV1Auth.Group("")
+	apiV1Admin.Use(api.RoleMiddleware("admin"))
+
+	// 注册 API 路由
 	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater, consumerManager)
+	setupAdminAPIRoutes(apiV1Admin, db, logger, cfg)
 
 	return router
 }
@@ -120,26 +136,20 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
 	setupRulesAPI(router, db, logger)
-	setupTasksAPI(router, db, logger)
+	setupTasksAPI(router, db, logger, acDispatcher)
 	setupResultsAPI(router, db, logger)
-	setupFixAPI(router, db, logger)
+	setupFixAPI(router, db, logger, acDispatcher)
 	setupDashboardAPI(router, db, logger, chConn, redisClient)
-	setupUsersAPI(router, db, logger)
 	setupAssetsAPI(router, db, logger)
 	setupReportsAPI(router, db, logger)
 	setupBusinessLinesAPI(router, db, logger)
-	setupSystemConfigAPI(router, db, logger)
-	setupNotificationsAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
-	setupAuditLogAPI(router, db, logger)
-	setupComponentsAPI(router, db, logger, cfg)
 	setupPolicyImportExportAPI(router, db, logger)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
 	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
-	setupBackupsAPI(router, db, logger)
 	setupVulnerabilitiesAPI(router, db, logger)
 	setupAntivirusAPI(router, db, logger, virusDBUpdater)
 	setupQuarantineAPI(router, db, logger)
@@ -148,7 +158,17 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupThreatIntelAPI(router, db, logger, redisClient)
 	setupNetworkBlockAPI(router, db, logger)
 	setupDependencyAPI(router, db, logger, acDispatcher)
+}
+
+// setupAdminAPIRoutes 注册需要管理员权限的 API 路由
+func setupAdminAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config) {
+	setupUsersAPI(router, db, logger)
+	setupSystemConfigAPI(router, db, logger)
+	setupNotificationsAPI(router, db, logger)
+	setupComponentsAPI(router, db, logger, cfg)
+	setupBackupsAPI(router, db, logger)
 	setupMigrationAPI(router, db, logger)
+	setupAuditLogAPI(router, db, logger)
 }
 
 // setupMigrationAPI 设置 MVP1 → MVP2 迁移助手 API 路由
@@ -225,15 +245,19 @@ func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupTasksAPI 设置任务 API 路由
-func setupTasksAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewTasksHandler(db, logger)
+// 读操作对所有认证用户开放，写操作需要 admin 角色
+func setupTasksAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewTasksHandler(db, logger, acDispatcher)
+	// 读操作（所有认证用户）
 	router.GET("/tasks", handler.ListTasks)
 	router.GET("/tasks/:task_id", handler.GetTask)
 	router.GET("/tasks/:task_id/host-status", handler.GetTaskHostStatus)
-	router.POST("/tasks", handler.CreateTask)
-	router.POST("/tasks/:task_id/run", handler.RunTask)
-	router.POST("/tasks/:task_id/cancel", handler.CancelTask)
-	router.DELETE("/tasks/:task_id", handler.DeleteTask)
+	// 写操作（需要 admin 角色）
+	admin := router.Group("", api.RoleMiddleware("admin"))
+	admin.POST("/tasks", handler.CreateTask)
+	admin.POST("/tasks/:task_id/run", handler.RunTask)
+	admin.POST("/tasks/:task_id/cancel", handler.CancelTask)
+	admin.DELETE("/tasks/:task_id", handler.DeleteTask)
 }
 
 // setupResultsAPI 设置结果 API 路由
@@ -247,16 +271,20 @@ func setupResultsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupFixAPI 设置基线修复 API 路由
-func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewFixHandler(db, logger)
+// 读操作对所有认证用户开放，写操作需要 admin 角色
+func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewFixHandler(db, logger, acDispatcher)
+	// 读操作（所有认证用户）
 	router.GET("/fix/fixable-items", handler.GetFixableItems)
-	router.POST("/fix-tasks", handler.CreateFixTask)
 	router.GET("/fix-tasks", handler.ListFixTasks)
 	router.GET("/fix-tasks/:task_id", handler.GetFixTask)
 	router.GET("/fix-tasks/:task_id/results", handler.GetFixResults)
 	router.GET("/fix-tasks/:task_id/host-status", handler.GetFixTaskHostStatus)
-	router.POST("/fix-tasks/:task_id/cancel", handler.CancelFixTask)
-	router.DELETE("/fix-tasks/:task_id", handler.DeleteFixTask)
+	// 写操作（需要 admin 角色）
+	admin := router.Group("", api.RoleMiddleware("admin"))
+	admin.POST("/fix-tasks", handler.CreateFixTask)
+	admin.POST("/fix-tasks/:task_id/cancel", handler.CancelFixTask)
+	admin.DELETE("/fix-tasks/:task_id", handler.DeleteFixTask)
 }
 
 // setupDashboardAPI 设置 Dashboard API 路由
@@ -541,11 +569,21 @@ func setupFIMAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chCon
 	router.GET("/fim/tasks/:id", tasksHandler.GetFIMTask)
 	router.POST("/fim/tasks/:id/run", tasksHandler.RunFIMTask)
 
-	// 事件查询
+	// 事件查询与确认
 	eventsHandler := api.NewFIMEventsHandler(db, logger, chConn)
 	router.GET("/fim/events", eventsHandler.ListFIMEvents)
 	router.GET("/fim/events/stats", eventsHandler.GetFIMEventStats)
+	router.POST("/fim/events/batch-confirm", eventsHandler.BatchConfirmFIMEvents)
 	router.GET("/fim/events/:id", eventsHandler.GetFIMEvent)
+	router.POST("/fim/events/:id/confirm", eventsHandler.ConfirmFIMEvent)
+
+	// 基线管理
+	baselinesHandler := api.NewFIMBaselinesHandler(db, logger)
+	router.GET("/fim/baselines", baselinesHandler.ListBaselines)
+	router.POST("/fim/baselines/batch-approve", baselinesHandler.BatchApproveBaselines)
+	router.GET("/fim/baselines/:id", baselinesHandler.GetBaseline)
+	router.POST("/fim/baselines/:id/approve", baselinesHandler.ApproveBaseline)
+	router.POST("/fim/baselines/:id/reject", baselinesHandler.RejectBaseline)
 }
 
 // setupMonitorAPI 设置系统监控 API 路由
@@ -612,10 +650,13 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	handler := api.NewVulnerabilitiesHandler(db, logger)
 	router.GET("/vulnerabilities", handler.ListVulnerabilities)
 	router.POST("/vulnerabilities/:id/ignore", handler.IgnoreVulnerability)
+	router.POST("/vulnerabilities/:id/unignore", handler.UnignoreVulnerability)
 	router.POST("/vulnerabilities/sync", handler.TriggerSync)
 	router.POST("/vulnerabilities/scan", handler.TriggerScan)
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
+
+	router.GET("/vulnerabilities/:id", handler.GetVulnerability)
 
 	// 漏洞修复相关
 	remHandler := api.NewRemediationHandler(db, logger)
@@ -637,6 +678,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-tasks/:id/verify", remHandler.VerifyTask)
 	router.POST("/remediation-tasks/batch", taskHandler.BatchCreate)
 	router.POST("/remediation-tasks/batch-confirm", taskHandler.BatchConfirm)
+	router.POST("/remediation-tasks/batch-retry", taskHandler.BatchRetry)
+	router.POST("/remediation-tasks/batch-cancel", taskHandler.BatchCancel)
 }
 
 // setupAlertContextAPI 设置告警溯源 API 路由

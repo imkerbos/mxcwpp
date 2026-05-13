@@ -156,24 +156,23 @@ func (c *Client) ReceiveTask() (*bridge.Task, error) {
 }
 
 // ReceiveTaskWithTimeout 从 Agent 接收任务，带超时机制
+// 使用 SetReadDeadline 而非 goroutine+select，避免超时后 goroutine 泄漏
 func (c *Client) ReceiveTaskWithTimeout(timeout time.Duration) (*bridge.Task, error) {
-	type result struct {
-		task *bridge.Task
-		err  error
+	// 设置底层 pipe 文件的读取截止时间
+	if f, ok := c.rx.(*os.File); ok {
+		if err := f.SetReadDeadline(time.Now().Add(timeout)); err == nil {
+			defer func() { _ = f.SetReadDeadline(time.Time{}) }() // 读完后重置截止时间
+		}
 	}
 
-	ch := make(chan result, 1)
-	go func() {
-		task, err := c.ReceiveTask()
-		ch <- result{task: task, err: err}
-	}()
-
-	select {
-	case res := <-ch:
-		return res.task, res.err
-	case <-time.After(timeout):
-		return nil, fmt.Errorf("receive task timeout after %v", timeout)
+	task, err := c.ReceiveTask()
+	if err != nil {
+		if os.IsTimeout(err) {
+			return nil, fmt.Errorf("receive task timeout after %v", timeout)
+		}
+		return nil, err
 	}
+	return task, nil
 }
 
 // Flush 刷新写入缓冲区

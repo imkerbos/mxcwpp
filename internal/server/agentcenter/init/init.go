@@ -22,15 +22,15 @@ import (
 
 // AgentCenterServices 包含 AgentCenter 服务所需的所有组件
 type AgentCenterServices struct {
-	Config            *config.Config
-	Logger            *zap.Logger
-	DB                *gorm.DB
-	GRPCServer        *grpc.Server
-	TransferService   *transfer.Service
-	TaskService       *service.TaskService
-	StatusCtx         context.Context
-	StatusCancel      context.CancelFunc
-	Listener          net.Listener
+	Config          *config.Config
+	Logger          *zap.Logger
+	DB              *gorm.DB
+	GRPCServer      *grpc.Server
+	TransferService *transfer.Service
+	TaskService     *service.TaskService
+	StatusCtx       context.Context
+	StatusCancel    context.CancelFunc
+	Listener        net.Listener
 }
 
 // Initialize 初始化 AgentCenter 服务的所有组件
@@ -87,15 +87,15 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	}
 
 	return &AgentCenterServices{
-		Config:            cfg,
-		Logger:            logger,
-		DB:                db,
-		GRPCServer:        grpcServer,
-		TransferService:   transferService,
-		TaskService:       taskService,
-		StatusCtx:         ctx,
-		StatusCancel:      cancel,
-		Listener:          listener,
+		Config:          cfg,
+		Logger:          logger,
+		DB:              db,
+		GRPCServer:      grpcServer,
+		TransferService: transferService,
+		TaskService:     taskService,
+		StatusCtx:       ctx,
+		StatusCancel:    cancel,
+		Listener:        listener,
 	}, nil
 }
 

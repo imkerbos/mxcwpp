@@ -61,7 +61,7 @@
               @click="handleMenuClick"
               @openChange="handleOpenChange"
             >
-              <template v-for="item in menuConfig" :key="item.key">
+              <template v-for="item in filteredMenu" :key="item.key">
                 <!-- 无子菜单: 直接渲染 menu-item -->
                 <a-menu-item
                   v-if="!item.children"
@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   DownOutlined,
@@ -145,7 +145,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSiteConfigStore } from '@/stores/site-config'
 import { authApi } from '@/api/auth'
 import apiClient from '@/api/client'
-import { menuConfig, routeMap, resolveMenuKeys } from '@/config/menu'
+import { menuConfig, filterMenuByRole, routeMap, resolveMenuKeys } from '@/config/menu'
 
 const router = useRouter()
 const route = useRoute()
@@ -174,6 +174,12 @@ const collapsed = ref(false)
 const selectedKeys = ref<string[]>([])
 const openKeys = ref<string[]>([])
 
+// 根据角色过滤菜单
+const filteredMenu = computed(() => {
+  const role = authStore.user?.role || 'user'
+  return filterMenuByRole(menuConfig, role)
+})
+
 // 根据路由自动更新菜单选中态
 watch(
   () => route.path,
@@ -192,11 +198,13 @@ watch(
 )
 
 // 手风琴模式: 同一时间只展开一个子菜单
-const rootSubmenuKeys = menuConfig.filter(item => item.children).map(item => item.key)
+const rootSubmenuKeys = computed(() =>
+  filteredMenu.value.filter(item => item.children).map(item => item.key)
+)
 
 const handleOpenChange = (keys: string[]) => {
   const latestOpenKey = keys.find(key => !openKeys.value.includes(key))
-  if (latestOpenKey && rootSubmenuKeys.includes(latestOpenKey)) {
+  if (latestOpenKey && rootSubmenuKeys.value.includes(latestOpenKey)) {
     openKeys.value = [latestOpenKey]
   } else {
     openKeys.value = keys

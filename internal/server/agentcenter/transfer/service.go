@@ -47,6 +47,38 @@ type Connection struct {
 	mu        sync.RWMutex
 }
 
+// GetHostname 线程安全地获取主机名
+func (c *Connection) GetHostname() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Hostname
+}
+
+// GetIPv4 线程安全地获取 IPv4 地址列表（返回副本）
+func (c *Connection) GetIPv4() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	dst := make([]string, len(c.IPv4))
+	copy(dst, c.IPv4)
+	return dst
+}
+
+// GetIPv6 线程安全地获取 IPv6 地址列表（返回副本）
+func (c *Connection) GetIPv6() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	dst := make([]string, len(c.IPv6))
+	copy(dst, c.IPv6)
+	return dst
+}
+
+// GetVersion 线程安全地获取版本
+func (c *Connection) GetVersion() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Version
+}
+
 // Service 是 Transfer 服务实现
 type Service struct {
 	grpcProto.UnimplementedTransferServer
@@ -102,7 +134,7 @@ func NewService(db *gorm.DB, logger *zap.Logger, cfg *config.Config) *Service {
 
 // Transfer 实现双向流 RPC
 func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 
 	// 启用 Server→Agent Snappy 压缩（Agent 端已注册 snappy decompressor）
@@ -633,6 +665,16 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 		zap.String("host_id", hostID),
 		zap.Int("plugin_count", len(pluginStats)))
 
+	// 批量查询该主机的所有现有插件记录（消除 N+1）
+	var existingPlugins []model.HostPlugin
+	if err := s.db.Where("host_id = ? AND deleted_at IS NULL", hostID).Find(&existingPlugins).Error; err != nil {
+		return fmt.Errorf("批量查询插件状态失败: %w", err)
+	}
+	existingMap := make(map[string]*model.HostPlugin, len(existingPlugins))
+	for i := range existingPlugins {
+		existingMap[existingPlugins[i].Name] = &existingPlugins[i]
+	}
+
 	// 更新或创建每个插件的状态
 	for name, stats := range pluginStats {
 		// 转换状态
@@ -657,34 +699,29 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 			startTime = &t
 		}
 
-		// 使用 UPSERT 更新或创建插件记录
-		hostPlugin := model.HostPlugin{
-			HostID:    hostID,
-			Name:      name,
-			Version:   stats.Version,
-			Status:    status,
-			StartTime: startTime,
-		}
-
-		// 查找现有记录（排除软删除的记录）
-		var existing model.HostPlugin
-		result := s.db.Where("host_id = ? AND name = ? AND deleted_at IS NULL", hostID, name).First(&existing)
-		if result.Error == nil {
+		if existing, ok := existingMap[name]; ok {
 			// 记录存在，更新
-			updates := map[string]interface{}{
+			updates := map[string]any{
 				"version":    stats.Version,
 				"status":     status,
 				"start_time": startTime,
 			}
-			if err := s.db.Model(&existing).Updates(updates).Error; err != nil {
+			if err := s.db.Model(existing).Updates(updates).Error; err != nil {
 				s.logger.Error("更新插件状态失败",
 					zap.String("host_id", hostID),
 					zap.String("plugin_name", name),
 					zap.Error(err))
 				continue
 			}
-		} else if result.Error == gorm.ErrRecordNotFound {
-			// 记录不存在（包括软删除），创建新记录
+		} else {
+			// 记录不存在，创建新记录
+			hostPlugin := model.HostPlugin{
+				HostID:    hostID,
+				Name:      name,
+				Version:   stats.Version,
+				Status:    status,
+				StartTime: startTime,
+			}
 			if err := s.db.Create(&hostPlugin).Error; err != nil {
 				s.logger.Error("创建插件状态失败",
 					zap.String("host_id", hostID),
@@ -692,13 +729,6 @@ func (s *Service) storeHostPlugins(ctx context.Context, hostID string, pluginSta
 					zap.Error(err))
 				continue
 			}
-		} else {
-			// 其他错误
-			s.logger.Error("查询插件状态失败",
-				zap.String("host_id", hostID),
-				zap.String("plugin_name", name),
-				zap.Error(result.Error))
-			continue
 		}
 
 		s.logger.Debug("更新插件状态成功",
@@ -800,15 +830,6 @@ func parseFloat(s string) *float64 {
 	return &f
 }
 
-// parseInt 解析整数
-func parseInt(s string) *uint64 {
-	var i uint64
-	if _, err := fmt.Sscanf(s, "%d", &i); err != nil {
-		return nil
-	}
-	return &i
-}
-
 // handleEncodedRecord 处理 EncodedRecord
 // 若 Kafka 生产者已注入，则将记录发布到对应 Topic（异步解耦，μs 级返回）；
 // 否则回退到直接写 MySQL（向后兼容）。
@@ -821,9 +842,9 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 			Body:         record.Data,
 			AgentTime:    record.Timestamp / int64(time.Second), // Timestamp 是纳秒，转成 Unix 秒
 			SvrTime:      time.Now().Unix(),
-			Hostname:     conn.Hostname,
-			IntranetIPv4: strings.Join(conn.IPv4, ","),
-			Version:      conn.Version,
+			Hostname:     conn.GetHostname(),
+			IntranetIPv4: strings.Join(conn.GetIPv4(), ","),
+			Version:      conn.GetVersion(),
 			ACID:         s.cfg.Server.InstanceID,
 		}
 		topic := kafka.RouteDataType(record.DataType, s.cfg.Kafka.TopicPrefix)
@@ -860,6 +881,9 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 	case 6002: // FIM 任务完成信号
 		return s.handleFIMTaskCompletion(ctx, record, conn)
 
+	case 6004: // FIM 基线快照（首次扫描上报）
+		return s.handleFIMBaselineSnapshot(ctx, record, conn)
+
 	case 5050, 5051, 5052, 5053, 5054, 5055, 5056, 5057, 5058, 5059, 5060:
 		// 资产数据
 		return s.assetService.HandleAssetData(conn.AgentID, record.DataType, record.Data)
@@ -873,7 +897,7 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 	case 7004: // Scanner 隔离/删除结果
 		return s.handleQuarantineResult(ctx, record, conn)
 
-	case 9001: // 漏洞修复任务结果
+	case 9200: // 漏洞修复任务结果（与 plugins/remediation 的 dataTypeRemediationResult 对齐）
 		return s.handleRemediationResult(ctx, record, conn)
 
 	default:
@@ -947,7 +971,7 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 		TaskID:        taskID,
 		HostID:        hostID,
 		RuleID:        ruleID,
-		Hostname:      conn.Hostname,
+		Hostname:      conn.GetHostname(),
 		PolicyID:      policyID,
 		PolicyName:    policyName,
 		Status:        resultStatus,
@@ -1029,6 +1053,7 @@ func (s *Service) createOrUpdateAlert(scanResult *model.ScanResult, conn *Connec
 			HostID:        scanResult.HostID,
 			RuleID:        scanResult.RuleID,
 			PolicyID:      scanResult.PolicyID,
+			Source:        model.AlertSourceBaseline,
 			Severity:      scanResult.Severity,
 			Category:      scanResult.Category,
 			Title:         scanResult.Title,
@@ -1132,8 +1157,8 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 		hostIP := ""
 		if len(host.IPv4) > 0 {
 			hostIP = strings.Join(host.IPv4, ",")
-		} else if len(conn.IPv4) > 0 {
-			hostIP = strings.Join(conn.IPv4, ",")
+		} else if ipv4 := conn.GetIPv4(); len(ipv4) > 0 {
+			hostIP = strings.Join(ipv4, ",")
 		}
 
 		// 构建恢复数据
@@ -1347,8 +1372,8 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 	hostIP := ""
 	if len(host.IPv4) > 0 {
 		hostIP = strings.Join(host.IPv4, ",")
-	} else if len(conn.IPv4) > 0 {
-		hostIP = strings.Join(conn.IPv4, ",")
+	} else if ipv4 := conn.GetIPv4(); len(ipv4) > 0 {
+		hostIP = strings.Join(ipv4, ",")
 	}
 
 	// 构建告警数据
@@ -1462,7 +1487,7 @@ func (s *Service) registerConnection(agentID string, conn *Connection) {
 	if oldConn, exists := s.connections[agentID]; exists && oldConn != conn {
 		s.logger.Info("Agent 重连，取消旧连接",
 			zap.String("agent_id", agentID),
-			zap.String("old_version", oldConn.Version),
+			zap.String("old_version", oldConn.GetVersion()),
 			zap.String("new_version", conn.Version),
 		)
 		oldConn.cancel()
@@ -1504,8 +1529,8 @@ func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Conn
 
 	// 获取主机 IP
 	hostIP := ""
-	if len(conn.IPv4) > 0 {
-		hostIP = strings.Join(conn.IPv4, ",")
+	if ipv4 := conn.GetIPv4(); len(ipv4) > 0 {
+		hostIP = strings.Join(ipv4, ",")
 	} else if len(host.IPv4) > 0 {
 		hostIP = strings.Join(host.IPv4, ",")
 	}
@@ -1644,6 +1669,7 @@ func (s *Service) createAgentOfflineAlert(agentID string) {
 			ResultID:    resultID,
 			HostID:      agentID,
 			RuleID:      "agent_offline",
+			Source:      model.AlertSourceAgent,
 			Severity:    "high",
 			Category:    "agent_offline",
 			Title:       title,
@@ -2198,6 +2224,13 @@ func (s *Service) GracefulShutdown() {
 	s.logger.Info("Transfer 服务进入优雅关闭，后续断连不发送离线通知")
 }
 
+// StopMetricsBuffer 停止指标缓冲区的后台刷写，在服务关闭时调用以刷写剩余数据
+func (s *Service) StopMetricsBuffer() {
+	if s.metricsBuffer != nil {
+		s.metricsBuffer.Stop()
+	}
+}
+
 // GetOnlineAgentCount 获取在线 Agent 数量
 func (s *Service) GetOnlineAgentCount() int {
 	s.connMu.RLock()
@@ -2564,7 +2597,7 @@ func (s *Service) handleFIMEvent(ctx context.Context, record *grpcProto.EncodedR
 	fimEvent := &model.FIMEvent{
 		EventID:      eventID,
 		HostID:       conn.AgentID,
-		Hostname:     conn.Hostname,
+		Hostname:     conn.GetHostname(),
 		TaskID:       taskID,
 		FilePath:     filePath,
 		ChangeType:   changeType,
@@ -2572,6 +2605,7 @@ func (s *Service) handleFIMEvent(ctx context.Context, record *grpcProto.EncodedR
 		Severity:     severity,
 		Category:     category,
 		DetectedAt:   detectedAt,
+		Status:       "pending",
 	}
 
 	if err := s.db.Create(fimEvent).Error; err != nil {
@@ -2691,6 +2725,120 @@ func (s *Service) handleFIMTaskCompletion(ctx context.Context, record *grpcProto
 	return nil
 }
 
+// handleFIMBaselineSnapshot 处理 FIM 基线快照（DataType 6004）
+// Agent 首次扫描后上报文件快照，服务端创建待审批基线
+func (s *Service) handleFIMBaselineSnapshot(ctx context.Context, record *grpcProto.EncodedRecord, conn *Connection) error {
+	bridgeRecord := &bridge.Record{}
+	if err := proto.Unmarshal(record.Data, bridgeRecord); err != nil {
+		return fmt.Errorf("解析 FIM 基线快照失败: %w", err)
+	}
+
+	if bridgeRecord.Data == nil {
+		return fmt.Errorf("FIM 基线快照 Record.Data 为空")
+	}
+	fields := bridgeRecord.Data.Fields
+
+	policyID := fields["policy_id"]
+	taskID := fields["task_id"]
+	snapshotStr := fields["snapshot"]
+	entryCount, _ := strconv.Atoi(fields["entry_count"])
+
+	if policyID == "" || snapshotStr == "" {
+		s.logger.Warn("FIM 基线快照缺少必要字段",
+			zap.String("agent_id", conn.AgentID),
+			zap.String("policy_id", policyID))
+		return nil
+	}
+
+	// 解析快照 JSON
+	type snapshotEntry struct {
+		SHA256 string `json:"sha256,omitempty"`
+		Size   int64  `json:"size"`
+		Mode   string `json:"mode,omitempty"`
+		UID    uint32 `json:"uid"`
+		GID    uint32 `json:"gid"`
+		MTime  int64  `json:"mtime"`
+	}
+	var snapshot map[string]snapshotEntry
+	if err := json.Unmarshal([]byte(snapshotStr), &snapshot); err != nil {
+		return fmt.Errorf("解析基线快照 JSON 失败: %w", err)
+	}
+
+	s.logger.Info("收到 FIM 基线快照",
+		zap.String("agent_id", conn.AgentID),
+		zap.String("policy_id", policyID),
+		zap.Int("entry_count", entryCount))
+
+	// 创建基线记录
+	baseline := &model.FIMBaseline{
+		PolicyID:   policyID,
+		HostID:     conn.AgentID,
+		Hostname:   conn.GetHostname(),
+		Version:    1,
+		Status:     "pending",
+		EntryCount: len(snapshot),
+		TaskID:     taskID,
+		CreatedAt:  model.Now(),
+		UpdatedAt:  model.Now(),
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 删除同策略+主机的旧 pending 基线
+		var oldBaselines []model.FIMBaseline
+		tx.Where("policy_id = ? AND host_id = ? AND status = ?",
+			policyID, conn.AgentID, "pending").Find(&oldBaselines)
+		for _, old := range oldBaselines {
+			tx.Where("baseline_id = ?", old.ID).Delete(&model.FIMBaselineEntry{})
+			tx.Delete(&old)
+		}
+
+		// 创建新基线
+		if err := tx.Create(baseline).Error; err != nil {
+			return fmt.Errorf("创建基线记录失败: %w", err)
+		}
+
+		// 批量写入条目
+		entries := make([]model.FIMBaselineEntry, 0, len(snapshot))
+		for filePath, entry := range snapshot {
+			entries = append(entries, model.FIMBaselineEntry{
+				BaselineID: baseline.ID,
+				FilePath:   filePath,
+				SHA256:     entry.SHA256,
+				FileSize:   entry.Size,
+				FileMode:   entry.Mode,
+				UID:        entry.UID,
+				GID:        entry.GID,
+				MTime:      entry.MTime,
+			})
+		}
+
+		// 分批插入（每批 500 条）
+		batchSize := 500
+		for i := 0; i < len(entries); i += batchSize {
+			end := i + batchSize
+			if end > len(entries) {
+				end = len(entries)
+			}
+			if err := tx.Create(entries[i:end]).Error; err != nil {
+				return fmt.Errorf("批量写入基线条目失败: %w", err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("保存 FIM 基线快照失败: %w", err)
+	}
+
+	s.logger.Info("FIM 基线快照已保存，等待审批",
+		zap.String("policy_id", policyID),
+		zap.String("host_id", conn.AgentID),
+		zap.Uint("baseline_id", baseline.ID),
+		zap.Int("entries", len(snapshot)))
+
+	return nil
+}
+
 // isAlertWhitelisted 检查告警是否命中白名单
 func (s *Service) isAlertWhitelisted(ruleID, hostID, category, severity string) bool {
 	var whitelists []model.AlertWhitelist
@@ -2733,8 +2881,8 @@ func (s *Service) handleScanResult(ctx context.Context, record *grpcProto.Encode
 	result := &model.AntivirusScanResult{
 		TaskID:     taskID,
 		HostID:     conn.AgentID,
-		Hostname:   conn.Hostname,
-		IP:         strings.Join(conn.IPv4, ","),
+		Hostname:   conn.GetHostname(),
+		IP:         strings.Join(conn.GetIPv4(), ","),
 		FilePath:   fields["file_path"],
 		ThreatName: fields["threat_name"],
 		ThreatType: fields["threat_type"],
@@ -2803,8 +2951,8 @@ func (s *Service) handleQuarantineResult(ctx context.Context, record *grpcProto.
 	if fields["action"] == "quarantine" && fields["status"] == "success" {
 		file := &model.QuarantineFile{
 			HostID:         conn.AgentID,
-			Hostname:       conn.Hostname,
-			IP:             strings.Join(conn.IPv4, ","),
+			Hostname:       conn.GetHostname(),
+			IP:             strings.Join(conn.GetIPv4(), ","),
 			OriginalPath:   fields["file_path"],
 			QuarantinePath: fields["quarantine_path"],
 			FilePermission: fields["file_permission"],

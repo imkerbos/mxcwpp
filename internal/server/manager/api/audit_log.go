@@ -36,7 +36,7 @@ type ListAuditLogsRequest struct {
 func (h *AuditLogHandler) ListAuditLogs(c *gin.Context) {
 	var req ListAuditLogsRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 	if req.Page <= 0 {

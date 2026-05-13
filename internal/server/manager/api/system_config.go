@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,20 +70,12 @@ func (h *SystemConfigHandler) GetKubernetesImageConfig(c *gin.Context) {
 		if result.Error == gorm.ErrRecordNotFound {
 			// 配置不存在，返回默认配置
 			h.logger.Debug("Kubernetes 镜像配置不存在，使用默认配置")
-			c.JSON(http.StatusOK, gin.H{
-				"code":    0,
-				"message": "success",
-				"data":    defaultConfig,
-			})
+			SuccessWithMessage(c, "success", defaultConfig)
 			return
 		}
 		// 其他错误（如表不存在），记录日志但返回默认配置，避免 500 错误
 		h.logger.Warn("查询 Kubernetes 镜像配置失败，使用默认配置", zap.Error(result.Error))
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
@@ -92,11 +83,7 @@ func (h *SystemConfigHandler) GetKubernetesImageConfig(c *gin.Context) {
 	if config.Value == "" {
 		// 配置值为空，返回默认配置
 		h.logger.Debug("Kubernetes 镜像配置值为空，使用默认配置")
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
@@ -104,11 +91,7 @@ func (h *SystemConfigHandler) GetKubernetesImageConfig(c *gin.Context) {
 	if err := json.Unmarshal([]byte(config.Value), &imageConfig); err != nil {
 		// 解析失败，记录日志但返回默认配置
 		h.logger.Warn("解析 Kubernetes 镜像配置失败，使用默认配置", zap.Error(err))
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
@@ -123,11 +106,7 @@ func (h *SystemConfigHandler) GetKubernetesImageConfig(c *gin.Context) {
 		imageConfig.DefaultVersion = defaultConfig.DefaultVersion
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "success",
-		"data":    imageConfig,
-	})
+	SuccessWithMessage(c, "success", imageConfig)
 }
 
 // UpdateKubernetesImageConfigRequest 更新 Kubernetes 镜像配置请求
@@ -142,10 +121,7 @@ type UpdateKubernetesImageConfigRequest struct {
 func (h *SystemConfigHandler) UpdateKubernetesImageConfig(c *gin.Context) {
 	var req UpdateKubernetesImageConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -158,10 +134,7 @@ func (h *SystemConfigHandler) UpdateKubernetesImageConfig(c *gin.Context) {
 	valueJSON, err := json.Marshal(imageConfig)
 	if err != nil {
 		h.logger.Error("序列化 Kubernetes 镜像配置失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "序列化配置失败",
-		})
+		InternalError(c, "序列化配置失败")
 		return
 	}
 
@@ -184,36 +157,23 @@ func (h *SystemConfigHandler) UpdateKubernetesImageConfig(c *gin.Context) {
 			"description": config.Description,
 		}).Error; err != nil {
 			h.logger.Error("更新 Kubernetes 镜像配置失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "更新配置失败",
-			})
+			InternalError(c, "更新配置失败")
 			return
 		}
 	} else if result.Error == gorm.ErrRecordNotFound {
 		// 创建新配置
 		if err := h.db.Create(&config).Error; err != nil {
 			h.logger.Error("创建 Kubernetes 镜像配置失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "创建配置失败",
-			})
+			InternalError(c, "创建配置失败")
 			return
 		}
 	} else {
 		h.logger.Error("查询 Kubernetes 镜像配置失败", zap.Error(result.Error))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询配置失败",
-		})
+		InternalError(c, "查询配置失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "配置更新成功",
-		"data":    imageConfig,
-	})
+	SuccessWithMessage(c, "配置更新成功", imageConfig)
 }
 
 // GetSiteConfig 获取站点配置
@@ -236,41 +196,25 @@ func (h *SystemConfigHandler) GetSiteConfig(c *gin.Context) {
 		if result.Error == gorm.ErrRecordNotFound {
 			// 配置不存在，返回默认配置
 			h.logger.Debug("站点配置不存在，使用默认配置")
-			c.JSON(http.StatusOK, gin.H{
-				"code":    0,
-				"message": "success",
-				"data":    defaultConfig,
-			})
+			SuccessWithMessage(c, "success", defaultConfig)
 			return
 		}
 		// 其他错误，记录日志但返回默认配置
 		h.logger.Warn("查询站点配置失败，使用默认配置", zap.Error(result.Error))
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
 	// 解析配置值
 	if config.Value == "" {
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
 	var siteConfig model.SiteConfig
 	if err := json.Unmarshal([]byte(config.Value), &siteConfig); err != nil {
 		h.logger.Warn("解析站点配置失败，使用默认配置", zap.Error(err))
-		c.JSON(http.StatusOK, gin.H{
-			"code":    0,
-			"message": "success",
-			"data":    defaultConfig,
-		})
+		SuccessWithMessage(c, "success", defaultConfig)
 		return
 	}
 
@@ -279,19 +223,15 @@ func (h *SystemConfigHandler) GetSiteConfig(c *gin.Context) {
 		siteConfig.SiteName = defaultConfig.SiteName
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "success",
-		"data":    siteConfig,
-	})
+	SuccessWithMessage(c, "success", siteConfig)
 }
 
 // UpdateSiteConfigRequest 更新站点配置请求
 type UpdateSiteConfigRequest struct {
-	SiteName   string  `json:"site_name"`    // 站点名称（必填，手动验证）
-	SiteLogo   *string `json:"site_logo"`    // Logo URL（指针类型，nil表示不修改，空字符串表示删除）
-	SiteDomain string  `json:"site_domain"`  // 前端访问域名（可选）
-	BackendURL string  `json:"backend_url"`  // 后端接口地址（必填）
+	SiteName   string  `json:"site_name"`   // 站点名称（必填，手动验证）
+	SiteLogo   *string `json:"site_logo"`   // Logo URL（指针类型，nil表示不修改，空字符串表示删除）
+	SiteDomain string  `json:"site_domain"` // 前端访问域名（可选）
+	BackendURL string  `json:"backend_url"` // 后端接口地址（必填）
 }
 
 // UpdateSiteConfig 更新站点配置
@@ -304,10 +244,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 				zap.Any("panic", r),
 				zap.String("stack", fmt.Sprintf("%+v", r)),
 			)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "服务器内部错误，请稍后重试",
-			})
+			InternalError(c, "服务器内部错误，请稍后重试")
 		}
 	}()
 
@@ -318,10 +255,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 		h.logger.Warn("更新站点配置请求参数绑定失败",
 			zap.Error(err),
 		)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数格式错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数格式错误")
 		return
 	}
 
@@ -340,19 +274,13 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 	// 验证必填字段
 	if strings.TrimSpace(req.SiteName) == "" {
 		h.logger.Warn("站点名称为空")
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "站点名称不能为空",
-		})
+		BadRequest(c, "站点名称不能为空")
 		return
 	}
 
 	if strings.TrimSpace(req.BackendURL) == "" {
 		h.logger.Warn("后端接口地址为空")
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "后端接口地址不能为空",
-		})
+		BadRequest(c, "后端接口地址不能为空")
 		return
 	}
 
@@ -364,10 +292,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 	// 检查数据库连接
 	if h.db == nil {
 		h.logger.Error("数据库连接未初始化")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "数据库连接未初始化",
-		})
+		InternalError(c, "数据库连接未初始化")
 		return
 	}
 
@@ -395,17 +320,11 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 				strings.Contains(strings.ToLower(errorMsg), "table") ||
 				strings.Contains(strings.ToLower(errorMsg), "no such table") {
 				h.logger.Warn("检测到表可能不存在")
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"code":    500,
-					"message": "数据库表不存在，请确保已执行数据库迁移。错误详情: " + errorMsg,
-				})
+				InternalError(c, "数据库表不存在，请确保已执行数据库迁移。错误详情: "+errorMsg)
 				return
 			}
 			// 其他数据库错误也返回
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "查询配置失败: " + errorMsg,
-			})
+			InternalError(c, "查询配置失败: "+errorMsg)
 			return
 		}
 	} else {
@@ -451,10 +370,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 	valueJSON, err := json.Marshal(siteConfig)
 	if err != nil {
 		h.logger.Error("序列化站点配置失败", zap.Error(err), zap.Any("site_config", siteConfig))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "序列化配置失败: " + err.Error(),
-		})
+		InternalError(c, "序列化配置失败")
 		return
 	}
 
@@ -479,10 +395,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 				zap.String("error_type", fmt.Sprintf("%T", err)),
 				zap.String("value_json", string(valueJSON)),
 			)
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "更新配置失败: " + err.Error(),
-			})
+			InternalError(c, "更新配置失败")
 			return
 		}
 		h.logger.Info("站点配置更新成功", zap.Uint("id", existingConfig.ID))
@@ -513,10 +426,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 							zap.Error(updateErr),
 							zap.Uint("id", existing.ID),
 						)
-						c.JSON(http.StatusInternalServerError, gin.H{
-							"code":    500,
-							"message": "更新配置失败: " + updateErr.Error(),
-						})
+						InternalError(c, "更新配置失败")
 						return
 					}
 					h.logger.Info("站点配置更新成功（唯一索引冲突后）", zap.Uint("id", existing.ID))
@@ -525,10 +435,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 						zap.Error(err),
 						zap.Error(queryErr),
 					)
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"code":    500,
-						"message": "保存配置失败: " + err.Error(),
-					})
+					InternalError(c, "保存配置失败")
 					return
 				}
 			} else {
@@ -539,10 +446,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 					zap.String("category", config.Category),
 					zap.String("value_json", string(valueJSON)),
 				)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"code":    500,
-					"message": "创建配置失败: " + err.Error(),
-				})
+				InternalError(c, "创建配置失败")
 				return
 			}
 		} else {
@@ -550,11 +454,7 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "配置更新成功",
-		"data":    siteConfig,
-	})
+	SuccessWithMessage(c, "配置更新成功", siteConfig)
 }
 
 // UploadLogo 上传 Logo
@@ -562,20 +462,14 @@ func (h *SystemConfigHandler) UpdateSiteConfig(c *gin.Context) {
 func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 	// 检查上传目录
 	if h.uploadDir == "" {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "文件上传功能未配置",
-		})
+		InternalError(c, "文件上传功能未配置")
 		return
 	}
 
 	// 获取上传的文件
 	file, err := c.FormFile("logo")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请选择要上传的文件: " + err.Error(),
-		})
+		BadRequest(c, "请选择要上传的文件")
 		return
 	}
 
@@ -590,19 +484,13 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 		}
 	}
 	if !allowed {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "不支持的文件类型，仅支持: " + strings.Join(allowedTypes, ", "),
-		})
+		BadRequest(c, "不支持的文件类型，仅支持: "+strings.Join(allowedTypes, ", "))
 		return
 	}
 
 	// 验证文件大小（最大 5MB）
 	if file.Size > 5*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "文件大小不能超过 5MB",
-		})
+		BadRequest(c, "文件大小不能超过 5MB")
 		return
 	}
 
@@ -614,10 +502,7 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 	// 保存文件
 	if err := c.SaveUploadedFile(file, filePath); err != nil {
 		h.logger.Error("保存 Logo 文件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "保存文件失败",
-		})
+		InternalError(c, "保存文件失败")
 		return
 	}
 
@@ -665,10 +550,7 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 	valueJSON, err := json.Marshal(siteConfig)
 	if err != nil {
 		h.logger.Error("序列化站点配置失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新配置失败",
-		})
+		InternalError(c, "更新配置失败")
 		return
 	}
 
@@ -679,10 +561,7 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 			"value": string(valueJSON),
 		}).Error; err != nil {
 			h.logger.Error("更新站点配置失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "更新配置失败",
-			})
+			InternalError(c, "更新配置失败")
 			return
 		}
 	} else {
@@ -695,20 +574,13 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 		}
 		if err := h.db.Create(&config).Error; err != nil {
 			h.logger.Error("创建站点配置失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "创建配置失败",
-			})
+			InternalError(c, "创建配置失败")
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "Logo 上传成功",
-		"data": gin.H{
-			"logo_url": logoURL,
-		},
+	SuccessWithMessage(c, "Logo 上传成功", gin.H{
+		"logo_url": logoURL,
 	})
 }
 
@@ -717,19 +589,13 @@ func (h *SystemConfigHandler) UploadLogo(c *gin.Context) {
 func (h *SystemConfigHandler) GetLogo(c *gin.Context) {
 	filename := c.Param("filename")
 	if filename == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "文件名不能为空",
-		})
+		BadRequest(c, "文件名不能为空")
 		return
 	}
 
 	// 安全检查：防止路径遍历
 	if strings.Contains(filename, "..") || strings.Contains(filename, "/") || strings.Contains(filename, "\\") {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的文件名",
-		})
+		BadRequest(c, "无效的文件名")
 		return
 	}
 
@@ -737,10 +603,7 @@ func (h *SystemConfigHandler) GetLogo(c *gin.Context) {
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "文件不存在",
-		})
+		NotFound(c, "文件不存在")
 		return
 	}
 
@@ -748,10 +611,7 @@ func (h *SystemConfigHandler) GetLogo(c *gin.Context) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		h.logger.Error("打开 Logo 文件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "读取文件失败",
-		})
+		InternalError(c, "读取文件失败")
 		return
 	}
 	defer file.Close()
@@ -813,7 +673,7 @@ type UpdateAlertConfigRequest struct {
 func (h *SystemConfigHandler) UpdateAlertConfig(c *gin.Context) {
 	var req UpdateAlertConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

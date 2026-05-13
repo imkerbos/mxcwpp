@@ -293,3 +293,75 @@ func TestAlertStormScenario(t *testing.T) {
 		}
 	}
 }
+
+// TestMatchPattern 验证白名单通配符/正则匹配
+func TestMatchPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		value   string
+		want    bool
+	}{
+		{"精确匹配", "nginx-pod", "nginx-pod", true},
+		{"精确不匹配", "nginx-pod", "redis-pod", false},
+		{"通配符 *", "nginx-*", "nginx-abc", true},
+		{"通配符不匹配", "nginx-*", "redis-abc", false},
+		{"通配符中间位置", "app-*-worker", "app-v2-worker", true},
+		{"多通配符", "*-nginx-*", "prod-nginx-pod1", true},
+		{"正则表达式", "^nginx-[0-9]+$", "nginx-123", true},
+		{"正则不匹配", "^nginx-[0-9]+$", "nginx-abc", false},
+		{"非法正则回退", "[invalid", "[invalid", false},
+		{"空 pattern", "", "", true},
+		{"单 * 匹配任何", "*", "anything", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchPattern(tt.pattern, tt.value)
+			if got != tt.want {
+				t.Errorf("matchPattern(%q, %q) = %v, want %v", tt.pattern, tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestWhitelistHitCountUpdate 验证白名单命中时 hit_count 正确递增
+func TestWhitelistHitCountUpdate(t *testing.T) {
+	db, svc := setupAlarmFilterTestDB(t)
+
+	// 插入白名单规则
+	db.Exec(`INSERT INTO kube_whitelists (name, namespace, status, hit_count) VALUES (?, ?, ?, ?)`,
+		"test-rule", "kube-system", "enabled", 0)
+
+	alarm := &model.KubeAlarm{
+		ClusterID: 1,
+		Severity:  "medium",
+		AlarmType: model.KubeAlarmTypeAbnormalProcess,
+		RuleID:    "K8S-001",
+		Namespace: "kube-system",
+		Target:    "pods/test",
+	}
+
+	// 应命中白名单
+	created, err := svc.CreateAlarmWithFilter(alarm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if created {
+		t.Error("白名单命中应返回 created=false")
+	}
+
+	// 验证 hit_count 递增
+	var hitCount int
+	db.Model(&model.KubeWhitelist{}).Select("hit_count").Where("name = ?", "test-rule").Scan(&hitCount)
+	if hitCount != 1 {
+		t.Errorf("hit_count 应为 1，实际 %d", hitCount)
+	}
+
+	// 再次命中
+	svc.CreateAlarmWithFilter(alarm)
+	db.Model(&model.KubeWhitelist{}).Select("hit_count").Where("name = ?", "test-rule").Scan(&hitCount)
+	if hitCount != 2 {
+		t.Errorf("hit_count 应为 2，实际 %d", hitCount)
+	}
+}

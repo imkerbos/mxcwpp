@@ -42,7 +42,7 @@ func (h *AlertAnalysisHandler) AnalyzeAlert(c *gin.Context) {
 	result, err := assist.AnalyzeAlert(uint(id))
 	if err != nil {
 		h.logger.Error("LLM 告警分析失败", zap.Uint64("alert_id", id), zap.Error(err))
-		InternalError(c, "分析失败: "+err.Error())
+		InternalError(c, "分析失败")
 		return
 	}
 

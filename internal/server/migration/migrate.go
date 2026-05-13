@@ -62,12 +62,55 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("通知类别迁移处理", zap.Error(err))
 	}
 
+	// 执行数据迁移：为告警记录回填 source 字段
+	if err := migrateAlertSource(db, logger); err != nil {
+		logger.Warn("告警来源迁移处理", zap.Error(err))
+	}
+
 	// 添加性能优化索引（幂等）
 	if err := AddPerformanceIndexes(db, logger); err != nil {
 		logger.Warn("添加性能索引失败", zap.Error(err))
 	}
 
 	logger.Info("数据库迁移完成")
+	return nil
+}
+
+// migrateAlertSource 为存量告警记录回填 source 字段
+func migrateAlertSource(db *gorm.DB, logger *zap.Logger) error {
+	// 检查是否有需要回填的记录
+	var count int64
+	db.Model(&model.Alert{}).Where("source IS NULL OR source = ''").Count(&count)
+	if count == 0 {
+		return nil
+	}
+
+	logger.Info("开始回填告警 source 字段", zap.Int64("count", count))
+
+	// 1. Agent 离线告警
+	r := db.Model(&model.Alert{}).
+		Where("(source IS NULL OR source = '') AND category = ?", "agent_offline").
+		Update("source", model.AlertSourceAgent)
+	if r.RowsAffected > 0 {
+		logger.Info("回填 agent 来源", zap.Int64("count", r.RowsAffected))
+	}
+
+	// 2. 运行时检测告警（CEL 规则 + 端口扫描）
+	r = db.Model(&model.Alert{}).
+		Where("(source IS NULL OR source = '') AND (rule_id LIKE ? OR rule_id = ?)", "cel-%", "scan-detector").
+		Update("source", model.AlertSourceRuntime)
+	if r.RowsAffected > 0 {
+		logger.Info("回填 runtime 来源", zap.Int64("count", r.RowsAffected))
+	}
+
+	// 3. 其余未标记的 → 基线告警
+	r = db.Model(&model.Alert{}).
+		Where("source IS NULL OR source = ''").
+		Update("source", model.AlertSourceBaseline)
+	if r.RowsAffected > 0 {
+		logger.Info("回填 baseline 来源", zap.Int64("count", r.RowsAffected))
+	}
+
 	return nil
 }
 

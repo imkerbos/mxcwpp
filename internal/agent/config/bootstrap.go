@@ -98,12 +98,17 @@ func downloadCertificates(bootstrap *BootstrapConfig, logger *zap.Logger) error 
 
 	// 构建下载 URL
 	certURL := fmt.Sprintf("%s/api/v1/agent/certificates", bootstrap.ServerURL)
+
+	// 下载证书（token 通过 Header 传递，避免在 URL/日志中泄漏）
+	req, err := http.NewRequest(http.MethodGet, certURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate request: %w", err)
+	}
 	if bootstrap.BootstrapToken != "" {
-		certURL += "?token=" + bootstrap.BootstrapToken
+		req.Header.Set("X-Bootstrap-Token", bootstrap.BootstrapToken)
 	}
 
-	// 下载证书
-	resp, err := client.Get(certURL)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to request certificates: %w", err)
 	}

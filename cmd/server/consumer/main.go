@@ -16,10 +16,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
+	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
-	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
 )
@@ -189,6 +189,18 @@ func main() {
 	case sig := <-quit:
 		logger.Info("收到退出信号", zap.String("signal", sig.String()))
 		cancel()
+
+		// 等待 ConsumerGroup 完全关闭（带超时）
+		shutdownTimer := time.NewTimer(15 * time.Second)
+		defer shutdownTimer.Stop()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				logger.Warn("Consumer 关闭时出错", zap.Error(err))
+			}
+		case <-shutdownTimer.C:
+			logger.Warn("Consumer 优雅关闭超时，强制退出")
+		}
 	case err := <-errCh:
 		if err != nil {
 			logger.Error("Consumer 异常退出", zap.Error(err))

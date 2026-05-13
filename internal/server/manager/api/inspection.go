@@ -22,20 +22,20 @@ func NewInspectionHandler(db *gorm.DB, logger *zap.Logger) *InspectionHandler {
 
 // InspectionHostItem 巡检主机项
 type InspectionHostItem struct {
-	HostID         string           `json:"host_id"`
-	Hostname       string           `json:"hostname"`
+	HostID         string            `json:"host_id"`
+	Hostname       string            `json:"hostname"`
 	IPv4           model.StringArray `json:"ipv4"`
-	Status         model.HostStatus `json:"status"`
-	AgentVersion   string           `json:"agent_version"`
-	AgentStartTime *model.LocalTime `json:"agent_start_time"`
-	SystemBootTime *model.LocalTime `json:"system_boot_time"`
-	LastHeartbeat  *model.LocalTime `json:"last_heartbeat"`
-	OSFamily       string           `json:"os_family"`
-	OSVersion      string           `json:"os_version"`
-	Arch           string           `json:"arch"`
-	RuntimeType    string           `json:"runtime_type"`
-	BusinessLine   string           `json:"business_line"`
-	Plugins        []PluginStatus   `json:"plugins"`
+	Status         model.HostStatus  `json:"status"`
+	AgentVersion   string            `json:"agent_version"`
+	AgentStartTime *model.LocalTime  `json:"agent_start_time"`
+	SystemBootTime *model.LocalTime  `json:"system_boot_time"`
+	LastHeartbeat  *model.LocalTime  `json:"last_heartbeat"`
+	OSFamily       string            `json:"os_family"`
+	OSVersion      string            `json:"os_version"`
+	Arch           string            `json:"arch"`
+	RuntimeType    string            `json:"runtime_type"`
+	BusinessLine   string            `json:"business_line"`
+	Plugins        []PluginStatus    `json:"plugins"`
 }
 
 // PluginStatus 插件状态
@@ -49,11 +49,11 @@ type PluginStatus struct {
 
 // InspectionSummary 巡检统计摘要
 type InspectionSummary struct {
-	TotalHosts         int `json:"total_hosts"`
-	OnlineHosts        int `json:"online_hosts"`
-	OfflineHosts       int `json:"offline_hosts"`
-	AgentOutdatedCount int `json:"agent_outdated_count"`
-	PluginErrorCount   int `json:"plugin_error_count"`
+	TotalHosts          int `json:"total_hosts"`
+	OnlineHosts         int `json:"online_hosts"`
+	OfflineHosts        int `json:"offline_hosts"`
+	AgentOutdatedCount  int `json:"agent_outdated_count"`
+	PluginErrorCount    int `json:"plugin_error_count"`
 	PluginOutdatedCount int `json:"plugin_outdated_count"`
 }
 

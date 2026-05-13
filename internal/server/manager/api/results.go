@@ -70,10 +70,7 @@ func (h *ResultsHandler) ListResults(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询结果总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询检测结果失败",
-		})
+		InternalError(c, "查询检测结果失败")
 		return
 	}
 
@@ -82,20 +79,11 @@ func (h *ResultsHandler) ListResults(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Offset(offset).Limit(pageSize).Order("checked_at DESC").Find(&results).Error; err != nil {
 		h.logger.Error("查询检测结果失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询检测结果失败",
-		})
+		InternalError(c, "查询检测结果失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": results,
-		},
-	})
+	SuccessPaginated(c, total, results)
 }
 
 // GetResult 获取检测结果详情
@@ -106,10 +94,7 @@ func (h *ResultsHandler) GetResult(c *gin.Context) {
 	ruleID := c.Query("rule_id")
 
 	if taskID == "" || hostID == "" || ruleID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "task_id, host_id, rule_id 不能为空",
-		})
+		BadRequest(c, "task_id, host_id, rule_id 不能为空")
 		return
 	}
 
@@ -117,24 +102,15 @@ func (h *ResultsHandler) GetResult(c *gin.Context) {
 	if err := h.db.Where("task_id = ? AND host_id = ? AND rule_id = ?", taskID, hostID, ruleID).
 		Preload("Host").Preload("Rule").First(&result).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "检测结果不存在",
-			})
+			NotFound(c, "检测结果不存在")
 			return
 		}
 		h.logger.Error("查询检测结果失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询检测结果失败",
-		})
+		InternalError(c, "查询检测结果失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": result,
-	})
+	Success(c, result)
 }
 
 // GetHostBaselineScore 获取主机基线得分
@@ -162,27 +138,21 @@ func (h *ResultsHandler) GetHostBaselineScore(c *gin.Context) {
 		Where("scan_results.host_id = ?", hostID).
 		Find(&latestResults).Error; err != nil {
 		h.logger.Error("查询主机基线得分失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机基线得分失败",
-		})
+		InternalError(c, "查询主机基线得分失败")
 		return
 	}
 
 	// 计算得分
 	if len(latestResults) == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"data": gin.H{
-				"host_id":        hostID,
-				"baseline_score": 0,
-				"pass_rate":      0.0,
-				"total_rules":    0,
-				"pass_count":     0,
-				"fail_count":     0,
-				"error_count":    0,
-				"na_count":       0,
-			},
+		Success(c, gin.H{
+			"host_id":        hostID,
+			"baseline_score": 0,
+			"pass_rate":      0.0,
+			"total_rules":    0,
+			"pass_count":     0,
+			"fail_count":     0,
+			"error_count":    0,
+			"na_count":       0,
 		})
 		return
 	}
@@ -234,19 +204,16 @@ func (h *ResultsHandler) GetHostBaselineScore(c *gin.Context) {
 	// 计算通过率
 	passRate := float64(passCount) / float64(totalRules)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"host_id":        hostID,
-			"baseline_score": int(baselineScore),
-			"pass_rate":      passRate,
-			"total_rules":    totalRules,
-			"pass_count":     passCount,
-			"fail_count":     failCount,
-			"error_count":    errorCount,
-			"na_count":       naCount,
-			"calculated_at":  time.Now(),
-		},
+	Success(c, gin.H{
+		"host_id":        hostID,
+		"baseline_score": int(baselineScore),
+		"pass_rate":      passRate,
+		"total_rules":    totalRules,
+		"pass_count":     passCount,
+		"fail_count":     failCount,
+		"error_count":    errorCount,
+		"na_count":       naCount,
+		"calculated_at":  time.Now(),
 	})
 }
 
@@ -275,10 +242,7 @@ func (h *ResultsHandler) GetHostBaselineSummary(c *gin.Context) {
 		Where("scan_results.host_id = ?", hostID).
 		Find(&latestResults).Error; err != nil {
 		h.logger.Error("查询主机基线摘要失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机基线摘要失败",
-		})
+		InternalError(c, "查询主机基线摘要失败")
 		return
 	}
 
@@ -313,10 +277,7 @@ func (h *ResultsHandler) GetHostBaselineSummary(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": summary,
-	})
+	Success(c, summary)
 }
 
 // ExportHostBaselineResults 导出主机基线检查结果
@@ -329,17 +290,11 @@ func (h *ResultsHandler) ExportHostBaselineResults(c *gin.Context) {
 	var host model.Host
 	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "主机不存在",
-			})
+			NotFound(c, "主机不存在")
 			return
 		}
 		h.logger.Error("查询主机信息失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机信息失败",
-		})
+		InternalError(c, "查询主机信息失败")
 		return
 	}
 
@@ -357,10 +312,7 @@ func (h *ResultsHandler) ExportHostBaselineResults(c *gin.Context) {
 		Order("scan_results.severity DESC, scan_results.category ASC").
 		Find(&results).Error; err != nil {
 		h.logger.Error("查询基线检查结果失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询基线检查结果失败",
-		})
+		InternalError(c, "查询基线检查结果失败")
 		return
 	}
 
@@ -370,10 +322,7 @@ func (h *ResultsHandler) ExportHostBaselineResults(c *gin.Context) {
 	case "excel":
 		h.exportExcel(c, host, results)
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "不支持的导出格式",
-		})
+		BadRequest(c, "不支持的导出格式")
 	}
 }
 
@@ -453,15 +402,15 @@ func (h *ResultsHandler) exportExcel(c *gin.Context, host model.Host, results []
 
 	// 标题样式
 	titleStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Size: 14},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true, Size: 14},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"#4472C4"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 
 	// 表头样式
 	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"#D9E1F2"}, Pattern: 1},
+		Font:      &excelize.Font{Bold: true},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{"#D9E1F2"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 		Border: []excelize.Border{
 			{Type: "left", Color: "000000", Style: 1},
@@ -522,10 +471,7 @@ func (h *ResultsHandler) exportExcel(c *gin.Context, host model.Host, results []
 	buf, err := f.WriteToBuffer()
 	if err != nil {
 		h.logger.Error("生成Excel文件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "生成Excel文件失败",
-		})
+		InternalError(c, "生成Excel文件失败")
 		return
 	}
 
@@ -534,4 +480,3 @@ func (h *ResultsHandler) exportExcel(c *gin.Context, host model.Host, results []
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
 }
-

@@ -78,12 +78,12 @@ type AgentOfflineData struct {
 
 // AgentOnlineData Agent 上线恢复数据
 type AgentOnlineData struct {
-	HostID      string
-	Hostname    string
-	IP          string
-	OSFamily    string
-	OSVersion   string
-	OnlineAt    time.Time
+	HostID       string
+	Hostname     string
+	IP           string
+	OSFamily     string
+	OSVersion    string
+	OnlineAt     time.Time
 	OfflineSince time.Time // 上次离线时间
 }
 
@@ -361,7 +361,7 @@ func (s *NotificationService) sendNotification(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		bodyStr := string(bodyBytes)
 		if len(bodyStr) > 200 {
 			bodyStr = bodyStr[:200] + "..."
@@ -679,7 +679,7 @@ func (s *NotificationService) sendResolvedNotification(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		bodyStr := string(bodyBytes)
 		if len(bodyStr) > 200 {
 			bodyStr = bodyStr[:200] + "..."
@@ -953,7 +953,7 @@ func (s *NotificationService) sendAgentOfflineNotification(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		bodyStr := string(bodyBytes)
 		if len(bodyStr) > 200 {
 			bodyStr = bodyStr[:200] + "..."
@@ -1224,7 +1224,7 @@ func (s *NotificationService) sendAgentOnlineNotification(
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		bodyStr := string(body)
 		if len(bodyStr) > 200 {
 			bodyStr = bodyStr[:200] + "..."
@@ -1397,7 +1397,7 @@ func (s *NotificationService) postWebhook(webhookURL string, message map[string]
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		bodyStr := string(bodyBytes)
 		if len(bodyStr) > 200 {
 			bodyStr = bodyStr[:200] + "..."
@@ -1557,16 +1557,16 @@ func (s *NotificationService) buildWebhookVulnerability(data *VulnerabilityAlert
 
 // VirusAlertData 病毒告警数据
 type VirusAlertData struct {
-	HostID     string
-	Hostname   string
-	IP         string
-	FilePath   string
-	ThreatName string
-	ThreatType string // virus, trojan, worm, ransomware, rootkit, miner, backdoor
-	Severity   string
-	FileHash   string
-	Action     string // detected, quarantined, deleted
-	DetectedAt time.Time
+	HostID      string
+	Hostname    string
+	IP          string
+	FilePath    string
+	ThreatName  string
+	ThreatType  string // virus, trojan, worm, ransomware, rootkit, miner, backdoor
+	Severity    string
+	FileHash    string
+	Action      string // detected, quarantined, deleted
+	DetectedAt  time.Time
 	FrontendURL string
 }
 
@@ -1653,14 +1653,14 @@ func (s *NotificationService) buildWebhookVirus(data *VirusAlertData) map[string
 
 // FIMAlertData 文件完整性告警数据
 type FIMAlertData struct {
-	HostID     string
-	Hostname   string
-	IP         string
-	FilePath   string
-	ChangeType string // added, removed, changed
-	Category   string // binary, config, auth, log
-	Severity   string
-	DetectedAt time.Time
+	HostID      string
+	Hostname    string
+	IP          string
+	FilePath    string
+	ChangeType  string // added, removed, changed
+	Category    string // binary, config, auth, log
+	Severity    string
+	DetectedAt  time.Time
 	FrontendURL string
 }
 
@@ -1972,7 +1972,7 @@ func (s *NotificationService) BuildTestLarkCard(notification *model.Notification
 			AlarmType: "container_escape", Title: "[K8S-005] 创建特权容器",
 			Description: "检测到创建特权容器", Namespace: "default",
 			Message: "用户 admin 在命名空间 default 中创建了特权容器 Pod test-pod",
-			Target: "pods/test-pod", FrontendURL: notification.FrontendURL,
+			Target:  "pods/test-pod", FrontendURL: notification.FrontendURL,
 		})
 	default:
 		// baseline_alert 和 agent_offline 使用原有逻辑

@@ -128,6 +128,7 @@ func createHeartbeatTimeoutAlert(db *gorm.DB, logger *zap.Logger, host *model.Ho
 			ResultID:    resultID,
 			HostID:      host.HostID,
 			RuleID:      "agent_offline",
+			Source:      model.AlertSourceAgent,
 			Severity:    "high",
 			Category:    "agent_offline",
 			Title:       title,

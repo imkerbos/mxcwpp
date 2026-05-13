@@ -1,4 +1,4 @@
-.PHONY: proto test clean help build-server build-consumer package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart pret-docker-up pret-docker-up-d pret-docker-down
+.PHONY: proto test test-ui test-all test-race security clean help build-server build-consumer package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart pret-docker-up pret-docker-up-d pret-docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -97,6 +97,34 @@ package-all-arch:
 test:
 	go test ./...
 
+test-ui:
+	cd ui && npm run test
+
+test-all: test test-ui
+
+test-race:
+	go test -race -short ./...
+
+security:
+	@echo "=== 依赖漏洞扫描 (govulncheck) ==="
+	@if command -v govulncheck &> /dev/null; then \
+		govulncheck ./...; \
+	else \
+		echo "govulncheck not found, installing..."; \
+		go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...; \
+	fi
+	@echo ""
+	@echo "=== 静态安全分析 (gosec) ==="
+	@if command -v gosec &> /dev/null; then \
+		gosec -quiet ./...; \
+	else \
+		echo "gosec not found, installing..."; \
+		go install github.com/securego/gosec/v2/cmd/gosec@latest && gosec -quiet ./...; \
+	fi
+	@echo ""
+	@echo "=== go vet ==="
+	go vet ./...
+
 fmt:
 	go fmt ./...
 
@@ -150,7 +178,11 @@ help:
 	@echo "  make package-all-arch       - 构建全部 (amd64 + arm64)"
 	@echo ""
 	@echo "测试与质量:"
-	@echo "  make test                   - 运行测试"
+	@echo "  make test                   - 运行后端测试"
+	@echo "  make test-ui                - 运行前端测试"
+	@echo "  make test-all               - 运行全部测试"
+	@echo "  make test-race              - 运行竞态检测测试"
+	@echo "  make security               - 安全扫描 (govulncheck + gosec + vet)"
 	@echo "  make fmt                    - 格式化代码"
 	@echo "  make lint                   - 代码检查"
 	@echo ""

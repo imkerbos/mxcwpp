@@ -45,17 +45,17 @@ type HostMetrics struct {
 
 // LatestMetrics 是最新监控数据
 type LatestMetrics struct {
-	CPUUsage       *float64   `json:"cpu_usage,omitempty"`
-	MemUsage       *float64   `json:"mem_usage,omitempty"`
-	DiskUsage      *float64   `json:"disk_usage,omitempty"`
-	NetBytesSent   *uint64    `json:"net_bytes_sent,omitempty"`
-	NetBytesRecv   *uint64    `json:"net_bytes_recv,omitempty"`
-	DiskReadBytes  *uint64    `json:"disk_read_bytes,omitempty"`
-	DiskWriteBytes *uint64    `json:"disk_write_bytes,omitempty"`
+	CPUUsage        *float64   `json:"cpu_usage,omitempty"`
+	MemUsage        *float64   `json:"mem_usage,omitempty"`
+	DiskUsage       *float64   `json:"disk_usage,omitempty"`
+	NetBytesSent    *uint64    `json:"net_bytes_sent,omitempty"`
+	NetBytesRecv    *uint64    `json:"net_bytes_recv,omitempty"`
+	DiskReadBytes   *uint64    `json:"disk_read_bytes,omitempty"`
+	DiskWriteBytes  *uint64    `json:"disk_write_bytes,omitempty"`
 	AgentCPUUsage   *float64   `json:"agent_cpu_usage,omitempty"`
 	AgentMemRSS     *uint64    `json:"agent_mem_rss,omitempty"`
 	AgentMemPercent *float64   `json:"agent_mem_percent,omitempty"`
-	CollectedAt    *time.Time `json:"collected_at,omitempty"`
+	CollectedAt     *time.Time `json:"collected_at,omitempty"`
 }
 
 // TimeSeriesMetrics 是时间序列监控数据

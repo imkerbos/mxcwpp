@@ -27,11 +27,11 @@ type Router struct {
 	mysql         *writer.MySQLWriter
 	ch            *writer.ClickHouseWriter
 	dlq           *DLQHandler
-	redisClient   *redis.Client // 可选，用于写 agent:ac: 映射
-	celEngine     *celengine.Engine          // CEL 规则引擎（可选）
-	alertGen      *celengine.AlertGenerator  // CEL 告警生成器（可选）
-	autoResponder *celengine.AutoResponder   // 自动响应执行器（可选）
-	scanDetector  *celengine.ScanDetector    // 端口扫描检测器（可选）
+	redisClient   *redis.Client             // 可选，用于写 agent:ac: 映射
+	celEngine     *celengine.Engine         // CEL 规则引擎（可选）
+	alertGen      *celengine.AlertGenerator // CEL 告警生成器（可选）
+	autoResponder *celengine.AutoResponder  // 自动响应执行器（可选）
+	scanDetector  *celengine.ScanDetector   // 端口扫描检测器（可选）
 	topics        []string
 	logger        *zap.Logger
 }

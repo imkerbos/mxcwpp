@@ -287,12 +287,12 @@ func (c *KubeBaselineChecker) checkSystemMastersBinding(ctx context.Context) (st
 	}
 	// 系统默认绑定白名单
 	systemBindings := map[string]bool{
-		"cluster-admin":                    true,
-		"system:masters":                   true,
-		"kubeadm:cluster-admins":           true,
-		"eks:cluster-admin-binding":        true,
-		"aks-cluster-admin-binding":        true,
-		"gke-cluster-admin-binding":        true,
+		"cluster-admin":             true,
+		"system:masters":            true,
+		"kubeadm:cluster-admins":    true,
+		"eks:cluster-admin-binding": true,
+		"aks-cluster-admin-binding": true,
+		"gke-cluster-admin-binding": true,
 	}
 	var affected model.AffectedResources
 	for _, crb := range crbs.Items {

@@ -39,7 +39,7 @@ type VirusDBUpdater struct {
 	pluginsBaseURL string // 插件下载基础 URL（用于 PluginConfig 下载地址）
 	triggerCh      chan struct{}
 	// fileHashes 记录上一次发布时每个病毒库文件的 SHA256，用于文件级 Delta 检测
-	fileHashes     map[string]string // filename -> sha256
+	fileHashes map[string]string // filename -> sha256
 }
 
 // NewVirusDBUpdater 创建病毒库更新器

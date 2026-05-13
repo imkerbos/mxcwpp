@@ -66,6 +66,14 @@ export const remediationTasksApi = {
     return apiClient.post<{ confirmed: number }>('/remediation-tasks/batch-confirm', { taskIds })
   },
 
+  batchRetry: (taskIds: number[]) => {
+    return apiClient.post<{ retried: number }>('/remediation-tasks/batch-retry', { taskIds })
+  },
+
+  batchCancel: (taskIds: number[]) => {
+    return apiClient.post<{ cancelled: number }>('/remediation-tasks/batch-cancel', { taskIds })
+  },
+
   getStats: () => {
     return apiClient.get<RemediationTaskStats>('/remediation-tasks/stats')
   },

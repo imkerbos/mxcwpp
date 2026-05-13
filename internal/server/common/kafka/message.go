@@ -7,9 +7,9 @@ import "time"
 type MQMessage struct {
 	DataType     int32     `json:"data_type"`
 	AgentID      string    `json:"agent_id"`
-	Body         []byte    `json:"body"`                    // 原始 protobuf 编码数据
-	AgentTime    int64     `json:"agent_time"`              // Agent 端时间戳（Unix 秒）
-	SvrTime      int64     `json:"svr_time"`                // AC 接收时间戳（Unix 秒）
+	Body         []byte    `json:"body"`       // 原始 protobuf 编码数据
+	AgentTime    int64     `json:"agent_time"` // Agent 端时间戳（Unix 秒）
+	SvrTime      int64     `json:"svr_time"`   // AC 接收时间戳（Unix 秒）
 	Hostname     string    `json:"hostname"`
 	IntranetIPv4 string    `json:"intranet_ipv4,omitempty"`
 	ExtranetIPv4 string    `json:"extranet_ipv4,omitempty"`

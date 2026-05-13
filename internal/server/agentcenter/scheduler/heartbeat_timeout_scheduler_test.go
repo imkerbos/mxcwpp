@@ -37,6 +37,7 @@ func setupHeartbeatTestDB(t *testing.T) *gorm.DB {
 		host_id TEXT,
 		rule_id TEXT,
 		policy_id TEXT,
+		source TEXT DEFAULT '',
 		severity TEXT,
 		category TEXT,
 		title TEXT,

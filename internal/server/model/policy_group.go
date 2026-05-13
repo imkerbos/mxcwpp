@@ -5,8 +5,8 @@ type PolicyGroup struct {
 	ID          string    `gorm:"primaryKey;column:id;type:varchar(64);not null" json:"id"`
 	Name        string    `gorm:"column:name;type:varchar(255);not null" json:"name"`
 	Description string    `gorm:"column:description;type:text" json:"description"`
-	Icon        string    `gorm:"column:icon;type:varchar(100)" json:"icon"`           // 图标（可选）
-	Color       string    `gorm:"column:color;type:varchar(20)" json:"color"`          // 颜色（可选）
+	Icon        string    `gorm:"column:icon;type:varchar(100)" json:"icon"`              // 图标（可选）
+	Color       string    `gorm:"column:color;type:varchar(20)" json:"color"`             // 颜色（可选）
 	SortOrder   int       `gorm:"column:sort_order;type:int;default:0" json:"sort_order"` // 排序顺序
 	Enabled     bool      `gorm:"column:enabled;type:boolean;default:true" json:"enabled"`
 	CreatedAt   LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`

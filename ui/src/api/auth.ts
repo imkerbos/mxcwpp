@@ -3,6 +3,13 @@ import apiClient from './client'
 export interface LoginRequest {
   username: string
   password: string
+  captcha_id: string
+  captcha_code: string
+}
+
+export interface CaptchaResponse {
+  captcha_id: string
+  captcha_image: string
 }
 
 export interface LoginResponse {
@@ -11,6 +18,7 @@ export interface LoginResponse {
     username: string
     role: string
   }
+  need_change_password?: boolean
 }
 
 export interface ChangePasswordRequest {
@@ -19,6 +27,10 @@ export interface ChangePasswordRequest {
 }
 
 export const authApi = {
+  getCaptcha: async (): Promise<CaptchaResponse> => {
+    return apiClient.get('/auth/captcha')
+  },
+
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     return apiClient.post('/auth/login', data)
   },

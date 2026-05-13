@@ -3,7 +3,6 @@ package api
 
 import (
 	"errors"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -92,10 +91,7 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		h.logger.Error("查询主机总数失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机列表失败",
-		})
+		InternalError(c, "查询主机列表失败")
 		return
 	}
 
@@ -104,10 +100,7 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	if err := query.Offset(offset).Limit(pageSize).Order("last_heartbeat DESC").Find(&hosts).Error; err != nil {
 		h.logger.Error("查询主机列表失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机列表失败",
-		})
+		InternalError(c, "查询主机列表失败")
 		return
 	}
 
@@ -135,13 +128,7 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 		items = append(items, item)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"total": total,
-			"items": items,
-		},
-	})
+	SuccessPaginated(c, total, items)
 }
 
 // HostStatusDistribution 主机状态分布统计
@@ -181,10 +168,7 @@ func (h *HostsHandler) GetHostStatusDistribution(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": distribution,
-	})
+	Success(c, distribution)
 }
 
 // GetHostRiskDistribution 获取主机基线风险分布（按严重程度）
@@ -217,10 +201,7 @@ func (h *HostsHandler) GetHostRiskDistribution(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": distribution,
-	})
+	Success(c, distribution)
 }
 
 // GetHost 获取主机详情
@@ -231,17 +212,11 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 	var host model.Host
 	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "主机不存在",
-			})
+			NotFound(c, "主机不存在")
 			return
 		}
 		h.logger.Error("查询主机失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机失败",
-		})
+		InternalError(c, "查询主机失败")
 		return
 	}
 
@@ -362,10 +337,7 @@ func (h *HostsHandler) GetHost(c *gin.Context) {
 		responseData["container_id"] = host.ContainerID
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": responseData,
-	})
+	Success(c, responseData)
 }
 
 // UpdateHostTags 更新主机标签
@@ -377,29 +349,20 @@ func (h *HostsHandler) UpdateHostTags(c *gin.Context) {
 		Tags []string `json:"tags" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
 	// 验证标签数量（最多10个）
 	if len(req.Tags) > 10 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "标签数量不能超过10个",
-		})
+		BadRequest(c, "标签数量不能超过10个")
 		return
 	}
 
 	// 验证标签长度（每个标签最多50个字符）
 	for _, tag := range req.Tags {
 		if len(tag) > 50 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "标签长度不能超过50个字符",
-			})
+			BadRequest(c, "标签长度不能超过50个字符")
 			return
 		}
 	}
@@ -408,43 +371,20 @@ func (h *HostsHandler) UpdateHostTags(c *gin.Context) {
 	tags := model.StringArray(req.Tags)
 	if err := h.db.Model(&model.Host{}).Where("host_id = ?", hostID).Update("tags", tags).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "主机不存在",
-			})
+			NotFound(c, "主机不存在")
 			return
 		}
 		h.logger.Error("更新主机标签失败", zap.Error(err), zap.String("host_id", hostID))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新主机标签失败",
-		})
+		InternalError(c, "更新主机标签失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "标签更新成功",
-	})
+	SuccessMessage(c, "标签更新成功")
 }
 
 // formatPercent 格式化百分比
 func formatPercent(value float64) string {
 	return strconv.FormatFloat(value, 'f', 2, 64) + "%"
-}
-
-// formatBytes 格式化字节数
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return strconv.FormatInt(bytes, 10) + " B"
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return strconv.FormatFloat(float64(bytes)/float64(div), 'f', 2, 64) + " " + []string{"KB", "MB", "GB", "TB"}[exp]
 }
 
 // GetHostMetrics 获取主机监控数据
@@ -498,17 +438,11 @@ func (h *HostsHandler) GetHostMetrics(c *gin.Context) {
 		if errors.Is(err, biz.ErrPrometheusDatasourceNotConfigured) {
 			message = err.Error()
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": message,
-		})
+		InternalError(c, message)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": metrics,
-	})
+	Success(c, metrics)
 }
 
 // HostRiskStatistics 主机风险统计
@@ -578,7 +512,7 @@ func (h *HostsHandler) GetHostRiskStatistics(c *gin.Context) {
 	}
 	h.db.Model(&model.Alert{}).
 		Select("severity, COUNT(*) as count").
-		Where("host_id = ? AND status = ? AND category != ? AND (rule_id NOT LIKE ? OR rule_id = '')", hostID, model.AlertStatusActive, "agent_offline", "cel-%").
+		Where("host_id = ? AND status = ? AND source = ?", hostID, model.AlertStatusActive, model.AlertSourceBaseline).
 		Group("severity").
 		Scan(&alertResults)
 
@@ -623,10 +557,7 @@ func (h *HostsHandler) GetHostRiskStatistics(c *gin.Context) {
 		stats.Vulnerabilities.Total += r.Count
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": stats,
-	})
+	Success(c, stats)
 }
 
 // UpdateHostBusinessLineRequest 更新主机业务线请求
@@ -641,10 +572,7 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 
 	var req UpdateHostBusinessLineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "请求参数错误: " + err.Error(),
-		})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
@@ -652,17 +580,11 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 	var host model.Host
 	if err := h.db.First(&host, "host_id = ?", hostID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    404,
-				"message": "主机不存在",
-			})
+			NotFound(c, "主机不存在")
 			return
 		}
 		h.logger.Error("查询主机失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询主机失败",
-		})
+		InternalError(c, "查询主机失败")
 		return
 	}
 
@@ -671,17 +593,11 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 		var businessLine model.BusinessLine
 		if err := h.db.Where("code = ? AND enabled = ?", req.BusinessLine, true).First(&businessLine).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"code":    400,
-					"message": "业务线不存在或已禁用",
-				})
+				BadRequest(c, "业务线不存在或已禁用")
 				return
 			}
 			h.logger.Error("查询业务线失败", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    500,
-				"message": "查询业务线失败",
-			})
+			InternalError(c, "查询业务线失败")
 			return
 		}
 		// 使用业务线代码（code）而不是名称（name）
@@ -694,18 +610,11 @@ func (h *HostsHandler) UpdateHostBusinessLine(c *gin.Context) {
 	// 更新业务线
 	if err := h.db.Save(&host).Error; err != nil {
 		h.logger.Error("更新主机业务线失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "更新主机业务线失败",
-		})
+		InternalError(c, "更新主机业务线失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "更新成功",
-		"data":    host,
-	})
+	SuccessWithMessage(c, "更新成功", host)
 }
 
 // HostPluginResponse 主机插件响应
@@ -917,7 +826,7 @@ type RestartAgentRequest struct {
 func (h *HostsHandler) RestartAgent(c *gin.Context) {
 	var req RestartAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		BadRequest(c, "请求参数错误: "+err.Error())
+		BadRequest(c, "请求参数错误")
 		return
 	}
 

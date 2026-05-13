@@ -243,9 +243,9 @@ func (c *KubeBaselineChecker) checkDockerSocketMount(ctx context.Context) (strin
 		return "error", nil
 	}
 	socketPaths := map[string]bool{
-		"/var/run/docker.sock":     true,
+		"/var/run/docker.sock":            true,
 		"/run/containerd/containerd.sock": true,
-		"/var/run/crio/crio.sock":  true,
+		"/var/run/crio/crio.sock":         true,
 	}
 	var affected model.AffectedResources
 	for _, pod := range pods.Items {

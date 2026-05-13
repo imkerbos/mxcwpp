@@ -60,6 +60,7 @@ func (g *AlertGenerator) createAlert(hostID string, rule *model.DetectionRule, f
 		ResultID:    resultID,
 		HostID:      hostID,
 		RuleID:      fmt.Sprintf("cel-%d", rule.ID),
+		Source:      model.AlertSourceRuntime,
 		Severity:    rule.Severity,
 		Category:    categorize(rule),
 		Title:       rule.Name,

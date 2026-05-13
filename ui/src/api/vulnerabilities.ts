@@ -1,5 +1,5 @@
 import apiClient from './client'
-import type { VulnerabilityListResult } from './types'
+import type { Vulnerability, VulnerabilityListResult } from './types'
 import type { SecurityDBSyncRecord } from './antivirus'
 
 export interface RemediationCommand {
@@ -51,6 +51,10 @@ export interface DailyTrend {
 }
 
 export const vulnerabilitiesApi = {
+  get: (id: number) => {
+    return apiClient.get<Vulnerability>(`/vulnerabilities/${id}`)
+  },
+
   list: (params?: {
     page?: number
     page_size?: number

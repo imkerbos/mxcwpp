@@ -89,28 +89,34 @@ type installedSoftware struct {
 
 // SyncNVD 从 NVD 同步最近 N 天的 CVE 数据，补充 OSV.dev 尚未收录的最新漏洞
 func (v *VulnScanner) SyncNVD() error {
+	return v.SyncNVDWithSoftware(nil)
+}
+
+// SyncNVDWithSoftware 使用预加载的软件列表执行 NVD 同步，避免重复查询
+func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedSoftware) error {
 	v.logger.Info("开始 NVD 补充同步")
 
-	// 1. 查询已安装软件，构建 CPE product → 软件列表 的映射
-	var software []installedSoftware
-	if err := v.db.Table("software AS s").
-		Select("s.name, s.version, s.host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
-		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
-		Where("s.name != ''").
-		Scan(&software).Error; err != nil {
-		return fmt.Errorf("查询已安装软件失败: %w", err)
-	}
+	// 如果调用方未提供软件列表，自行查询
+	if softwareByName == nil {
+		var software []installedSoftware
+		if err := v.db.Table("software AS s").
+			Select("s.name, s.version, s.host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+			Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
+			Where("s.name != ''").
+			Scan(&software).Error; err != nil {
+			return fmt.Errorf("查询已安装软件失败: %w", err)
+		}
 
-	if len(software) == 0 {
-		v.logger.Info("没有已安装软件，跳过 NVD 同步")
-		return nil
-	}
+		if len(software) == 0 {
+			v.logger.Info("没有已安装软件，跳过 NVD 同步")
+			return nil
+		}
 
-	// 构建软件名 → 安装信息列表 的映射（小写化用于匹配）
-	softwareByName := make(map[string][]installedSoftware)
-	for _, sw := range software {
-		key := strings.ToLower(sw.Name)
-		softwareByName[key] = append(softwareByName[key], sw)
+		softwareByName = make(map[string][]installedSoftware)
+		for _, sw := range software {
+			key := strings.ToLower(sw.Name)
+			softwareByName[key] = append(softwareByName[key], sw)
+		}
 	}
 
 	v.logger.Info("已安装软件去重名称数", zap.Int("count", len(softwareByName)))
@@ -190,34 +196,38 @@ func (v *VulnScanner) SyncNVD() error {
 			continue
 		}
 
-		// 创建主机关联（去重）
+		// 创建主机关联（复用公共方法）
+		entries := make([]hostVulnEntry, 0)
 		hostSeen := make(map[string]struct{})
 		for _, sw := range matches {
 			if _, ok := hostSeen[sw.HostID]; ok {
 				continue
 			}
 			hostSeen[sw.HostID] = struct{}{}
-
-			hostVuln := &model.HostVulnerability{
-				VulnID:         vulnRecord.ID,
-				HostID:         sw.HostID,
-				Hostname:       sw.Hostname,
-				IP:             sw.IP,
-				CurrentVersion: sw.Version,
-				Status:         "unpatched",
-			}
-			v.db.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "vuln_id"}, {Name: "host_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"hostname", "ip", "current_version"}),
-			}).Create(hostVuln)
+			entries = append(entries, hostVulnEntry{
+				HostID:   sw.HostID,
+				Hostname: sw.Hostname,
+				IP:       sw.IP,
+				Version:  sw.Version,
+			})
 		}
+		v.upsertHostVulnsBatch(vulnRecord.ID, entries)
 
-		// 更新受影响主机数
-		var affectedCount int64
-		v.db.Model(&model.HostVulnerability{}).
-			Where("vuln_id = ? AND status = ?", vulnRecord.ID, "unpatched").
-			Count(&affectedCount)
-		v.db.Model(vulnRecord).Update("affected_hosts", affectedCount)
+		// 发送漏洞告警通知
+		if len(matches) > 0 {
+			go func(vuln *model.Vulnerability, sw installedSoftware) {
+				var affected int64
+				v.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vuln.ID, "unpatched").Count(&affected)
+				ns := NewNotificationService(v.db, v.logger)
+				_ = ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
+					HostID: sw.HostID, Hostname: sw.Hostname, IP: sw.IP,
+					CveID: vuln.CveID, Severity: vuln.Severity, CvssScore: vuln.CvssScore,
+					Component: vuln.Component, CurrentVersion: vuln.CurrentVersion,
+					FixedVersion: vuln.FixedVersion, Description: vuln.Description,
+					AffectedHosts: int(affected),
+				})
+			}(vulnRecord, matches[0])
+		}
 
 		existingCVEs[cveID] = struct{}{}
 		newCount++
@@ -484,10 +494,10 @@ func (v *VulnScanner) extractNVDFixedVersion(configs []nvdConfiguration) string 
 }
 
 func (v *VulnScanner) extractNVDReference(cve nvdCVE) string {
-	// 优先返回 NVD 自身链接
-	nvdURL := fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", cve.ID)
+	// 优先返回 CVE 的原始 advisory 链接
 	if len(cve.References) > 0 {
-		return nvdURL
+		return cve.References[0].URL
 	}
-	return nvdURL
+	// 无参考链接时回退到 NVD 详情页
+	return fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", cve.ID)
 }

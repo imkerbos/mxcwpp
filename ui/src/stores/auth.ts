@@ -19,10 +19,13 @@ export const useAuthStore = defineStore('auth', () => {
     return !!token.value
   }
 
+  const needChangePassword = ref(false)
+
   const login = async (data: LoginRequest) => {
     const response = await authApi.login(data)
     token.value = response.token
     user.value = response.user
+    needChangePassword.value = response.need_change_password || false
     localStorage.setItem(TOKEN_KEY, response.token)
     localStorage.setItem(USER_KEY, JSON.stringify(response.user))
     return response
@@ -60,6 +63,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     token,
     user,
+    needChangePassword,
     isAuthenticated,
     login,
     logout,

@@ -103,7 +103,11 @@ func (h *PortHandler) parsePortLine(line, protocol string) (*engine.PortAsset, e
 
 	// 解析本地地址（格式：IP:PORT，十六进制）
 	localAddr := fields[1]
-	portHex := strings.Split(localAddr, ":")[1]
+	addrParts := strings.Split(localAddr, ":")
+	if len(addrParts) < 2 {
+		return nil, fmt.Errorf("invalid local address format: %s", localAddr)
+	}
+	portHex := addrParts[1]
 	port, err := strconv.ParseInt(portHex, 16, 32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse port: %w", err)

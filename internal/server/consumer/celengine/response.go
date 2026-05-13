@@ -78,6 +78,10 @@ func (r *AutoResponder) Execute(hostID string, matchedRules []model.DetectionRul
 // writeAuditLog 记录自动响应审计日志
 func (r *AutoResponder) writeAuditLog(hostID string, rule model.DetectionRule, action ResponseAction, status string, errMsg string) {
 	if r.db == nil {
+		r.logger.Warn("审计日志写入跳过: 数据库连接未初始化",
+			zap.String("host_id", hostID),
+			zap.String("action", action.Type),
+			zap.String("rule", rule.Name))
 		return
 	}
 	detail := fmt.Sprintf("rule=%s severity=%s target=%s status=%s", rule.Name, rule.Severity, action.Target, status)
@@ -89,6 +93,7 @@ func (r *AutoResponder) writeAuditLog(hostID string, rule model.DetectionRule, a
 		Action:       action.Type,
 		ResourceType: "auto_response",
 		ResourceID:   fmt.Sprintf("%d", rule.ID),
+		Detail:       detail,
 		Path:         fmt.Sprintf("/host/%s/%s/%s", hostID, action.Type, action.Target),
 		IP:           "127.0.0.1",
 		StatusCode:   200,
@@ -97,7 +102,9 @@ func (r *AutoResponder) writeAuditLog(hostID string, rule model.DetectionRule, a
 		log.StatusCode = 500
 	}
 	if err := r.db.Create(log).Error; err != nil {
-		r.logger.Warn("自动响应审计日志写入失败", zap.Error(err))
+		r.logger.Error("自动响应审计日志写入失败",
+			zap.String("detail", detail),
+			zap.Error(err))
 	}
 }
 

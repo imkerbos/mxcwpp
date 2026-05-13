@@ -5,11 +5,11 @@ import "time"
 
 // DataType 常量
 const (
-	DataTypeScanTask       int32 = 7000 // 扫描任务（下行）
-	DataTypeScanResult     int32 = 7001 // 扫描结果（上行）
-	DataTypeScanComplete   int32 = 7002 // 扫描任务完成信号
-	DataTypeQuarantineCmd  int32 = 7003 // 隔离/删除命令（下行）
-	DataTypeQuarantineAck  int32 = 7004 // 隔离/删除结果（上行）
+	DataTypeScanTask      int32 = 7000 // 扫描任务（下行）
+	DataTypeScanResult    int32 = 7001 // 扫描结果（上行）
+	DataTypeScanComplete  int32 = 7002 // 扫描任务完成信号
+	DataTypeQuarantineCmd int32 = 7003 // 隔离/删除命令（下行）
+	DataTypeQuarantineAck int32 = 7004 // 隔离/删除结果（上行）
 )
 
 // ScanRequest 扫描请求

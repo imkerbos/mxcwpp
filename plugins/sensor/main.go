@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 	"time"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/plugins/sensor/engine"
@@ -28,13 +26,6 @@ var (
 )
 
 func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "PANIC in main: %v\nStack trace:\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	// 1. 初始化插件客户端
 	client, err := plugins.NewClient()
 	if err != nil {
@@ -44,7 +35,7 @@ func main() {
 	defer client.Close()
 
 	// 2. 初始化日志
-	logger, err := newPluginLogger()
+	logger, err := plugins.NewPluginLogger()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
@@ -126,14 +117,7 @@ func main() {
 
 // handleEvent 处理单个 Tetragon 事件，转换为 Record 并上报
 func handleEvent(event *engine.TetragonEvent, client *plugins.Client, logger *zap.Logger) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("PANIC in handleEvent",
-				zap.Any("panic", r),
-				zap.String("stack", string(debug.Stack())))
-			err = fmt.Errorf("panic in handleEvent: %v", r)
-		}
-	}()
+	defer plugins.RecoverAndLog(logger, "handleEvent")()
 
 	// 选择 DataType
 	dataType := engine.EventTypeToDataType(event.EventType)
@@ -187,15 +171,4 @@ func handleEvent(event *engine.TetragonEvent, client *plugins.Client, logger *za
 		zap.Int32("data_type", dataType))
 
 	return nil
-}
-
-// newPluginLogger 创建插件专用的 logger
-func newPluginLogger() (*zap.Logger, error) {
-	config := zap.NewProductionConfig()
-	config.OutputPaths = []string{"stderr"}
-	config.ErrorOutputPaths = []string{"stderr"}
-	config.Encoding = "json"
-	config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	return config.Build()
 }

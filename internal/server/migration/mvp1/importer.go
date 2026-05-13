@@ -371,7 +371,7 @@ func (imp *Importer) migratePolicies(ctx context.Context) (*TableReport, error) 
 			OSFamily:     model.StringArray(src.OSFamily),
 			OSVersion:    src.OSVersion,
 			Enabled:      src.Enabled,
-			GroupID:       src.GroupID,
+			GroupID:      src.GroupID,
 			RuntimeTypes: model.StringArray{"vm"},
 			CreatedAt:    parseTime(src.CreatedAt),
 			UpdatedAt:    parseTime(src.UpdatedAt),

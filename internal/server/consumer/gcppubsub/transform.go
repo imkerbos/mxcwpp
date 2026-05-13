@@ -9,10 +9,10 @@ import (
 
 // LogEntry Cloud Logging 日志条目结构（简化版，仅提取审计日志所需字段）
 type LogEntry struct {
-	InsertID  string       `json:"insertId"`
-	LogName   string       `json:"logName"`
-	Timestamp string       `json:"timestamp"`
-	Resource  LogResource  `json:"resource"`
+	InsertID     string          `json:"insertId"`
+	LogName      string          `json:"logName"`
+	Timestamp    string          `json:"timestamp"`
+	Resource     LogResource     `json:"resource"`
 	ProtoPayload json.RawMessage `json:"protoPayload"`
 	JSONPayload  json.RawMessage `json:"jsonPayload"`
 }

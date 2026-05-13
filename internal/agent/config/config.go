@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -14,10 +15,11 @@ import (
 // 本地配置：Agent 启动时从文件读取，用于连接 Server
 // 远程配置：由 Server 下发，支持热更新
 type Config struct {
-	Local        LocalConfig  `mapstructure:"local"`
-	Remote       RemoteConfig // 由 Server 下发，初始为空
-	BuildVersion string       // 构建时嵌入的版本（优先级最高）
-	SignPublicKey string      // Ed25519 公钥（base64），构建时嵌入
+	Local         LocalConfig  `mapstructure:"local"`
+	Remote        RemoteConfig // 由 Server 下发，初始为空
+	remoteMu      sync.RWMutex // 保护 Remote 字段的并发读写
+	BuildVersion  string       // 构建时嵌入的版本（优先级最高）
+	SignPublicKey string       // Ed25519 公钥（base64），构建时嵌入
 }
 
 // LocalConfig 是本地配置（最小配置）
@@ -157,34 +159,39 @@ func getServerHost() string {
 
 // UpdateRemoteConfig 更新远程配置（由 Server 下发）
 func (c *Config) UpdateRemoteConfig(remote *RemoteConfig) {
+	c.remoteMu.Lock()
+	defer c.remoteMu.Unlock()
 	c.Remote = *remote
 	c.Remote.Loaded = true
 }
 
 // GetHeartbeatInterval 获取心跳间隔（优先使用远程配置）
 func (c *Config) GetHeartbeatInterval() time.Duration {
+	c.remoteMu.RLock()
+	defer c.remoteMu.RUnlock()
 	if c.Remote.Loaded && c.Remote.HeartbeatInterval > 0 {
 		return c.Remote.HeartbeatInterval
 	}
-	// 默认值
 	return 60 * time.Second
 }
 
 // GetWorkDir 获取工作目录（优先使用远程配置）
 func (c *Config) GetWorkDir() string {
+	c.remoteMu.RLock()
+	defer c.remoteMu.RUnlock()
 	if c.Remote.Loaded && c.Remote.WorkDir != "" {
 		return c.Remote.WorkDir
 	}
-	// 默认值
 	return "/var/lib/mxsec-agent"
 }
 
 // GetProduct 获取产品名称（优先使用远程配置）
 func (c *Config) GetProduct() string {
+	c.remoteMu.RLock()
+	defer c.remoteMu.RUnlock()
 	if c.Remote.Loaded && c.Remote.Product != "" {
 		return c.Remote.Product
 	}
-	// 默认值
 	return "mxsec-agent"
 }
 
@@ -195,10 +202,11 @@ func (c *Config) GetVersion() string {
 		return c.BuildVersion
 	}
 	// 2. 使用远程配置的版本
+	c.remoteMu.RLock()
+	defer c.remoteMu.RUnlock()
 	if c.Remote.Loaded && c.Remote.Version != "" {
 		return c.Remote.Version
 	}
-	// 3. 默认值
 	return "1.0.0"
 }
 

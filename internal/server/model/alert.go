@@ -10,6 +10,17 @@ const (
 	AlertStatusIgnored  AlertStatus = "ignored"  // 已忽略
 )
 
+// AlertSource 告警来源常量
+const (
+	AlertSourceBaseline      = "baseline"      // 基线安全
+	AlertSourceRuntime       = "runtime"       // 运行时检测
+	AlertSourceAgent         = "agent"         // Agent 状态
+	AlertSourceVulnerability = "vulnerability" // 漏洞管理
+	AlertSourceFIM           = "fim"           // 文件完整性
+	AlertSourceVirus         = "virus"         // 病毒查杀
+	AlertSourceKube          = "kube"          // 容器安全
+)
+
 // Alert 告警模型
 type Alert struct {
 	ID             uint        `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
@@ -17,7 +28,8 @@ type Alert struct {
 	HostID         string      `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
 	RuleID         string      `gorm:"column:rule_id;type:varchar(64);not null;index" json:"rule_id"`
 	PolicyID       string      `gorm:"column:policy_id;type:varchar(64);index" json:"policy_id"`
-	Severity       string      `gorm:"column:severity;type:varchar(20);not null;index" json:"severity"` // critical, high, medium, low
+	Source         string      `gorm:"column:source;type:varchar(20);not null;default:'';index" json:"source"` // 告警来源: baseline, runtime, agent, vulnerability, fim, virus, kube
+	Severity       string      `gorm:"column:severity;type:varchar(20);not null;index" json:"severity"`        // critical, high, medium, low
 	Category       string      `gorm:"column:category;type:varchar(50);index" json:"category"`
 	Title          string      `gorm:"column:title;type:varchar(255);not null" json:"title"`
 	Description    string      `gorm:"column:description;type:text" json:"description"`

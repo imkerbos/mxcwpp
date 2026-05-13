@@ -86,8 +86,12 @@ func (c *KubeBaselineChecker) checkNodeKernelVersion(ctx context.Context) (strin
 		kernel := node.Status.NodeInfo.KernelVersion
 		parts := strings.SplitN(kernel, ".", 3)
 		if len(parts) >= 2 {
-			major, _ := strconv.Atoi(parts[0])
-			minor, _ := strconv.Atoi(parts[1])
+			major, errMajor := strconv.Atoi(parts[0])
+			minor, errMinor := strconv.Atoi(strings.TrimRight(parts[1], "+-abcdefghijklmnopqrstuvwxyz"))
+			if errMajor != nil || errMinor != nil {
+				// 无法解析的内核版本跳过，避免误报
+				continue
+			}
 			if major < 4 || (major == 4 && minor < 19) {
 				affected = append(affected, model.AffectedResource{
 					Kind: "Node", Name: fmt.Sprintf("%s (kernel:%s)", node.Name, kernel),

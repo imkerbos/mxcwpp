@@ -48,12 +48,14 @@ type PluginsConfig struct {
 
 // ServerConfig 是服务器配置
 type ServerConfig struct {
-	GRPC        GRPCConfig `mapstructure:"grpc"`
-	HTTP        HTTPConfig `mapstructure:"http"`
-	JWTSecret   string     `mapstructure:"jwt_secret"`   // JWT 密钥，用于生成和验证 Token
-	ManagerAddr string     `mapstructure:"manager_addr"` // AC 向 Manager SD 注册的 Manager HTTP 地址（如 http://manager:8080）
-	InstanceID  string     `mapstructure:"instance_id"`  // AC 实例唯一 ID（多实例部署时区分，留空则用 hostname）
-	ExternalURL string     `mapstructure:"external_url"` // 外网访问地址（如 https://mxsec.example.com），用于拼接 K8s Audit Webhook URL
+	GRPC           GRPCConfig `mapstructure:"grpc"`
+	HTTP           HTTPConfig `mapstructure:"http"`
+	JWTSecret      string     `mapstructure:"jwt_secret"`      // JWT 密钥，用于生成和验证 Token
+	ManagerAddr    string     `mapstructure:"manager_addr"`    // AC 向 Manager SD 注册的 Manager HTTP 地址（如 http://manager:8080）
+	InstanceID     string     `mapstructure:"instance_id"`     // AC 实例唯一 ID（多实例部署时区分，留空则用 hostname）
+	ExternalURL    string     `mapstructure:"external_url"`    // 外网访问地址（如 https://mxsec.example.com），用于拼接 K8s Audit Webhook URL
+	CORSOrigins    []string   `mapstructure:"cors_origins"`    // CORS 允许的 Origin 列表（为空时默认仅允许同源访问）
+	InternalSecret string     `mapstructure:"internal_secret"` // AC 内部通信共享密钥（为空时不验证）
 }
 
 // GRPCConfig 是 gRPC 服务配置
@@ -110,7 +112,7 @@ func (c MySQLConfig) DSN() string {
 	// 使用 url.QueryEscape 编码 loc 参数
 	locEncoded := url.QueryEscape(loc)
 
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%v&loc=%s&allowNativePasswords=true&allowCleartextPasswords=true",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%v&loc=%s&allowNativePasswords=true",
 		c.User, c.Password, c.Host, c.Port, c.Database, c.Charset, c.ParseTime, locEncoded)
 }
 
@@ -222,6 +224,9 @@ type MetricsConfig struct {
 	MySQL MySQLMetricsConfig `mapstructure:"mysql"`
 	// Prometheus 配置
 	Prometheus PrometheusConfig `mapstructure:"prometheus"`
+	// BasicAuth 用户名/密码，用于保护 /metrics 端点（留空则不保护）
+	BasicAuthUser     string `mapstructure:"basic_auth_user"`
+	BasicAuthPassword string `mapstructure:"basic_auth_password"`
 }
 
 // MySQLMetricsConfig 是 MySQL 监控指标存储配置
@@ -330,7 +335,7 @@ func setDefaults(cfg *Config, logFileSet bool) {
 		cfg.Database.MySQL.MaxIdleConns = 10
 	}
 	if cfg.Database.MySQL.MaxOpenConns == 0 {
-		cfg.Database.MySQL.MaxOpenConns = 100
+		cfg.Database.MySQL.MaxOpenConns = 50
 	}
 	if cfg.Database.MySQL.ConnMaxLifetime == 0 {
 		cfg.Database.MySQL.ConnMaxLifetime = time.Hour
