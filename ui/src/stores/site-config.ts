@@ -47,7 +47,7 @@ export const useSiteConfigStore = defineStore('siteConfig', () => {
     // 更新 favicon
     const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement
     if (link) {
-      link.href = siteLogo.value || '/logo.png'
+      link.href = siteLogo.value || '/favicon.png'
     }
   }
 

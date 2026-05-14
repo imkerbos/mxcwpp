@@ -7,11 +7,9 @@
     <div class="license-card">
       <!-- 授权状态 -->
       <div class="license-status">
-        <div class="status-icon">
-          <CheckCircleFilled />
-        </div>
-        <h3 class="status-title">开源版本</h3>
-        <p class="status-desc">当前版本为开源版本，无需授权</p>
+        <img src="/logo-wide.png" alt="MxSec Platform" class="status-logo" />
+        <h3 class="status-title">社区版 · Community Edition</h3>
+        <p class="status-desc">{{ appVersion }} · AGPL-3.0 · 开源免费</p>
       </div>
 
       <!-- 信息区域 -->
@@ -21,9 +19,24 @@
             <InfoCircleOutlined />
             <span>版本信息</span>
           </div>
-          <p class="section-content">
-            Matrix Cloud Security Platform 是一个开源的安全基线检查平台，当前版本为社区版（Community Edition）。
-          </p>
+          <div class="info-table">
+            <div class="info-row">
+              <span class="info-label">产品名称</span>
+              <span class="info-value">矩阵云安全平台（MxSec Platform）</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">当前版本</span>
+              <span class="info-value">{{ appVersion }} Community Edition</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">开源协议</span>
+              <span class="info-value">AGPL-3.0</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">系统架构</span>
+              <span class="info-value">Agent + Plugin + Server（分布式）</span>
+            </div>
+          </div>
         </div>
 
         <a-divider />
@@ -36,15 +49,27 @@
           <div class="feature-list">
             <div class="feature-item">
               <CheckOutlined class="feature-check" />
-              <span>开源版本完全免费使用，无需任何授权</span>
+              <span>源码完全开放，免费使用、修改和分发</span>
             </div>
             <div class="feature-item">
               <CheckOutlined class="feature-check" />
-              <span>支持所有核心功能，包括基线检查、资产采集、策略管理等</span>
+              <span>不限制 Agent 接入数量、用户数量和数据存储量</span>
             </div>
             <div class="feature-item">
               <CheckOutlined class="feature-check" />
-              <span>可自由部署和使用，无功能限制</span>
+              <span>所有安全能力全部开放：安全基线、告警管理、FIM、容器安全、病毒查杀、漏洞管理、威胁情报、自动响应等</span>
+            </div>
+            <div class="feature-item">
+              <CheckOutlined class="feature-check" />
+              <span>修改和衍生作品必须以相同 AGPL-3.0 协议开源，并保留版权信息</span>
+            </div>
+            <div class="feature-item">
+              <CheckOutlined class="feature-check" />
+              <span>作为网络服务提供时，必须向用户公开完整源码</span>
+            </div>
+            <div class="feature-item">
+              <CloseOutlined class="feature-close" />
+              <span>商业闭源使用（售卖、托管服务、集成至商业产品等）需联系获取商业授权</span>
             </div>
           </div>
         </div>
@@ -64,8 +89,12 @@
               </a>
             </div>
             <div class="link-item">
+              <MailOutlined />
+              <span>商业授权联系：0xkerbos@gmail.com</span>
+            </div>
+            <div class="link-item">
               <UserOutlined />
-              <span>Powered by Kerbos</span>
+              <span>Maintained by Kerbos</span>
             </div>
           </div>
         </div>
@@ -75,15 +104,29 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import {
-  CheckCircleFilled,
   CheckOutlined,
+  CloseOutlined,
+  MailOutlined,
   InfoCircleOutlined,
   SafetyCertificateOutlined,
   LinkOutlined,
   GithubOutlined,
   UserOutlined,
 } from '@ant-design/icons-vue'
+import apiClient from '@/api/client'
+
+const appVersion = ref('--')
+
+onMounted(async () => {
+  try {
+    const response = await apiClient.get<{ version: string; status: string }>('/health')
+    appVersion.value = response.version ? `v${response.version}` : '--'
+  } catch {
+    appVersion.value = '--'
+  }
+})
 </script>
 
 <style scoped>
@@ -92,7 +135,7 @@ import {
 }
 
 .page-header {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-header h2 {
@@ -102,35 +145,34 @@ import {
 }
 
 .license-card {
-  max-width: 680px;
+  max-width: 860px;
   margin: 0 auto;
 }
 
 /* 授权状态 */
 .license-status {
   text-align: center;
-  padding: 48px 24px 40px;
+  padding: 24px 24px 20px;
   background: linear-gradient(135deg, #f6ffed 0%, #E8F3FF 100%);
   border-radius: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 16px;
 }
 
-.status-icon {
-  font-size: 56px;
-  color: #00B42A;
-  margin-bottom: 16px;
-  line-height: 1;
+.status-logo {
+  height: 56px;
+  object-fit: contain;
+  margin-bottom: 10px;
 }
 
 .status-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   color: #262626;
-  margin: 0 0 8px 0;
+  margin: 0 0 4px 0;
 }
 
 .status-desc {
-  font-size: 15px;
+  font-size: 14px;
   color: rgba(0, 0, 0, 0.45);
   margin: 0;
 }
@@ -139,56 +181,86 @@ import {
 .license-details {
   background: #fff;
   border-radius: 12px;
-  padding: 32px;
+  padding: 20px 24px;
   border: 1px solid #f0f0f0;
 }
 
+.license-details :deep(.ant-divider) {
+  margin: 16px 0;
+}
+
 .detail-section {
-  padding: 4px 0;
+  padding: 0;
 }
 
 .section-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #262626;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .section-title :deep(.anticon) {
   color: #165DFF;
-  font-size: 18px;
+  font-size: 16px;
 }
 
-.section-content {
-  color: #595959;
-  line-height: 1.8;
-  margin: 0;
-  padding-left: 26px;
+/* 版本信息表格 */
+.info-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.info-label {
+  width: 80px;
+  flex-shrink: 0;
+  color: #86909C;
+}
+
+.info-value {
+  color: #1D2129;
 }
 
 /* 功能列表 */
 .feature-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-left: 26px;
+  gap: 9px;
+  padding-left: 24px;
 }
 
 .feature-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   color: #595959;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .feature-check {
   color: #00B42A;
-  font-size: 14px;
-  margin-top: 4px;
+  font-size: 13px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.feature-close {
+  color: #F53F3F;
+  font-size: 13px;
+  margin-top: 3px;
   flex-shrink: 0;
 }
 
@@ -196,20 +268,20 @@ import {
 .link-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-left: 26px;
+  gap: 8px;
+  padding-left: 24px;
 }
 
 .link-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: #595959;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .link-item :deep(.anticon) {
-  font-size: 16px;
+  font-size: 14px;
   color: #86909C;
 }
 
