@@ -18,7 +18,7 @@
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="remediation" tab="漏洞修复" />
       <a-tab-pane key="kube" tab="容器安全" />
-      <a-tab-pane key="runtime" tab="运行时检测" />
+      <a-tab-pane key="runtime" tab="EDR" />
     </a-tabs>
 
     <!-- 基线检查 Tab（现有全部内容） -->

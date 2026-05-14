@@ -580,7 +580,7 @@
               <div class="risk-overview-row second-row">
                 <div class="risk-card">
                   <div class="risk-card-header">
-                    <span class="risk-card-title">应用运行时安全告警</span>
+                    <span class="risk-card-title">EDR 告警</span>
                     <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'runtime')">详情</a-button>
                   </div>
                   <div class="risk-card-content">

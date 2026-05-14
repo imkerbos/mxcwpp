@@ -294,8 +294,8 @@ const loadData = async () => {
     })
     report.value = data
   } catch (error) {
-    console.error('加载运行时检测报告失败:', error)
-    message.error('加载运行时检测报告失败')
+    console.error('加载 EDR 报告失败:', error)
+    message.error('加载 EDR 报告失败')
   } finally {
     loading.value = false
   }

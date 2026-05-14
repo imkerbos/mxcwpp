@@ -420,7 +420,7 @@ const exportPDF = async () => {
   try {
     const period = report.value.meta.reportPeriod.replace(/\s/g, '')
     const dateStr = new Date().toISOString().split('T')[0]
-    const filename = `运行时检测报告-${period}_${dateStr}.pdf`
+    const filename = `EDR报告-${period}_${dateStr}.pdf`
     reportContent.value.classList.add('pdf-exporting')
     const options = {
       margin: [10, 10, 10, 10] as [number, number, number, number],

@@ -33,7 +33,7 @@
         @change="handleAlertTypeChange"
       >
         <a-select-option value="baseline">基线安全</a-select-option>
-        <a-select-option value="runtime">运行时检测</a-select-option>
+        <a-select-option value="runtime">EDR</a-select-option>
         <a-select-option value="agent">Agent 状态</a-select-option>
         <a-select-option value="vulnerability">漏洞管理</a-select-option>
         <a-select-option value="fim">文件完整性</a-select-option>
@@ -442,7 +442,7 @@ const getSourceColor = (source: string) => {
 const getSourceText = (source: string) => {
   const texts: Record<string, string> = {
     baseline: '基线安全',
-    runtime: '运行时检测',
+    runtime: 'EDR',
     agent: 'Agent 状态',
     vulnerability: '漏洞管理',
     fim: '文件完整性',

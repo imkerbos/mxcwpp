@@ -238,12 +238,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Virus/Quarantine.vue'),
         meta: { title: '文件隔离箱' },
       },
-      // 运行时告警事件
+      // EDR 告警事件
       {
         path: 'detection/events',
         name: 'RuntimeAlerts',
         component: () => import('@/views/RuntimeAlerts/index.vue'),
-        meta: { title: '运行时告警事件' },
+        meta: { title: 'EDR 告警事件' },
       },
       // 检测规则管理
       {

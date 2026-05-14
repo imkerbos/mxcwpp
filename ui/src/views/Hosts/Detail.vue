@@ -56,7 +56,7 @@
       <a-tab-pane key="baseline" :tab="`基线风险(${baselineCount})`">
         <BaselineRisk :host-id="hostId" />
       </a-tab-pane>
-      <a-tab-pane key="runtime" :tab="`运行时安全告警(${runtimeAlertCount})`">
+      <a-tab-pane key="runtime" :tab="`EDR 告警(${runtimeAlertCount})`">
         <RuntimeAlerts :host-id="hostId" />
       </a-tab-pane>
       <a-tab-pane key="antivirus" :tab="`病毒查杀(${antivirusCount})`">

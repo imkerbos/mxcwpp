@@ -112,7 +112,7 @@ export const menuConfig: MenuItem[] = [
   },
   {
     key: 'runtime-detection',
-    title: '运行时检测',
+    title: 'EDR',
     icon: ThunderboltOutlined,
     children: [
       { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },

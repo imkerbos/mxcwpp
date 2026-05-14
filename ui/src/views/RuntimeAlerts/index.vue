@@ -1,7 +1,7 @@
 <template>
   <div class="runtime-alerts-page">
     <div class="page-header">
-      <h2 class="page-title">运行时告警事件</h2>
+      <h2 class="page-title">EDR 告警事件</h2>
     </div>
 
     <!-- 统计卡片 -->

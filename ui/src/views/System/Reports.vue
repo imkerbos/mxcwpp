@@ -23,7 +23,7 @@
       <a-tab-pane key="antivirus" tab="病毒查杀" />
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="kube" tab="容器安全" />
-      <a-tab-pane key="runtime" tab="运行时检测" />
+      <a-tab-pane key="runtime" tab="EDR" />
     </a-tabs>
 
     <template v-if="activeTab === 'overview'">
@@ -521,7 +521,7 @@ const hostRiskChartOption = computed<EChartsOption>(() => ({
   },
   xAxis: {
     type: 'category',
-    data: ['主机告警', '运行时告警', '高危漏洞', '病毒文件', '高危基线'],
+    data: ['主机告警', 'EDR 告警', '高危漏洞', '病毒文件', '高危基线'],
     axisLabel: {
       rotate: 45,
       interval: 0,
