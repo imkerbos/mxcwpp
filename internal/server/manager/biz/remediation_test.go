@@ -18,7 +18,7 @@ func TestDetectPackageType(t *testing.T) {
 		{"pkg:deb/debian/nginx@1.25.0?arch=amd64", "deb"},
 		{"pkg:deb/debian/openssh-server@8.2p1~1?arch=amd64", "deb"},
 		{"", ""},
-		{"pkg:npm/@angular/core@12.0.0", ""},
+		{"pkg:npm/@angular/core@12.0.0", "npm"},
 	}
 
 	for _, tt := range tests {

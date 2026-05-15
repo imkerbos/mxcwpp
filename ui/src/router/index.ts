@@ -225,6 +225,24 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/VulnRemediation/TaskDetail.vue'),
         meta: { title: '任务详情' },
       },
+      {
+        path: 'vuln-remediation/policies',
+        name: 'RemediationPolicies',
+        component: () => import('@/views/VulnRemediation/Policies.vue'),
+        meta: { title: '修复策略' },
+      },
+      {
+        path: 'vuln-scan-schedules',
+        name: 'VulnScanSchedules',
+        component: () => import('@/views/VulnList/ScanSchedules.vue'),
+        meta: { title: '扫描计划' },
+      },
+      {
+        path: 'vuln-db-manage',
+        name: 'VulnDBManage',
+        component: () => import('@/views/System/VulnDBManage.vue'),
+        meta: { title: '漏洞库管理' },
+      },
       // 病毒查杀
       {
         path: 'virus/scan',
@@ -241,8 +259,8 @@ const routes: RouteRecordRaw[] = [
       // EDR 告警事件
       {
         path: 'detection/events',
-        name: 'RuntimeAlerts',
-        component: () => import('@/views/RuntimeAlerts/index.vue'),
+        name: 'EDRAlerts',
+        component: () => import('@/views/EDRAlerts/index.vue'),
         meta: { title: 'EDR 告警事件' },
       },
       // 检测规则管理
@@ -342,7 +360,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Kube/Whitelist.vue'),
         meta: { title: '容器白名单' },
       },
-      // RASP 已弃用，由 Tetragon eBPF 运行时检测替代
+      {
+        path: 'kube/image-scan',
+        name: 'ImageScan',
+        component: () => import('@/views/Kube/ImageScan.vue'),
+        meta: { title: '镜像扫描' },
+      },
+      // RASP 已弃用，由 Tetragon eBPF EDR 替代
       // 保留路由兼容旧书签，重定向到检测规则页
       {
         path: 'rasp/apps',
