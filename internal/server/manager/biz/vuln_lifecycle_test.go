@@ -54,6 +54,13 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			current_version TEXT,
 			fixed_version   TEXT,
 			reference_url   TEXT,
+			cnvd_id         TEXT,
+			cnnvd_id        TEXT,
+			has_exploit     INTEGER DEFAULT 0,
+			in_kev          INTEGER DEFAULT 0,
+			exploit_ref     TEXT,
+			priority_score  REAL DEFAULT 0,
+			exposure_score  REAL DEFAULT 0,
 			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -101,6 +108,8 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			vendor       TEXT,
 			install_time TEXT,
 			purl         TEXT,
+			ecosystem    TEXT,
+			source_file  TEXT,
 			collected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,

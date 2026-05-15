@@ -63,6 +63,9 @@ export const vulnerabilitiesApi = {
     severity?: string
     status?: string
     component?: string
+    exploit_status?: string
+    priority?: string
+    sort?: string
   }) => {
     return apiClient.get<VulnerabilityListResult>('/vulnerabilities', { params })
   },

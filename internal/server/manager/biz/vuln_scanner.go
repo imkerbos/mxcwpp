@@ -136,6 +136,32 @@ func (v *VulnScanner) SyncOnly() error {
 			lastErr = err
 		}
 	}
+	// CNVD 同步
+	if err := v.SyncCNVD(); err != nil {
+		v.logger.Warn("CNVD 同步失败", zap.Error(err))
+		if lastErr == nil {
+			lastErr = err
+		}
+	}
+	// CNNVD 编号补齐
+	if err := v.SyncCNNVD(); err != nil {
+		v.logger.Warn("CNNVD 同步失败", zap.Error(err))
+		if lastErr == nil {
+			lastErr = err
+		}
+	}
+	// ExploitDB + CISA KEV 利用标记
+	if err := v.SyncExploit(); err != nil {
+		v.logger.Warn("Exploit 同步失败", zap.Error(err))
+		if lastErr == nil {
+			lastErr = err
+		}
+	}
+	// 重算漏洞优先级
+	pc := NewPriorityCalculator(v.db, v.logger)
+	if err := pc.RecalculateAll(); err != nil {
+		v.logger.Warn("优先级重算失败", zap.Error(err))
+	}
 
 	duration := int(time.Since(startedAt).Seconds())
 	updates := map[string]interface{}{"duration": duration}
@@ -341,6 +367,17 @@ func (v *VulnScanner) doScanAll() error {
 	// Red Hat Security Data 补充同步
 	if err := v.SyncRedHatWithSoftware(softwareByName); err != nil {
 		v.logger.Warn("Red Hat 补充同步失败（不影响其他数据）", zap.Error(err))
+	}
+
+	// Exploit 利用标记同步
+	if err := v.SyncExploit(); err != nil {
+		v.logger.Warn("Exploit 标记同步失败（不影响其他数据）", zap.Error(err))
+	}
+
+	// 重算漏洞优先级
+	pc := NewPriorityCalculator(v.db, v.logger)
+	if err := pc.RecalculateAll(); err != nil {
+		v.logger.Warn("优先级重算失败（不影响扫描结果）", zap.Error(err))
 	}
 
 	return nil

@@ -24,11 +24,15 @@ func NewVulnerabilitiesHandler(db *gorm.DB, logger *zap.Logger) *Vulnerabilities
 }
 
 type vulnerabilityListFilter struct {
-	HostID    string
-	Search    string
-	Severity  string
-	Status    string
-	Component string
+	HostID        string
+	Search        string
+	Severity      string
+	Status        string
+	Component     string
+	ExploitStatus string // has_exploit / in_kev / none
+	Ecosystem     string // OS / Go / npm / PyPI / Maven / Cargo
+	Priority      string // high / medium-high / medium / low
+	Sort          string // priority_score / cvss_score
 }
 
 func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityListFilter) *gorm.DB {
@@ -49,8 +53,10 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 			"vulnerabilities.component LIKE ?",
 			"vulnerabilities.current_version LIKE ?",
 			"vulnerabilities.fixed_version LIKE ?",
+			"vulnerabilities.cnvd_id LIKE ?",
+			"vulnerabilities.cnnvd_id LIKE ?",
 		}
-		args := []interface{}{pattern, pattern, pattern, pattern, pattern, pattern}
+		args := []interface{}{pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern}
 		if filter.HostID != "" {
 			clauses = append(clauses, "hv.hostname LIKE ?", "hv.ip LIKE ?", "hv.current_version LIKE ?")
 			args = append(args, pattern, pattern, pattern)
@@ -69,6 +75,28 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		} else {
 			query = query.Where("vulnerabilities.status = ?", filter.Status)
 		}
+	}
+
+	// 利用状态筛选
+	switch filter.ExploitStatus {
+	case "in_kev":
+		query = query.Where("vulnerabilities.in_kev = ?", true)
+	case "has_exploit":
+		query = query.Where("vulnerabilities.has_exploit = ? AND vulnerabilities.in_kev = ?", true, false)
+	case "none":
+		query = query.Where("vulnerabilities.has_exploit = ?", false)
+	}
+
+	// 优先级筛选
+	switch filter.Priority {
+	case "high":
+		query = query.Where("vulnerabilities.priority_score >= ?", 0.75)
+	case "medium-high":
+		query = query.Where("vulnerabilities.priority_score >= ? AND vulnerabilities.priority_score < ?", 0.50, 0.75)
+	case "medium":
+		query = query.Where("vulnerabilities.priority_score >= ? AND vulnerabilities.priority_score < ?", 0.25, 0.50)
+	case "low":
+		query = query.Where("vulnerabilities.priority_score < ?", 0.25)
 	}
 
 	return query
@@ -117,11 +145,14 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	filter := vulnerabilityListFilter{
-		HostID:    strings.TrimSpace(c.Query("host_id")),
-		Search:    strings.TrimSpace(c.Query("search")),
-		Severity:  strings.TrimSpace(c.Query("severity")),
-		Status:    strings.TrimSpace(c.Query("status")),
-		Component: strings.TrimSpace(c.Query("component")),
+		HostID:        strings.TrimSpace(c.Query("host_id")),
+		Search:        strings.TrimSpace(c.Query("search")),
+		Severity:      strings.TrimSpace(c.Query("severity")),
+		Status:        strings.TrimSpace(c.Query("status")),
+		Component:     strings.TrimSpace(c.Query("component")),
+		ExploitStatus: strings.TrimSpace(c.Query("exploit_status")),
+		Priority:      strings.TrimSpace(c.Query("priority")),
+		Sort:          strings.TrimSpace(c.Query("sort")),
 	}
 	if page <= 0 {
 		page = 1
@@ -150,9 +181,18 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		}
 		return db.Order("updated_at DESC")
 	}
+	// 排序
+	orderClause := "vulnerabilities.discovered_at DESC"
+	switch filter.Sort {
+	case "priority_score":
+		orderClause = "vulnerabilities.priority_score DESC"
+	case "cvss_score":
+		orderClause = "vulnerabilities.cvss_score DESC"
+	}
+
 	if err := query.Preload("Hosts", preloadHosts).
 		Offset(offset).Limit(pageSize).
-		Order("vulnerabilities.discovered_at DESC").
+		Order(orderClause).
 		Find(&vulns).Error; err != nil {
 		h.logger.Error("查询漏洞列表失败", zap.Error(err))
 		InternalError(c, "查询漏洞列表失败")
