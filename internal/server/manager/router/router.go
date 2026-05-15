@@ -681,6 +681,16 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-tasks/batch-retry", taskHandler.BatchRetry)
 	router.POST("/remediation-tasks/batch-cancel", taskHandler.BatchCancel)
 
+	// 扫描计划管理
+	vulnScanner := biz.NewVulnScanner(db, logger)
+	scanScheduler := biz.NewScanScheduler(db, logger, vulnScanner)
+	schedHandler := api.NewScanSchedulesHandler(db, logger, scanScheduler)
+	router.GET("/vulnerabilities/schedules", schedHandler.ListSchedules)
+	router.POST("/vulnerabilities/schedules", schedHandler.CreateSchedule)
+	router.PUT("/vulnerabilities/schedules/:id", schedHandler.UpdateSchedule)
+	router.DELETE("/vulnerabilities/schedules/:id", schedHandler.DeleteSchedule)
+	router.POST("/vulnerabilities/schedules/:id/toggle", schedHandler.ToggleSchedule)
+
 	// 漏洞库缓存管理
 	cacheHandler := api.NewVulnCacheHandler(db, logger)
 	router.GET("/vulnerabilities/cache/stats", cacheHandler.GetStats)
