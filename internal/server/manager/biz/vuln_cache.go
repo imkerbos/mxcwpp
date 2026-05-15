@@ -91,41 +91,43 @@ func (c *VulnCacheManager) PutCache(osvID string, rawJSON []byte) error {
 		FirstOrCreate(&cache).Error
 }
 
-// GetStats 获取缓存统计信息
+// GetStats 获取漏洞库统计信息（基于 vulnerabilities 表）
 func (c *VulnCacheManager) GetStats() (*CacheStats, error) {
 	stats := &CacheStats{
 		Mode: string(c.mode),
 	}
 
-	now := time.Now()
+	var result struct {
+		Total       int64      `gorm:"column:total"`
+		Unpatched   int64      `gorm:"column:unpatched"`
+		Patched     int64      `gorm:"column:patched"`
+		LastUpdated *time.Time `gorm:"column:last_updated"`
+	}
+	c.db.Model(&model.Vulnerability{}).Select(
+		"COUNT(*) as total, " +
+			"SUM(CASE WHEN status != 'patched' THEN 1 ELSE 0 END) as unpatched, " +
+			"SUM(CASE WHEN status = 'patched' THEN 1 ELSE 0 END) as patched, " +
+			"MAX(updated_at) as last_updated",
+	).Scan(&result)
 
-	// 总条数
-	c.db.Model(&model.VulnCache{}).Count(&stats.TotalCount)
-
-	// 有效条数
-	c.db.Model(&model.VulnCache{}).Where("expired_at > ?", now).Count(&stats.ValidCount)
-
-	// 过期条数
-	stats.ExpiredCount = stats.TotalCount - stats.ValidCount
-
-	// 最后更新时间
-	var lastCached *time.Time
-	c.db.Model(&model.VulnCache{}).Select("MAX(cached_at)").Scan(&lastCached)
-	if lastCached != nil {
-		lt := model.ToLocalTime(*lastCached)
+	stats.TotalCount = result.Total
+	stats.UnpatchedCount = result.Unpatched
+	stats.PatchedCount = result.Patched
+	if result.LastUpdated != nil {
+		lt := model.ToLocalTime(*result.LastUpdated)
 		stats.LastUpdated = &lt
 	}
 
 	return stats, nil
 }
 
-// CacheStats 缓存统计
+// CacheStats 漏洞库统计
 type CacheStats struct {
-	Mode         string           `json:"mode"`
-	TotalCount   int64            `json:"totalCount"`
-	ValidCount   int64            `json:"validCount"`
-	ExpiredCount int64            `json:"expiredCount"`
-	LastUpdated  *model.LocalTime `json:"lastUpdated"`
+	Mode           string           `json:"mode"`
+	TotalCount     int64            `json:"totalCount"`
+	UnpatchedCount int64            `json:"unpatchedCount"`
+	PatchedCount   int64            `json:"patchedCount"`
+	LastUpdated    *model.LocalTime `json:"lastUpdated"`
 }
 
 // PurgeExpired 清理过期缓存

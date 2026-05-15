@@ -181,6 +181,15 @@ func (s *ScanScheduler) executeSchedule(scheduleID uint, scanType string) {
 	s.db.Model(&model.ScanSchedule{}).Where("id = ?", scheduleID).
 		Update("last_run_at", now)
 
+	// 创建执行记录
+	exec := model.ScanScheduleExecution{
+		ScheduleID: scheduleID,
+		ScanType:   scanType,
+		Status:     "running",
+		StartedAt:  now,
+	}
+	s.db.Create(&exec)
+
 	var err error
 	switch scanType {
 	case "full_scan":
@@ -189,12 +198,30 @@ func (s *ScanScheduler) executeSchedule(scheduleID uint, scanType string) {
 		err = s.scanner.SyncOnly()
 	default:
 		s.logger.Warn("未知的扫描类型", zap.String("type", scanType))
+		finishedAt := model.Now()
+		s.db.Model(&exec).Updates(map[string]any{
+			"status":      "failed",
+			"error_msg":   "未知的扫描类型: " + scanType,
+			"finished_at": finishedAt,
+		})
 		return
 	}
 
-	if err != nil {
-		s.logger.Error("定时扫描执行失败", zap.Uint("schedule_id", scheduleID), zap.Error(err))
+	// 更新执行记录
+	finishedAt := model.Now()
+	duration := int(time.Since(time.Time(now)).Seconds())
+	updates := map[string]any{
+		"finished_at": finishedAt,
+		"duration":    duration,
 	}
+	if err != nil {
+		updates["status"] = "failed"
+		updates["error_msg"] = err.Error()
+		s.logger.Error("定时扫描执行失败", zap.Uint("schedule_id", scheduleID), zap.Error(err))
+	} else {
+		updates["status"] = "success"
+	}
+	s.db.Model(&exec).Updates(updates)
 
 	// 更新下次执行时间
 	entry, ok := s.entryMap[scheduleID]

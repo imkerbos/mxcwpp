@@ -200,7 +200,7 @@ CVSS 基础分 + 运行状态 + 对外暴露 + 补丁可用性加权评分，前
 
 | 决策 | 选型 | 理由 |
 |------|------|------|
-| 运行时检测 | Tetragon（非自研 eBPF） | CNCF 生产就绪，避免内核兼容性问题 |
+| EDR 检测 | Tetragon（非自研 eBPF） | CNCF 生产就绪，避免内核兼容性问题 |
 | 规则引擎 | CEL-Go（非 Falco/Sigma） | 嵌入式，无独立进程开销 |
 | 漏洞库 | OSV.dev + NVD + Red Hat（已接入）；CNVD + CNNVD + ExploitDB/KEV（待接入） | 多源分层：OSV 主扫描，NVD/Red Hat 补充，CNVD/CNNVD 满足国内合规，KEV 标记在野利用 |
 | 病毒引擎 | YARA-X（非经典 YARA） | Rust 重写，经典 YARA 已 EOL |

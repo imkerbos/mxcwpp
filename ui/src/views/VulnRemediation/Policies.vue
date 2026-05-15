@@ -49,6 +49,9 @@
             </template>
             <template v-else-if="column.key === 'action'">
               <a-space>
+                <a-button type="link" size="small" @click="showExecutions(record)">
+                  历史
+                </a-button>
                 <a-button
                   type="link"
                   size="small"
@@ -160,6 +163,49 @@
         </a-descriptions-item>
       </a-descriptions>
     </a-modal>
+
+    <!-- 执行历史抽屉 -->
+    <a-drawer
+      v-model:open="execDrawerVisible"
+      :title="'执行历史 - ' + execDrawerTitle"
+      width="800"
+      :destroy-on-close="true"
+    >
+      <a-table
+        :columns="execColumns"
+        :data-source="execData"
+        :loading="execLoading"
+        size="small"
+        row-key="id"
+        :pagination="{
+          current: execPagination.current,
+          pageSize: execPagination.pageSize,
+          total: execPagination.total,
+          showSizeChanger: false,
+        }"
+        @change="handleExecTableChange"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'status'">
+            <a-tag :color="execStatusColor(record.status)" :bordered="false">
+              {{ execStatusText(record.status) }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'startedAt'">
+            {{ formatDate(record.startedAt) }}
+          </template>
+          <template v-else-if="column.key === 'duration'">
+            {{ record.duration ? record.duration + 's' : '-' }}
+          </template>
+          <template v-else-if="column.key === 'errorMsg'">
+            <a-tooltip v-if="record.errorMsg" :title="record.errorMsg">
+              <span class="exec-error-text">{{ record.errorMsg }}</span>
+            </a-tooltip>
+            <span v-else>-</span>
+          </template>
+        </template>
+      </a-table>
+    </a-drawer>
   </div>
 </template>
 
@@ -168,7 +214,7 @@ import { onMounted, ref, reactive } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { remediationPoliciesApi } from '@/api/remediation-policies'
-import type { RemediationPolicy, PolicyPreview } from '@/api/remediation-policies'
+import type { RemediationPolicy, PolicyPreview, PolicyExecution } from '@/api/remediation-policies'
 
 const loading = ref(false)
 const policies = ref<RemediationPolicy[]>([])
@@ -348,6 +394,66 @@ const handleDelete = async (record: RemediationPolicy) => {
   }
 }
 
+// === 执行历史 ===
+const execDrawerVisible = ref(false)
+const execDrawerTitle = ref('')
+const execLoading = ref(false)
+const execData = ref<PolicyExecution[]>([])
+const execPolicyId = ref(0)
+const execPagination = reactive({ current: 1, pageSize: 20, total: 0 })
+
+const execColumns = [
+  { title: 'ID', dataIndex: 'id', width: 60 },
+  { title: '状态', key: 'status', width: 80 },
+  { title: '匹配主机', dataIndex: 'hostCount', width: 90 },
+  { title: '匹配漏洞', dataIndex: 'vulnCount', width: 90 },
+  { title: '生成任务', dataIndex: 'taskCount', width: 90 },
+  { title: '执行人', dataIndex: 'createdBy', width: 100 },
+  { title: '执行时间', key: 'startedAt', width: 170 },
+  { title: '耗时', key: 'duration', width: 70 },
+  { title: '备注', key: 'errorMsg', ellipsis: true },
+]
+
+const execStatusColor = (status: string) => {
+  const map: Record<string, string> = { success: 'green', failed: 'red', running: 'blue' }
+  return map[status] || 'default'
+}
+
+const execStatusText = (status: string) => {
+  const map: Record<string, string> = { success: '成功', failed: '失败', running: '执行中' }
+  return map[status] || status
+}
+
+const showExecutions = async (record: RemediationPolicy) => {
+  execPolicyId.value = record.id
+  execDrawerTitle.value = record.name
+  execPagination.current = 1
+  execDrawerVisible.value = true
+  await loadExecutions()
+}
+
+const loadExecutions = async () => {
+  execLoading.value = true
+  try {
+    const data = await remediationPoliciesApi.listExecutions(
+      execPolicyId.value,
+      execPagination.current,
+      execPagination.pageSize,
+    )
+    execData.value = data?.items ?? []
+    execPagination.total = data?.total ?? 0
+  } catch {
+    execData.value = []
+  } finally {
+    execLoading.value = false
+  }
+}
+
+const handleExecTableChange = (pag: { current: number }) => {
+  execPagination.current = pag.current
+  loadExecutions()
+}
+
 onMounted(() => {
   loadPolicies()
 })
@@ -378,4 +484,15 @@ onMounted(() => {
 .card-body { padding: 20px; }
 .filter-bar { display: flex; gap: 12px; margin-bottom: 16px; }
 .filter-actions { margin-left: auto; display: flex; gap: 8px; }
+
+.exec-error-text {
+  color: #F53F3F;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  display: inline-block;
+}
 </style>

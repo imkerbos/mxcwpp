@@ -18,3 +18,20 @@ type ScanSchedule struct {
 func (ScanSchedule) TableName() string {
 	return "scan_schedules"
 }
+
+// ScanScheduleExecution 扫描计划执行记录
+type ScanScheduleExecution struct {
+	ID         uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	ScheduleID uint       `gorm:"column:schedule_id;not null;index" json:"scheduleId"`
+	ScanType   string     `gorm:"column:scan_type;type:varchar(20);not null" json:"scanType"`            // full_scan / sync_only
+	Status     string     `gorm:"column:status;type:varchar(16);not null;default:running" json:"status"` // running / success / failed
+	ErrorMsg   string     `gorm:"column:error_msg;type:text" json:"errorMsg"`
+	Duration   int        `gorm:"column:duration" json:"duration"` // 秒
+	StartedAt  LocalTime  `gorm:"column:started_at;type:timestamp;not null" json:"startedAt"`
+	FinishedAt *LocalTime `gorm:"column:finished_at;type:timestamp" json:"finishedAt"`
+}
+
+// TableName 指定表名
+func (ScanScheduleExecution) TableName() string {
+	return "scan_schedule_executions"
+}

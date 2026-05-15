@@ -141,3 +141,37 @@ func (h *RemediationPoliciesHandler) PreviewPolicy(c *gin.Context) {
 
 	Success(c, preview)
 }
+
+// ListExecutions 查询修复策略的执行历史
+func (h *RemediationPoliciesHandler) ListExecutions(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的 ID")
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	var total int64
+	h.db.Model(&model.RemediationPolicyExecution{}).Where("policy_id = ?", id).Count(&total)
+
+	var records []model.RemediationPolicyExecution
+	h.db.Where("policy_id = ?", id).
+		Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&records)
+
+	Success(c, gin.H{
+		"items": records,
+		"total": total,
+		"page":  page,
+	})
+}

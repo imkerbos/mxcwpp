@@ -378,7 +378,7 @@ const notifyCategoryOptions = [
   { value: 'vulnerability_alert', label: '漏洞告警', description: '漏洞扫描发现高危漏洞时发送通知', hasSeverity: true },
   { value: 'virus_alert', label: '病毒查杀告警', description: '检测到病毒或恶意文件时发送通知', hasSeverity: true },
   { value: 'fim_alert', label: '文件完整性告警', description: '关键文件被篡改、新增或删除时发送通知', hasSeverity: true },
-  { value: 'runtime_alert', label: 'EDR 告警', description: 'EDR 检测规则触发告警时发送通知', hasSeverity: true },
+  { value: 'edr_alert', label: 'EDR 告警', description: 'EDR 检测规则触发告警时发送通知', hasSeverity: true },
   { value: 'kube_alert', label: 'K8s 安全告警', description: 'K8s 审计检测规则触发告警时发送通知', hasSeverity: true },
 ]
 
@@ -389,7 +389,7 @@ const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
   vulnerability_alert: '漏洞告警',
   virus_alert: '病毒查杀告警',
   fim_alert: '文件完整性告警',
-  runtime_alert: 'EDR 告警',
+  edr_alert: 'EDR 告警',
   kube_alert: 'K8s 安全告警',
 }
 
@@ -400,7 +400,7 @@ const NOTIFY_CATEGORY_COLOR_MAP: Record<string, string> = {
   vulnerability_alert: 'red',
   virus_alert: 'volcano',
   fim_alert: 'gold',
-  runtime_alert: 'purple',
+  edr_alert: 'purple',
   kube_alert: 'blue',
 }
 
@@ -793,7 +793,7 @@ const handleNotifyCategoryChange = () => {
     vulnerability_alert: '漏洞告警',
     virus_alert: '病毒查杀告警',
     fim_alert: '文件完整性告警',
-    runtime_alert: 'EDR 告警',
+    edr_alert: 'EDR 告警',
     kube_alert: 'K8s 安全告警',
   }
   formData.name = formData.name || defaultNames[formData.notify_category] || ''

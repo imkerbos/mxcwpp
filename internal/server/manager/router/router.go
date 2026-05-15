@@ -690,6 +690,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.PUT("/vulnerabilities/schedules/:id", schedHandler.UpdateSchedule)
 	router.DELETE("/vulnerabilities/schedules/:id", schedHandler.DeleteSchedule)
 	router.POST("/vulnerabilities/schedules/:id/toggle", schedHandler.ToggleSchedule)
+	router.GET("/vulnerabilities/schedules/:id/executions", schedHandler.ListExecutions)
+	router.GET("/vulnerabilities/schedules/executions/:execId", schedHandler.GetExecution)
 
 	// 漏洞库缓存管理
 	cacheHandler := api.NewVulnCacheHandler(db, logger)
@@ -721,6 +723,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.DELETE("/remediation-policies/:id", policyHandler.DeletePolicy)
 	router.POST("/remediation-policies/:id/execute", policyHandler.ExecutePolicy)
 	router.POST("/remediation-policies/:id/preview", policyHandler.PreviewPolicy)
+	router.GET("/remediation-policies/:id/executions", policyHandler.ListExecutions)
 }
 
 // setupAlertContextAPI 设置告警溯源 API 路由
