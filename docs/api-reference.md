@@ -259,12 +259,12 @@
 | GET | `/api/v1/reports/antivirus` | 病毒查杀报告 |
 | GET | `/api/v1/reports/vulnerability` | 漏洞报告 |
 | GET | `/api/v1/reports/kube` | 容器安全报告 |
-| GET | `/api/v1/reports/runtime` | 运行时安全报告 |
+| GET | `/api/v1/reports/edr` | EDR 检测报告 |
 | GET | `/api/v1/reports/antivirus/:task_id/executive` | 病毒查杀执行摘要 |
 | GET | `/api/v1/reports/vulnerability/executive` | 漏洞执行摘要 |
 | GET | `/api/v1/reports/remediation/executive` | 修复执行摘要 |
 | GET | `/api/v1/reports/kube/executive` | 容器安全执行摘要 |
-| GET | `/api/v1/reports/runtime/executive` | 运行时安全执行摘要 |
+| GET | `/api/v1/reports/edr/executive` | EDR 检测执行摘要 |
 | GET | `/api/v1/reports/generated` | 已生成报告列表 |
 | GET | `/api/v1/reports/generated/:id` | 已生成报告详情 |
 | DELETE | `/api/v1/reports/generated/:id` | 删除已生成报告 |
@@ -315,7 +315,7 @@
 |------|------|------|
 | GET | `/api/v1/alerts` | 告警列表 |
 | GET | `/api/v1/alerts/statistics` | 告警统计 |
-| GET | `/api/v1/alerts/runtime-statistics` | 运行时告警统计 |
+| GET | `/api/v1/alerts/edr-statistics` | EDR 告警统计 |
 | GET | `/api/v1/alerts/:id` | 告警详情 |
 | POST | `/api/v1/alerts/:id/resolve` | 解决告警 |
 | POST | `/api/v1/alerts/:id/ignore` | 忽略告警 |

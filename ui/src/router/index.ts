@@ -238,6 +238,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '扫描计划' },
       },
       {
+        path: 'vuln-scan-executions/:id',
+        name: 'VulnScanExecutionDetail',
+        component: () => import('@/views/VulnList/ExecutionDetail.vue'),
+        meta: { title: '执行详情' },
+      },
+      {
         path: 'vuln-db-manage',
         name: 'VulnDBManage',
         component: () => import('@/views/System/VulnDBManage.vue'),

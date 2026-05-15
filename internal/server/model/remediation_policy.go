@@ -24,3 +24,23 @@ type RemediationPolicy struct {
 func (RemediationPolicy) TableName() string {
 	return "remediation_policies"
 }
+
+// RemediationPolicyExecution 修复策略执行记录
+type RemediationPolicyExecution struct {
+	ID         uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	PolicyID   uint       `gorm:"column:policy_id;not null;index" json:"policyId"`
+	Status     string     `gorm:"column:status;type:varchar(16);not null;default:running" json:"status"`
+	HostCount  int        `gorm:"column:host_count" json:"hostCount"`
+	VulnCount  int        `gorm:"column:vuln_count" json:"vulnCount"`
+	TaskCount  int        `gorm:"column:task_count" json:"taskCount"`
+	ErrorMsg   string     `gorm:"column:error_msg;type:text" json:"errorMsg"`
+	CreatedBy  string     `gorm:"column:created_by;type:varchar(100)" json:"createdBy"`
+	Duration   int        `gorm:"column:duration" json:"duration"`
+	StartedAt  LocalTime  `gorm:"column:started_at;type:timestamp;not null" json:"startedAt"`
+	FinishedAt *LocalTime `gorm:"column:finished_at;type:timestamp" json:"finishedAt"`
+}
+
+// TableName 指定表名
+func (RemediationPolicyExecution) TableName() string {
+	return "remediation_policy_executions"
+}

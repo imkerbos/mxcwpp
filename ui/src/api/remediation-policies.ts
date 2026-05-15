@@ -25,6 +25,20 @@ export interface PolicyPreview {
   taskCount: number
 }
 
+export interface PolicyExecution {
+  id: number
+  policyId: number
+  status: string
+  hostCount: number
+  vulnCount: number
+  taskCount: number
+  errorMsg: string
+  createdBy: string
+  duration: number
+  startedAt: string
+  finishedAt?: string
+}
+
 export const remediationPoliciesApi = {
   list: () => {
     return apiClient.get<RemediationPolicy[]>('/remediation-policies')
@@ -52,5 +66,12 @@ export const remediationPoliciesApi = {
 
   preview: (id: number) => {
     return apiClient.post<PolicyPreview>(`/remediation-policies/${id}/preview`)
+  },
+
+  listExecutions: (id: number, page = 1, pageSize = 20) => {
+    return apiClient.get<{ items: PolicyExecution[]; total: number; page: number }>(
+      `/remediation-policies/${id}/executions`,
+      { params: { page, pageSize } },
+    )
   },
 }

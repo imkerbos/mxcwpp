@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -43,23 +44,52 @@ func (p *PolicyExecutor) Execute(policyID uint, createdBy string) error {
 		zap.String("name", policy.Name),
 		zap.String("rollout_type", policy.RolloutType))
 
+	// 创建执行记录
+	now := model.Now()
+	exec := model.RemediationPolicyExecution{
+		PolicyID:  policyID,
+		Status:    "running",
+		CreatedBy: createdBy,
+		StartedAt: now,
+	}
+	p.db.Create(&exec)
+
+	// 执行完成时统一更新记录
+	finishExec := func(status string, errMsg string, hostCount, vulnCount, taskCount int) {
+		finishedAt := model.Now()
+		duration := int(time.Since(time.Time(now)).Seconds())
+		p.db.Model(&exec).Updates(map[string]any{
+			"status":      status,
+			"error_msg":   errMsg,
+			"host_count":  hostCount,
+			"vuln_count":  vulnCount,
+			"task_count":  taskCount,
+			"duration":    duration,
+			"finished_at": finishedAt,
+		})
+	}
+
 	// 1. 匹配目标主机
 	hostIDs, err := p.matchHosts(&policy)
 	if err != nil {
+		finishExec("failed", "匹配目标主机失败: "+err.Error(), 0, 0, 0)
 		return fmt.Errorf("匹配目标主机失败: %w", err)
 	}
 	if len(hostIDs) == 0 {
 		p.logger.Info("没有匹配的目标主机")
+		finishExec("success", "没有匹配的目标主机", 0, 0, 0)
 		return nil
 	}
 
 	// 2. 匹配漏洞
 	vulns, err := p.matchVulns(&policy, hostIDs)
 	if err != nil {
+		finishExec("failed", "匹配漏洞失败: "+err.Error(), len(hostIDs), 0, 0)
 		return fmt.Errorf("匹配漏洞失败: %w", err)
 	}
 	if len(vulns) == 0 {
 		p.logger.Info("没有匹配的漏洞")
+		finishExec("success", "没有匹配的漏洞", len(hostIDs), 0, 0)
 		return nil
 	}
 
@@ -70,6 +100,7 @@ func (p *PolicyExecutor) Execute(policyID uint, createdBy string) error {
 	// 3. 创建修复任务
 	tasks, err := p.createTasks(&policy, vulns, hostIDs, createdBy)
 	if err != nil {
+		finishExec("failed", "创建修复任务失败: "+err.Error(), len(hostIDs), len(vulns), 0)
 		return fmt.Errorf("创建修复任务失败: %w", err)
 	}
 
@@ -85,9 +116,14 @@ func (p *PolicyExecutor) Execute(policyID uint, createdBy string) error {
 		err = p.executeImmediate(tasks, &policy)
 	}
 
+	if err != nil {
+		finishExec("failed", err.Error(), len(hostIDs), len(vulns), len(tasks))
+	} else {
+		finishExec("success", "", len(hostIDs), len(vulns), len(tasks))
+	}
+
 	// 更新策略最后执行时间
-	now := model.Now()
-	p.db.Model(&policy).Update("last_run_at", now)
+	p.db.Model(&policy).Update("last_run_at", model.Now())
 
 	return err
 }

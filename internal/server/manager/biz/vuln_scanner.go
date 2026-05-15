@@ -123,59 +123,72 @@ func (v *VulnScanner) SyncOnly() error {
 
 	v.logger.Info("开始漏洞库同步（仅同步，不扫描主机）")
 
-	var lastErr error
-	// NVD 同步
-	if err := v.SyncNVD(); err != nil {
-		v.logger.Warn("NVD 同步失败", zap.Error(err))
-		lastErr = err
+	// 逐个数据源同步，记录每个源的状态
+	type sourceResult struct {
+		Name   string `json:"name"`
+		Status string `json:"status"` // success / failed / skipped
+		Error  string `json:"error,omitempty"`
 	}
-	// Red Hat Security Data 同步
-	if err := v.SyncRedHat(); err != nil {
-		v.logger.Warn("Red Hat 同步失败", zap.Error(err))
-		if lastErr == nil {
-			lastErr = err
+	var results []sourceResult
+	var coreErr error // 核心数据源失败
+
+	// 核心数据源
+	for _, src := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"NVD", v.SyncNVD},
+		{"RedHat", v.SyncRedHat},
+	} {
+		if err := src.fn(); err != nil {
+			v.logger.Warn(src.name+" 同步失败", zap.Error(err))
+			results = append(results, sourceResult{Name: src.name, Status: "failed", Error: err.Error()})
+			if coreErr == nil {
+				coreErr = err
+			}
+		} else {
+			results = append(results, sourceResult{Name: src.name, Status: "success"})
 		}
 	}
-	// CNVD 同步
-	if err := v.SyncCNVD(); err != nil {
-		v.logger.Warn("CNVD 同步失败", zap.Error(err))
-		if lastErr == nil {
-			lastErr = err
+
+	// 增强数据源（失败不影响整体状态）
+	for _, src := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"CNVD", v.SyncCNVD},
+		{"CNNVD", v.SyncCNNVD},
+		{"Exploit", v.SyncExploit},
+	} {
+		if err := src.fn(); err != nil {
+			v.logger.Warn(src.name+" 同步失败，跳过", zap.Error(err))
+			results = append(results, sourceResult{Name: src.name, Status: "failed", Error: err.Error()})
+		} else {
+			results = append(results, sourceResult{Name: src.name, Status: "success"})
 		}
 	}
-	// CNNVD 编号补齐
-	if err := v.SyncCNNVD(); err != nil {
-		v.logger.Warn("CNNVD 同步失败", zap.Error(err))
-		if lastErr == nil {
-			lastErr = err
-		}
-	}
-	// ExploitDB + CISA KEV 利用标记
-	if err := v.SyncExploit(); err != nil {
-		v.logger.Warn("Exploit 同步失败", zap.Error(err))
-		if lastErr == nil {
-			lastErr = err
-		}
-	}
+
 	// 重算漏洞优先级
 	pc := NewPriorityCalculator(v.db, v.logger)
 	if err := pc.RecalculateAll(); err != nil {
 		v.logger.Warn("优先级重算失败", zap.Error(err))
 	}
 
+	// 写入同步结果
 	duration := int(time.Since(startedAt).Seconds())
-	updates := map[string]interface{}{"duration": duration}
-	if lastErr != nil {
+	updates := map[string]any{"duration": duration}
+	resultsJSON, _ := json.Marshal(results)
+	if coreErr != nil {
 		updates["status"] = "failed"
-		updates["error_msg"] = lastErr.Error()
 	} else {
 		updates["status"] = "success"
 		updates["version"] = time.Now().Format("20060102.150405")
 	}
+	updates["error_msg"] = string(resultsJSON)
 	v.db.Model(&record).Updates(updates)
 
 	v.logger.Info("漏洞库同步完成", zap.Int("duration_seconds", duration))
-	return lastErr
+	return coreErr
 }
 
 // GetLatestSyncStatus 查询最近一条漏洞相关同步记录
@@ -247,7 +260,8 @@ func (v *VulnScanner) ScanAll() error {
 		newVulns, criticalCount, highCount, affectedHosts)
 
 	updates["status"] = "success"
-	updates["version"] = fmt.Sprintf("%s | %s", time.Now().Format("20060102.150405"), summary)
+	updates["version"] = time.Now().Format("20060102.150405")
+	updates["error_msg"] = summary // 非错误，记录扫描摘要
 
 	v.logger.Info("全量漏洞扫描完成",
 		zap.Int64("new_vulns", newVulns),

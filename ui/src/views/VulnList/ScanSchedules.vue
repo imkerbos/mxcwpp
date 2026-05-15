@@ -45,6 +45,9 @@
             </template>
             <template v-else-if="column.key === 'action'">
               <a-space>
+                <a-button type="link" size="small" @click="showExecutions(record)">
+                  历史
+                </a-button>
                 <a-button type="link" size="small" @click="openEditModal(record)">
                   编辑
                 </a-button>
@@ -91,6 +94,72 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 执行历史抽屉 -->
+    <a-drawer
+      v-model:open="execDrawerVisible"
+      :title="`执行历史 - ${execDrawerTitle}`"
+      width="720"
+      :destroy-on-close="true"
+    >
+      <a-table
+        :columns="execColumns"
+        :data-source="execData"
+        :loading="execLoading"
+        size="small"
+        row-key="id"
+        :pagination="{
+          current: execPagination.current,
+          pageSize: execPagination.pageSize,
+          total: execPagination.total,
+          showSizeChanger: false,
+        }"
+        @change="handleExecTableChange"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'id'">
+            <router-link :to="{ name: 'VulnScanExecutionDetail', params: { id: record.id } }">
+              #{{ record.id }}
+            </router-link>
+          </template>
+          <template v-else-if="column.key === 'status'">
+            <a-tag :color="execStatusColor(record.status)" :bordered="false">
+              {{ execStatusText(record.status) }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'scanType'">
+            <a-tag :color="scanTypeColor(record.scanType)">
+              {{ scanTypeText(record.scanType) }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.key === 'errorMsg'">
+            <template v-if="record.errorMsg && record.errorMsg.startsWith('[')">
+              <a-tag
+                v-for="src in parseSourceResults(record.errorMsg)"
+                :key="src.name"
+                :color="src.status === 'success' ? 'green' : src.status === 'skipped' ? 'default' : 'red'"
+                :bordered="false"
+                size="small"
+                style="margin-right: 4px"
+              >
+                <a-tooltip v-if="src.error" :title="src.error">{{ src.name }}</a-tooltip>
+                <template v-else>{{ src.name }}</template>
+              </a-tag>
+            </template>
+            <a-tooltip v-else-if="record.errorMsg" :title="record.errorMsg">
+              <span class="exec-error-text">{{ record.errorMsg }}</span>
+            </a-tooltip>
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.key === 'startedAt'">
+            {{ formatDate(record.startedAt) }}
+          </template>
+          <template v-else-if="column.key === 'duration'">
+            {{ record.duration ? record.duration + 's' : '-' }}
+          </template>
+        </template>
+      </a-table>
+    </a-drawer>
   </div>
 </template>
 
@@ -99,7 +168,7 @@ import { onMounted, ref, reactive } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { scanSchedulesApi } from '@/api/scan-schedules'
-import type { ScanSchedule } from '@/api/scan-schedules'
+import type { ScanSchedule, ScanScheduleExecution } from '@/api/scan-schedules'
 
 const loading = ref(false)
 const schedules = ref<ScanSchedule[]>([])
@@ -233,6 +302,71 @@ const handleDelete = async (record: ScanSchedule) => {
   }
 }
 
+// === 执行历史 ===
+const execDrawerVisible = ref(false)
+const execDrawerTitle = ref('')
+const execLoading = ref(false)
+const execData = ref<ScanScheduleExecution[]>([])
+const execScheduleId = ref(0)
+const execPagination = reactive({ current: 1, pageSize: 20, total: 0 })
+
+const execColumns = [
+  { title: 'ID', key: 'id', width: 80 },
+  { title: '扫描类型', key: 'scanType', width: 100 },
+  { title: '状态', key: 'status', width: 80 },
+  { title: '开始时间', key: 'startedAt', width: 170 },
+  { title: '耗时', key: 'duration', width: 80 },
+  { title: '详情', key: 'errorMsg', ellipsis: true },
+]
+
+const execStatusColor = (status: string) => {
+  const map: Record<string, string> = { success: 'green', failed: 'red', running: 'blue' }
+  return map[status] || 'default'
+}
+
+const execStatusText = (status: string) => {
+  const map: Record<string, string> = { success: '成功', failed: '失败', running: '执行中' }
+  return map[status] || status
+}
+
+const parseSourceResults = (msg: string) => {
+  try {
+    return JSON.parse(msg) as { name: string; status: string; error?: string }[]
+  } catch {
+    return []
+  }
+}
+
+const showExecutions = async (record: ScanSchedule) => {
+  execScheduleId.value = record.id
+  execDrawerTitle.value = record.name
+  execPagination.current = 1
+  execDrawerVisible.value = true
+  await loadExecutions()
+}
+
+const loadExecutions = async () => {
+  execLoading.value = true
+  try {
+    const data = await scanSchedulesApi.listExecutions(
+      execScheduleId.value,
+      execPagination.current,
+      execPagination.pageSize,
+    )
+    execData.value = data?.items ?? []
+    execPagination.total = data?.total ?? 0
+  } catch {
+    execData.value = []
+  } finally {
+    execLoading.value = false
+  }
+}
+
+const handleExecTableChange = (pag: any) => {
+  execPagination.current = pag.current
+  loadExecutions()
+}
+
 onMounted(() => {
   loadSchedules()
 })
@@ -263,5 +397,16 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 12px;
   color: #86909C;
+}
+
+.exec-error-text {
+  color: #F53F3F;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  display: inline-block;
 }
 </style>

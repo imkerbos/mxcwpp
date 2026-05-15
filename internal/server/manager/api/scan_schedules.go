@@ -114,3 +114,112 @@ func (h *ScanSchedulesHandler) ToggleSchedule(c *gin.Context) {
 
 	SuccessMessage(c, "操作成功")
 }
+
+// ListExecutions 查询扫描计划的执行历史
+func (h *ScanSchedulesHandler) ListExecutions(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的 ID")
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	var total int64
+	h.db.Model(&model.ScanScheduleExecution{}).Where("schedule_id = ?", id).Count(&total)
+
+	var records []model.ScanScheduleExecution
+	h.db.Where("schedule_id = ?", id).
+		Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&records)
+
+	Success(c, gin.H{
+		"items": records,
+		"total": total,
+		"page":  page,
+	})
+}
+
+// GetExecution 查询单次执行详情（含新增漏洞、受影响主机）
+func (h *ScanSchedulesHandler) GetExecution(c *gin.Context) {
+	execID, _ := strconv.ParseUint(c.Param("execId"), 10, 64)
+	if execID == 0 {
+		BadRequest(c, "无效的执行 ID")
+		return
+	}
+
+	var exec model.ScanScheduleExecution
+	if err := h.db.First(&exec, execID).Error; err != nil {
+		NotFound(c, "执行记录不存在")
+		return
+	}
+
+	// 关联的扫描计划名称
+	var schedule model.ScanSchedule
+	h.db.Select("name").First(&schedule, exec.ScheduleID)
+
+	// 查本次执行时间窗口内新增的漏洞
+	vulnPage, _ := strconv.Atoi(c.DefaultQuery("vulnPage", "1"))
+	vulnPageSize, _ := strconv.Atoi(c.DefaultQuery("vulnPageSize", "20"))
+	if vulnPage < 1 {
+		vulnPage = 1
+	}
+	if vulnPageSize < 1 || vulnPageSize > 100 {
+		vulnPageSize = 20
+	}
+
+	finishedAt := exec.FinishedAt
+	if finishedAt == nil {
+		// 执行中 — 用当前时间作为窗口结束
+		now := model.Now()
+		finishedAt = &now
+	}
+
+	var vulnTotal int64
+	h.db.Model(&model.Vulnerability{}).
+		Where("created_at >= ? AND created_at <= ?", exec.StartedAt, *finishedAt).
+		Count(&vulnTotal)
+
+	var vulns []model.Vulnerability
+	h.db.Where("created_at >= ? AND created_at <= ?", exec.StartedAt, *finishedAt).
+		Order("cvss_score DESC").
+		Offset((vulnPage - 1) * vulnPageSize).
+		Limit(vulnPageSize).
+		Find(&vulns)
+
+	// 查本次执行时间窗口内新增的主机-漏洞关联（受影响主机）
+	type affectedHost struct {
+		HostID    string `json:"hostId"`
+		Hostname  string `json:"hostname"`
+		IP        string `json:"ip"`
+		VulnCount int64  `json:"vulnCount"`
+	}
+	var hosts []affectedHost
+	h.db.Model(&model.HostVulnerability{}).
+		Select("host_id, hostname, ip, COUNT(*) as vuln_count").
+		Where("created_at >= ? AND created_at <= ?", exec.StartedAt, *finishedAt).
+		Group("host_id, hostname, ip").
+		Order("vuln_count DESC").
+		Limit(100).
+		Find(&hosts)
+
+	Success(c, gin.H{
+		"execution":    exec,
+		"scheduleName": schedule.Name,
+		"vulns": gin.H{
+			"items": vulns,
+			"total": vulnTotal,
+			"page":  vulnPage,
+		},
+		"affectedHosts": hosts,
+	})
+}

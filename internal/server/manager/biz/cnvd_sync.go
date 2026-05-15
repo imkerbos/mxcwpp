@@ -11,10 +11,8 @@ import (
 )
 
 const (
-	// CNVD 数据源 API（第三方聚合，实际部署时通过配置文件覆盖）
-	cnvdDefaultAPI = "https://api.cnvd-data.example.com/v1/vulnerabilities"
-	cnvdSyncDays   = 14
-	cnvdPageSize   = 100
+	cnvdSyncDays = 14
+	cnvdPageSize = 100
 )
 
 // cnvdVulnItem CNVD 漏洞条目
@@ -34,24 +32,22 @@ type cnvdAPIResponse struct {
 }
 
 // SyncCNVD 从 CNVD 数据源同步漏洞信息
-// 策略：优先通过 CVE ID 关联已有漏洞，补充 cnvd_id 字段
-// 无 CVE 映射的 CNVD 漏洞单独入库
+// CNVD（cnvd.org.cn）不提供公开 API，需要用户在系统配置中填入第三方数据源地址。
+// 可选方案：Vulners API（需 API Key）、腾讯云漏洞知识库 API、自建爬虫等。
 func (v *VulnScanner) SyncCNVD() error {
-	v.logger.Info("开始 CNVD 数据源同步")
-
-	// 从系统配置读取 API 地址（支持自定义数据源）
-	apiURL := cnvdDefaultAPI
-	var configURL string
+	// 从系统配置读取 API 地址
+	var apiURL string
 	if err := v.db.Table("system_configs").
 		Select("value").
 		Where("`key` = ?", "cnvd_api_url").
-		Scan(&configURL).Error; err == nil && configURL != "" {
-		apiURL = configURL
+		Scan(&apiURL).Error; err != nil || apiURL == "" {
+		v.logger.Info("CNVD 数据源未配置，跳过同步（CNVD 无公开 API，请在系统设置中配置第三方数据源地址）")
+		return nil
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	v.logger.Info("开始 CNVD 数据源同步", zap.String("api", apiURL))
 
-	// 计算同步起始日期
+	client := &http.Client{Timeout: 30 * time.Second}
 	since := time.Now().AddDate(0, 0, -cnvdSyncDays).Format("2006-01-02")
 
 	totalSynced := 0
@@ -61,7 +57,6 @@ func (v *VulnScanner) SyncCNVD() error {
 		reqURL := fmt.Sprintf("%s?since=%s&page=%d&pageSize=%d", apiURL, since, page, cnvdPageSize)
 		resp, err := client.Get(reqURL)
 		if err != nil {
-			v.logger.Warn("CNVD API 请求失败，跳过同步", zap.Error(err))
 			return fmt.Errorf("CNVD API 请求失败: %w", err)
 		}
 
@@ -72,7 +67,6 @@ func (v *VulnScanner) SyncCNVD() error {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			v.logger.Warn("CNVD API 响应异常", zap.Int("statusCode", resp.StatusCode))
 			return fmt.Errorf("CNVD API 响应状态码: %d", resp.StatusCode)
 		}
 
@@ -91,7 +85,6 @@ func (v *VulnScanner) SyncCNVD() error {
 			}
 
 			if item.CveID != "" {
-				// 有 CVE 映射 → 更新已有漏洞的 cnvd_id
 				result := v.db.Table("vulnerabilities").
 					Where("cve_id = ? AND (cnvd_id IS NULL OR cnvd_id = '')", item.CveID).
 					Update("cnvd_id", item.CnvdID)
@@ -99,7 +92,6 @@ func (v *VulnScanner) SyncCNVD() error {
 					totalSynced++
 				}
 			}
-			// 无 CVE 映射的 CNVD 漏洞暂不入库，等后续确定完整数据源方案后再处理
 		}
 
 		if len(apiResp.Data) < cnvdPageSize {

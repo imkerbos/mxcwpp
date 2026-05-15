@@ -390,10 +390,10 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			Detail:       `{"quarantine_dir": "/var/mxsec/quarantine", "yara_rules_dir": "/var/mxsec/yara-rules"}`,
 		},
 		{
-			Name:         "sensor",
-			Type:         model.PluginTypeSensor,
+			Name:         "edr",
+			Type:         model.PluginTypeEDR,
 			RuntimeTypes: model.StringArray{"vm"},
-			Description:  "eBPF 实时监控插件，基于 Tetragon 采集进程/文件/网络事件",
+			Description:  "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件",
 			Detail:       `{"tetragon_socket": "/var/run/tetragon/tetragon.sock"}`,
 		},
 	}
@@ -790,9 +790,9 @@ func initDefaultComponents(db *gorm.DB, logger *zap.Logger) error {
 		{Name: "collector", Category: model.ComponentCategoryPlugin, Description: "资产采集插件，采集主机进程、端口、用户等信息"},
 		{Name: "fim", Category: model.ComponentCategoryPlugin, Description: "文件完整性监控插件，基于 AIDE 检测文件变更"},
 		{Name: "scanner", Category: model.ComponentCategoryPlugin, Description: "病毒查杀插件，基于 ClamAV + YARA-X 双引擎检测恶意文件"},
-		{Name: "sensor", Category: model.ComponentCategoryPlugin, Description: "eBPF 实时监控插件，基于 Tetragon 采集进程/文件/网络事件"},
+		{Name: "edr", Category: model.ComponentCategoryPlugin, Description: "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件"},
 		{Name: "virus-database", Category: model.ComponentCategoryPlugin, Description: "ClamAV 病毒特征库，由 freshclam 自动更新"},
-		{Name: "tetragon", Category: model.ComponentCategoryDependency, Description: "Cilium Tetragon eBPF 运行时安全引擎"},
+		{Name: "tetragon", Category: model.ComponentCategoryDependency, Description: "Cilium Tetragon eBPF 安全引擎"},
 	}
 
 	for _, c := range components {

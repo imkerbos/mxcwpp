@@ -16,24 +16,24 @@
       <a-col :xs="12" :md="4">
         <div class="stat-card">
           <div class="stat-value">{{ stats.totalCount ?? 0 }}</div>
-          <div class="stat-label">总缓存数</div>
+          <div class="stat-label">漏洞总量</div>
         </div>
       </a-col>
       <a-col :xs="12" :md="4">
         <div class="stat-card">
-          <div class="stat-value success">{{ stats.validCount ?? 0 }}</div>
-          <div class="stat-label">有效条目</div>
+          <div class="stat-value warning">{{ stats.unpatchedCount ?? 0 }}</div>
+          <div class="stat-label">未修复</div>
         </div>
       </a-col>
       <a-col :xs="12" :md="4">
         <div class="stat-card">
-          <div class="stat-value warning">{{ stats.expiredCount ?? 0 }}</div>
-          <div class="stat-label">已过期</div>
+          <div class="stat-value success">{{ stats.patchedCount ?? 0 }}</div>
+          <div class="stat-label">已修复</div>
         </div>
       </a-col>
       <a-col :xs="12" :md="4">
         <div class="stat-card">
-          <div class="stat-value">{{ formatDate(stats.lastUpdated) }}</div>
+          <div class="stat-value time-value">{{ formatDate(stats.lastUpdated) }}</div>
           <div class="stat-label">最后更新</div>
         </div>
       </a-col>
@@ -122,8 +122,8 @@ import apiClient from '@/api/client'
 interface CacheStats {
   mode?: string
   totalCount?: number
-  validCount?: number
-  expiredCount?: number
+  unpatchedCount?: number
+  patchedCount?: number
   lastUpdated?: string
 }
 
@@ -204,8 +204,8 @@ const loadStats = async () => {
 const loadImports = async () => {
   loadingImports.value = true
   try {
-    const data = await apiClient.get<ImportRecord[]>('/vulnerabilities/cache/imports')
-    importRecords.value = data ?? []
+    const data = await apiClient.get<{ items: ImportRecord[]; total: number }>('/vulnerabilities/cache/imports')
+    importRecords.value = data?.items ?? []
   } catch {
     importRecords.value = []
   } finally {
@@ -291,10 +291,15 @@ onMounted(() => {
   border-radius: 8px;
   padding: 16px;
   text-align: center;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
-.stat-value { font-size: 24px; font-weight: 700; color: #1D2129; }
+.stat-value { font-size: 24px; font-weight: 700; color: #1D2129; line-height: 1.2; }
 .stat-value.primary { color: #165DFF; font-size: 16px; }
+.stat-value.time-value { font-size: 14px; font-weight: 600; color: #1D2129; }
 .stat-value.success { color: #52C41A; }
 .stat-value.warning { color: #FF7D00; }
 
