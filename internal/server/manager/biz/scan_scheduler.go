@@ -42,11 +42,13 @@ func (s *ScanScheduler) Start() error {
 		return fmt.Errorf("加载扫描计划失败: %w", err)
 	}
 
+	s.mu.Lock()
 	for _, sch := range schedules {
 		if err := s.addCronJob(sch); err != nil {
 			s.logger.Warn("加载扫描计划失败", zap.Uint("id", sch.ID), zap.String("name", sch.Name), zap.Error(err))
 		}
 	}
+	s.mu.Unlock()
 
 	s.cron.Start()
 	s.logger.Info("漏洞扫描调度器已启动", zap.Int("active_jobs", len(s.entryMap)))
@@ -79,6 +81,8 @@ func (s *ScanScheduler) AddSchedule(sch *model.ScanSchedule) error {
 	}
 
 	if sch.Enabled {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		return s.addCronJob(*sch)
 	}
 	return nil
@@ -108,15 +112,15 @@ func (s *ScanScheduler) UpdateSchedule(id uint, updates map[string]any) error {
 		return err
 	}
 
-	// 移除旧 job
+	// 移除旧 job + 添加新 job
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if entryID, ok := s.entryMap[id]; ok {
 		s.cron.Remove(entryID)
 		delete(s.entryMap, id)
 	}
-	s.mu.Unlock()
 
-	// 如果启用，添加新 job
 	if sch.Enabled {
 		return s.addCronJob(sch)
 	}
@@ -149,11 +153,8 @@ func (s *ScanScheduler) ToggleSchedule(id uint) error {
 	return nil
 }
 
-// addCronJob 注册 cron 任务
+// addCronJob 注册 cron 任务（调用方须持有 s.mu 或确保无竞争）
 func (s *ScanScheduler) addCronJob(sch model.ScanSchedule) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	scheduleID := sch.ID
 	scanType := sch.ScanType
 
