@@ -223,5 +223,13 @@ var (
 		&MigrationJob{},
 		&ComponentPushHost{},
 		&RemediationTask{},
+		&ScanSchedule{},
+		&ScanScheduleExecution{},
+		&VulnCache{},
+		&VulnDBImport{},
+		&ImageScan{},
+		&ImageVulnerability{},
+		&RemediationPolicy{},
+		&RemediationPolicyExecution{},
 	}
 )

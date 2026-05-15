@@ -60,8 +60,11 @@ export const menuConfig: MenuItem[] = [
     icon: BugOutlined,
     children: [
       { key: 'vuln-list', title: '漏洞列表', route: '/vuln-list' },
+      { key: 'vuln-scan-schedules', title: '扫描计划', route: '/vuln-scan-schedules' },
       { key: 'vuln-remediation', title: '修复报告', route: '/vuln-remediation' },
       { key: 'remediation-tasks', title: '修复任务', route: '/vuln-remediation/tasks' },
+      { key: 'remediation-policies', title: '修复策略', route: '/vuln-remediation/policies' },
+      { key: 'vuln-db-manage', title: '漏洞库管理', route: '/vuln-db-manage' },
     ],
   },
   {
@@ -108,11 +111,12 @@ export const menuConfig: MenuItem[] = [
       { key: 'kube-baseline', title: '基线检查', route: '/kube/baseline' },
       { key: 'kube-baseline-rules', title: '基线规则', route: '/kube/baseline-rules' },
       { key: 'kube-whitelist', title: '告警白名单', route: '/kube/whitelist' },
+      { key: 'kube-image-scan', title: '镜像扫描', route: '/kube/image-scan' },
     ],
   },
   {
-    key: 'runtime-detection',
-    title: '运行时检测',
+    key: 'edr',
+    title: 'EDR',
     icon: ThunderboltOutlined,
     children: [
       { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },

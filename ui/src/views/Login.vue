@@ -1,54 +1,29 @@
 <template>
-  <div class="login-container">
-    <!-- 左侧安全主题区域 -->
-    <div class="login-left">
-      <!-- 网格动画背景 -->
-      <div class="grid-background">
-        <div class="grid-line" v-for="i in 20" :key="'h'+i" :style="{ top: (i * 5) + '%' }"></div>
-        <div class="grid-line vertical" v-for="i in 20" :key="'v'+i" :style="{ left: (i * 5) + '%' }"></div>
-      </div>
-      <!-- 浮动节点 -->
-      <div class="floating-nodes">
-        <div class="node" v-for="i in 8" :key="'n'+i" :class="'node-' + i"></div>
-      </div>
-      <!-- 文案区域 -->
-      <div class="left-content">
-        <div class="brand-icon">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-        </div>
-        <h2 class="brand-title">Matrix Cloud Security</h2>
-        <p class="brand-desc">矩阵云安全平台</p>
-        <div class="features">
-          <div class="feature-item">
-            <div class="feature-dot"></div>
-            <span>主机基线合规检查</span>
-          </div>
-          <div class="feature-item">
-            <div class="feature-dot"></div>
-            <span>多维度安全评估</span>
-          </div>
-          <div class="feature-item">
-            <div class="feature-dot"></div>
-            <span>实时威胁监控告警</span>
-          </div>
-        </div>
+  <div class="login-page">
+    <!-- 背景动画 -->
+    <div class="bg-grid">
+      <div class="grid-line" v-for="i in 20" :key="'h'+i" :style="{ top: (i * 5) + '%' }"></div>
+      <div class="grid-line vertical" v-for="i in 20" :key="'v'+i" :style="{ left: (i * 5) + '%' }"></div>
+    </div>
+    <div class="bg-nodes">
+      <div class="node" v-for="i in 8" :key="'n'+i" :class="'node-' + i"></div>
+    </div>
+
+    <!-- 左侧：Logo + 介绍 -->
+    <div class="left-side">
+      <div class="left-inner">
+        <img src="/logo-wide.png" alt="MxSec Platform" class="brand-logo" />
+        <h2 class="brand-headline">蓝队实战化安全运营平台</h2>
+        <p class="brand-sub">威胁监测 · 攻击溯源 · 应急响应 · 持续防御</p>
       </div>
     </div>
 
-    <!-- 右侧登录表单区域 -->
-    <div class="login-right">
-      <div class="login-content">
-        <div class="login-header">
-          <img
-            v-if="siteConfigStore.siteLogo"
-            :src="siteConfigStore.siteLogo"
-            alt="Logo"
-            class="login-logo"
-          />
+    <!-- 右侧：登录悬浮卡片 -->
+    <div class="right-side">
+      <div class="login-card">
+        <div class="card-header">
           <h1>{{ siteConfigStore.siteName }}</h1>
-          <p class="login-subtitle">安全管理控制台</p>
+          <p>安全管理控制台</p>
         </div>
 
         <a-form
@@ -147,11 +122,11 @@
           </a-form>
         </a-modal>
       </div>
+    </div>
 
-      <!-- 页脚 -->
-      <div class="login-footer">
-        &copy; {{ new Date().getFullYear() }} {{ siteConfigStore.siteName }}
-      </div>
+    <!-- 页脚：全局居中 -->
+    <div class="login-footer">
+      &copy; {{ new Date().getFullYear() }} {{ siteConfigStore.siteName }}
     </div>
   </div>
 </template>
@@ -182,7 +157,6 @@ const refreshCaptcha = async () => {
   }
 }
 
-// 初始化站点配置和验证码
 onMounted(() => {
   siteConfigStore.init()
   refreshCaptcha()
@@ -229,7 +203,6 @@ const handleLogin = async () => {
     }
   } catch (err: any) {
     error.value = err.message || '登录失败，请检查用户名和密码'
-    // 登录失败后刷新验证码（旧验证码已被消费）
     form.captcha_code = ''
     refreshCaptcha()
   } finally {
@@ -264,28 +237,21 @@ const handleChangePassword = async () => {
 </script>
 
 <style scoped>
-.login-container {
+.login-page {
   display: flex;
   min-height: 100vh;
   width: 100%;
-}
-
-/* 左侧安全主题区域 */
-.login-left {
-  flex: 0 0 40%;
+  background: linear-gradient(160deg, #0c0e14 0%, #111520 50%, #141824 100%);
   position: relative;
-  background: linear-gradient(135deg, #165DFF 0%, #1148C2 40%, #0E42D2 100%);
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-/* 网格背景 */
-.grid-background {
+/* ===== 背景动画 ===== */
+.bg-grid {
   position: absolute;
   inset: 0;
-  opacity: 0.08;
+  opacity: 0.04;
+  pointer-events: none;
 }
 
 .grid-line {
@@ -293,7 +259,7 @@ const handleChangePassword = async () => {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, #165DFF 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #3b82f6 50%, transparent 100%);
 }
 
 .grid-line.vertical {
@@ -301,152 +267,130 @@ const handleChangePassword = async () => {
   bottom: 0;
   width: 1px;
   height: auto;
-  background: linear-gradient(180deg, transparent 0%, #165DFF 50%, transparent 100%);
+  background: linear-gradient(180deg, transparent 0%, #3b82f6 50%, transparent 100%);
 }
 
-/* 浮动节点 */
-.floating-nodes {
+.bg-nodes {
   position: absolute;
   inset: 0;
+  pointer-events: none;
 }
 
 .node {
   position: absolute;
   width: 6px;
   height: 6px;
-  background: #165DFF;
+  background: #3b82f6;
   border-radius: 50%;
   opacity: 0.4;
   animation: pulse 3s ease-in-out infinite;
 }
 
-.node-1 { top: 15%; left: 20%; animation-delay: 0s; }
-.node-2 { top: 30%; left: 60%; animation-delay: 0.5s; }
-.node-3 { top: 50%; left: 35%; animation-delay: 1s; }
-.node-4 { top: 70%; left: 70%; animation-delay: 1.5s; }
-.node-5 { top: 25%; left: 80%; animation-delay: 2s; }
-.node-6 { top: 60%; left: 15%; animation-delay: 0.8s; }
-.node-7 { top: 80%; left: 45%; animation-delay: 1.2s; }
-.node-8 { top: 40%; left: 85%; animation-delay: 1.8s; }
+.node-1 { top: 15%; left: 10%; animation-delay: 0s; }
+.node-2 { top: 30%; left: 35%; animation-delay: 0.5s; }
+.node-3 { top: 50%; left: 20%; animation-delay: 1s; }
+.node-4 { top: 70%; left: 40%; animation-delay: 1.5s; }
+.node-5 { top: 25%; left: 45%; animation-delay: 2s; }
+.node-6 { top: 60%; left: 8%; animation-delay: 0.8s; }
+.node-7 { top: 80%; left: 30%; animation-delay: 1.2s; }
+.node-8 { top: 40%; left: 50%; animation-delay: 1.8s; }
 
 @keyframes pulse {
   0%, 100% {
     transform: scale(1);
     opacity: 0.4;
-    box-shadow: 0 0 0 0 rgba(22, 93, 255, 0.4);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
   }
   50% {
     transform: scale(1.8);
     opacity: 0.8;
-    box-shadow: 0 0 12px 4px rgba(22, 93, 255, 0.2);
+    box-shadow: 0 0 12px 4px rgba(59, 130, 246, 0.2);
   }
 }
 
-/* 左侧文案 */
-.left-content {
+/* ===== 左侧 ===== */
+.left-side {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
   z-index: 1;
-  text-align: center;
-  color: #ffffff;
-  padding: 40px;
+  padding: 60px;
 }
 
-.brand-icon {
-  margin-bottom: 24px;
-  color: #165DFF;
-  filter: drop-shadow(0 0 20px rgba(22, 93, 255, 0.3));
+.left-inner {
+  max-width: 520px;
 }
 
-.brand-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0 0 8px 0;
+.brand-logo {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  margin-bottom: 48px;
+  filter: drop-shadow(0 0 50px rgba(30, 80, 180, 0.2));
+}
+
+.brand-headline {
+  font-size: 22px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 12px 0;
   letter-spacing: 1px;
 }
 
-.brand-desc {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.65);
-  margin: 0 0 40px 0;
+.brand-sub {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 0;
   letter-spacing: 2px;
 }
 
-.features {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  align-items: flex-start;
-  max-width: 240px;
-  margin: 0 auto;
-}
-
-.feature-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.75);
-}
-
-.feature-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #165DFF;
-  flex-shrink: 0;
-  box-shadow: 0 0 8px rgba(22, 93, 255, 0.5);
-}
-
-/* 右侧登录表单区域 */
-.login-right {
+/* ===== 右侧 ===== */
+.right-side {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
   align-items: center;
-  background: #ffffff;
-  padding: 40px;
+  justify-content: center;
   position: relative;
+  z-index: 1;
+  padding: 40px;
 }
 
-.login-content {
-  width: 100%;
-  max-width: 400px;
+.login-card {
+  width: 440px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  padding: 44px 40px 36px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
 }
 
-.login-header {
+.card-header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
 }
 
-.login-header h1 {
+.card-header h1 {
   margin: 0 0 4px 0;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 600;
   color: #1D2129;
-  letter-spacing: 0.5px;
 }
 
-.login-subtitle {
-  font-size: 14px;
+.card-header p {
+  font-size: 13px;
   color: #86909C;
   margin: 0;
 }
 
-.login-logo {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  margin-bottom: 16px;
-}
-
+/* ===== 表单 ===== */
 .login-form {
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .login-input {
-  height: 48px;
+  height: 46px;
   border-radius: 8px;
 }
 
@@ -460,11 +404,11 @@ const handleChangePassword = async () => {
 }
 
 .login-button {
-  height: 48px;
+  height: 46px;
   border-radius: 8px;
   font-size: 16px;
   font-weight: 500;
-  margin-top: 8px;
+  margin-top: 4px;
   background: linear-gradient(135deg, #165DFF 0%, #0E42D2 100%);
   border: none;
   box-shadow: 0 4px 12px rgba(22, 93, 255, 0.35);
@@ -484,7 +428,7 @@ const handleChangePassword = async () => {
 
 .captcha-input {
   flex: 1;
-  height: 48px;
+  height: 46px;
   border-radius: 8px;
 }
 
@@ -498,7 +442,7 @@ const handleChangePassword = async () => {
 }
 
 .captcha-image {
-  height: 48px;
+  height: 46px;
   border-radius: 8px;
   cursor: pointer;
   border: 1px solid #e5e6eb;
@@ -511,7 +455,7 @@ const handleChangePassword = async () => {
 }
 
 .captcha-placeholder {
-  height: 48px;
+  height: 46px;
   width: 150px;
   border-radius: 8px;
   border: 1px solid #e5e6eb;
@@ -528,43 +472,37 @@ const handleChangePassword = async () => {
   margin-top: 16px;
 }
 
-/* 页脚 */
+/* ===== 页脚 ===== */
 .login-footer {
   position: absolute;
-  bottom: 24px;
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 13px;
-  color: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.25);
   text-align: center;
+  z-index: 1;
+  white-space: nowrap;
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .login-container {
+/* ===== 响应式 ===== */
+@media (max-width: 900px) {
+  .login-page {
     flex-direction: column;
   }
 
-  .login-left {
-    flex: 0 0 200px;
-    min-height: 200px;
+  .left-side {
+    flex: none;
+    padding: 40px 24px 0;
   }
 
-  .brand-title {
-    font-size: 20px;
+  .brand-logo {
+    max-width: 300px;
   }
 
-  .features {
-    display: none;
-  }
-
-  .login-right {
+  .right-side {
     flex: 1;
     padding: 24px;
-  }
-
-  .login-content {
-    max-width: 100%;
   }
 }
 </style>

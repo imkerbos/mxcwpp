@@ -44,12 +44,10 @@ export const useSiteConfigStore = defineStore('siteConfig', () => {
   const updateDocumentTitle = () => {
     const title = siteName.value || '矩阵云安全平台'
     document.title = title
-    // 更新 favicon（如果有 logo）
-    if (siteLogo.value) {
-      const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement
-      if (link) {
-        link.href = siteLogo.value
-      }
+    // 更新 favicon
+    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement
+    if (link) {
+      link.href = siteLogo.value || '/favicon.png'
     }
   }
 

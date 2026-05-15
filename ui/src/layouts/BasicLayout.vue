@@ -1,19 +1,27 @@
 <template>
   <a-layout class="layout" :style="{ minWidth: '1200px' }">
-    <!-- ========== Navbar (顶部导航栏) ========== -->
-    <div class="navbar">
-      <div class="navbar-left">
-        <img
-          v-if="siteConfigStore.siteLogo"
-          :src="siteConfigStore.siteLogo"
-          alt="Logo"
-          class="navbar-logo"
-        />
-        <div v-else class="navbar-logo-placeholder">M</div>
-        <h1 class="navbar-title">{{ siteConfigStore.siteName }}</h1>
+    <!-- ========== Logo 区域 (左上角, 与侧边栏等宽) ========== -->
+    <div class="logo-area" :style="{ width: collapsed ? '48px' : '200px' }" @click="router.push('/dashboard')" style="cursor: pointer;">
+      <img
+        v-show="!collapsed"
+        src="/logo-wide.png"
+        alt="MxSec Platform"
+        class="logo-wide"
+      />
+      <img
+        v-show="collapsed"
+        src="/logo.png"
+        alt="MxSec Platform"
+        class="logo-icon"
+      />
+    </div>
+
+    <!-- ========== 顶部导航栏 (Logo 右侧) ========== -->
+    <div class="header-bar" :style="{ left: collapsed ? '48px' : '200px' }">
+      <div class="header-left">
         <span class="navbar-version">{{ appVersion }}</span>
       </div>
-      <div class="navbar-right">
+      <div class="header-right">
         <a-dropdown>
           <a class="user-dropdown" @click.prevent>
             <a-avatar :size="28" class="user-avatar">
@@ -313,11 +321,39 @@ const resetChangePasswordForm = () => {
   min-height: 100vh;
 }
 
-/* ========== Navbar ========== */
-.navbar {
+/* ========== Logo 区域 (左上角) ========== */
+.logo-area {
   position: fixed;
   top: 0;
   left: 0;
+  height: 60px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E5E8EF;
+  border-right: 1px solid #E5E8EF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1002;
+  transition: width 0.2s;
+  overflow: hidden;
+}
+
+.logo-wide {
+  height: 44px;
+  object-fit: contain;
+  padding: 0 12px;
+}
+
+.logo-icon {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+/* ========== 顶部导航栏 (Logo 右侧) ========== */
+.header-bar {
+  position: fixed;
+  top: 0;
   right: 0;
   height: 60px;
   background: #FFFFFF;
@@ -327,39 +363,13 @@ const resetChangePasswordForm = () => {
   justify-content: space-between;
   padding: 0 20px;
   z-index: 1001;
+  transition: left 0.2s;
 }
 
-.navbar-left {
+.header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.navbar-logo {
-  width: 28px;
-  height: 28px;
-  object-fit: contain;
-}
-
-.navbar-logo-placeholder {
-  width: 28px;
-  height: 28px;
-  background: linear-gradient(135deg, #165DFF, #0E42D2);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-}
-
-.navbar-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1D2129;
-  margin: 0;
-  line-height: 1;
 }
 
 .navbar-version {
@@ -371,7 +381,7 @@ const resetChangePasswordForm = () => {
   line-height: 1.5;
 }
 
-.navbar-right {
+.header-right {
   display: flex;
   align-items: center;
 }

@@ -57,9 +57,28 @@
           <span v-if="scanStatus.duration" class="scan-status-info">
             耗时 {{ scanStatus.duration }}s
           </span>
-          <a-tooltip v-if="scanStatus.status === 'failed' && scanStatus.errorMsg" :title="scanStatus.errorMsg">
-            <span class="scan-status-error">{{ scanStatus.errorMsg }}</span>
-          </a-tooltip>
+          <template v-if="scanStatus.errorMsg">
+            <template v-if="parsedSourceResults.length > 0">
+              <a-tag
+                v-for="src in parsedSourceResults"
+                :key="src.name"
+                :color="src.status === 'success' ? 'green' : src.status === 'skipped' ? 'default' : 'red'"
+                :bordered="false"
+                size="small"
+                style="margin-left: 4px"
+              >
+                <a-tooltip v-if="src.error" :title="src.error">
+                  {{ src.name }}: {{ src.status === 'success' ? '成功' : src.status === 'skipped' ? '跳过' : '失败' }}
+                </a-tooltip>
+                <template v-else>
+                  {{ src.name }}: {{ src.status === 'success' ? '成功' : src.status === 'skipped' ? '跳过' : '失败' }}
+                </template>
+              </a-tag>
+            </template>
+            <a-tooltip v-else :title="scanStatus.errorMsg">
+              <span class="scan-status-error">{{ scanStatus.errorMsg }}</span>
+            </a-tooltip>
+          </template>
         </template>
         <span v-else class="scan-status-info">尚未执行过扫描</span>
       </div>
@@ -207,7 +226,20 @@
             </a-tag>
           </template>
           <template v-else-if="column.key === 'errorMsg'">
-            <a-tooltip v-if="record.errorMsg" :title="record.errorMsg">
+            <template v-if="record.errorMsg && record.errorMsg.startsWith('[')">
+              <a-tag
+                v-for="src in JSON.parse(record.errorMsg)"
+                :key="src.name"
+                :color="src.status === 'success' ? 'green' : src.status === 'skipped' ? 'default' : 'red'"
+                :bordered="false"
+                size="small"
+                style="margin-right: 4px"
+              >
+                <a-tooltip v-if="src.error" :title="src.error">{{ src.name }}</a-tooltip>
+                <template v-else>{{ src.name }}</template>
+              </a-tag>
+            </template>
+            <a-tooltip v-else-if="record.errorMsg" :title="record.errorMsg">
               <span style="color: #F53F3F; font-size: 12px; cursor: pointer">{{ record.errorMsg }}</span>
             </a-tooltip>
             <span v-else>-</span>
@@ -292,6 +324,18 @@ const columns = [
 
 // === 扫描状态 ===
 const scanStatus = ref<SecurityDBSyncRecord | null>(null)
+
+// 解析 errorMsg 中的数据源同步结果 JSON
+const parsedSourceResults = computed(() => {
+  const msg = scanStatus.value?.errorMsg
+  if (!msg || !msg.startsWith('[')) return []
+  try {
+    return JSON.parse(msg) as { name: string; status: string; error?: string }[]
+  } catch {
+    return []
+  }
+})
+
 const scanHistoryVisible = ref(false)
 const scanHistoryLoading = ref(false)
 const scanHistoryData = ref<SecurityDBSyncRecord[]>([])
@@ -521,6 +565,12 @@ const handleReset = () => {
 }
 
 const hostSummary = (record: Vulnerability) => {
+  // 全局视图：统一显示受影响主机数量
+  if (!filterHostId.value) {
+    const count = record.affectedHosts || record.hosts?.length || 0
+    return `${count} 台主机`
+  }
+  // 按主机筛选时：显示主机名详情
   if (!record.hosts?.length) return `${record.affectedHosts || 0} 台主机`
   if (record.hosts.length === 1) {
     return `${record.hosts[0].hostname || record.hosts[0].hostId} (${record.hosts[0].ip || '-'})`

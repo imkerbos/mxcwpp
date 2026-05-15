@@ -1,5 +1,5 @@
 <template>
-  <div class="host-runtime-alerts">
+  <div class="host-edr-alerts">
     <a-row :gutter="[16, 16]" style="margin-bottom: 16px">
       <a-col :xs="12" :md="6">
         <div class="stat-card">
@@ -27,7 +27,7 @@
       </a-col>
     </a-row>
 
-    <a-card title="运行时安全告警" :bordered="false">
+    <a-card title="EDR 告警" :bordered="false">
       <div class="filter-bar">
         <a-input-search
           v-model:value="keyword"
@@ -250,7 +250,7 @@ watch(
 </script>
 
 <style scoped>
-.host-runtime-alerts {
+.host-edr-alerts {
   width: 100%;
 }
 

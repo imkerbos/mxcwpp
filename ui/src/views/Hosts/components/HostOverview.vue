@@ -580,7 +580,7 @@
               <div class="risk-overview-row second-row">
                 <div class="risk-card">
                   <div class="risk-card-header">
-                    <span class="risk-card-title">应用运行时安全告警</span>
+                    <span class="risk-card-title">EDR 告警</span>
                     <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'runtime')">详情</a-button>
                   </div>
                   <div class="risk-card-content">
@@ -837,7 +837,7 @@
                     <template v-else-if="column.key === 'action'">
                       <a-popconfirm
                         v-if="needsTetragonInstall(record)"
-                        title="确定安装 Tetragon 依赖？安装后 Sensor 插件将自动恢复运行。"
+                        title="确定安装 Tetragon 依赖？安装后 EDR 插件将自动恢复运行。"
                         @confirm="handleInstallTetragon"
                       >
                         <a-button type="link" size="small" :loading="depInstalling" :disabled="host?.status !== 'online'">
@@ -1075,11 +1075,11 @@ const loadComponents = async () => {
   }
 }
 
-// sensor 插件依赖（Tetragon）相关
+// EDR 插件依赖（Tetragon）相关
 const depInstalling = ref(false)
 
 const needsTetragonInstall = (record: ComponentInfo) => {
-  return record.name === 'sensor' && ['error', 'dormant', 'not_installed'].includes(record.status)
+  return record.name === 'edr' && ['error', 'dormant', 'not_installed'].includes(record.status)
 }
 
 const handleInstallTetragon = async () => {
