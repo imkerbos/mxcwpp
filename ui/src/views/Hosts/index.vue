@@ -112,8 +112,7 @@
                   <a-menu-item @click="handleBatchRestartAgent">重启 Agent</a-menu-item>
                   <a-menu-item @click="handleBatchBindBusinessLine">批量绑定业务线</a-menu-item>
                   <a-menu-item>批量导入标签</a-menu-item>
-                  <a-menu-item>清理离线数据</a-menu-item>
-                  <a-menu-item>删除未安装记录</a-menu-item>
+                  <a-menu-item @click="handleBatchDeleteHost" danger>批量删除主机</a-menu-item>
                 </a-menu>
               </template>
             </a-dropdown>
@@ -700,6 +699,33 @@ const doRestartAgent = async (hostIds: string[]) => {
     console.error('重启 Agent 失败:', error)
     message.error(error?.message || '重启 Agent 失败，请重试')
   }
+}
+
+// 批量删除主机
+const handleBatchDeleteHost = () => {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要删除的主机')
+    return
+  }
+  Modal.confirm({
+    title: '批量删除主机',
+    content: `确定要删除选中的 ${selectedRowKeys.value.length} 台主机及其所有关联数据吗？此操作不可恢复。`,
+    okText: '确定删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        const res = await hostsApi.batchDelete(selectedRowKeys.value)
+        message.success(`成功删除 ${res.deleted} 台主机${res.failed > 0 ? `，${res.failed} 台失败` : ''}`)
+        selectedRowKeys.value = []
+        loadHosts()
+        loadStatusDistribution()
+        loadRiskDistribution()
+      } catch (error: any) {
+        message.error(error?.message || '批量删除失败')
+      }
+    },
+  })
 }
 
 // 批量绑定业务线

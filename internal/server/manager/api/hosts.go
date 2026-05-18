@@ -714,106 +714,105 @@ func (h *HostsHandler) GetHostPlugins(c *gin.Context) {
 	Success(c, response)
 }
 
+// deleteHostByID 删除单台主机及其所有关联数据（事务内执行）
+func (h *HostsHandler) deleteHostByID(tx *gorm.DB, hostID string) error {
+	var host model.Host
+	if err := tx.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+		return err
+	}
+
+	// 1. 删除扫描结果
+	if err := tx.Where("host_id = ?", hostID).Delete(&model.ScanResult{}).Error; err != nil {
+		return err
+	}
+	// 2. 删除告警
+	if err := tx.Where("host_id = ?", hostID).Delete(&model.Alert{}).Error; err != nil {
+		return err
+	}
+	// 3. 删除主机监控数据
+	if err := tx.Where("host_id = ?", hostID).Delete(&model.HostMetric{}).Error; err != nil {
+		return err
+	}
+	// 4. 删除主机插件信息
+	if err := tx.Where("host_id = ?", hostID).Delete(&model.HostPlugin{}).Error; err != nil {
+		return err
+	}
+	// 5. 删除资产数据（进程、端口、软件、容器等）
+	for _, m := range []any{
+		&model.Process{}, &model.Port{}, &model.Software{}, &model.Container{},
+		&model.AssetUser{}, &model.Cron{}, &model.Service{},
+		&model.NetInterface{}, &model.Volume{}, &model.Kmod{}, &model.App{},
+	} {
+		if err := tx.Where("host_id = ?", hostID).Delete(m).Error; err != nil {
+			return err
+		}
+	}
+	// 6. 删除主机漏洞关联数据
+	if err := tx.Where("host_id = ?", hostID).Delete(&model.HostVulnerability{}).Error; err != nil {
+		return err
+	}
+	// 7. 清除基线得分缓存
+	if h.scoreCache != nil {
+		h.scoreCache.InvalidateHostScore(hostID)
+	}
+	// 8. 最后删除主机记录
+	return tx.Delete(&host).Error
+}
+
 // DeleteHost 删除主机
 // DELETE /api/v1/hosts/:host_id
 func (h *HostsHandler) DeleteHost(c *gin.Context) {
 	hostID := c.Param("host_id")
 
-	// 查询主机是否存在
-	var host model.Host
-	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		return h.deleteHostByID(tx, hostID)
+	})
+
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			NotFound(c, "主机不存在")
 			return
 		}
-		h.logger.Error("查询主机失败", zap.String("host_id", hostID), zap.Error(err))
-		InternalError(c, "查询主机失败")
-		return
-	}
-
-	// 使用事务删除主机及其所有关联数据
-	err := h.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 删除扫描结果
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.ScanResult{}).Error; err != nil {
-			return err
-		}
-
-		// 2. 删除告警
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Alert{}).Error; err != nil {
-			return err
-		}
-
-		// 3. 删除主机监控数据
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostMetric{}).Error; err != nil {
-			return err
-		}
-
-		// 4. 删除主机插件信息
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostPlugin{}).Error; err != nil {
-			return err
-		}
-
-		// 5. 删除资产数据（进程、端口、软件、容器等）
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Process{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Port{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Software{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Container{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.AssetUser{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Cron{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Service{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.NetInterface{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Volume{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.Kmod{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.App{}).Error; err != nil {
-			return err
-		}
-
-		// 6. 删除主机漏洞关联数据
-		if err := tx.Where("host_id = ?", hostID).Delete(&model.HostVulnerability{}).Error; err != nil {
-			return err
-		}
-
-		// 7. 清除基线得分缓存
-		if h.scoreCache != nil {
-			h.scoreCache.InvalidateHostScore(hostID)
-		}
-
-		// 8. 最后删除主机记录
-		if err := tx.Delete(&host).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
 		h.logger.Error("删除主机失败", zap.String("host_id", hostID), zap.Error(err))
 		InternalError(c, "删除主机失败")
 		return
 	}
 
-	h.logger.Info("主机已删除", zap.String("host_id", hostID), zap.String("hostname", host.Hostname))
+	h.logger.Info("主机已删除", zap.String("host_id", hostID))
 	SuccessMessage(c, "主机删除成功")
+}
+
+// BatchDeleteHost 批量删除主机
+// POST /api/v1/hosts/batch-delete
+func (h *HostsHandler) BatchDeleteHost(c *gin.Context) {
+	var req struct {
+		HostIDs []string `json:"host_ids" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误：host_ids 不能为空")
+		return
+	}
+
+	if len(req.HostIDs) > 100 {
+		BadRequest(c, "单次最多删除 100 台主机")
+		return
+	}
+
+	var deleted, failed int
+	for _, hostID := range req.HostIDs {
+		err := h.db.Transaction(func(tx *gorm.DB) error {
+			return h.deleteHostByID(tx, hostID)
+		})
+		if err != nil {
+			failed++
+			h.logger.Warn("批量删除主机失败", zap.String("host_id", hostID), zap.Error(err))
+			continue
+		}
+		deleted++
+	}
+
+	h.logger.Info("批量删除主机完成", zap.Int("deleted", deleted), zap.Int("failed", failed))
+	Success(c, gin.H{"deleted": deleted, "failed": failed, "total": len(req.HostIDs)})
 }
 
 // RestartAgentRequest Agent 重启请求

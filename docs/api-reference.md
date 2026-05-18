@@ -118,6 +118,7 @@
 | PUT | `/api/v1/hosts/:host_id/tags` | 更新主机标签 |
 | PUT | `/api/v1/hosts/:host_id/business-line` | 更新主机业务线 |
 | DELETE | `/api/v1/hosts/:host_id` | 删除主机 |
+| POST | `/api/v1/hosts/batch-delete` | 批量删除主机（上限 100） |
 
 ---
 

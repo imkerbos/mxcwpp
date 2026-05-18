@@ -204,6 +204,7 @@ func setupHostsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, sco
 	router.PUT("/hosts/:host_id/tags", handler.UpdateHostTags)
 	router.PUT("/hosts/:host_id/business-line", handler.UpdateHostBusinessLine)
 	router.DELETE("/hosts/:host_id", handler.DeleteHost)
+	router.POST("/hosts/batch-delete", handler.BatchDeleteHost)
 	router.GET("/hosts/status-distribution", handler.GetHostStatusDistribution)
 	router.GET("/hosts/risk-distribution", handler.GetHostRiskDistribution)
 }

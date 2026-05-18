@@ -128,6 +128,11 @@ export const hostsApi = {
     return apiClient.delete(`/hosts/${hostId}`)
   },
 
+  // 批量删除主机
+  batchDelete: (hostIds: string[]) => {
+    return apiClient.post<{ deleted: number; failed: number; total: number }>('/hosts/batch-delete', { host_ids: hostIds })
+  },
+
   // 重启 Agent
   restartAgent: (hostIds?: string[]) => {
     return apiClient.post('/hosts/restart-agent', { host_ids: hostIds || [] })
