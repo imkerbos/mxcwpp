@@ -558,7 +558,12 @@ const handleBatchRemediate = async () => {
   batchLoading.value = true
   try {
     const res = await remediationTasksApi.batchCreate(selectedRowKeys.value)
-    message.success(`已创建 ${res.created} 个修复任务，请前往修复任务页面确认执行`)
+    let msg = `已为 ${res.vulnCount} 个漏洞、${res.hostCount} 台主机创建 ${res.created} 个修复任务`
+    if (res.skipped > 0) {
+      msg += `，跳过 ${res.skipped} 个（已有进行中任务）`
+    }
+    msg += '，请前往修复任务页面确认执行'
+    message.success(msg)
     selectedRowKeys.value = []
   } catch {
     message.error('批量创建修复任务失败')

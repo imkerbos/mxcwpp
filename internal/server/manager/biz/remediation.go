@@ -77,22 +77,31 @@ func (s *RemediationService) generateCommands(vuln *model.Vulnerability) []Remed
 	switch pkgType {
 	case "rpm":
 		if fixedVersion != "" {
-			commands = append(commands, RemediationCommand{
-				PackageType: "rpm",
-				Command:     fmt.Sprintf("yum update %s-%s -y", component, fixedVersion),
-				Description: fmt.Sprintf("使用 yum 升级 %s 到修复版本 %s", component, fixedVersion),
-			})
-			commands = append(commands, RemediationCommand{
-				PackageType: "rpm",
-				Command:     fmt.Sprintf("dnf upgrade %s-%s -y", component, fixedVersion),
-				Description: fmt.Sprintf("使用 dnf 升级 %s 到修复版本 %s（RHEL 8+/Fedora）", component, fixedVersion),
-			})
+			commands = append(commands,
+				RemediationCommand{
+					PackageType: "rpm-yum",
+					Command:     fmt.Sprintf("yum update %s-%s -y", component, fixedVersion),
+					Description: fmt.Sprintf("使用 yum 升级 %s 到修复版本 %s（CentOS 7/RHEL 7）", component, fixedVersion),
+				},
+				RemediationCommand{
+					PackageType: "rpm-dnf",
+					Command:     fmt.Sprintf("dnf upgrade %s-%s -y", component, fixedVersion),
+					Description: fmt.Sprintf("使用 dnf 升级 %s 到修复版本 %s（RHEL 8+/Rocky/Fedora）", component, fixedVersion),
+				},
+			)
 		} else {
-			commands = append(commands, RemediationCommand{
-				PackageType: "rpm",
-				Command:     fmt.Sprintf("yum update %s -y", component),
-				Description: fmt.Sprintf("升级 %s 到最新可用版本", component),
-			})
+			commands = append(commands,
+				RemediationCommand{
+					PackageType: "rpm-yum",
+					Command:     fmt.Sprintf("yum update %s -y", component),
+					Description: fmt.Sprintf("使用 yum 升级 %s 到最新可用版本", component),
+				},
+				RemediationCommand{
+					PackageType: "rpm-dnf",
+					Command:     fmt.Sprintf("dnf upgrade %s -y", component),
+					Description: fmt.Sprintf("使用 dnf 升级 %s 到最新可用版本", component),
+				},
+			)
 		}
 	case "deb":
 		if fixedVersion != "" {
@@ -149,13 +158,18 @@ func (s *RemediationService) generateCommands(vuln *model.Vulnerability) []Remed
 			})
 		}
 	default:
-		// 无法判断包管理器时，同时提供两种 OS 包修复方案
+		// 无法判断包管理器时，同时提供三种 OS 包修复方案
 		if fixedVersion != "" {
 			commands = append(commands,
 				RemediationCommand{
-					PackageType: "rpm",
+					PackageType: "rpm-yum",
 					Command:     fmt.Sprintf("yum update %s-%s -y", component, fixedVersion),
-					Description: fmt.Sprintf("RPM 系统：升级 %s 到 %s", component, fixedVersion),
+					Description: fmt.Sprintf("RPM 系统 (yum)：升级 %s 到 %s", component, fixedVersion),
+				},
+				RemediationCommand{
+					PackageType: "rpm-dnf",
+					Command:     fmt.Sprintf("dnf upgrade %s-%s -y", component, fixedVersion),
+					Description: fmt.Sprintf("RPM 系统 (dnf)：升级 %s 到 %s", component, fixedVersion),
 				},
 				RemediationCommand{
 					PackageType: "deb",
@@ -166,9 +180,14 @@ func (s *RemediationService) generateCommands(vuln *model.Vulnerability) []Remed
 		} else {
 			commands = append(commands,
 				RemediationCommand{
-					PackageType: "rpm",
+					PackageType: "rpm-yum",
 					Command:     fmt.Sprintf("yum update %s -y", component),
-					Description: fmt.Sprintf("RPM 系统：升级 %s 到最新版本", component),
+					Description: fmt.Sprintf("RPM 系统 (yum)：升级 %s 到最新版本", component),
+				},
+				RemediationCommand{
+					PackageType: "rpm-dnf",
+					Command:     fmt.Sprintf("dnf upgrade %s -y", component),
+					Description: fmt.Sprintf("RPM 系统 (dnf)：升级 %s 到最新版本", component),
 				},
 				RemediationCommand{
 					PackageType: "deb",
