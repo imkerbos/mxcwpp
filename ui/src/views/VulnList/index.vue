@@ -302,6 +302,15 @@
             </a-tooltip>
             <span v-else>-</span>
           </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button
+              type="link"
+              size="small"
+              @click="goScanHistoryDetail(record.id)"
+            >
+              详情
+            </a-button>
+          </template>
         </template>
       </a-table>
     </a-drawer>
@@ -412,13 +421,17 @@ const scanHistoryPagination = ref({
 const scanHistoryColumns = [
   {
     title: '类型', dataIndex: 'dbType', width: 120,
-    customRender: ({ text }: { text: string }) => text === 'vuln-sync' ? '漏洞库同步' : '全量扫描',
+    customRender: ({ text }: { text: string }) => {
+      const m: Record<string, string> = { osv: '全量扫描', 'osv-incremental': '增量扫描', 'vuln-sync': '漏洞库同步' }
+      return m[text] || text
+    },
   },
-  { title: '版本', dataIndex: 'version', width: 160 },
+  { title: '版本', dataIndex: 'version', width: 140 },
   { title: '状态', key: 'status', width: 80 },
   { title: '耗时(秒)', dataIndex: 'duration', width: 80 },
   { title: '开始时间', dataIndex: 'startedAt', width: 170, customRender: ({ text }: { text: string }) => formatDateTime(text) },
-  { title: '错误信息', key: 'errorMsg', ellipsis: true },
+  { title: '扫描摘要', key: 'errorMsg', ellipsis: true },
+  { title: '操作', key: 'action', width: 80, fixed: 'right' as const },
 ]
 
 const scanStatusColor = (status: string) => {
@@ -465,6 +478,11 @@ const loadScanHistory = async () => {
   } finally {
     scanHistoryLoading.value = false
   }
+}
+
+const goScanHistoryDetail = (id: number) => {
+  scanHistoryVisible.value = false
+  router.push({ name: 'ScanHistoryDetail', params: { id } })
 }
 
 const handleScanHistoryTableChange = (pag: any) => {

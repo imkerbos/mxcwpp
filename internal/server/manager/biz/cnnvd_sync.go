@@ -89,6 +89,7 @@ func (v *VulnScanner) SyncCNNVD() error {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	totalUpdated := 0
+	consecutiveErrors := 0
 
 	// 分页拉取 CNNVD 最新漏洞，匹配 CVE 编号
 	for page := 1; page <= cnnvdMaxPages; page++ {
@@ -103,6 +104,11 @@ func (v *VulnScanner) SyncCNNVD() error {
 			return fmt.Errorf("构建 CNNVD 请求失败: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+		req.Header.Set("Referer", "https://www.cnnvd.org.cn/home/childHome")
+		req.Header.Set("Origin", "https://www.cnnvd.org.cn")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -116,8 +122,20 @@ func (v *VulnScanner) SyncCNNVD() error {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("CNNVD API 响应状态码: %d", resp.StatusCode)
+			consecutiveErrors++
+			v.logger.Warn("CNNVD API 非 200 响应，等待后重试",
+				zap.Int("status", resp.StatusCode),
+				zap.Int("page", page),
+				zap.Int("consecutiveErrors", consecutiveErrors),
+			)
+			if consecutiveErrors >= 3 {
+				return fmt.Errorf("CNNVD API 连续 %d 次非 200 响应（最近: %d），停止同步", consecutiveErrors, resp.StatusCode)
+			}
+			time.Sleep(time.Duration(consecutiveErrors*5) * time.Second)
+			page-- // 重试当前页
+			continue
 		}
+		consecutiveErrors = 0
 
 		var apiResp cnnvdListResponse
 		if err := json.Unmarshal(respBody, &apiResp); err != nil {

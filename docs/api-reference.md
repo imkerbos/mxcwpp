@@ -118,7 +118,9 @@
 | PUT | `/api/v1/hosts/:host_id/tags` | 更新主机标签 |
 | PUT | `/api/v1/hosts/:host_id/business-line` | 更新主机业务线 |
 | DELETE | `/api/v1/hosts/:host_id` | 删除主机 |
-| POST | `/api/v1/hosts/batch-delete` | 批量删除主机（上限 100） |
+| POST | `/api/v1/hosts/batch-delete` | 批量删除主机（上限 100，支持 force 参数） |
+| POST | `/api/v1/hosts/batch-update-tags` | 批量更新标签（append/replace 模式，上限 100） |
+| POST | `/api/v1/hosts/batch-update-business-line` | 批量更新业务线（上限 100） |
 
 ---
 
