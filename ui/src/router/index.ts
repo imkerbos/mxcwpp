@@ -194,6 +194,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Whitelist/index.vue'),
         meta: { title: '白名单' },
       },
+      // 漏洞通报
+      {
+        path: 'vuln-bulletins',
+        name: 'VulnBulletins',
+        component: () => import('@/views/VulnBulletins/index.vue'),
+        meta: { title: '漏洞通报' },
+      },
+      {
+        path: 'vuln-bulletins/:id',
+        name: 'VulnBulletinDetail',
+        component: () => import('@/views/VulnBulletins/Detail.vue'),
+        meta: { title: '通报详情' },
+      },
       // 漏洞列表
       {
         path: 'vuln-list',

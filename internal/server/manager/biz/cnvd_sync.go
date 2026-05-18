@@ -110,6 +110,7 @@ func (v *VulnScanner) SyncCNVD() error {
 					Description:  item.Title,
 					Status:       "unpatched",
 					DiscoveredAt: model.Now(),
+					Source:       "cnvd",
 				}
 				if err := v.db.Create(&vuln).Error; err == nil {
 					totalSynced++

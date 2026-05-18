@@ -54,6 +54,12 @@ type nvdCVE struct {
 			} `json:"cvssData"`
 		} `json:"cvssMetricV30"`
 	} `json:"metrics"`
+	Weaknesses []struct {
+		Description []struct {
+			Lang  string `json:"lang"`
+			Value string `json:"value"`
+		} `json:"description"`
+	} `json:"weaknesses"`
 	Configurations []nvdConfiguration `json:"configurations"`
 	References     []struct {
 		URL string `json:"url"`
@@ -159,31 +165,41 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 
 		// 提取漏洞信息
 		description := v.extractNVDDescription(item.CVE)
-		cvssScore, severity := v.extractNVDCVSS(item.CVE)
+		cvssResult := v.extractNVDCVSSFull(item.CVE)
 		fixedVersion := v.extractNVDFixedVersion(item.CVE.Configurations)
 		referenceURL := v.extractNVDReference(item.CVE)
+		cweID := v.extractNVDCWE(item.CVE)
+		affectedVersions := v.extractNVDAffectedVersions(item.CVE.Configurations)
+		attackVector, vulnType := classifyFromCVSSVector(cvssResult.VectorString, cweID)
 
 		// 取第一个匹配的组件名
 		firstMatch := matches[0]
 
 		vulnRecord := &model.Vulnerability{
-			CveID:          cveID,
-			OsvID:          "",
-			PURL:           "",
-			Severity:       severity,
-			CvssScore:      cvssScore,
-			Component:      firstMatch.Name,
-			Description:    description,
-			Status:         "unpatched",
-			DiscoveredAt:   model.LocalTime(time.Now()),
-			CurrentVersion: firstMatch.Version,
-			FixedVersion:   fixedVersion,
-			ReferenceUrl:   referenceURL,
+			CveID:            cveID,
+			OsvID:            "",
+			PURL:             "",
+			Severity:         cvssResult.Severity,
+			CvssScore:        cvssResult.BaseScore,
+			CvssVector:       cvssResult.VectorString,
+			AttackVector:     attackVector,
+			VulnType:         vulnType,
+			AffectedVersions: affectedVersions,
+			Source:           "nvd",
+			PatchAvailable:   fixedVersion != "",
+			CweID:            cweID,
+			Component:        firstMatch.Name,
+			Description:      description,
+			Status:           "unpatched",
+			DiscoveredAt:     model.LocalTime(time.Now()),
+			CurrentVersion:   firstMatch.Version,
+			FixedVersion:     fixedVersion,
+			ReferenceUrl:     referenceURL,
 		}
 
 		if err := v.db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "cve_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"cvss_score", "description", "fixed_version", "reference_url"}),
+			DoUpdates: clause.AssignmentColumns([]string{"cvss_score", "cvss_vector", "attack_vector", "vuln_type", "affected_versions", "source", "patch_available", "cwe_id", "description", "fixed_version", "reference_url"}),
 		}).Create(vulnRecord).Error; err != nil {
 			v.logger.Error("NVD 写入漏洞记录失败", zap.String("cve_id", cveID), zap.Error(err))
 			continue
@@ -213,21 +229,19 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 		}
 		v.upsertHostVulnsBatch(vulnRecord.ID, entries)
 
-		// 发送漏洞告警通知
-		if len(matches) > 0 {
-			go func(vuln *model.Vulnerability, sw installedSoftware) {
-				var affected int64
-				v.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vuln.ID, "unpatched").Count(&affected)
+		// 异步创建漏洞通报 + 发送通知
+		go func(vuln *model.Vulnerability) {
+			bs := NewVulnBulletinService(v.db, v.logger)
+			bulletin := bs.TryCreateBulletin(vuln)
+			if bulletin != nil {
 				ns := NewNotificationService(v.db, v.logger)
-				_ = ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
-					HostID: sw.HostID, Hostname: sw.Hostname, IP: sw.IP,
-					CveID: vuln.CveID, Severity: vuln.Severity, CvssScore: vuln.CvssScore,
-					Component: vuln.Component, CurrentVersion: vuln.CurrentVersion,
-					FixedVersion: vuln.FixedVersion, Description: vuln.Description,
-					AffectedHosts: int(affected),
-				})
-			}(vulnRecord, matches[0])
-		}
+				if err := ns.SendVulnBulletinNotification(bulletin); err != nil {
+					v.logger.Error("发送漏洞通报通知失败",
+						zap.String("bulletin_no", bulletin.BulletinNo),
+						zap.Error(err))
+				}
+			}
+		}(vulnRecord)
 
 		existingCVEs[cveID] = struct{}{}
 		newCount++
@@ -451,18 +465,62 @@ func (v *VulnScanner) extractNVDDescription(cve nvdCVE) string {
 	return ""
 }
 
+// nvdCVSSResult NVD CVSS 提取结果
+type nvdCVSSResult struct {
+	BaseScore    float64
+	Severity     string
+	VectorString string
+}
+
 func (v *VulnScanner) extractNVDCVSS(cve nvdCVE) (float64, string) {
+	r := v.extractNVDCVSSFull(cve)
+	return r.BaseScore, r.Severity
+}
+
+func (v *VulnScanner) extractNVDCVSSFull(cve nvdCVE) nvdCVSSResult {
 	// 优先 CVSS v3.1
 	if len(cve.Metrics.CvssMetricV31) > 0 {
 		d := cve.Metrics.CvssMetricV31[0].CvssData
-		return d.BaseScore, nvdSeverityToInternal(d.BaseSeverity)
+		return nvdCVSSResult{d.BaseScore, nvdSeverityToInternal(d.BaseSeverity), d.VectorString}
 	}
 	// 回退 CVSS v3.0
 	if len(cve.Metrics.CvssMetricV30) > 0 {
 		d := cve.Metrics.CvssMetricV30[0].CvssData
-		return d.BaseScore, nvdSeverityToInternal(d.BaseSeverity)
+		return nvdCVSSResult{d.BaseScore, nvdSeverityToInternal(d.BaseSeverity), d.VectorString}
 	}
-	return 0, "medium"
+	return nvdCVSSResult{0, "medium", ""}
+}
+
+// extractNVDCWE 提取 CWE 编号（取第一个非 NVD-CWE-noinfo / NVD-CWE-Other 的条目）
+func (v *VulnScanner) extractNVDCWE(cve nvdCVE) string {
+	for _, w := range cve.Weaknesses {
+		for _, d := range w.Description {
+			if d.Value != "" && d.Value != "NVD-CWE-noinfo" && d.Value != "NVD-CWE-Other" {
+				return d.Value
+			}
+		}
+	}
+	return ""
+}
+
+// extractNVDAffectedVersions 从 CPE 配置提取影响版本范围字符串
+func (v *VulnScanner) extractNVDAffectedVersions(configs []nvdConfiguration) string {
+	for _, config := range configs {
+		for _, node := range config.Nodes {
+			for _, cpe := range node.CPEMatch {
+				if !cpe.Vulnerable {
+					continue
+				}
+				if cpe.VersionEndExcluding != "" {
+					return "< " + cpe.VersionEndExcluding
+				}
+				if cpe.VersionEndIncluding != "" {
+					return "<= " + cpe.VersionEndIncluding
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func nvdSeverityToInternal(s string) string {

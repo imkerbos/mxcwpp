@@ -59,6 +59,7 @@ export const menuConfig: MenuItem[] = [
     title: '漏洞管理',
     icon: BugOutlined,
     children: [
+      { key: 'vuln-bulletins', title: '漏洞通报', route: '/vuln-bulletins' },
       { key: 'vuln-list', title: '漏洞列表', route: '/vuln-list' },
       { key: 'vuln-scan-schedules', title: '扫描计划', route: '/vuln-scan-schedules' },
       { key: 'vuln-remediation', title: '修复报告', route: '/vuln-remediation' },

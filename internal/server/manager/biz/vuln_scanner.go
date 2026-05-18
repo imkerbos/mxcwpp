@@ -525,28 +525,37 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 				cveIDs := v.extractCVEs(*fullVuln)
 				severity := v.mapSeverity(*fullVuln)
 				cvssScore := v.extractCVSS(*fullVuln)
+				cvssVector := v.extractCVSSVector(*fullVuln)
 				fixedVersion := v.extractFixedVersion(*fullVuln)
 				referenceURL := v.extractReferenceURL(*fullVuln)
+				affectedVersions := v.extractAffectedVersions(*fullVuln)
+				attackVector, vulnType := classifyFromCVSSVector(cvssVector, "")
 
 				for _, cveID := range cveIDs {
 					vulnRecord := &model.Vulnerability{
-						CveID:          cveID,
-						OsvID:          fullVuln.ID,
-						PURL:           purl,
-						Severity:       severity,
-						CvssScore:      cvssScore,
-						Component:      pkgInfo.Name,
-						Description:    fullVuln.Summary,
-						Status:         "unpatched",
-						DiscoveredAt:   model.LocalTime(time.Now()),
-						CurrentVersion: pkgInfo.Version,
-						FixedVersion:   fixedVersion,
-						ReferenceUrl:   referenceURL,
+						CveID:            cveID,
+						OsvID:            fullVuln.ID,
+						PURL:             purl,
+						Severity:         severity,
+						CvssScore:        cvssScore,
+						CvssVector:       cvssVector,
+						AttackVector:     attackVector,
+						VulnType:         vulnType,
+						AffectedVersions: affectedVersions,
+						Source:           "osv",
+						PatchAvailable:   fixedVersion != "",
+						Component:        pkgInfo.Name,
+						Description:      fullVuln.Summary,
+						Status:           "unpatched",
+						DiscoveredAt:     model.LocalTime(time.Now()),
+						CurrentVersion:   pkgInfo.Version,
+						FixedVersion:     fixedVersion,
+						ReferenceUrl:     referenceURL,
 					}
 
 					if err := v.db.Clauses(clause.OnConflict{
 						Columns:   []clause.Column{{Name: "cve_id"}},
-						DoUpdates: clause.AssignmentColumns([]string{"osv_id", "purl", "cvss_score", "description", "fixed_version", "reference_url"}),
+						DoUpdates: clause.AssignmentColumns([]string{"osv_id", "purl", "cvss_score", "cvss_vector", "attack_vector", "vuln_type", "affected_versions", "source", "patch_available", "description", "fixed_version", "reference_url"}),
 					}).Create(vulnRecord).Error; err != nil {
 						v.logger.Error("写入漏洞记录失败", zap.String("cve_id", cveID), zap.Error(err))
 						continue
@@ -560,29 +569,19 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 
 					v.upsertHostVulns(vulnRecord.ID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
 
-					// 异步发送漏洞告警通知
-					if len(purlHosts[purl]) > 0 {
-						firstHost := purlHosts[purl][0]
-						go func(vuln *model.Vulnerability, hostID, hostname string) {
-							var host model.Host
-							ip := ""
-							if v.db.Select("ipv4").First(&host, "host_id = ?", hostID).Error == nil && len(host.IPv4) > 0 {
-								ip = host.IPv4[0]
-							}
-							var affected int64
-							v.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vuln.ID, "unpatched").Count(&affected)
+					// 异步创建漏洞通报 + 发送通知
+					go func(vuln *model.Vulnerability) {
+						bs := NewVulnBulletinService(v.db, v.logger)
+						bulletin := bs.TryCreateBulletin(vuln)
+						if bulletin != nil {
 							ns := NewNotificationService(v.db, v.logger)
-							if err := ns.SendVulnerabilityAlertNotification(&VulnerabilityAlertData{
-								HostID: hostID, Hostname: hostname, IP: ip,
-								CveID: vuln.CveID, Severity: vuln.Severity, CvssScore: vuln.CvssScore,
-								Component: vuln.Component, CurrentVersion: vuln.CurrentVersion,
-								FixedVersion: vuln.FixedVersion, Description: vuln.Description,
-								AffectedHosts: int(affected),
-							}); err != nil {
-								v.logger.Error("发送漏洞告警通知失败", zap.String("cve_id", vuln.CveID), zap.Error(err))
+							if err := ns.SendVulnBulletinNotification(bulletin); err != nil {
+								v.logger.Error("发送漏洞通报通知失败",
+									zap.String("bulletin_no", bulletin.BulletinNo),
+									zap.Error(err))
 							}
-						}(vulnRecord, firstHost, hostnameMap[firstHost])
-					}
+						}
+					}(vulnRecord)
 					vulnCount++
 				}
 				continue
@@ -889,6 +888,43 @@ func (v *VulnScanner) extractCVSS(vuln osvVuln) float64 {
 		}
 	}
 	return 0
+}
+
+// extractCVSSVector 提取 CVSS v3 向量字符串原文
+func (v *VulnScanner) extractCVSSVector(vuln osvVuln) string {
+	for _, sev := range vuln.Severity {
+		if sev.Type == "CVSS_V3" && sev.Score != "" {
+			return sev.Score
+		}
+	}
+	return ""
+}
+
+// extractAffectedVersions 提取影响版本范围描述
+func (v *VulnScanner) extractAffectedVersions(vuln osvVuln) string {
+	for _, affected := range vuln.Affected {
+		for _, r := range affected.Ranges {
+			var introduced, fixed string
+			for _, event := range r.Events {
+				if event.Introduced != "" && event.Introduced != "0" {
+					introduced = event.Introduced
+				}
+				if event.Fixed != "" {
+					fixed = event.Fixed
+				}
+			}
+			if fixed != "" && introduced != "" {
+				return ">= " + introduced + ", < " + fixed
+			}
+			if fixed != "" {
+				return "< " + fixed
+			}
+			if introduced != "" {
+				return ">= " + introduced
+			}
+		}
+	}
+	return ""
 }
 
 // parseCVSSv3Vector 解析 CVSS v3.x 向量字符串，返回 Base Score

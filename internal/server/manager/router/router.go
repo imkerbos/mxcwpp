@@ -151,6 +151,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
 	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
 	setupVulnerabilitiesAPI(router, db, logger)
+	setupVulnBulletinsAPI(router, db, logger)
 	setupAntivirusAPI(router, db, logger, virusDBUpdater)
 	setupQuarantineAPI(router, db, logger)
 	setupDetectionRulesAPI(router, db, logger)
@@ -730,6 +731,21 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-policies/:id/execute", policyHandler.ExecutePolicy)
 	router.POST("/remediation-policies/:id/preview", policyHandler.PreviewPolicy)
 	router.GET("/remediation-policies/:id/executions", policyHandler.ListExecutions)
+}
+
+// setupVulnBulletinsAPI 设置漏洞通报 API 路由
+func setupVulnBulletinsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewVulnBulletinsHandler(db, logger)
+	router.GET("/vuln-bulletins", handler.ListBulletins)
+	router.GET("/vuln-bulletins/statistics", handler.GetBulletinStatistics)
+	router.GET("/vuln-bulletins/config", handler.GetBulletinConfig)
+	router.PUT("/vuln-bulletins/config", handler.UpdateBulletinConfig)
+	router.GET("/vuln-bulletins/:id", handler.GetBulletin)
+	router.PUT("/vuln-bulletins/:id/acknowledge", handler.AcknowledgeBulletin)
+	router.PUT("/vuln-bulletins/:id/resolve", handler.ResolveBulletin)
+	router.PUT("/vuln-bulletins/:id/ignore", handler.IgnoreBulletin)
+	router.PUT("/vuln-bulletins/:id/reopen", handler.ReopenBulletin)
+	router.POST("/vuln-bulletins/batch", handler.BatchBulletins)
 }
 
 // setupAlertContextAPI 设置告警溯源 API 路由
