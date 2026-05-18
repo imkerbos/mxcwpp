@@ -2,6 +2,21 @@ import apiClient from './client'
 import type { Vulnerability, VulnerabilityListResult } from './types'
 import type { SecurityDBSyncRecord } from './antivirus'
 
+export interface ScanHistoryDetail {
+  record: SecurityDBSyncRecord
+  vulns: {
+    items: Vulnerability[]
+    total: number
+    page: number
+  }
+  affectedHosts: {
+    hostId: string
+    hostname: string
+    ip: string
+    vulnCount: number
+  }[]
+}
+
 export interface RemediationCommand {
   packageType: string
   command: string
@@ -88,6 +103,13 @@ export const vulnerabilitiesApi = {
 
   getScanHistory: (params?: { page?: number; page_size?: number }) => {
     return apiClient.get<{ total: number; items: SecurityDBSyncRecord[] }>('/vulnerabilities/scan-history', { params })
+  },
+
+  getScanHistoryDetail: (id: number, vulnPage = 1, vulnPageSize = 20) => {
+    return apiClient.get<ScanHistoryDetail>(
+      `/vulnerabilities/scan-history/${id}`,
+      { params: { vulnPage, vulnPageSize } },
+    )
   },
 
   // 修复建议
