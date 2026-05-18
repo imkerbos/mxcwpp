@@ -93,8 +93,8 @@ export const vulnerabilitiesApi = {
     return apiClient.post('/vulnerabilities/sync')
   },
 
-  triggerScan: () => {
-    return apiClient.post('/vulnerabilities/scan')
+  triggerScan: (scanType: 'full_scan' | 'incremental_scan' = 'full_scan') => {
+    return apiClient.post('/vulnerabilities/scan', { scan_type: scanType })
   },
 
   getScanStatus: () => {

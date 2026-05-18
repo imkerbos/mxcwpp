@@ -171,7 +171,15 @@
           <div class="filter-actions">
             <a-button @click="handleReset">重置</a-button>
             <a-button @click="handleExport">导出当前结果</a-button>
-            <a-button type="primary" @click="handleScan">立即扫描</a-button>
+            <a-dropdown>
+              <a-button type="primary">立即扫描 <DownOutlined /></a-button>
+              <template #overlay>
+                <a-menu @click="handleScanMenu">
+                  <a-menu-item key="full_scan">全量扫描</a-menu-item>
+                  <a-menu-item key="incremental_scan">增量扫描</a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
           </div>
         </div>
 
@@ -321,6 +329,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import { DownOutlined } from '@ant-design/icons-vue'
 import { vulnerabilitiesApi } from '@/api/vulnerabilities'
 import { remediationTasksApi } from '@/api/remediation-tasks'
 import type { SecurityDBSyncRecord } from '@/api/antivirus'
@@ -604,13 +613,15 @@ const handleSync = async () => {
   }
 }
 
-const handleScan = async () => {
+const handleScanMenu = async ({ key }: { key: string }) => {
+  const scanType = key as 'full_scan' | 'incremental_scan'
+  const label = scanType === 'incremental_scan' ? '增量扫描' : '全量扫描'
   try {
-    await vulnerabilitiesApi.triggerScan()
-    message.success('全量扫描任务已启动（OSV + NVD + Red Hat）')
+    await vulnerabilitiesApi.triggerScan(scanType)
+    message.success(`${label}任务已启动`)
     setTimeout(() => loadScanStatus(), 2000)
   } catch {
-    message.error('创建扫描任务失败')
+    message.error(`${label}任务启动失败`)
   }
 }
 

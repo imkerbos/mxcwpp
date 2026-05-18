@@ -410,11 +410,24 @@ func (h *VulnerabilitiesHandler) TriggerSync(c *gin.Context) {
 
 // TriggerScan 触发漏洞扫描（包含漏洞库同步 + 主机扫描）
 // POST /api/v1/vulnerabilities/scan
+// 支持 scan_type 参数：full_scan（全量，默认）/ incremental_scan（增量）
 func (h *VulnerabilitiesHandler) TriggerScan(c *gin.Context) {
+	var req struct {
+		ScanType string `json:"scan_type"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.ScanType == "" {
+		req.ScanType = "full_scan"
+	}
+	if req.ScanType != "full_scan" && req.ScanType != "incremental_scan" {
+		BadRequest(c, "无效的扫描类型，支持 full_scan / incremental_scan")
+		return
+	}
+
 	// 并发保护：检查是否有正在运行的同步/扫描任务
 	var running int64
 	h.db.Model(&model.SecurityDBSyncRecord{}).
-		Where("db_type IN ? AND status = ?", []string{"osv", "vuln-sync"}, "running").
+		Where("db_type IN ? AND status = ?", []string{"osv", "osv-incremental", "vuln-sync"}, "running").
 		Count(&running)
 	if running > 0 {
 		BadRequest(c, "已有同步或扫描任务正在运行，请等待完成后再试")
@@ -423,13 +436,21 @@ func (h *VulnerabilitiesHandler) TriggerScan(c *gin.Context) {
 
 	scanner := biz.NewVulnScanner(h.db, h.logger)
 
-	go func() {
-		if err := scanner.ScanAll(); err != nil {
-			h.logger.Error("漏洞扫描失败", zap.Error(err))
-		}
-	}()
-
-	SuccessMessage(c, "漏洞扫描任务已启动")
+	if req.ScanType == "incremental_scan" {
+		go func() {
+			if err := scanner.ScanIncremental(); err != nil {
+				h.logger.Error("增量扫描失败", zap.Error(err))
+			}
+		}()
+		SuccessMessage(c, "增量扫描任务已启动")
+	} else {
+		go func() {
+			if err := scanner.ScanAll(); err != nil {
+				h.logger.Error("漏洞扫描失败", zap.Error(err))
+			}
+		}()
+		SuccessMessage(c, "全量扫描任务已启动")
+	}
 }
 
 // GetScanStatus 获取漏洞扫描最新同步状态
