@@ -82,6 +82,7 @@
         <a-form-item label="扫描类型" required>
           <a-select v-model:value="form.scanType" placeholder="请选择扫描类型">
             <a-select-option value="full_scan">全量扫描</a-select-option>
+            <a-select-option value="incremental_scan">增量扫描</a-select-option>
             <a-select-option value="sync_only">仅同步</a-select-option>
           </a-select>
         </a-form-item>
@@ -197,6 +198,7 @@ const columns = [
 const scanTypeColor = (type: string) => {
   const map: Record<string, string> = {
     full_scan: 'blue',
+    incremental_scan: 'cyan',
     sync_only: 'green',
   }
   return map[type] || 'default'
@@ -205,6 +207,7 @@ const scanTypeColor = (type: string) => {
 const scanTypeText = (type: string) => {
   const map: Record<string, string> = {
     full_scan: '全量扫描',
+    incremental_scan: '增量扫描',
     sync_only: '仅同步',
   }
   return map[type] || type
