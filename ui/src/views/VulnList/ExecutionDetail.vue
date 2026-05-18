@@ -24,8 +24,8 @@
             <a-descriptions :column="3" bordered size="small">
               <a-descriptions-item label="所属计划">{{ detail.scheduleName }}</a-descriptions-item>
               <a-descriptions-item label="扫描类型">
-                <a-tag :color="detail.execution.scanType === 'full_scan' ? 'blue' : 'green'">
-                  {{ detail.execution.scanType === 'full_scan' ? '全量扫描' : '仅同步' }}
+                <a-tag :color="scanTypeColor(detail.execution.scanType)">
+                  {{ scanTypeText(detail.execution.scanType) }}
                 </a-tag>
               </a-descriptions-item>
               <a-descriptions-item label="状态">
@@ -187,6 +187,9 @@ const sourceResults = computed(() => {
 
 const statusColor = (s: string) => ({ success: 'green', failed: 'red', running: 'blue' }[s] || 'default')
 const statusText = (s: string) => ({ success: '成功', failed: '失败', running: '执行中' }[s] || s)
+
+const scanTypeColor = (t: string) => ({ full_scan: 'blue', incremental_scan: 'cyan', sync_only: 'green' }[t] || 'default')
+const scanTypeText = (t: string) => ({ full_scan: '全量扫描', incremental_scan: '增量扫描', sync_only: '仅同步' }[t] || t)
 
 const severityColor = (s: string) => {
   const m: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold', low: 'blue' }
