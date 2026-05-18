@@ -232,5 +232,6 @@ var (
 		&ImageRegistry{},
 		&RemediationPolicy{},
 		&RemediationPolicyExecution{},
+		&VulnBulletin{},
 	}
 )

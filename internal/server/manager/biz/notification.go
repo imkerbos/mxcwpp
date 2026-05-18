@@ -1931,6 +1931,282 @@ func (s *NotificationService) buildWebhookKube(data *KubeAlertData) map[string]i
 }
 
 // ============================================================
+// 漏洞通报通知
+// ============================================================
+
+// SendVulnBulletinNotification 发送漏洞通报通知
+func (s *NotificationService) SendVulnBulletinNotification(bulletin *model.VulnBulletin) error {
+	var notifications []model.Notification
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryVulnBulletin).
+		Find(&notifications).Error; err != nil {
+		return err
+	}
+
+	sentCount := 0
+	for _, n := range notifications {
+		// 通报不按严重级别二次过滤，等级控制已在通报配置中完成
+
+		var msg map[string]interface{}
+		if n.Type == model.NotificationTypeLark {
+			msg = s.buildLarkBulletinCard(&n, bulletin)
+		} else {
+			msg = s.buildWebhookBulletin(bulletin)
+		}
+		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
+			s.logger.Error("发送漏洞通报通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+			continue
+		}
+		sentCount++
+	}
+
+	if sentCount > 0 {
+		// 更新通报状态和通知追踪
+		now := model.Now()
+		s.db.Model(bulletin).Updates(map[string]interface{}{
+			"status":           model.BulletinStatusNotified,
+			"notified_at":      &now,
+			"last_notified_at": &now,
+			"notify_count":     bulletin.NotifyCount + 1,
+		})
+	}
+
+	return nil
+}
+
+// buildLarkBulletinCard 构建飞书漏洞通报卡片
+func (s *NotificationService) buildLarkBulletinCard(notification *model.Notification, b *model.VulnBulletin) map[string]interface{} {
+	// 优先级标题和颜色
+	priorityLabel := bulletinPriorityLabel(b.Priority)
+	template := bulletinPriorityTemplate(b.Priority)
+	title := fmt.Sprintf("%s %s 漏洞通报 · %s", bulletinPriorityEmoji(b.Priority), priorityLabel, b.BulletinNo)
+
+	// 攻击向量中文
+	avText := attackVectorLabel(b.AttackVector)
+	// 漏洞类型中文
+	vtText := vulnTypeLabel(b.VulnType)
+
+	// 基础信息段
+	info := fmt.Sprintf(
+		"矩阵云安全平台检测到安全漏洞，请及时处理。\n\n"+
+			"**漏洞编号：** %s\n"+
+			"**受影响组件：** %s\n"+
+			"**漏洞类型：** %s\n"+
+			"**CVSS 评分：** %.1f (%s)\n"+
+			"**攻击向量：** %s",
+		b.CveID, b.Component, vtText,
+		b.CvssScore, getSeverityLabel(b.Severity), avText,
+	)
+
+	elements := []map[string]interface{}{larkTextDiv(info), larkHR()}
+
+	// 影响范围段
+	impact := fmt.Sprintf(
+		"**影响资产：** %d 台\n"+
+			"**影响版本：** %s",
+		b.AffectedAssets, defaultStr(b.AffectedVersions, "未知"),
+	)
+	elements = append(elements, larkTextDiv(impact), larkHR())
+
+	// 威胁情报段
+	kevText := "否"
+	if b.InKEV {
+		kevText = "是 (CISA KEV)"
+	}
+	expText := "否"
+	if b.HasExploit {
+		expText = "是"
+	}
+	intel := fmt.Sprintf(
+		"**在野利用：** %s\n"+
+			"**公开 EXP：** %s",
+		kevText, expText,
+	)
+	elements = append(elements, larkTextDiv(intel), larkHR())
+
+	// 修复建议段
+	fixText := defaultStr(b.FixSuggestion, "暂无修复建议")
+	if b.FixedVersion != "" {
+		fixText = fmt.Sprintf("升级至 %s 及以上", b.FixedVersion)
+	}
+	fix := fmt.Sprintf("**修复建议：** %s", fixText)
+	if b.Workaround != "" {
+		fix += fmt.Sprintf("\n**临时缓解：** %s", b.Workaround)
+	}
+	elements = append(elements, larkTextDiv(fix), larkHR())
+
+	// SLA 段
+	sla := ""
+	if b.SLAAckDeadline != nil {
+		sla += fmt.Sprintf("**确认截止：** %s\n", b.SLAAckDeadline.String())
+	}
+	if b.SLAResolveDeadline != nil {
+		sla += fmt.Sprintf("**修复截止：** %s", b.SLAResolveDeadline.String())
+	}
+	if sla != "" {
+		elements = append(elements, larkTextDiv(sla), larkHR())
+	}
+
+	// 底部元信息
+	meta := fmt.Sprintf("漏洞来源：%s　·　通报状态：%s",
+		defaultStr(b.Source, "未知"), bulletinStatusLabel(b.Status))
+	elements = append(elements, larkTextDiv(meta))
+
+	// 跳转按钮
+	if notification.FrontendURL != "" {
+		url := fmt.Sprintf("%s/vuln-bulletins/%d",
+			strings.TrimSuffix(notification.FrontendURL, "/"), b.ID)
+		elements = append(elements, larkActionButton("查看详情", url))
+	}
+
+	return s.buildLarkCardMessage(notification, title, template, elements)
+}
+
+// buildWebhookBulletin 构建 Webhook 通报消息
+func (s *NotificationService) buildWebhookBulletin(b *model.VulnBulletin) map[string]interface{} {
+	msg := map[string]interface{}{
+		"alert_type":        "vuln_bulletin",
+		"bulletin_no":       b.BulletinNo,
+		"priority":          b.Priority,
+		"cve_id":            b.CveID,
+		"component":         b.Component,
+		"vuln_type":         b.VulnType,
+		"severity":          b.Severity,
+		"cvss_score":        b.CvssScore,
+		"cvss_vector":       b.CvssVector,
+		"attack_vector":     b.AttackVector,
+		"affected_assets":   b.AffectedAssets,
+		"affected_versions": b.AffectedVersions,
+		"fixed_version":     b.FixedVersion,
+		"fix_suggestion":    b.FixSuggestion,
+		"has_exploit":       b.HasExploit,
+		"in_kev":            b.InKEV,
+		"source":            b.Source,
+		"status":            b.Status,
+		"description":       b.Description,
+	}
+	if b.SLAAckDeadline != nil {
+		msg["sla_ack_deadline"] = b.SLAAckDeadline.Time().Format(time.RFC3339)
+	}
+	if b.SLAResolveDeadline != nil {
+		msg["sla_resolve_deadline"] = b.SLAResolveDeadline.Time().Format(time.RFC3339)
+	}
+	return msg
+}
+
+// ---- 通报辅助函数 ----
+
+func bulletinPriorityLabel(p string) string {
+	switch p {
+	case model.BulletinPriorityP0:
+		return "P0 紧急"
+	case model.BulletinPriorityP1:
+		return "P1 高"
+	case model.BulletinPriorityP2:
+		return "P2 中"
+	case model.BulletinPriorityP3:
+		return "P3 低"
+	default:
+		return p
+	}
+}
+
+func bulletinPriorityEmoji(p string) string {
+	switch p {
+	case model.BulletinPriorityP0:
+		return "🚨"
+	case model.BulletinPriorityP1:
+		return "🔴"
+	case model.BulletinPriorityP2:
+		return "🟡"
+	case model.BulletinPriorityP3:
+		return "🔵"
+	default:
+		return "🔔"
+	}
+}
+
+func bulletinPriorityTemplate(p string) string {
+	switch p {
+	case model.BulletinPriorityP0:
+		return "red"
+	case model.BulletinPriorityP1:
+		return "orange"
+	case model.BulletinPriorityP2:
+		return "blue"
+	case model.BulletinPriorityP3:
+		return "grey"
+	default:
+		return "blue"
+	}
+}
+
+func bulletinStatusLabel(s string) string {
+	switch s {
+	case model.BulletinStatusPending:
+		return "待处理"
+	case model.BulletinStatusNotified:
+		return "已通知"
+	case model.BulletinStatusAcknowledged:
+		return "已确认"
+	case model.BulletinStatusResolved:
+		return "已修复"
+	case model.BulletinStatusIgnored:
+		return "已忽略"
+	default:
+		return s
+	}
+}
+
+func attackVectorLabel(av string) string {
+	switch av {
+	case model.AttackVectorNetwork:
+		return "网络"
+	case model.AttackVectorAdjacent:
+		return "相邻网络"
+	case model.AttackVectorLocal:
+		return "本地"
+	case model.AttackVectorPhysical:
+		return "物理"
+	default:
+		return "未知"
+	}
+}
+
+func vulnTypeLabel(vt string) string {
+	switch vt {
+	case model.VulnTypeRCE:
+		return "远程代码执行 (RCE)"
+	case model.VulnTypeLPE:
+		return "本地提权 (LPE)"
+	case model.VulnTypeDoS:
+		return "拒绝服务 (DoS)"
+	case model.VulnTypeInfoDisclosure:
+		return "信息泄露"
+	case model.VulnTypeAuthBypass:
+		return "认证绕过"
+	case model.VulnTypeXSS:
+		return "跨站脚本 (XSS)"
+	case model.VulnTypeSQLi:
+		return "SQL 注入"
+	case model.VulnTypeSSRF:
+		return "服务端请求伪造 (SSRF)"
+	case model.VulnTypeOther:
+		return "其他"
+	case model.VulnTypeUnknown:
+		return "未知"
+	default:
+		return vt
+	}
+}
+
+func defaultStr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// ============================================================
 // 测试通知辅助方法（公开，供 API 层调用）
 // ============================================================
 

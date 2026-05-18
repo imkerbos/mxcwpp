@@ -117,6 +117,7 @@ func (v *VulnScanner) SyncRedHatWithSoftware(softwareByName map[string][]install
 			DiscoveredAt:   model.LocalTime(time.Now()),
 			CurrentVersion: firstMatch.Version,
 			ReferenceUrl:   referenceURL,
+			Source:         "redhat",
 		}
 
 		if err := v.db.Clauses(clause.OnConflict{
