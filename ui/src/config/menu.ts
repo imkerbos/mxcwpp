@@ -59,12 +59,14 @@ export const menuConfig: MenuItem[] = [
     title: '漏洞管理',
     icon: BugOutlined,
     children: [
+      { key: 'vuln-bulletins', title: '漏洞通报', route: '/vuln-bulletins' },
       { key: 'vuln-list', title: '漏洞列表', route: '/vuln-list' },
       { key: 'vuln-scan-schedules', title: '扫描计划', route: '/vuln-scan-schedules' },
       { key: 'vuln-remediation', title: '修复报告', route: '/vuln-remediation' },
       { key: 'remediation-tasks', title: '修复任务', route: '/vuln-remediation/tasks' },
       { key: 'remediation-policies', title: '修复策略', route: '/vuln-remediation/policies' },
       { key: 'vuln-db-manage', title: '漏洞库管理', route: '/vuln-db-manage' },
+      { key: 'sbom-import', title: 'SBOM 导入', route: '/sbom-import' },
     ],
   },
   {

@@ -229,7 +229,9 @@ var (
 		&VulnDBImport{},
 		&ImageScan{},
 		&ImageVulnerability{},
+		&ImageRegistry{},
 		&RemediationPolicy{},
 		&RemediationPolicyExecution{},
+		&VulnBulletin{},
 	}
 )

@@ -194,6 +194,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Whitelist/index.vue'),
         meta: { title: '白名单' },
       },
+      // 漏洞通报
+      {
+        path: 'vuln-bulletins',
+        name: 'VulnBulletins',
+        component: () => import('@/views/VulnBulletins/index.vue'),
+        meta: { title: '漏洞通报' },
+      },
+      {
+        path: 'vuln-bulletins/:id',
+        name: 'VulnBulletinDetail',
+        component: () => import('@/views/VulnBulletins/Detail.vue'),
+        meta: { title: '通报详情' },
+      },
       // 漏洞列表
       {
         path: 'vuln-list',
@@ -248,6 +261,12 @@ const routes: RouteRecordRaw[] = [
         name: 'VulnDBManage',
         component: () => import('@/views/System/VulnDBManage.vue'),
         meta: { title: '漏洞库管理' },
+      },
+      {
+        path: 'sbom-import',
+        name: 'SBOMImport',
+        component: () => import('@/views/System/SBOMImport.vue'),
+        meta: { title: 'SBOM 导入' },
       },
       // 病毒查杀
       {

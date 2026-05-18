@@ -32,6 +32,7 @@ const (
 	NotifyCategoryFIMAlert           NotifyCategory = "fim_alert"           // 文件完整性告警通知
 	NotifyCategoryEDRAlert           NotifyCategory = "edr_alert"           // EDR 告警通知
 	NotifyCategoryKubeAlert          NotifyCategory = "kube_alert"          // K8s 安全告警通知
+	NotifyCategoryVulnBulletin       NotifyCategory = "vuln_bulletin"       // 漏洞通报通知
 )
 
 // NotificationSeverity 通知等级

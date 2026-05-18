@@ -87,6 +87,14 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		query = query.Where("vulnerabilities.has_exploit = ?", false)
 	}
 
+	// 生态系统筛选
+	if filter.Ecosystem != "" {
+		query = query.Joins("JOIN host_vulnerabilities ehv ON ehv.vuln_id = vulnerabilities.id").
+			Joins("JOIN software sw ON sw.host_id = ehv.host_id AND sw.name = vulnerabilities.component").
+			Where("sw.ecosystem = ?", filter.Ecosystem).
+			Group("vulnerabilities.id")
+	}
+
 	// 优先级筛选
 	switch filter.Priority {
 	case "high":
@@ -152,6 +160,7 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		Component:     strings.TrimSpace(c.Query("component")),
 		ExploitStatus: strings.TrimSpace(c.Query("exploit_status")),
 		Priority:      strings.TrimSpace(c.Query("priority")),
+		Ecosystem:     strings.TrimSpace(c.Query("ecosystem")),
 		Sort:          strings.TrimSpace(c.Query("sort")),
 	}
 	if page <= 0 {
@@ -437,6 +446,39 @@ func (h *VulnerabilitiesHandler) GetScanStatus(c *gin.Context) {
 		return
 	}
 	Success(c, record)
+}
+
+// GetPriorityStats 漏洞优先级分布统计
+// GET /api/v1/vulnerabilities/stats/priority
+func (h *VulnerabilitiesHandler) GetPriorityStats(c *gin.Context) {
+	type PriorityBucket struct {
+		Level string `json:"level"`
+		Count int64  `json:"count"`
+	}
+
+	var results []PriorityBucket
+
+	// 高优先级 >= 0.75
+	var high int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ?", "unpatched", 0.75).Count(&high)
+	results = append(results, PriorityBucket{Level: "high", Count: high})
+
+	// 中高 0.50-0.75
+	var mediumHigh int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ? AND priority_score < ?", "unpatched", 0.50, 0.75).Count(&mediumHigh)
+	results = append(results, PriorityBucket{Level: "medium-high", Count: mediumHigh})
+
+	// 中 0.25-0.50
+	var medium int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ? AND priority_score < ?", "unpatched", 0.25, 0.50).Count(&medium)
+	results = append(results, PriorityBucket{Level: "medium", Count: medium})
+
+	// 低 < 0.25
+	var low int64
+	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score < ?", "unpatched", 0.25).Count(&low)
+	results = append(results, PriorityBucket{Level: "low", Count: low})
+
+	Success(c, results)
 }
 
 // GetScanHistory 获取漏洞扫描历史记录

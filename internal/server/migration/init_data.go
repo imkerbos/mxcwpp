@@ -84,6 +84,20 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		logger.Warn("初始化内置 CEL 表达式模板失败", zap.Error(err))
 	}
 
+	// 默认扫描计划
+	var scheduleCount int64
+	db.Model(&model.ScanSchedule{}).Count(&scheduleCount)
+	if scheduleCount == 0 {
+		schedules := []model.ScanSchedule{
+			{Name: "每日漏洞库同步", ScanType: "sync_only", CronExpr: "0 0 2 * * *", Enabled: true, CreatedBy: "system"},
+			{Name: "每周全量扫描", ScanType: "full_scan", CronExpr: "0 0 3 * * 0", Enabled: true, CreatedBy: "system"},
+		}
+		for _, s := range schedules {
+			db.Create(&s)
+		}
+		logger.Info("初始化默认扫描计划")
+	}
+
 	// 检查是否已完成首次数据初始化
 	if isDataInitialized(db) {
 		logger.Info("默认数据已初始化过，跳过策略组和策略重建")

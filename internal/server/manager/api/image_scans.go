@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // ImageScansHandler 镜像扫描 API 处理器
@@ -103,4 +104,117 @@ func (h *ImageScansHandler) GetScanVulns(c *gin.Context) {
 	}
 
 	Success(c, vulns)
+}
+
+// CreateRegistry 添加 Registry
+func (h *ImageScansHandler) CreateRegistry(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		URL      string `json:"url" binding:"required"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Insecure bool   `json:"insecure"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	registry := model.ImageRegistry{
+		Name:     req.Name,
+		URL:      req.URL,
+		Username: req.Username,
+		Password: req.Password,
+		Insecure: req.Insecure,
+	}
+	if err := h.db.Create(&registry).Error; err != nil {
+		InternalError(c, "创建 Registry 失败")
+		return
+	}
+	Success(c, registry)
+}
+
+// ListRegistries Registry 列表
+func (h *ImageScansHandler) ListRegistries(c *gin.Context) {
+	var registries []model.ImageRegistry
+	h.db.Order("created_at DESC").Find(&registries)
+	Success(c, registries)
+}
+
+// UpdateRegistry 更新 Registry
+func (h *ImageScansHandler) UpdateRegistry(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的 ID")
+		return
+	}
+
+	var req struct {
+		Name     string `json:"name"`
+		URL      string `json:"url"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Insecure *bool  `json:"insecure"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数错误")
+		return
+	}
+
+	updates := map[string]any{}
+	if req.Name != "" {
+		updates["name"] = req.Name
+	}
+	if req.URL != "" {
+		updates["url"] = req.URL
+	}
+	if req.Username != "" {
+		updates["username"] = req.Username
+	}
+	if req.Password != "" {
+		updates["password"] = req.Password
+	}
+	if req.Insecure != nil {
+		updates["insecure"] = *req.Insecure
+	}
+
+	if err := h.db.Model(&model.ImageRegistry{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		InternalError(c, "更新 Registry 失败")
+		return
+	}
+
+	var registry model.ImageRegistry
+	h.db.First(&registry, id)
+	Success(c, registry)
+}
+
+// DeleteRegistry 删除 Registry
+func (h *ImageScansHandler) DeleteRegistry(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的 ID")
+		return
+	}
+	if err := h.db.Delete(&model.ImageRegistry{}, id).Error; err != nil {
+		InternalError(c, "删除 Registry 失败")
+		return
+	}
+	Success(c, nil)
+}
+
+// ScanRegistryImages 触发 Registry 批量扫描
+func (h *ImageScansHandler) ScanRegistryImages(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的 ID")
+		return
+	}
+
+	go func() {
+		if err := h.scanner.ScanRegistry(uint(id)); err != nil {
+			h.logger.Warn("Registry 批量扫描失败", zap.Error(err))
+		}
+	}()
+
+	Success(c, gin.H{"message": "Registry 批量扫描任务已启动"})
 }
