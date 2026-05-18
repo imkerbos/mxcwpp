@@ -65,6 +65,7 @@ export const menuConfig: MenuItem[] = [
       { key: 'remediation-tasks', title: '修复任务', route: '/vuln-remediation/tasks' },
       { key: 'remediation-policies', title: '修复策略', route: '/vuln-remediation/policies' },
       { key: 'vuln-db-manage', title: '漏洞库管理', route: '/vuln-db-manage' },
+      { key: 'sbom-import', title: 'SBOM 导入', route: '/sbom-import' },
     ],
   },
   {

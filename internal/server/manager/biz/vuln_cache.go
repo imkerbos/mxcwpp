@@ -57,12 +57,22 @@ func (c *VulnCacheManager) SetMode(mode VulnCacheMode) {
 	c.mode = mode
 }
 
-// GetCachedVuln 从缓存中获取漏洞数据
+// GetCachedVuln 从缓存中获取漏洞数据（仅返回未过期的）
 // 返回 nil 表示缓存未命中
 func (c *VulnCacheManager) GetCachedVuln(osvID string) (json.RawMessage, error) {
 	var cache model.VulnCache
 	err := c.db.Where("osv_id = ? AND expired_at > ?", osvID, time.Now()).
 		First(&cache).Error
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(cache.RawJSON), nil
+}
+
+// GetCachedVulnIncludeExpired 从缓存中获取漏洞数据（包含过期数据，用于 API 不可用时兜底）
+func (c *VulnCacheManager) GetCachedVulnIncludeExpired(osvID string) (json.RawMessage, error) {
+	var cache model.VulnCache
+	err := c.db.Where("osv_id = ?", osvID).First(&cache).Error
 	if err != nil {
 		return nil, err
 	}

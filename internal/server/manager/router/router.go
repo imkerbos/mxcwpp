@@ -665,6 +665,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/vulnerabilities/:id/verify", remHandler.VerifyRemediation)
 	router.GET("/vulnerabilities/stats/remediation", remHandler.GetRemediationStats)
 	router.GET("/vulnerabilities/stats/trend", remHandler.GetRemediationTrend)
+	router.GET("/vulnerabilities/stats/priority", handler.GetPriorityStats)
 
 	// 修复任务管理
 	taskHandler := api.NewRemediationTasksHandler(db, logger)
@@ -706,6 +707,11 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.GET("/images/scans", imageHandler.ListScans)
 	router.GET("/images/scans/:id", imageHandler.GetScan)
 	router.GET("/images/scans/:id/vulns", imageHandler.GetScanVulns)
+	router.POST("/images/registries", imageHandler.CreateRegistry)
+	router.GET("/images/registries", imageHandler.ListRegistries)
+	router.PUT("/images/registries/:id", imageHandler.UpdateRegistry)
+	router.DELETE("/images/registries/:id", imageHandler.DeleteRegistry)
+	router.POST("/images/registries/:id/scan", imageHandler.ScanRegistryImages)
 
 	// SBOM 导入
 	sbomHandler := api.NewSBOMImportHandler(db, logger)

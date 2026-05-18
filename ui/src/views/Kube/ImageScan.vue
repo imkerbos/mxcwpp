@@ -74,6 +74,98 @@
       </div>
     </div>
 
+    <!-- Registry 管理 -->
+    <div class="dashboard-card" style="margin-top: 16px;">
+      <div class="card-body">
+        <div class="filter-bar">
+          <span class="section-title">镜像仓库</span>
+          <div class="filter-actions">
+            <a-button @click="loadRegistries">刷新</a-button>
+            <a-button type="primary" @click="registryModalVisible = true">添加仓库</a-button>
+          </div>
+        </div>
+
+        <a-table
+          :columns="registryColumns"
+          :data-source="registries"
+          :loading="loadingRegistries"
+          size="middle"
+          row-key="id"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'lastSyncAt'">
+              {{ formatDate(record.lastSyncAt) }}
+            </template>
+            <template v-else-if="column.key === 'action'">
+              <a-space>
+                <a-button type="link" size="small" @click="showEditRegistry(record)">
+                  编辑
+                </a-button>
+                <a-button type="link" size="small" :loading="record._scanning" @click="handleScanRegistry(record)">
+                  批量扫描
+                </a-button>
+                <a-popconfirm title="确定删除？" @confirm="handleDeleteRegistry(record.id)">
+                  <a-button type="link" size="small" danger>删除</a-button>
+                </a-popconfirm>
+              </a-space>
+            </template>
+          </template>
+        </a-table>
+      </div>
+    </div>
+
+    <!-- 添加仓库弹窗 -->
+    <a-modal
+      v-model:open="registryModalVisible"
+      title="添加镜像仓库"
+      @ok="handleCreateRegistry"
+      :confirm-loading="creatingRegistry"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="registryForm.name" placeholder="例如: 生产仓库" />
+        </a-form-item>
+        <a-form-item label="Registry 地址" required>
+          <a-input v-model:value="registryForm.url" placeholder="https://registry.example.com" />
+        </a-form-item>
+        <a-form-item label="用户名">
+          <a-input v-model:value="registryForm.username" placeholder="可选" />
+        </a-form-item>
+        <a-form-item label="密码">
+          <a-input-password v-model:value="registryForm.password" placeholder="可选" />
+        </a-form-item>
+        <a-form-item>
+          <a-checkbox v-model:checked="registryForm.insecure">跳过 TLS 验证</a-checkbox>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- 编辑仓库弹窗 -->
+    <a-modal
+      v-model:open="editRegistryModalVisible"
+      title="编辑镜像仓库"
+      @ok="handleUpdateRegistry"
+      :confirm-loading="updatingRegistry"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="名称" required>
+          <a-input v-model:value="editRegistryForm.name" placeholder="例如: 生产仓库" />
+        </a-form-item>
+        <a-form-item label="Registry 地址" required>
+          <a-input v-model:value="editRegistryForm.url" placeholder="https://registry.example.com" />
+        </a-form-item>
+        <a-form-item label="用户名">
+          <a-input v-model:value="editRegistryForm.username" placeholder="可选" />
+        </a-form-item>
+        <a-form-item label="密码">
+          <a-input-password v-model:value="editRegistryForm.password" placeholder="留空则不修改" />
+        </a-form-item>
+        <a-form-item>
+          <a-checkbox v-model:checked="editRegistryForm.insecure">跳过 TLS 验证</a-checkbox>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <!-- 漏洞详情抽屉 -->
     <a-drawer
       v-model:open="drawerVisible"
@@ -118,6 +210,7 @@
 import { onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { imageScansApi } from '@/api/image-scans'
+import apiClient from '@/api/client'
 import type { ImageScan, ImageVulnerability } from '@/api/image-scans'
 
 const loading = ref(false)
@@ -259,8 +352,123 @@ const showDetail = async (record: ImageScan) => {
   }
 }
 
+// === Registry 管理 ===
+const registries = ref<any[]>([])
+const loadingRegistries = ref(false)
+const registryModalVisible = ref(false)
+const creatingRegistry = ref(false)
+const registryForm = ref({ name: '', url: '', username: '', password: '', insecure: false })
+
+const registryColumns = [
+  { title: 'ID', dataIndex: 'id', width: 60 },
+  { title: '名称', dataIndex: 'name', width: 150 },
+  { title: '地址', dataIndex: 'url', width: 280 },
+  { title: '镜像数', dataIndex: 'imageCount', width: 90 },
+  { title: '最近同步', key: 'lastSyncAt', width: 170 },
+  { title: '操作', key: 'action', width: 160 },
+]
+
+const loadRegistries = async () => {
+  loadingRegistries.value = true
+  try {
+    const res = await apiClient.get<any[]>('/images/registries')
+    registries.value = res ?? []
+  } catch {
+    registries.value = []
+  } finally {
+    loadingRegistries.value = false
+  }
+}
+
+const handleCreateRegistry = async () => {
+  if (!registryForm.value.name || !registryForm.value.url) {
+    message.warning('请填写名称和地址')
+    return
+  }
+  creatingRegistry.value = true
+  try {
+    await apiClient.post('/images/registries', registryForm.value)
+    message.success('仓库添加成功')
+    registryModalVisible.value = false
+    registryForm.value = { name: '', url: '', username: '', password: '', insecure: false }
+    loadRegistries()
+  } catch {
+    message.error('添加失败')
+  } finally {
+    creatingRegistry.value = false
+  }
+}
+
+// === Registry 编辑 ===
+const editRegistryModalVisible = ref(false)
+const updatingRegistry = ref(false)
+const editRegistryId = ref(0)
+const editRegistryForm = ref({ name: '', url: '', username: '', password: '', insecure: false })
+
+const showEditRegistry = (record: any) => {
+  editRegistryId.value = record.id
+  editRegistryForm.value = {
+    name: record.name,
+    url: record.url,
+    username: record.username || '',
+    password: '',
+    insecure: record.insecure ?? false,
+  }
+  editRegistryModalVisible.value = true
+}
+
+const handleUpdateRegistry = async () => {
+  if (!editRegistryForm.value.name || !editRegistryForm.value.url) {
+    message.warning('请填写名称和地址')
+    return
+  }
+  updatingRegistry.value = true
+  try {
+    const data: any = {
+      name: editRegistryForm.value.name,
+      url: editRegistryForm.value.url,
+      username: editRegistryForm.value.username,
+      insecure: editRegistryForm.value.insecure,
+    }
+    if (editRegistryForm.value.password) {
+      data.password = editRegistryForm.value.password
+    }
+    await imageScansApi.updateRegistry(editRegistryId.value, data)
+    message.success('仓库更新成功')
+    editRegistryModalVisible.value = false
+    loadRegistries()
+  } catch {
+    message.error('更新失败')
+  } finally {
+    updatingRegistry.value = false
+  }
+}
+
+const handleDeleteRegistry = async (id: number) => {
+  try {
+    await apiClient.delete(`/images/registries/${id}`)
+    message.success('已删除')
+    loadRegistries()
+  } catch {
+    message.error('删除失败')
+  }
+}
+
+const handleScanRegistry = async (record: any) => {
+  record._scanning = true
+  try {
+    await apiClient.post(`/images/registries/${record.id}/scan`)
+    message.success('批量扫描任务已启动')
+  } catch {
+    message.error('扫描启动失败')
+  } finally {
+    record._scanning = false
+  }
+}
+
 onMounted(() => {
   loadScans()
+  loadRegistries()
 })
 </script>
 

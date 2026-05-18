@@ -339,7 +339,75 @@ func (p *PolicyExecutor) executeRolling(tasks []model.RemediationTask, policy *m
 		}
 	}
 
+	// 启动后台监控，自动推进后续批次
+	go p.monitorRollingBatches(tasks, maxParallel)
+
 	return nil
+}
+
+// monitorRollingBatches 监控滚动执行批次，自动推进
+func (p *PolicyExecutor) monitorRollingBatches(tasks []model.RemediationTask, maxParallel int) {
+	if len(tasks) <= maxParallel {
+		return
+	}
+
+	taskIDs := make([]uint, len(tasks))
+	for i, t := range tasks {
+		taskIDs[i] = t.ID
+	}
+
+	batchStart := 0
+	for batchStart < len(tasks) {
+		batchEnd := batchStart + maxParallel
+		if batchEnd > len(tasks) {
+			batchEnd = len(tasks)
+		}
+		batchIDs := taskIDs[batchStart:batchEnd]
+
+		// 轮询等待当前批次完成
+		for {
+			time.Sleep(10 * time.Second)
+
+			var running int64
+			p.db.Model(&model.RemediationTask{}).
+				Where("id IN ? AND status IN ?", batchIDs, []string{"confirmed", "running"}).
+				Count(&running)
+			if running == 0 {
+				break
+			}
+		}
+
+		// 检查成功率
+		var succeeded, total int64
+		p.db.Model(&model.RemediationTask{}).Where("id IN ?", batchIDs).Count(&total)
+		p.db.Model(&model.RemediationTask{}).Where("id IN ? AND status = ?", batchIDs, "success").Count(&succeeded)
+
+		if total > 0 && float64(succeeded)/float64(total) < 0.8 {
+			p.logger.Warn("滚动执行批次成功率低于 80%，暂停后续批次",
+				zap.Int("batch_start", batchStart),
+				zap.Int64("succeeded", succeeded),
+				zap.Int64("total", total))
+			return
+		}
+
+		// 推进下一批
+		batchStart = batchEnd
+		if batchStart >= len(tasks) {
+			break
+		}
+		nextEnd := batchStart + maxParallel
+		if nextEnd > len(tasks) {
+			nextEnd = len(tasks)
+		}
+		nextBatchIDs := taskIDs[batchStart:nextEnd]
+		p.db.Model(&model.RemediationTask{}).
+			Where("id IN ? AND status = ?", nextBatchIDs, "pending").
+			Update("status", "confirmed")
+
+		p.logger.Info("滚动执行推进下一批",
+			zap.Int("batch_start", batchStart),
+			zap.Int("batch_size", nextEnd-batchStart))
+	}
 }
 
 // severitiesAbove 返回指定级别及以上的所有严重级别

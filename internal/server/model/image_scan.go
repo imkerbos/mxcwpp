@@ -37,3 +37,21 @@ type ImageVulnerability struct {
 func (ImageVulnerability) TableName() string {
 	return "image_vulnerabilities"
 }
+
+// ImageRegistry 镜像仓库配置
+type ImageRegistry struct {
+	ID         uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	Name       string     `gorm:"column:name;type:varchar(100);not null" json:"name"`
+	URL        string     `gorm:"column:url;type:varchar(500);not null" json:"url"`
+	Username   string     `gorm:"column:username;type:varchar(100)" json:"username"`
+	Password   string     `gorm:"column:password;type:varchar(500)" json:"-"` // JSON 中隐藏
+	Insecure   bool       `gorm:"column:insecure;default:false" json:"insecure"`
+	ImageCount int        `gorm:"column:image_count;default:0" json:"imageCount"`
+	LastSyncAt *LocalTime `gorm:"column:last_sync_at;type:timestamp" json:"lastSyncAt"`
+	CreatedAt  LocalTime  `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt  LocalTime  `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+}
+
+func (ImageRegistry) TableName() string {
+	return "image_registries"
+}

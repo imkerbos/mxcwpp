@@ -42,4 +42,25 @@ export const imageScansApi = {
   getVulns: (id: number) => {
     return apiClient.get<ImageVulnerability[]>(`/images/scans/${id}/vulns`)
   },
+
+  // Registry
+  listRegistries: () => {
+    return apiClient.get<any[]>('/images/registries')
+  },
+
+  createRegistry: (data: { name: string; url: string; username?: string; password?: string; insecure?: boolean }) => {
+    return apiClient.post('/images/registries', data)
+  },
+
+  updateRegistry: (id: number, data: { name?: string; url?: string; username?: string; password?: string; insecure?: boolean }) => {
+    return apiClient.put(`/images/registries/${id}`, data)
+  },
+
+  deleteRegistry: (id: number) => {
+    return apiClient.delete(`/images/registries/${id}`)
+  },
+
+  scanRegistry: (id: number) => {
+    return apiClient.post(`/images/registries/${id}/scan`)
+  },
 }

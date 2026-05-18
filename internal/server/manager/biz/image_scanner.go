@@ -1,9 +1,13 @@
 package biz
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
+	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,8 +42,13 @@ func NewImageScanner(db *gorm.DB, logger *zap.Logger) *ImageScanner {
 	}
 }
 
-// ScanImage 扫描单个容器镜像
+// ScanImage 扫描单个容器镜像（公开镜像或已配置 Docker 凭据的场景）
 func (s *ImageScanner) ScanImage(image string) (*model.ImageScan, error) {
+	return s.ScanImageWithAuth(image, "", "")
+}
+
+// ScanImageWithAuth 扫描容器镜像（支持 Registry 认证）
+func (s *ImageScanner) ScanImageWithAuth(image, username, password string) (*model.ImageScan, error) {
 	s.logger.Info("开始扫描容器镜像", zap.String("image", image))
 
 	// 创建扫描记录
@@ -60,7 +69,7 @@ func (s *ImageScanner) ScanImage(image string) (*model.ImageScan, error) {
 	}
 
 	// 执行 Trivy 扫描
-	output, err := s.runTrivy(image)
+	output, err := s.runTrivy(image, username, password)
 	if err != nil {
 		scan.Status = "failed"
 		scan.ErrorMsg = err.Error()
@@ -124,14 +133,17 @@ func (s *ImageScanner) ScanImage(image string) (*model.ImageScan, error) {
 }
 
 // runTrivy 执行 Trivy CLI
-func (s *ImageScanner) runTrivy(image string) ([]byte, error) {
+func (s *ImageScanner) runTrivy(image, username, password string) ([]byte, error) {
 	args := []string{
 		"image",
 		"--format", "json",
 		"--severity", "CRITICAL,HIGH,MEDIUM,LOW",
 		"--quiet",
-		image,
 	}
+	if username != "" {
+		args = append(args, "--username", username, "--password", password)
+	}
+	args = append(args, image)
 
 	cmd := exec.Command(s.trivyPath, args...)
 	output, err := cmd.Output()
@@ -254,6 +266,119 @@ func (s *ImageScanner) GetScanByID(id uint) (*model.ImageScan, error) {
 		return nil, err
 	}
 	return &scan, nil
+}
+
+// ScanRegistry 扫描 Registry 中的所有镜像
+func (s *ImageScanner) ScanRegistry(registryID uint) error {
+	var registry model.ImageRegistry
+	if err := s.db.First(&registry, registryID).Error; err != nil {
+		return fmt.Errorf("Registry 不存在: %w", err)
+	}
+
+	s.logger.Info("开始扫描 Registry", zap.String("name", registry.Name), zap.String("url", registry.URL))
+
+	// 获取镜像列表
+	images, err := s.listRegistryImages(&registry)
+	if err != nil {
+		return fmt.Errorf("获取镜像列表失败: %w", err)
+	}
+
+	s.logger.Info("Registry 镜像列表", zap.Int("count", len(images)))
+
+	// 更新 Registry 信息
+	now := model.Now()
+	s.db.Model(&registry).Updates(map[string]any{
+		"image_count":  len(images),
+		"last_sync_at": now,
+	})
+
+	// 逐个扫描（并发控制，最多 3 个并行），传递 Registry 凭据
+	sem := make(chan struct{}, 3)
+	var wg sync.WaitGroup
+
+	for _, image := range images {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(img string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if _, err := s.ScanImageWithAuth(img, registry.Username, registry.Password); err != nil {
+				s.logger.Warn("镜像扫描失败", zap.String("image", img), zap.Error(err))
+			}
+		}(image)
+	}
+	wg.Wait()
+
+	s.logger.Info("Registry 扫描完成", zap.String("name", registry.Name), zap.Int("images", len(images)))
+	return nil
+}
+
+// listRegistryImages 通过 Docker Registry V2 API 获取镜像列表
+func (s *ImageScanner) listRegistryImages(registry *model.ImageRegistry) ([]string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	if registry.Insecure {
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+
+	// 1. 获取 catalog
+	catalogURL := strings.TrimRight(registry.URL, "/") + "/v2/_catalog"
+	req, _ := http.NewRequest("GET", catalogURL, nil)
+	if registry.Username != "" {
+		req.SetBasicAuth(registry.Username, registry.Password)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 catalog 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("catalog 响应状态码: %d", resp.StatusCode)
+	}
+
+	var catalog struct {
+		Repositories []string `json:"repositories"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		return nil, fmt.Errorf("解析 catalog 失败: %w", err)
+	}
+
+	// 2. 获取每个 repo 的 tags
+	var images []string
+	for _, repo := range catalog.Repositories {
+		tagsURL := strings.TrimRight(registry.URL, "/") + "/v2/" + repo + "/tags/list"
+		tagReq, _ := http.NewRequest("GET", tagsURL, nil)
+		if registry.Username != "" {
+			tagReq.SetBasicAuth(registry.Username, registry.Password)
+		}
+
+		tagResp, err := client.Do(tagReq)
+		if err != nil {
+			s.logger.Warn("获取 tags 失败", zap.String("repo", repo), zap.Error(err))
+			continue
+		}
+
+		var tagList struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.NewDecoder(tagResp.Body).Decode(&tagList); err != nil {
+			s.logger.Warn("解析 tags 失败", zap.String("repo", repo), zap.Error(err))
+			tagResp.Body.Close()
+			continue
+		}
+		tagResp.Body.Close()
+
+		registryHost := strings.TrimPrefix(strings.TrimPrefix(registry.URL, "https://"), "http://")
+		registryHost = strings.TrimRight(registryHost, "/")
+		for _, tag := range tagList.Tags {
+			images = append(images, registryHost+"/"+repo+":"+tag)
+		}
+	}
+
+	return images, nil
 }
 
 // init 确保 time 包被引用（parseTrivyOutput 中未直接使用，但 model.Now 依赖）
