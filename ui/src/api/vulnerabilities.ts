@@ -109,4 +109,14 @@ export const vulnerabilitiesApi = {
   getRemediationTrend: (days?: number) => {
     return apiClient.get<DailyTrend[]>('/vulnerabilities/stats/trend', { params: { days } })
   },
+
+  // 取消忽略
+  unignore: (id: number) => {
+    return apiClient.post(`/vulnerabilities/${id}/unignore`)
+  },
+
+  // 优先级分布统计
+  getPriorityStats: () => {
+    return apiClient.get<{ level: string; count: number }[]>('/vulnerabilities/stats/priority')
+  },
 }

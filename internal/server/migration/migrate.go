@@ -3,6 +3,7 @@ package migration
 
 import (
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -23,11 +24,26 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("组件表迁移处理", zap.Error(err))
 	}
 
-	// 执行自动迁移
+	// 执行自动迁移（带连接恢复和重试）
 	for _, m := range model.AllModels {
-		if err := db.AutoMigrate(m); err != nil {
-			logger.Error("数据库迁移失败", zap.Error(err), zap.String("model", fmt.Sprintf("%T", m)))
-			return fmt.Errorf("迁移模型 %T 失败: %w", m, err)
+		var migrateErr error
+		for attempt := range 3 {
+			if attempt > 0 {
+				// 重试前探活连接，必要时让连接池重建
+				if sqlDB, err := db.DB(); err == nil {
+					sqlDB.SetConnMaxLifetime(0) // 强制回收旧连接
+					_ = sqlDB.Ping()
+					sqlDB.SetConnMaxLifetime(time.Hour)
+				}
+				logger.Info("重试迁移", zap.String("model", fmt.Sprintf("%T", m)), zap.Int("attempt", attempt+1))
+			}
+			if migrateErr = db.AutoMigrate(m); migrateErr == nil {
+				break
+			}
+		}
+		if migrateErr != nil {
+			logger.Error("数据库迁移失败", zap.Error(migrateErr), zap.String("model", fmt.Sprintf("%T", m)))
+			return fmt.Errorf("迁移模型 %T 失败: %w", m, migrateErr)
 		}
 		logger.Info("模型迁移成功", zap.String("model", fmt.Sprintf("%T", m)))
 	}

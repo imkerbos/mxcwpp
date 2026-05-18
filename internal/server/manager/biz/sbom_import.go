@@ -87,9 +87,17 @@ func (s *SBOMImporter) Import(file io.Reader, format string, projectName string)
 		ComponentCount: len(components),
 	}
 
-	// 触发漏洞扫描（仅扫描该项目的组件）
+	// 触发漏洞扫描
+	if s.scanner != nil {
+		go func() {
+			if err := s.scanner.ScanAll(); err != nil {
+				s.logger.Warn("SBOM 导入后漏洞扫描失败", zap.Error(err))
+			}
+		}()
+	}
+
+	// 统计该 SBOM 项目当前关联的漏洞
 	var vulnCount, critCount, highCount int64
-	// 查询该 SBOM 项目关联的漏洞
 	s.db.Model(&model.Vulnerability{}).
 		Joins("JOIN host_vulnerabilities hv ON hv.vuln_id = vulnerabilities.id").
 		Where("hv.host_id = ? AND hv.status = ?", hostID, "unpatched").

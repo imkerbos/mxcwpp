@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 const (
@@ -85,10 +87,31 @@ func (v *VulnScanner) SyncCNVD() error {
 			}
 
 			if item.CveID != "" {
+				// 有 CVE 映射：更新已有记录
 				result := v.db.Table("vulnerabilities").
 					Where("cve_id = ? AND (cnvd_id IS NULL OR cnvd_id = '')", item.CveID).
 					Update("cnvd_id", item.CnvdID)
 				if result.RowsAffected > 0 {
+					totalSynced++
+				}
+			} else {
+				// 无 CVE 映射：作为独立漏洞入库
+				var existing int64
+				v.db.Table("vulnerabilities").Where("cnvd_id = ?", item.CnvdID).Count(&existing)
+				if existing > 0 {
+					continue
+				}
+				severity := mapCNVDSeverity(item.Severity)
+				vuln := model.Vulnerability{
+					CveID:        item.CnvdID, // 用 CNVD 编号作为标识
+					CnvdID:       item.CnvdID,
+					Severity:     severity,
+					Component:    item.AffectedProduct,
+					Description:  item.Title,
+					Status:       "unpatched",
+					DiscoveredAt: model.Now(),
+				}
+				if err := v.db.Create(&vuln).Error; err == nil {
 					totalSynced++
 				}
 			}
@@ -102,4 +125,20 @@ func (v *VulnScanner) SyncCNVD() error {
 
 	v.logger.Info("CNVD 同步完成", zap.Int("synced", totalSynced))
 	return nil
+}
+
+// mapCNVDSeverity 映射 CNVD 严重级别
+func mapCNVDSeverity(severity string) string {
+	switch severity {
+	case "超危":
+		return "critical"
+	case "高危":
+		return "high"
+	case "中危":
+		return "medium"
+	case "低危":
+		return "low"
+	default:
+		return "medium"
+	}
 }

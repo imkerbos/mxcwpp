@@ -249,6 +249,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/System/VulnDBManage.vue'),
         meta: { title: '漏洞库管理' },
       },
+      {
+        path: 'sbom-import',
+        name: 'SBOMImport',
+        component: () => import('@/views/System/SBOMImport.vue'),
+        meta: { title: 'SBOM 导入' },
+      },
       // 病毒查杀
       {
         path: 'virus/scan',
