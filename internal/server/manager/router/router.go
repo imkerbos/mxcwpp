@@ -205,6 +205,8 @@ func setupHostsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, sco
 	router.PUT("/hosts/:host_id/business-line", handler.UpdateHostBusinessLine)
 	router.DELETE("/hosts/:host_id", handler.DeleteHost)
 	router.POST("/hosts/batch-delete", handler.BatchDeleteHost)
+	router.POST("/hosts/batch-update-tags", handler.BatchUpdateTags)
+	router.POST("/hosts/batch-update-business-line", handler.BatchUpdateBusinessLine)
 	router.GET("/hosts/status-distribution", handler.GetHostStatusDistribution)
 	router.GET("/hosts/risk-distribution", handler.GetHostRiskDistribution)
 }
@@ -657,6 +659,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/vulnerabilities/scan", handler.TriggerScan)
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
+	router.GET("/vulnerabilities/scan-history/:id", handler.GetScanHistoryDetail)
 
 	router.GET("/vulnerabilities/:id", handler.GetVulnerability)
 

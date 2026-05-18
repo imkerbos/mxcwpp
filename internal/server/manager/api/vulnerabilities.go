@@ -3,6 +3,7 @@ package api
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -504,5 +505,74 @@ func (h *VulnerabilitiesHandler) GetScanHistory(c *gin.Context) {
 	Success(c, gin.H{
 		"total": total,
 		"items": records,
+	})
+}
+
+// GetScanHistoryDetail 获取单条扫描记录详情（含本次新增的漏洞列表）
+// GET /api/v1/vulnerabilities/scan-history/:id
+func (h *VulnerabilitiesHandler) GetScanHistoryDetail(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	if id == 0 {
+		BadRequest(c, "无效的记录 ID")
+		return
+	}
+
+	var record model.SecurityDBSyncRecord
+	if err := h.db.First(&record, id).Error; err != nil {
+		NotFound(c, "扫描记录不存在")
+		return
+	}
+
+	vulnPage, _ := strconv.Atoi(c.DefaultQuery("vulnPage", "1"))
+	vulnPageSize, _ := strconv.Atoi(c.DefaultQuery("vulnPageSize", "20"))
+	if vulnPage < 1 {
+		vulnPage = 1
+	}
+	if vulnPageSize < 1 || vulnPageSize > 100 {
+		vulnPageSize = 20
+	}
+
+	// 时间窗口：扫描开始 → 扫描开始 + 耗时
+	windowEnd := record.StartedAt.Add(time.Duration(record.Duration+60) * time.Second) // +60s 容差
+	if record.Status == "running" {
+		windowEnd = time.Now()
+	}
+
+	var vulnTotal int64
+	h.db.Model(&model.Vulnerability{}).
+		Where("created_at >= ? AND created_at <= ?", record.StartedAt, windowEnd).
+		Count(&vulnTotal)
+
+	var vulns []model.Vulnerability
+	h.db.Where("created_at >= ? AND created_at <= ?", record.StartedAt, windowEnd).
+		Order("cvss_score DESC").
+		Offset((vulnPage - 1) * vulnPageSize).
+		Limit(vulnPageSize).
+		Find(&vulns)
+
+	// 受影响主机
+	type affectedHost struct {
+		HostID    string `json:"hostId"`
+		Hostname  string `json:"hostname"`
+		IP        string `json:"ip"`
+		VulnCount int64  `json:"vulnCount"`
+	}
+	var hosts []affectedHost
+	h.db.Model(&model.HostVulnerability{}).
+		Select("host_id, hostname, ip, COUNT(*) as vuln_count").
+		Where("created_at >= ? AND created_at <= ?", record.StartedAt, windowEnd).
+		Group("host_id, hostname, ip").
+		Order("vuln_count DESC").
+		Limit(100).
+		Find(&hosts)
+
+	Success(c, gin.H{
+		"record": record,
+		"vulns": gin.H{
+			"items": vulns,
+			"total": vulnTotal,
+			"page":  vulnPage,
+		},
+		"affectedHosts": hosts,
 	})
 }

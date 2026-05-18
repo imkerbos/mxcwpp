@@ -385,7 +385,6 @@ import { hostsApi, type Host } from '@/api/hosts'
 const notifyCategoryOptions = [
   { value: 'baseline_alert', label: '基线安全告警', description: '基线检测发现安全问题时发送通知', hasSeverity: true },
   { value: 'agent_offline', label: 'Agent 离线通知', description: 'Agent 断开连接时发送通知', hasSeverity: false },
-  { value: 'vulnerability_alert', label: '漏洞告警', description: '漏洞扫描发现高危漏洞时发送通知', hasSeverity: true },
   { value: 'virus_alert', label: '病毒查杀告警', description: '检测到病毒或恶意文件时发送通知', hasSeverity: true },
   { value: 'fim_alert', label: '文件完整性告警', description: '关键文件被篡改、新增或删除时发送通知', hasSeverity: true },
   { value: 'edr_alert', label: 'EDR 告警', description: 'EDR 检测规则触发告警时发送通知', hasSeverity: true },
@@ -397,7 +396,6 @@ const notifyCategoryOptions = [
 const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
   baseline_alert: '基线安全告警',
   agent_offline: 'Agent 离线通知',
-  vulnerability_alert: '漏洞告警',
   vuln_bulletin: '漏洞通报',
   virus_alert: '病毒查杀告警',
   fim_alert: '文件完整性告警',
@@ -409,7 +407,6 @@ const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
 const NOTIFY_CATEGORY_COLOR_MAP: Record<string, string> = {
   baseline_alert: 'green',
   agent_offline: 'orange',
-  vulnerability_alert: 'red',
   vuln_bulletin: 'magenta',
   virus_alert: 'volcano',
   fim_alert: 'gold',
@@ -819,7 +816,6 @@ const handleNotifyCategoryChange = () => {
   const defaultNames: Record<string, string> = {
     baseline_alert: '基线安全告警',
     agent_offline: 'Agent 离线通知',
-    vulnerability_alert: '漏洞告警',
     vuln_bulletin: '漏洞通报通知',
     virus_alert: '病毒查杀告警',
     fim_alert: '文件完整性告警',

@@ -209,7 +209,7 @@ func (v *VulnScanner) GetLatestSyncStatus() (*model.SecurityDBSyncRecord, error)
 // GetSyncHistory 分页查询漏洞相关同步历史记录
 func (v *VulnScanner) GetSyncHistory(page, pageSize int) ([]model.SecurityDBSyncRecord, int64, error) {
 	var total int64
-	query := v.db.Model(&model.SecurityDBSyncRecord{}).Where("db_type IN ?", []string{"osv", "vuln-sync"})
+	query := v.db.Model(&model.SecurityDBSyncRecord{}).Where("db_type IN ?", []string{"osv", "osv-incremental", "vuln-sync"})
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -217,6 +217,133 @@ func (v *VulnScanner) GetSyncHistory(page, pageSize int) ([]model.SecurityDBSync
 	offset := (page - 1) * pageSize
 	err := query.Offset(offset).Limit(pageSize).Order("id DESC").Find(&records).Error
 	return records, total, err
+}
+
+// ScanIncremental 增量漏洞扫描：仅扫描自上次扫描以来新增/变更的软件包
+// 通过 software.collected_at > 上次扫描时间 筛选变更软件，大幅降低扫描耗时
+func (v *VulnScanner) ScanIncremental() error {
+	startedAt := time.Now()
+
+	// 查询上次成功扫描的开始时间（osv 全量 或 osv-incremental 增量）
+	var lastRecord model.SecurityDBSyncRecord
+	var since time.Time
+	err := v.db.Where("db_type IN ? AND status = ?", []string{"osv", "osv-incremental"}, "success").
+		Order("started_at DESC").First(&lastRecord).Error
+	if err != nil {
+		// 无历史记录 → 回退到全量
+		v.logger.Info("无增量基线记录，回退全量扫描")
+		return v.ScanAll()
+	}
+	since = lastRecord.StartedAt
+
+	// 插入 running 记录
+	record := model.SecurityDBSyncRecord{
+		DBType:    "osv-incremental",
+		Status:    "running",
+		StartedAt: startedAt,
+	}
+	v.db.Create(&record)
+
+	v.logger.Info("开始增量漏洞扫描", zap.Time("since", since))
+
+	// 查询自 since 以来新增/变更的软件包
+	var packages []purlInfo
+	if err := v.db.Table("software AS s").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
+		Where("s.purl != '' AND s.purl IS NOT NULL AND s.collected_at > ?", since).
+		Scan(&packages).Error; err != nil {
+		updates := map[string]any{"status": "failed", "error_msg": err.Error(), "duration": int(time.Since(startedAt).Seconds())}
+		v.db.Model(&record).Updates(updates)
+		return fmt.Errorf("查询增量软件包失败: %w", err)
+	}
+
+	if len(packages) == 0 {
+		v.logger.Info("无新增/变更软件包，增量扫描跳过")
+		duration := int(time.Since(startedAt).Seconds())
+		v.db.Model(&record).Updates(map[string]any{
+			"status":    "success",
+			"version":   time.Now().Format("20060102.150405"),
+			"error_msg": "无新增软件包，跳过",
+			"duration":  duration,
+		})
+		return nil
+	}
+
+	v.logger.Info("增量软件包数", zap.Int("count", len(packages)))
+
+	// 按 PURL 去重
+	purlHosts := make(map[string][]string)
+	purlPkgInfo := make(map[string]purlInfo)
+	hostnameMap := make(map[string]string)
+	ipMap := make(map[string]string)
+	for _, pkg := range packages {
+		purlHosts[pkg.PURL] = append(purlHosts[pkg.PURL], pkg.HostID)
+		if _, exists := purlPkgInfo[pkg.PURL]; !exists {
+			purlPkgInfo[pkg.PURL] = pkg
+		}
+		if pkg.Hostname != "" {
+			hostnameMap[pkg.HostID] = pkg.Hostname
+		}
+		if pkg.IP != "" {
+			ipMap[pkg.HostID] = pkg.IP
+		}
+	}
+
+	uniquePURLs := make([]string, 0, len(purlHosts))
+	for purl := range purlHosts {
+		uniquePURLs = append(uniquePURLs, purl)
+	}
+
+	v.logger.Info("增量去重后 PURL 数", zap.Int("count", len(uniquePURLs)))
+
+	// 预加载已有漏洞标识
+	knownVulnIDs := make(map[string]struct{})
+	var cveIDs []string
+	v.db.Model(&model.Vulnerability{}).Pluck("cve_id", &cveIDs)
+	for _, id := range cveIDs {
+		knownVulnIDs[id] = struct{}{}
+	}
+	var osvIDs []string
+	v.db.Model(&model.Vulnerability{}).Where("osv_id != ''").Pluck("DISTINCT osv_id", &osvIDs)
+	for _, id := range osvIDs {
+		knownVulnIDs[id] = struct{}{}
+	}
+
+	detailCache := make(map[string]*osvVuln)
+
+	// 分批调用 OSV.dev API
+	totalVulns := 0
+	for i := 0; i < len(uniquePURLs); i += osvBatchSize {
+		end := i + osvBatchSize
+		if end > len(uniquePURLs) {
+			end = len(uniquePURLs)
+		}
+		batch := uniquePURLs[i:end]
+
+		vulnCount, err := v.queryBatch(batch, purlHosts, purlPkgInfo, hostnameMap, ipMap, detailCache, knownVulnIDs)
+		if err != nil {
+			v.logger.Error("增量 OSV.dev 查询失败", zap.Int("batch_start", i), zap.Error(err))
+			continue
+		}
+		totalVulns += vulnCount
+	}
+
+	duration := int(time.Since(startedAt).Seconds())
+	summary := fmt.Sprintf("增量扫描 %d 个 PURL，发现 %d 个漏洞", len(uniquePURLs), totalVulns)
+
+	v.logger.Info("增量漏洞扫描完成",
+		zap.Int("total_purls", len(uniquePURLs)),
+		zap.Int("total_vulns", totalVulns),
+		zap.Int("duration_seconds", duration))
+
+	v.db.Model(&record).Updates(map[string]any{
+		"status":    "success",
+		"version":   time.Now().Format("20060102.150405"),
+		"error_msg": summary,
+		"duration":  duration,
+	})
+	return nil
 }
 
 // ScanAll 全量漏洞扫描：查询所有软件包 PURL → OSV.dev API → 写入漏洞表

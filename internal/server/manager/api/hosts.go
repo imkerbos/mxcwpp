@@ -764,15 +764,27 @@ func (h *HostsHandler) deleteHostByID(tx *gorm.DB, hostID string) error {
 func (h *HostsHandler) DeleteHost(c *gin.Context) {
 	hostID := c.Param("host_id")
 
+	// 安全校验：在线主机不允许直接删除
+	var host model.Host
+	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "主机不存在")
+			return
+		}
+		h.logger.Error("查询主机失败", zap.Error(err))
+		InternalError(c, "查询主机失败")
+		return
+	}
+	if host.Status == model.HostStatusOnline {
+		BadRequest(c, "在线主机不允许删除，请先确认主机已离线")
+		return
+	}
+
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		return h.deleteHostByID(tx, hostID)
 	})
 
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			NotFound(c, "主机不存在")
-			return
-		}
 		h.logger.Error("删除主机失败", zap.String("host_id", hostID), zap.Error(err))
 		InternalError(c, "删除主机失败")
 		return
@@ -787,6 +799,7 @@ func (h *HostsHandler) DeleteHost(c *gin.Context) {
 func (h *HostsHandler) BatchDeleteHost(c *gin.Context) {
 	var req struct {
 		HostIDs []string `json:"host_ids" binding:"required,min=1"`
+		Force   bool     `json:"force"` // 强制删除（包括在线主机）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "请求参数错误：host_ids 不能为空")
@@ -798,8 +811,21 @@ func (h *HostsHandler) BatchDeleteHost(c *gin.Context) {
 		return
 	}
 
-	var deleted, failed int
+	var deleted, failed, skipped int
 	for _, hostID := range req.HostIDs {
+		// 非 force 模式下跳过在线主机
+		if !req.Force {
+			var host model.Host
+			if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+				failed++
+				continue
+			}
+			if host.Status == model.HostStatusOnline {
+				skipped++
+				continue
+			}
+		}
+
 		err := h.db.Transaction(func(tx *gorm.DB) error {
 			return h.deleteHostByID(tx, hostID)
 		})
@@ -811,8 +837,8 @@ func (h *HostsHandler) BatchDeleteHost(c *gin.Context) {
 		deleted++
 	}
 
-	h.logger.Info("批量删除主机完成", zap.Int("deleted", deleted), zap.Int("failed", failed))
-	Success(c, gin.H{"deleted": deleted, "failed": failed, "total": len(req.HostIDs)})
+	h.logger.Info("批量删除主机完成", zap.Int("deleted", deleted), zap.Int("failed", failed), zap.Int("skipped", skipped))
+	Success(c, gin.H{"deleted": deleted, "failed": failed, "skipped": skipped, "total": len(req.HostIDs)})
 }
 
 // RestartAgentRequest Agent 重启请求
@@ -889,4 +915,117 @@ func (h *HostsHandler) GetRestartRecords(c *gin.Context) {
 	}
 
 	Success(c, records)
+}
+
+// BatchUpdateTags 批量更新主机标签
+// POST /api/v1/hosts/batch-update-tags
+func (h *HostsHandler) BatchUpdateTags(c *gin.Context) {
+	var req struct {
+		HostIDs []string `json:"host_ids" binding:"required,min=1"`
+		Tags    []string `json:"tags" binding:"required"`
+		Mode    string   `json:"mode" binding:"required,oneof=append replace"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误：host_ids、tags、mode(append/replace) 必填")
+		return
+	}
+
+	if len(req.HostIDs) > 100 {
+		BadRequest(c, "单次最多操作 100 台主机")
+		return
+	}
+
+	// 校验标签
+	for _, tag := range req.Tags {
+		if len(tag) > 50 {
+			BadRequest(c, "标签长度不能超过50个字符")
+			return
+		}
+	}
+
+	var updated, failed int
+	for _, hostID := range req.HostIDs {
+		var finalTags model.StringArray
+
+		if req.Mode == "append" {
+			// 追加模式：读取现有标签，合并去重
+			var host model.Host
+			if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
+				failed++
+				continue
+			}
+			tagSet := make(map[string]struct{})
+			for _, t := range host.Tags {
+				tagSet[t] = struct{}{}
+			}
+			for _, t := range req.Tags {
+				tagSet[t] = struct{}{}
+			}
+			for t := range tagSet {
+				finalTags = append(finalTags, t)
+			}
+		} else {
+			// 替换模式
+			finalTags = model.StringArray(req.Tags)
+		}
+
+		// 校验合并后标签总数
+		if len(finalTags) > 10 {
+			failed++
+			continue
+		}
+
+		if err := h.db.Model(&model.Host{}).Where("host_id = ?", hostID).Update("tags", finalTags).Error; err != nil {
+			failed++
+			h.logger.Warn("批量更新标签失败", zap.String("host_id", hostID), zap.Error(err))
+			continue
+		}
+		updated++
+	}
+
+	h.logger.Info("批量更新标签完成", zap.Int("updated", updated), zap.Int("failed", failed))
+	Success(c, gin.H{"updated": updated, "failed": failed})
+}
+
+// BatchUpdateBusinessLine 批量更新主机业务线
+// POST /api/v1/hosts/batch-update-business-line
+func (h *HostsHandler) BatchUpdateBusinessLine(c *gin.Context) {
+	var req struct {
+		HostIDs      []string `json:"host_ids" binding:"required,min=1"`
+		BusinessLine string   `json:"business_line"` // 空字符串表示取消绑定
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请求参数错误：host_ids 不能为空")
+		return
+	}
+
+	if len(req.HostIDs) > 100 {
+		BadRequest(c, "单次最多操作 100 台主机")
+		return
+	}
+
+	// 如果指定了业务线，验证其存在且启用
+	if req.BusinessLine != "" {
+		var businessLine model.BusinessLine
+		if err := h.db.Where("code = ? AND enabled = ?", req.BusinessLine, true).First(&businessLine).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				BadRequest(c, "业务线不存在或已禁用")
+				return
+			}
+			h.logger.Error("查询业务线失败", zap.Error(err))
+			InternalError(c, "查询业务线失败")
+			return
+		}
+	}
+
+	// 单事务批量更新
+	result := h.db.Model(&model.Host{}).Where("host_id IN ?", req.HostIDs).Update("business_line", req.BusinessLine)
+	if result.Error != nil {
+		h.logger.Error("批量更新业务线失败", zap.Error(result.Error))
+		InternalError(c, "批量更新业务线失败")
+		return
+	}
+
+	h.logger.Info("批量更新业务线完成", zap.Int64("updated", result.RowsAffected))
+	Success(c, gin.H{"updated": result.RowsAffected})
 }

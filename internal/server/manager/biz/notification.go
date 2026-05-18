@@ -1464,94 +1464,6 @@ func larkHR() map[string]interface{} {
 }
 
 // ============================================================
-// 漏洞告警通知
-// ============================================================
-
-// VulnerabilityAlertData 漏洞告警数据
-type VulnerabilityAlertData struct {
-	HostID         string
-	Hostname       string
-	IP             string
-	CveID          string
-	Severity       string
-	CvssScore      float64
-	Component      string
-	CurrentVersion string
-	FixedVersion   string
-	Description    string
-	AffectedHosts  int
-	FrontendURL    string
-}
-
-// SendVulnerabilityAlertNotification 发送漏洞告警通知
-func (s *NotificationService) SendVulnerabilityAlertNotification(data *VulnerabilityAlertData) error {
-	var notifications []model.Notification
-	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryVulnerabilityAlert).Find(&notifications).Error; err != nil {
-		return err
-	}
-	for _, n := range notifications {
-		if len(n.Severities) > 0 && !s.matchSeverity(n.Severities, data.Severity) {
-			continue
-		}
-		if !s.matchScopeByHostID(&n, data.HostID) {
-			continue
-		}
-		var msg map[string]interface{}
-		if n.Type == model.NotificationTypeLark {
-			msg = s.buildLarkVulnerabilityCard(&n, data)
-		} else {
-			msg = s.buildWebhookVulnerability(data)
-		}
-		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
-			s.logger.Error("发送漏洞告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
-		}
-	}
-	return nil
-}
-
-func (s *NotificationService) buildLarkVulnerabilityCard(notification *model.Notification, data *VulnerabilityAlertData) map[string]interface{} {
-	desc := fmt.Sprintf(
-		"矩阵云安全平台检测到漏洞风险，请及时处理。\n\n"+
-			"**漏洞编号：** %s\n"+
-			"**CVSS 评分：** %.1f\n"+
-			"**主机名称：** %s\n"+
-			"**主机 IP：** %s\n"+
-			"**受影响组件：** %s\n"+
-			"**当前版本：** %s\n"+
-			"**修复版本：** %s\n"+
-			"**影响主机数：** %d",
-		data.CveID, data.CvssScore, data.Hostname, data.IP,
-		data.Component, data.CurrentVersion, data.FixedVersion, data.AffectedHosts,
-	)
-	elements := []map[string]interface{}{larkTextDiv(desc)}
-	if data.Description != "" {
-		elements = append(elements, larkHR(), larkTextDiv("**漏洞描述：**\n"+data.Description))
-	}
-	if notification.FrontendURL != "" {
-		url := fmt.Sprintf("%s/vulnerabilities?cve=%s", strings.TrimSuffix(notification.FrontendURL, "/"), data.CveID)
-		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
-	}
-	return s.buildLarkCardMessage(notification, "🔓 漏洞告警通知", s.getSeverityTemplate(data.Severity), elements)
-}
-
-func (s *NotificationService) buildWebhookVulnerability(data *VulnerabilityAlertData) map[string]interface{} {
-	return map[string]interface{}{
-		"alert_type":      "vulnerability",
-		"host_id":         data.HostID,
-		"hostname":        data.Hostname,
-		"ip":              data.IP,
-		"cve_id":          data.CveID,
-		"severity":        data.Severity,
-		"cvss_score":      data.CvssScore,
-		"component":       data.Component,
-		"current_version": data.CurrentVersion,
-		"fixed_version":   data.FixedVersion,
-		"description":     data.Description,
-		"affected_hosts":  data.AffectedHosts,
-	}
-}
-
-// ============================================================
 // 病毒查杀告警通知
 // ============================================================
 
@@ -2214,14 +2126,6 @@ func defaultStr(s, fallback string) string {
 func (s *NotificationService) BuildTestLarkCard(notification *model.Notification, category model.NotifyCategory) map[string]interface{} {
 	now := time.Now()
 	switch category {
-	case model.NotifyCategoryVulnerabilityAlert:
-		return s.buildLarkVulnerabilityCard(notification, &VulnerabilityAlertData{
-			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
-			CveID: "CVE-2024-1234", Severity: "critical", CvssScore: 9.8,
-			Component: "openssl", CurrentVersion: "1.1.1k", FixedVersion: "1.1.1w",
-			Description: "OpenSSL 远程代码执行漏洞", AffectedHosts: 5,
-			FrontendURL: notification.FrontendURL,
-		})
 	case model.NotifyCategoryVirusAlert:
 		return s.buildLarkVirusCard(notification, &VirusAlertData{
 			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",

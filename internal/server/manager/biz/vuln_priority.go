@@ -391,6 +391,11 @@ func ClassifyBulletinPriority(vuln *model.Vulnerability) (string, model.Priority
 		factors.Reason = "在 CISA KEV 目录"
 		return model.BulletinPriorityP1, factors
 	}
+	// Critical + CVSS ≥ 9.0 兜底（覆盖 vulnType 缺失的高危漏洞）
+	if vuln.Severity == "critical" && vuln.CvssScore >= 9.0 {
+		factors.Reason = "Critical 漏洞 + CVSS ≥ 9.0"
+		return model.BulletinPriorityP1, factors
+	}
 
 	// P2：中
 	// - CVSS ≥ 7.0 无 EXP

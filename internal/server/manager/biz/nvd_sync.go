@@ -1,9 +1,11 @@
 package biz
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -251,6 +253,41 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 	return nil
 }
 
+// newNVDClient 创建强制 HTTP/1.1 的 HTTP 客户端
+// NVD API 大响应体在 HTTP/2 下容易触发 stream INTERNAL_ERROR
+func newNVDClient() *http.Client {
+	return &http.Client{
+		Timeout: 180 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig:   &tls.Config{},
+			ForceAttemptHTTP2: false,
+			TLSNextProto:      make(map[string]func(string, *tls.Conn) http.RoundTripper),
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+		},
+	}
+}
+
+// nvdGetWithRetry 带重试的 NVD GET 请求（最多 3 次，间隔递增）
+func (v *VulnScanner) nvdGetWithRetry(client *http.Client, url string) (*http.Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		resp, err := client.Get(url)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		v.logger.Warn("NVD 请求失败，准备重试",
+			zap.Int("attempt", attempt),
+			zap.Error(err),
+		)
+		time.Sleep(time.Duration(attempt*10) * time.Second)
+	}
+	return nil, lastErr
+}
+
 // fetchRecentNVDCVEs 查询 NVD 最近 N 天发布的 CVE
 func (v *VulnScanner) fetchRecentNVDCVEs() ([]nvdItem, error) {
 	endDate := time.Now().UTC()
@@ -271,9 +308,9 @@ func (v *VulnScanner) fetchRecentNVDCVEs() ([]nvdItem, error) {
 		zap.String("endDate", endDate.Format(time.RFC3339)),
 	)
 
-	// NVD API 响应体较大（2000+ CVE），需要足够的超时来完成下载
-	client := &http.Client{Timeout: 180 * time.Second}
-	resp, err := client.Get(url)
+	client := newNVDClient()
+
+	resp, err := v.nvdGetWithRetry(client, url)
 	if err != nil {
 		return nil, fmt.Errorf("调用 NVD API 失败: %w", err)
 	}
@@ -284,8 +321,13 @@ func (v *VulnScanner) fetchRecentNVDCVEs() ([]nvdItem, error) {
 		return nil, fmt.Errorf("NVD API 返回 %d: %s", resp.StatusCode, string(body))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取 NVD 响应失败: %w", err)
+	}
+
 	var result nvdResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("解析 NVD 响应失败: %w", err)
 	}
 
@@ -295,18 +337,26 @@ func (v *VulnScanner) fetchRecentNVDCVEs() ([]nvdItem, error) {
 	allItems := result.Vulnerabilities
 	for startIndex := nvdPageSize; startIndex < result.TotalResults; startIndex += nvdPageSize {
 		pageURL := fmt.Sprintf("%s&startIndex=%d", url, startIndex)
-		pageResp, err := client.Get(pageURL)
+
+		pageResp, err := v.nvdGetWithRetry(client, pageURL)
 		if err != nil {
 			v.logger.Warn("NVD 分页查询失败", zap.Int("startIndex", startIndex), zap.Error(err))
 			break
 		}
+
+		pageBody, err := io.ReadAll(pageResp.Body)
+		pageResp.Body.Close()
+		if err != nil {
+			v.logger.Warn("NVD 分页读取失败", zap.Int("startIndex", startIndex), zap.Error(err))
+			break
+		}
+
 		var pageResult nvdResponse
-		if err := json.NewDecoder(pageResp.Body).Decode(&pageResult); err != nil {
-			pageResp.Body.Close()
+		if err := json.Unmarshal(pageBody, &pageResult); err != nil {
 			v.logger.Warn("NVD 分页解析失败", zap.Int("startIndex", startIndex), zap.Error(err))
 			break
 		}
-		pageResp.Body.Close()
+
 		allItems = append(allItems, pageResult.Vulnerabilities...)
 		v.logger.Info("NVD 分页获取完成", zap.Int("startIndex", startIndex), zap.Int("pageItems", len(pageResult.Vulnerabilities)))
 
