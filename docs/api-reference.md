@@ -620,6 +620,8 @@
 | POST | `/api/v1/remediation-tasks/:id/verify` | 验证修复任务 |
 | POST | `/api/v1/remediation-tasks/batch` | 批量创建修复任务 |
 | POST | `/api/v1/remediation-tasks/batch-confirm` | 批量确认修复任务 |
+| POST | `/api/v1/remediation-tasks/batch-retry` | 批量重试修复任务 |
+| POST | `/api/v1/remediation-tasks/batch-cancel` | 批量取消修复任务 |
 
 ---
 
