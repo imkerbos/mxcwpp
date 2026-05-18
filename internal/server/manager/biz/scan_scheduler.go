@@ -194,6 +194,8 @@ func (s *ScanScheduler) executeSchedule(scheduleID uint, scanType string) {
 	switch scanType {
 	case "full_scan":
 		err = s.scanner.ScanAll()
+	case "incremental_scan":
+		err = s.scanner.ScanIncremental()
 	case "sync_only":
 		err = s.scanner.SyncOnly()
 	default:
