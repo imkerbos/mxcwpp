@@ -308,7 +308,7 @@
     >
       <div style="margin-bottom: 16px;">
         <div style="margin-bottom: 8px; color: #4E5969;">
-          已选择 <strong>{{ selectedRowKeys.length }}</strong> 台主机
+          已选择 <strong>{{ batchBindHostIds.length }}</strong> 台主机
         </div>
       </div>
       <div style="margin-bottom: 16px;">
@@ -409,6 +409,7 @@ const businessLines = ref<BusinessLine[]>([])
 // 批量绑定业务线
 const batchBindBusinessLineModalVisible = ref(false)
 const batchBindBusinessLine = ref<string>('')
+const batchBindHostIds = ref<string[]>([]) // 打开模态框时快照选中的主机 ID
 
 // 批量添加标签
 const batchTagsModalVisible = ref(false)
@@ -910,24 +911,27 @@ const handleBatchBindBusinessLine = () => {
     message.warning('请先选择要绑定的主机')
     return
   }
+  batchBindHostIds.value = [...selectedRowKeys.value]
   batchBindBusinessLine.value = ''
   batchBindBusinessLineModalVisible.value = true
 }
 
 // 确认批量绑定业务线
 const handleConfirmBatchBindBusinessLine = async () => {
-  if (selectedRowKeys.value.length === 0) {
+  const hostIds = [...batchBindHostIds.value]
+  if (hostIds.length === 0) {
     message.warning('请先选择要绑定的主机')
     return
   }
 
   try {
     const businessLine = batchBindBusinessLine.value || ''
-    const res = await hostsApi.batchUpdateBusinessLine(selectedRowKeys.value, businessLine)
+    const res = await hostsApi.batchUpdateBusinessLine(hostIds, businessLine)
     message.success(`成功更新 ${res.updated} 台主机业务线`)
 
     // 清空选择并关闭对话框
     selectedRowKeys.value = []
+    batchBindHostIds.value = []
     batchBindBusinessLineModalVisible.value = false
     batchBindBusinessLine.value = ''
 
@@ -935,7 +939,6 @@ const handleConfirmBatchBindBusinessLine = async () => {
     loadHosts()
   } catch (error: any) {
     console.error('批量绑定业务线失败:', error)
-    message.error(error?.message || '批量绑定业务线失败，请重试')
   }
 }
 
@@ -943,6 +946,7 @@ const handleConfirmBatchBindBusinessLine = async () => {
 const handleCancelBatchBindBusinessLine = () => {
   batchBindBusinessLineModalVisible.value = false
   batchBindBusinessLine.value = ''
+  batchBindHostIds.value = []
 }
 
 onMounted(() => {

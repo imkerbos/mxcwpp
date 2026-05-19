@@ -3,6 +3,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -811,34 +812,86 @@ func (h *HostsHandler) BatchDeleteHost(c *gin.Context) {
 		return
 	}
 
-	var deleted, failed, skipped int
-	for _, hostID := range req.HostIDs {
-		// 非 force 模式下跳过在线主机
-		if !req.Force {
-			var host model.Host
-			if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
-				failed++
-				continue
-			}
-			if host.Status == model.HostStatusOnline {
-				skipped++
-				continue
-			}
-		}
-
-		err := h.db.Transaction(func(tx *gorm.DB) error {
-			return h.deleteHostByID(tx, hostID)
-		})
-		if err != nil {
-			failed++
-			h.logger.Warn("批量删除主机失败", zap.String("host_id", hostID), zap.Error(err))
-			continue
-		}
-		deleted++
+	// 单次查询获取所有请求主机的状态
+	var hosts []model.Host
+	if err := h.db.Where("host_id IN ?", req.HostIDs).Select("host_id, status").Find(&hosts).Error; err != nil {
+		h.logger.Error("查询主机状态失败", zap.Error(err))
+		InternalError(c, "查询主机状态失败")
+		return
 	}
 
+	existSet := make(map[string]string, len(hosts)) // host_id -> status
+	for _, host := range hosts {
+		existSet[host.HostID] = string(host.Status)
+	}
+
+	// 分类：待删除 / 跳过 / 不存在
+	var deleteIDs []string
+	var skipped, failed int
+	for _, id := range req.HostIDs {
+		status, exists := existSet[id]
+		if !exists {
+			failed++
+		} else if !req.Force && status == string(model.HostStatusOnline) {
+			skipped++
+		} else {
+			deleteIDs = append(deleteIDs, id)
+		}
+	}
+
+	if len(deleteIDs) == 0 {
+		Success(c, gin.H{"deleted": 0, "failed": failed, "skipped": skipped, "total": len(req.HostIDs)})
+		return
+	}
+
+	// 单事务批量删除所有关联数据和主机记录
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		return h.deleteHostsByIDs(tx, deleteIDs)
+	})
+	if err != nil {
+		h.logger.Error("批量删除主机失败", zap.Error(err), zap.Int("count", len(deleteIDs)))
+		InternalError(c, "批量删除主机失败")
+		return
+	}
+
+	deleted := len(deleteIDs)
 	h.logger.Info("批量删除主机完成", zap.Int("deleted", deleted), zap.Int("failed", failed), zap.Int("skipped", skipped))
 	Success(c, gin.H{"deleted": deleted, "failed": failed, "skipped": skipped, "total": len(req.HostIDs)})
+}
+
+// deleteHostsByIDs 批量删除主机及其关联数据（单事务内执行，WHERE host_id IN 批量操作）
+func (h *HostsHandler) deleteHostsByIDs(tx *gorm.DB, hostIDs []string) error {
+	if len(hostIDs) == 0 {
+		return nil
+	}
+
+	// 按依赖顺序批量删除所有关联表
+	relatedModels := []any{
+		&model.ScanResult{}, &model.Alert{}, &model.HostMetric{}, &model.HostPlugin{},
+		&model.Process{}, &model.Port{}, &model.Software{}, &model.Container{},
+		&model.AssetUser{}, &model.Cron{}, &model.Service{},
+		&model.NetInterface{}, &model.Volume{}, &model.Kmod{}, &model.App{},
+		&model.HostVulnerability{},
+	}
+	for _, m := range relatedModels {
+		if err := tx.Where("host_id IN ?", hostIDs).Delete(m).Error; err != nil {
+			return fmt.Errorf("删除关联数据失败: %w", err)
+		}
+	}
+
+	// 清除基线得分缓存
+	if h.scoreCache != nil {
+		for _, id := range hostIDs {
+			h.scoreCache.InvalidateHostScore(id)
+		}
+	}
+
+	// 最后删除主机记录
+	if err := tx.Where("host_id IN ?", hostIDs).Delete(&model.Host{}).Error; err != nil {
+		return fmt.Errorf("删除主机记录失败: %w", err)
+	}
+
+	return nil
 }
 
 // RestartAgentRequest Agent 重启请求
@@ -995,6 +1048,7 @@ func (h *HostsHandler) BatchUpdateBusinessLine(c *gin.Context) {
 		BusinessLine string   `json:"business_line"` // 空字符串表示取消绑定
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("批量更新业务线参数绑定失败", zap.Error(err))
 		BadRequest(c, "请求参数错误：host_ids 不能为空")
 		return
 	}
