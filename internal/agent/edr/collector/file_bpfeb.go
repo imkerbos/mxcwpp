@@ -86,6 +86,7 @@ type fileProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type fileMapSpecs struct {
+	ConfigMap         *ebpf.MapSpec `ebpf:"config_map"`
 	FileEventScratch  *ebpf.MapSpec `ebpf:"file_event_scratch"`
 	FileEvents        *ebpf.MapSpec `ebpf:"file_events"`
 	FileWhitelistPids *ebpf.MapSpec `ebpf:"file_whitelist_pids"`
@@ -117,6 +118,7 @@ func (o *fileObjects) Close() error {
 //
 // It can be passed to loadFileObjects or ebpf.CollectionSpec.LoadAndAssign.
 type fileMaps struct {
+	ConfigMap         *ebpf.Map `ebpf:"config_map"`
 	FileEventScratch  *ebpf.Map `ebpf:"file_event_scratch"`
 	FileEvents        *ebpf.Map `ebpf:"file_events"`
 	FileWhitelistPids *ebpf.Map `ebpf:"file_whitelist_pids"`
@@ -124,6 +126,7 @@ type fileMaps struct {
 
 func (m *fileMaps) Close() error {
 	return _FileClose(
+		m.ConfigMap,
 		m.FileEventScratch,
 		m.FileEvents,
 		m.FileWhitelistPids,

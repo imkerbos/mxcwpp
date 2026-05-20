@@ -46,6 +46,21 @@ struct {
 	__type(value, __u8);
 } file_whitelist_pids SEC(".maps");
 
+// Dynamic degradation level (0=normal, 1-3=degraded). Updated by Go side.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} config_map SEC(".maps");
+
+// get_degrade_level reads current degradation level from config_map.
+static __always_inline __u32 get_degrade_level(void) {
+	__u32 zero = 0;
+	__u32 *level = bpf_map_lookup_elem(&config_map, &zero);
+	return level ? *level : 0;
+}
+
 // ----- Helpers -----
 
 // get_file_event_buf returns a file_event from the per-CPU scratch buffer.
@@ -131,6 +146,10 @@ static __always_inline void fill_inode(struct file_event *evt, struct dentry *de
 
 SEC("kprobe/security_file_open")
 int BPF_KPROBE(kprobe_security_file_open, struct file *file) {
+	// Degradation level 1+: skip file_open (low-risk, high-volume)
+	if (get_degrade_level() >= 1)
+		return 0;
+
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u32 tgid = BPF_CORE_READ(task, tgid);
 
@@ -180,6 +199,10 @@ int BPF_KPROBE(kprobe_security_inode_rename,
 	struct inode *old_dir, struct dentry *old_dentry,
 	struct inode *new_dir, struct dentry *new_dentry) {
 
+	// Degradation level 2+: skip all file events
+	if (get_degrade_level() >= 2)
+		return 0;
+
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u32 tgid = BPF_CORE_READ(task, tgid);
 
@@ -219,6 +242,10 @@ int BPF_KPROBE(kprobe_security_inode_rename,
 
 SEC("kprobe/security_inode_unlink")
 int BPF_KPROBE(kprobe_security_inode_unlink, struct inode *dir, struct dentry *dentry) {
+	// Degradation level 2+: skip all file events
+	if (get_degrade_level() >= 2)
+		return 0;
+
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	__u32 tgid = BPF_CORE_READ(task, tgid);
 
@@ -256,6 +283,10 @@ int BPF_KPROBE(kprobe_security_inode_unlink, struct inode *dir, struct dentry *d
 
 SEC("kprobe/security_inode_setattr")
 int BPF_KPROBE(kprobe_security_inode_setattr, void *idmap, struct dentry *dentry, struct iattr *attr) {
+	// Degradation level 2+: skip all file events
+	if (get_degrade_level() >= 2)
+		return 0;
+
 	if (!dentry || !attr)
 		return 0;
 

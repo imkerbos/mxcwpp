@@ -35,8 +35,14 @@ type Capability string
 const (
 	CapEBPFFull     Capability = "ebpf_full"
 	CapFileFull     Capability = "file_full"     // rename/unlink/chmod (eBPF only)
+	CapNetworkFull  Capability = "network_full"  // tcp_connect/accept/udp_send (eBPF only)
 	CapDNSFull      Capability = "dns_full"      // DNS query capture
 	CapContainerCtx Capability = "container_ctx" // container context injection
+
+	// Userspace fallback capabilities (reduced feature set).
+	CapProcessBasic Capability = "process_basic" // cn_proc exec/exit only
+	CapFileBasic    Capability = "file_basic"    // fanotify close_write only
+	CapNetworkBasic Capability = "network_basic" // /proc/net polling (no short-lived conns)
 )
 
 // Collector is the interface that all event collectors must implement.
@@ -47,12 +53,18 @@ type Collector interface {
 	// Capabilities returns the set of capabilities this collector provides.
 	Capabilities() []Capability
 
+	// HookType returns the BPF attach mechanism detected/used (fentry or kprobe).
+	HookType() HookType
+
 	// Start begins event collection. Events are sent to the returned channel.
 	// The channel is closed when the collector stops or the context is cancelled.
 	Start(ctx context.Context) (<-chan *event.Event, error)
 
 	// Stop gracefully shuts down the collector and releases resources.
 	Stop() error
+
+	// DegradationLevel returns the current dynamic degradation level (0-3).
+	DegradationLevel() int32
 }
 
 // DetectAndCreate probes the running kernel and returns the best available collector.

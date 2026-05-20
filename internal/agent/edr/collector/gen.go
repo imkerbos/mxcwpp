@@ -24,3 +24,4 @@ package collector
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel,bpfeb -type process_event process bpf/process.c -- -I bpf -Wall -Werror -O2 -g -D__TARGET_ARCH_x86
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel,bpfeb -type file_event file bpf/file.c -- -I bpf -Wall -Werror -O2 -g -D__TARGET_ARCH_x86
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel,bpfeb -type network_event network bpf/network.c -- -I bpf -Wall -Werror -O2 -g -D__TARGET_ARCH_x86

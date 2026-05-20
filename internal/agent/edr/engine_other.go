@@ -27,3 +27,21 @@ func (e *Engine) Start(_ context.Context) error { return nil }
 
 // Stop is a no-op stub.
 func (e *Engine) Stop() error { return nil }
+
+// Stats is a no-op stub.
+func (e *Engine) Stats() (forwarded, dropped uint64) { return 0, 0 }
+
+// DegradationLevel is a no-op stub.
+func (e *Engine) DegradationLevel() int32 { return 0 }
+
+// GetEDRMode is a no-op stub.
+func (e *Engine) GetEDRMode() string { return "" }
+
+// GetEDRCapabilities is a no-op stub.
+func (e *Engine) GetEDRCapabilities() []string { return nil }
+
+// GetEDRHookType is a no-op stub.
+func (e *Engine) GetEDRHookType() string { return "" }
+
+// GetEDRStats is a no-op stub.
+func (e *Engine) GetEDRStats() (forwarded, dropped uint64) { return 0, 0 }

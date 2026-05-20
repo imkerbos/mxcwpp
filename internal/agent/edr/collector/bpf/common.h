@@ -10,6 +10,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 // ----- Constants -----
 
@@ -41,6 +42,15 @@
 #define ATTR_MODE  (1 << 0)
 #define ATTR_UID   (1 << 1)
 #define ATTR_GID   (1 << 2)
+
+// ----- Network event types -----
+
+#define EVENT_NET_TCP_CONNECT  20
+#define EVENT_NET_TCP_ACCEPT   21
+#define EVENT_NET_UDP_SEND     22
+
+// IP address constants
+#define ADDR_SIZE_V6  16   // IPv6 address size; IPv4 uses first 4 bytes
 
 // ----- Event structures -----
 
@@ -83,6 +93,27 @@ struct file_event {
 	char   filepath2[MAX_FILEPATH];  // rename: new path; others: unused
 };
 
+// network_event — emitted for tcp_connect/tcp_accept/udp_send events.
+struct network_event {
+	__u8   event_type;          // EVENT_NET_TCP_CONNECT / ACCEPT / UDP_SEND
+	__u8   ip_version;          // 4 or 6
+	__u8   protocol;            // 6=TCP, 17=UDP (IPPROTO_*)
+	__u8   direction;           // 0=outbound, 1=inbound
+	__u32  pid;
+	__u32  tgid;
+	__u32  ppid;
+	__u32  uid;
+	__u32  gid;
+	__u64  start_ts;
+	__u8   in_container;
+	__u8   _pad[3];
+	__u32  local_port;          // host byte order
+	__u32  remote_port;         // host byte order
+	__u8   local_addr[ADDR_SIZE_V6];   // IPv4: first 4 bytes; IPv6: all 16
+	__u8   remote_addr[ADDR_SIZE_V6];
+	char   comm[TASK_COMM_LEN];
+};
+
 // ----- Shared helpers -----
 
 // Check if a tgid is whitelisted. Returns 1 if whitelisted (should skip).
@@ -104,6 +135,22 @@ static __always_inline __u8 detect_container(struct task_struct *task) {
 
 	unsigned int level = BPF_CORE_READ(pid_ns, level);
 	return level > 0 ? 1 : 0;
+}
+
+// fill_net_task_info populates common task fields on a network_event.
+static __always_inline void fill_net_task_info(struct network_event *evt, struct task_struct *task) {
+	evt->pid  = BPF_CORE_READ(task, pid);
+	evt->tgid = BPF_CORE_READ(task, tgid);
+	evt->uid  = BPF_CORE_READ(task, real_cred, uid.val);
+	evt->gid  = BPF_CORE_READ(task, real_cred, gid.val);
+	evt->start_ts = bpf_ktime_get_ns();
+	evt->in_container = detect_container(task);
+
+	struct task_struct *parent = BPF_CORE_READ(task, real_parent);
+	if (parent)
+		evt->ppid = BPF_CORE_READ(parent, tgid);
+
+	BPF_CORE_READ_STR_INTO(&evt->comm, task, comm);
 }
 
 // fill_task_info populates common task fields on a file_event.
