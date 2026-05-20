@@ -21,7 +21,41 @@
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+// ----- Maps (process-specific) -----
+
+// Perf buffer for delivering process events to userspace.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
+	__uint(key_size, sizeof(__u32));
+	__uint(value_size, sizeof(__u32));
+} events SEC(".maps");
+
+// Per-CPU scratch buffer for building process_event (exceeds 512-byte stack limit).
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct process_event);
+} event_scratch SEC(".maps");
+
+// PIDs to skip (agent self, child plugins). Populated from Go side.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 64);
+	__type(key, __u32);
+	__type(value, __u8);
+} whitelist_pids SEC(".maps");
+
 // ----- Helpers -----
+
+// get_event_buf returns a zeroed process_event from the per-CPU scratch buffer.
+static __always_inline struct process_event *get_event_buf(void) {
+	__u32 zero = 0;
+	struct process_event *evt = bpf_map_lookup_elem(&event_scratch, &zero);
+	if (evt)
+		__builtin_memset(evt, 0, sizeof(*evt));
+	return evt;
+}
 
 // read_cmdline reads the process command line from user memory into buf.
 // task->mm->arg_start .. arg_end holds the original argv strings (NUL-separated).
@@ -50,25 +84,6 @@ static __always_inline void read_cmdline(struct task_struct *task, char *buf, __
 	buf[len] = '\0';
 }
 
-// detect_container checks if the task is in a non-root PID namespace.
-// level > 0 means the task is inside a container (or nested namespace).
-static __always_inline __u8 detect_container(struct task_struct *task) {
-	struct nsproxy *ns;
-	struct pid_namespace *pid_ns;
-	unsigned int level;
-
-	ns = BPF_CORE_READ(task, nsproxy);
-	if (!ns)
-		return 0;
-
-	pid_ns = BPF_CORE_READ(ns, pid_ns_for_children);
-	if (!pid_ns)
-		return 0;
-
-	level = BPF_CORE_READ(pid_ns, level);
-	return level > 0 ? 1 : 0;
-}
-
 // ----- sched_process_exec -----
 //
 // Raw tracepoint args for sched_process_exec:
@@ -87,7 +102,7 @@ int tracepoint_sched_process_exec(struct bpf_raw_tracepoint_args *ctx) {
 	__u32 tgid = BPF_CORE_READ(task, tgid);
 
 	// Fast path: skip whitelisted PIDs
-	if (is_whitelisted(tgid))
+	if (is_whitelisted(&whitelist_pids, tgid))
 		return 0;
 
 	// Get per-CPU scratch buffer (avoids 512-byte BPF stack limit)
@@ -149,7 +164,7 @@ int tracepoint_sched_process_exit(struct bpf_raw_tracepoint_args *ctx) {
 		return 0;
 
 	// Fast path: skip whitelisted PIDs
-	if (is_whitelisted(tgid))
+	if (is_whitelisted(&whitelist_pids, tgid))
 		return 0;
 
 	// Get per-CPU scratch buffer
