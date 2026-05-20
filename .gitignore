@@ -12,6 +12,8 @@ tmp/
 *.so
 *.dylib
 *.o
+!internal/agent/edr/collector/*_bpfel.o
+!internal/agent/edr/collector/*_bpfeb.o
 *.a
 
 # Top-level binaries
