@@ -18,7 +18,7 @@ import (
 type Engine struct{}
 
 // NewEngine returns an error on non-Linux platforms.
-func NewEngine(_ *zap.Logger, _ *transport.Manager) (*Engine, error) {
+func NewEngine(_ *zap.Logger, _ *transport.Manager, _ string) (*Engine, error) {
 	return nil, fmt.Errorf("EDR engine requires Linux")
 }
 
@@ -45,3 +45,15 @@ func (e *Engine) GetEDRHookType() string { return "" }
 
 // GetEDRStats is a no-op stub.
 func (e *Engine) GetEDRStats() (forwarded, dropped uint64) { return 0, 0 }
+
+// RulesVersion is a no-op stub.
+func (e *Engine) RulesVersion() string { return "" }
+
+// RulesCount is a no-op stub.
+func (e *Engine) RulesCount() int { return 0 }
+
+// RulesMatched is a no-op stub.
+func (e *Engine) RulesMatched() uint64 { return 0 }
+
+// ReloadRules is a no-op stub.
+func (e *Engine) ReloadRules() error { return nil }
