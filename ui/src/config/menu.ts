@@ -117,8 +117,8 @@ export const menuConfig: MenuItem[] = [
     ],
   },
   {
-    key: 'edr',
-    title: 'EDR',
+    key: 'detection',
+    title: '威胁检测',
     icon: ThunderboltOutlined,
     children: [
       { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },

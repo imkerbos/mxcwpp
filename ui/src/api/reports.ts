@@ -262,7 +262,7 @@ export interface ExecutiveTaskReport {
 }
 
 // ============================================================
-// 分类报告 - 病毒查杀 / 漏洞管理 / 容器安全 / EDR 检测
+// 分类报告 - 病毒查杀 / 漏洞管理 / 容器安全
 // ============================================================
 
 // 病毒查杀报告
@@ -347,33 +347,6 @@ export interface KubeReport {
   }
   baselineBySeverity: Record<string, number>
   baselineByCategory: Record<string, number>
-}
-
-// EDR 检测报告
-export interface EDRReport {
-  summary: {
-    totalAlerts: number
-    activeAlerts: number
-    resolvedAlerts: number
-    todayAlerts: number
-    affectedHosts: number
-  }
-  severityDistribution: Record<string, number>
-  categoryDistribution: Array<{ category: string; count: number }>
-  mitreDistribution: Array<{ mitreId: string; count: number }>
-  topRules: Array<{
-    ruleId: string
-    ruleName: string
-    count: number
-    severity: string
-  }>
-  topAffectedHosts: Array<{
-    hostId: string
-    hostname: string
-    ip: string
-    alertCount: number
-    criticalCount: number
-  }>
 }
 
 // 分类报告查询参数
@@ -564,53 +537,6 @@ export interface KubeExecutiveReport {
   }
 }
 
-// EDR 检测 Executive 报告
-export interface EDRExecutiveReport {
-  meta: {
-    reportId: string
-    reportTitle: string
-    generatedAt: string
-    companyName: string
-    reportPeriod: string
-    checkTarget: string
-  }
-  summary: {
-    overallConclusion: string
-    alertOverview: string
-    hasCriticalAlert: boolean
-    hasHighAlert: boolean
-  }
-  statistics: {
-    totalAlerts: number
-    activeAlerts: number
-    resolvedAlerts: number
-    todayAlerts: number
-    affectedHosts: number
-    bySeverity: Record<string, number>
-    byCategory: Array<{ category: string; count: number }>
-    byMitre: Array<{ mitreId: string; count: number }>
-  }
-  hostDetails: Array<{
-    hostId: string
-    hostname: string
-    ip: string
-    alertCount: number
-    criticalCount: number
-    highCount: number
-  }>
-  topRules: Array<{
-    ruleId: string
-    ruleName: string
-    count: number
-    severity: string
-  }>
-  recommendation: {
-    overallAssessment: string
-    actionSuggestions: string[]
-    disclaimer: string
-  }
-}
-
 // 漏洞修复 Executive 报告
 export interface RemediationExecutiveReport {
   meta: {
@@ -760,11 +686,6 @@ export const reportsApi = {
     return apiClient.get('/reports/kube', { params })
   },
 
-  // 获取 EDR 检测报告
-  getEDRReport: async (params?: CategoryReportParams): Promise<EDRReport> => {
-    return apiClient.get('/reports/edr', { params })
-  },
-
   // Executive 报告（可导出 PDF）
   getAntivirusExecutiveReport: async (taskId: number): Promise<AntivirusExecutiveReport> => {
     return apiClient.get(`/reports/antivirus/${taskId}/executive`)
@@ -776,10 +697,6 @@ export const reportsApi = {
 
   getKubeExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<KubeExecutiveReport> => {
     return apiClient.get('/reports/kube/executive', { params })
-  },
-
-  getEDRExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<EDRExecutiveReport> => {
-    return apiClient.get('/reports/edr/executive', { params })
   },
 
   getRemediationExecutiveReport: async (params: { start_time: string; end_time: string }): Promise<RemediationExecutiveReport> => {

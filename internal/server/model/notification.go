@@ -29,7 +29,7 @@ const (
 	NotifyCategoryAgentOffline  NotifyCategory = "agent_offline"  // Agent 离线通知
 	NotifyCategoryVirusAlert    NotifyCategory = "virus_alert"    // 病毒查杀告警通知
 	NotifyCategoryFIMAlert      NotifyCategory = "fim_alert"      // 文件完整性告警通知
-	NotifyCategoryEDRAlert      NotifyCategory = "edr_alert"      // EDR 告警通知
+	NotifyCategoryDetection     NotifyCategory = "detection"      // CEL 规则检测告警通知
 	NotifyCategoryKubeAlert     NotifyCategory = "kube_alert"     // K8s 安全告警通知
 	NotifyCategoryVulnBulletin  NotifyCategory = "vuln_bulletin"  // 漏洞通报通知
 )

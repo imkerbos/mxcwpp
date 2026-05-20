@@ -153,7 +153,7 @@ export const hostsApi = {
     return apiClient.get('/hosts/restart-records')
   },
 
-  // 依赖安装（如 Tetragon）
+  // 依赖安装
   installDependency: (hostIds: string[], dependency: string, action: 'install' | 'uninstall' | 'status' = 'install', version?: string) => {
     return apiClient.post<{ message: string; data: Array<{ host_id: string; request_id?: string; status: string; error?: string }> }>('/hosts/dependency/install', {
       host_ids: hostIds,
