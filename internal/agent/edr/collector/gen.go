@@ -16,8 +16,11 @@ package collector
 // Output:
 //   process_bpfel.go  / process_bpfel.o   (little-endian: amd64, arm64)
 //   process_bpfeb.go  / process_bpfeb.o   (big-endian: s390x, mips — rare)
+//   file_bpfel.go     / file_bpfel.o
+//   file_bpfeb.go     / file_bpfeb.o
 //
 // The generated Go files embed the compiled BPF bytecode and provide
-// type-safe loading functions (loadProcessObjects, etc.).
+// type-safe loading functions (loadProcessObjects, loadFileObjects, etc.).
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel,bpfeb -type process_event process bpf/process.c -- -I bpf -Wall -Werror -O2 -g -D__TARGET_ARCH_x86
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -target bpfel,bpfeb -type file_event file bpf/file.c -- -I bpf -Wall -Werror -O2 -g -D__TARGET_ARCH_x86

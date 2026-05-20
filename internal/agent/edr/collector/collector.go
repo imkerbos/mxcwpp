@@ -24,7 +24,7 @@ import (
 type Mode string
 
 const (
-	ModeEBPF      Mode = "ebpf"     // kernel >= 5.4, full capabilities
+	ModeEBPF      Mode = "ebpf"      // kernel >= 5.4, full capabilities
 	ModeUserspace Mode = "userspace" // fallback for old kernels
 )
 
