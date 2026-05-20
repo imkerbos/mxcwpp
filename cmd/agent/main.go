@@ -15,6 +15,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
+	"github.com/imkerbos/mxsec-platform/internal/agent/edr"
 	"github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
 	"github.com/imkerbos/mxsec-platform/internal/agent/id"
 	"github.com/imkerbos/mxsec-platform/internal/agent/logger"
@@ -132,6 +133,13 @@ func main() {
 	// 7. 创建插件管理器（需要在心跳模块之前创建，以便传递引用）
 	pluginMgr := plugin.NewManager(cfg, log, transportMgr)
 
+	// 7.5 创建 EDR 引擎（内置模块，与 Agent 同进程）
+	edrEngine, err := edr.NewEngine(log, transportMgr)
+	if err != nil {
+		log.Warn("EDR engine initialization failed, continuing without EDR",
+			zap.Error(err))
+	}
+
 	// 8. 设置配置更新回调
 	transportMgr.SetConfigUpdateCallback(func(agentConfig *grpc.AgentConfig, certBundle *grpc.CertificateBundle) {
 		// 处理证书包更新
@@ -182,6 +190,13 @@ func main() {
 	// 自更新模块（监听来自 Server 的更新命令）
 	go updater.Startup(ctx, wg, log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
 
+	// EDR 引擎（内置模块，不计入 WaitGroup — 通过 context 取消后自行停止）
+	if edrEngine != nil {
+		if err := edrEngine.Start(ctx); err != nil {
+			log.Error("EDR engine start failed", zap.Error(err))
+		}
+	}
+
 	// 9. 信号处理
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
@@ -195,6 +210,14 @@ func main() {
 	// 10. 优雅退出
 	log.Info("Shutting down...")
 	cancel()
+
+	// 停止 EDR 引擎（在 cancel 之后，释放 eBPF 资源）
+	if edrEngine != nil {
+		if err := edrEngine.Stop(); err != nil {
+			log.Error("EDR engine stop failed", zap.Error(err))
+		}
+	}
+
 	wg.Wait()
 
 	// 关闭连接

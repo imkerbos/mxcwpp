@@ -1,6 +1,6 @@
 # DataType 分配表
 
-**最后更新**: 2026-05-18 | **维护者**: Kerbos
+**最后更新**: 2026-05-20 | **维护者**: Kerbos
 
 > **强制规则**: 新增任何 DataType 前必须先在本文档注册，确认无冲突后再写代码。
 > 违反此规则会导致消息被错误路由（静默丢弃或写入错误 Topic），排查成本极高。
@@ -42,10 +42,11 @@
 
 | DataType | 方向 | 说明 | 生产者 | 消费者 |
 |----------|------|------|--------|--------|
-| 3000 | Plugin→Server | 进程事件 (exec/exit) | EDR 插件 | Consumer→ClickHouse + CEL |
-| 3001 | Plugin→Server | 文件事件 (file_open) | EDR 插件 | Consumer→ClickHouse + CEL |
-| 3002 | Plugin→Server | 网络事件 (tcp_connect/accept) | EDR 插件 | Consumer→ClickHouse + CEL + 端口扫描检测 |
-| 3003-3099 | - | **未分配** | - | - |
+| 3000 | Agent→Server | 进程事件 (exec/exit) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3001 | Agent→Server | 文件事件 (open/write/rename/unlink/chmod) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3002 | Agent→Server | 网络事件 (tcp_connect/accept/close, udp_send) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL + 端口扫描检测 |
+| 3003 | Agent→Server | DNS 查询事件 (dns_query) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3004-3099 | - | **未分配** | - | - |
 
 ### 资产采集 (5050-5060) → Kafka: `TopicAsset`
 
@@ -173,7 +174,7 @@ Kafka 启用时只走 Kafka 路径，直写路径仅在 Kafka 关闭时兜底。
 |----------|-----------|---------------|---------|------|
 | 1000 | heartbeat | MySQL+CH+Redis | Y | 完整双路径 |
 | 1001 | heartbeat | ClickHouse | - | Kafka-only，指标数据无需持久化到 MySQL |
-| 3000-3002 | ebpf | ClickHouse+CEL | - | Kafka-only，时序数据写 ClickHouse |
+| 3000-3003 | ebpf | ClickHouse+CEL | - | Kafka-only，时序数据写 ClickHouse（生产者: Agent 内置 EDR 引擎） |
 | 5050-5060 | asset | MySQL | Y | 完整双路径 |
 | 6001 | events | MySQL+CH+CEL | Y | 完整双路径 |
 | 6002 | events | MySQL | Y | 完整双路径 |
