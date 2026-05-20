@@ -122,7 +122,7 @@ func (s *AgentCenterServices) Cleanup() {
 		s.GRPCServer.GracefulStop()
 	}
 	if s.Logger != nil {
-		s.Logger.Sync()
+		_ = s.Logger.Sync()
 	}
 	if s.DB != nil {
 		if err := database.Close(); err != nil {

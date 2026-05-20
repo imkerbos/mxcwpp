@@ -47,13 +47,8 @@ func (h *AgentHandler) InstallScript(c *gin.Context) {
 	}
 	if httpHost == "" {
 		// 如果还是为空，使用配置的地址
+		// 注意：如果配置的地址是 0.0.0.0/localhost/127.0.0.1，在开发环境下保持使用配置的地址
 		httpHost = h.httpAddress
-		// 如果配置的地址是 0.0.0.0 或 localhost，尝试从请求中获取实际地址
-		if strings.Contains(httpHost, "0.0.0.0") || strings.Contains(httpHost, "localhost") || strings.Contains(httpHost, "127.0.0.1") {
-			// 尝试从 X-Forwarded-For 或 RemoteAddr 获取客户端 IP（作为服务器地址的参考）
-			// 但更可靠的方式是使用 Host 头（如果存在）
-			// 如果都没有，保持使用配置的地址（可能是开发环境）
-		}
 	}
 	// 确保有协议前缀
 	if !strings.HasPrefix(httpHost, "http://") && !strings.HasPrefix(httpHost, "https://") {

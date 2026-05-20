@@ -145,18 +145,6 @@ func LoadDefaults() *Config {
 	}
 }
 
-// getServerHost 获取 Server 地址（优先级：环境变量 > 构建时嵌入 > 默认值）
-// 注意：构建时嵌入的值需要通过 main.go 传入，这里只处理环境变量和默认值
-func getServerHost() string {
-	// 1. 环境变量
-	if host := os.Getenv("MXSEC_SERVER_HOST"); host != "" {
-		return host
-	}
-	// 2. 构建时嵌入的值由 main.go 处理
-	// 3. 默认值
-	return "localhost:6751"
-}
-
 // UpdateRemoteConfig 更新远程配置（由 Server 下发）
 func (c *Config) UpdateRemoteConfig(remote *RemoteConfig) {
 	c.remoteMu.Lock()

@@ -267,53 +267,6 @@ func (u *VirusDBUpdater) runFreshclam(ctx context.Context) error {
 	return nil
 }
 
-// packageVirusDB 将病毒库文件打包为 tar.gz
-func (u *VirusDBUpdater) packageVirusDB() (string, string, error) {
-	// 查找 .cvd 和 .cld 文件
-	patterns := []string{"*.cvd", "*.cld"}
-	var dbFiles []string
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(u.dataDir, pattern))
-		if err != nil {
-			continue
-		}
-		dbFiles = append(dbFiles, matches...)
-	}
-
-	if len(dbFiles) == 0 {
-		return "", "", fmt.Errorf("no virus database files found in %s", u.dataDir)
-	}
-
-	// 版本号：使用时间戳
-	version := time.Now().Format("20060102.150405")
-
-	// 打包
-	archiveName := fmt.Sprintf("virus-database-%s.tar.gz", version)
-	archivePath := filepath.Join(u.uploadDir, "plugins", archiveName)
-
-	if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil {
-		return "", "", err
-	}
-
-	// 使用 tar 命令打包（简单可靠）
-	args := []string{"-czf", archivePath, "-C", u.dataDir}
-	for _, f := range dbFiles {
-		args = append(args, filepath.Base(f))
-	}
-
-	cmd := exec.Command("tar", args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return "", "", fmt.Errorf("tar failed: %s: %w", string(output), err)
-	}
-
-	u.logger.Info("病毒库打包完成",
-		zap.String("archive", archivePath),
-		zap.Int("files", len(dbFiles)),
-	)
-
-	return archivePath, version, nil
-}
-
 // initFileHashes 启动时扫描当前病毒库文件，建立 hash 基线
 // 避免每次重启后 fileHashes 为空导致所有文件被误判为"变化"并重新打包
 func (u *VirusDBUpdater) initFileHashes() {

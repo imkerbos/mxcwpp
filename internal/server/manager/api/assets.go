@@ -1567,8 +1567,7 @@ func (h *AssetsHandler) ListServices(c *gin.Context) {
 	serviceType := c.Query("service_type")
 	status := c.Query("status")
 
-	query := h.db.Model(&model.Service{})
-	query = h.buildQuery(&model.Service{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Service{}, params.HostID, params.BusinessLine)
 	if serviceType != "" {
 		query = query.Where("service_type = ?", serviceType)
 	}
@@ -1592,8 +1591,7 @@ func (h *AssetsHandler) ListCrons(c *gin.Context) {
 	user := c.Query("user")
 	cronType := c.Query("cron_type")
 
-	query := h.db.Model(&model.Cron{})
-	query = h.buildQuery(&model.Cron{}, params.HostID, params.BusinessLine)
+	query := h.buildQuery(&model.Cron{}, params.HostID, params.BusinessLine)
 	if user != "" {
 		query = query.Where("user = ?", user)
 	}
@@ -2014,7 +2012,7 @@ func (h *AssetsHandler) queryNamedTopN(modelDef interface{}, hostID, businessLin
 
 	items := make([]AssetTopItem, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, AssetTopItem{Name: row.Name, Value: row.Value})
+		items = append(items, AssetTopItem(row))
 	}
 	return items, nil
 }

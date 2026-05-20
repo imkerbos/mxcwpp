@@ -29,28 +29,6 @@ func buildTestBody(t *testing.T, fields map[string]string) []byte {
 	return body
 }
 
-// mockAlertGenerator 模拟告警生成器，记录调用
-type mockAlertGenerator struct {
-	calls []alertGenCall
-}
-
-type alertGenCall struct {
-	hostID string
-	rules  []model.DetectionRule
-	fields map[string]string
-}
-
-// mockAutoResponder 模拟自动响应器，记录调用
-type mockAutoResponder struct {
-	calls []autoRespCall
-}
-
-type autoRespCall struct {
-	hostID string
-	rules  []model.DetectionRule
-	fields map[string]string
-}
-
 // TestEvaluateCEL_MatchAndGenerate 测试 sensor → CEL → alerts 链路
 // 验证：eBPF 事件经过 CEL 引擎评估后，命中规则时生成告警
 func TestEvaluateCEL_MatchAndGenerate(t *testing.T) {

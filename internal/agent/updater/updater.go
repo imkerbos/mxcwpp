@@ -155,10 +155,10 @@ func IsDowngrade(currentVer, targetVer string) bool {
 	for i := 0; i < maxLen; i++ {
 		var current, target int
 		if i < len(currentParts) {
-			fmt.Sscanf(currentParts[i], "%d", &current)
+			_, _ = fmt.Sscanf(currentParts[i], "%d", &current)
 		}
 		if i < len(targetParts) {
-			fmt.Sscanf(targetParts[i], "%d", &target)
+			_, _ = fmt.Sscanf(targetParts[i], "%d", &target)
 		}
 		if target < current {
 			return true

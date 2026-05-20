@@ -97,7 +97,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	log.Info("Agent starting",
 		zap.String("version", cfg.GetVersion()),
@@ -178,8 +178,12 @@ func main() {
 	wg := &sync.WaitGroup{}
 	wg.Add(4)
 
-	// 心跳模块（传递插件管理器引用）
-	go heartbeat.Startup(ctx, wg, cfg, log, transportMgr, agentID, pluginMgr)
+	// 心跳模块（传递插件管理器和 EDR 引擎引用）
+	var edrStatus heartbeat.EDRStatusGetter
+	if edrEngine != nil {
+		edrStatus = edrEngine
+	}
+	go heartbeat.Startup(ctx, wg, cfg, log, transportMgr, agentID, pluginMgr, edrStatus)
 
 	// 传输模块（使用已创建的传输管理器）
 	go transport.StartupWithManager(ctx, wg, transportMgr)

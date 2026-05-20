@@ -8,8 +8,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -28,6 +30,10 @@ const (
 	bpfEventFileRename = 11
 	bpfEventFileUnlink = 12
 	bpfEventFileChmod  = 13
+
+	bpfEventNetTCPConnect = 20
+	bpfEventNetTCPAccept  = 21
+	bpfEventNetUDPSend    = 22
 )
 
 // Path mode constants — must match bpf/common.h
@@ -84,6 +90,29 @@ type fileEvent struct {
 	Filepath2   [256]byte
 }
 
+// networkEvent mirrors struct network_event from bpf/common.h.
+// Field order, sizes, and padding MUST stay in sync with the C struct.
+// All fields exported for binary.Read (reflect).
+type networkEvent struct {
+	EventType   uint8
+	IPVersion   uint8
+	Protocol    uint8
+	Direction   uint8
+	Pid         uint32
+	Tgid        uint32
+	Ppid        uint32
+	Uid         uint32
+	Gid         uint32
+	StartTs     uint64
+	InContainer uint8
+	Pad0        [3]uint8
+	LocalPort   uint32
+	RemotePort  uint32
+	LocalAddr   [16]byte
+	RemoteAddr  [16]byte
+	Comm        [16]byte
+}
+
 // ebpfCollector implements Collector using cilium/ebpf for kernel-level event collection.
 //
 // Lifecycle:
@@ -91,8 +120,9 @@ type fileEvent struct {
 //  2. Start() — load BPF objects, attach tracepoints/kprobes, start perf readers
 //  3. Stop()  — detach all hooks, close perf readers, release BPF resources
 type ebpfCollector struct {
-	logger  *zap.Logger
-	eventCh chan *event.Event
+	logger   *zap.Logger
+	eventCh  chan *event.Event
+	hookType HookType // detected hook capability (fentry or kprobe)
 
 	// Process BPF resources (nil until Start)
 	procObjs       *processObjects
@@ -105,12 +135,25 @@ type ebpfCollector struct {
 	fileLinks      []link.Link // independent kprobe attachments
 	filePerfReader *perf.Reader
 
+	// Network BPF resources (nil until Start; may remain nil if load/attach fails)
+	netObjs       *networkObjects
+	netLinks      []link.Link // independent kprobe/kretprobe attachments
+	netPerfReader *perf.Reader
+
+	// /proc scanner for initial snapshot and periodic reconciliation
+	scanner *procScanner
+
+	// Dynamic resource degradation
+	degradeMgr *DegradationManager
+
 	wg sync.WaitGroup
 }
 
 func newEBPFCollector(logger *zap.Logger) (*ebpfCollector, error) {
+	ht := detectHookType(logger)
 	return &ebpfCollector{
-		logger: logger,
+		logger:   logger,
+		hookType: ht,
 	}, nil
 }
 
@@ -118,12 +161,27 @@ func (c *ebpfCollector) Mode() Mode {
 	return ModeEBPF
 }
 
-func (c *ebpfCollector) Capabilities() []Capability {
-	return []Capability{
-		CapEBPFFull,
-		CapFileFull,
-		CapContainerCtx,
+func (c *ebpfCollector) HookType() HookType {
+	return c.hookType
+}
+
+// DegradationLevel returns the current dynamic degradation level (0-3).
+func (c *ebpfCollector) DegradationLevel() int32 {
+	if c.degradeMgr != nil {
+		return c.degradeMgr.Level()
 	}
+	return 0
+}
+
+func (c *ebpfCollector) Capabilities() []Capability {
+	caps := []Capability{CapEBPFFull, CapContainerCtx}
+	if c.filePerfReader != nil {
+		caps = append(caps, CapFileFull)
+	}
+	if c.netPerfReader != nil {
+		caps = append(caps, CapNetworkFull)
+	}
+	return caps
 }
 
 // Start loads BPF programs, attaches hooks, and begins reading events.
@@ -143,6 +201,19 @@ func (c *ebpfCollector) Start(ctx context.Context) (<-chan *event.Event, error) 
 		)
 	}
 
+	// ----- Network collector (optional — degraded mode if fails) -----
+	if err := c.startNetworkCollector(); err != nil {
+		c.logger.Warn("network collector failed to start, continuing without network events",
+			zap.Error(err),
+		)
+	}
+
+	// ----- /proc snapshot (before perf readers to avoid race) -----
+	c.scanner = newProcScanner(c.logger, c.eventCh)
+	if err := c.scanner.initialSnapshot(); err != nil {
+		c.logger.Warn("/proc initial snapshot failed", zap.Error(err))
+	}
+
 	// Start reader goroutines
 	c.wg.Add(1)
 	go c.readProcessEvents(ctx)
@@ -151,6 +222,42 @@ func (c *ebpfCollector) Start(ctx context.Context) (<-chan *event.Event, error) 
 		c.wg.Add(1)
 		go c.readFileEvents(ctx)
 	}
+
+	if c.netPerfReader != nil {
+		c.wg.Add(1)
+		go c.readNetworkEvents(ctx)
+	}
+
+	// /proc reconciliation goroutine (5-minute interval)
+	c.wg.Add(1)
+	go c.scanner.reconcileLoop(ctx, &c.wg, 5*time.Minute)
+
+	// Dynamic degradation manager — collect config_map refs from all loaded BPF objects.
+	var configMaps []*ebpf.Map
+	if c.procObjs != nil {
+		configMaps = append(configMaps, c.procObjs.ConfigMap)
+	}
+	if c.fileObjs != nil {
+		configMaps = append(configMaps, c.fileObjs.ConfigMap)
+	}
+	if c.netObjs != nil {
+		configMaps = append(configMaps, c.netObjs.ConfigMap)
+	}
+	c.degradeMgr = NewDegradationManager(c.logger, configMaps, func() {
+		// Self-kill: close perf readers to stop all collection
+		c.logger.Error("degradation self-kill triggered, stopping all event collection")
+		if c.netPerfReader != nil {
+			c.netPerfReader.Close()
+		}
+		if c.filePerfReader != nil {
+			c.filePerfReader.Close()
+		}
+		if c.procPerfReader != nil {
+			c.procPerfReader.Close()
+		}
+	})
+	c.wg.Add(1)
+	go c.degradeMgr.Monitor(ctx, &c.wg)
 
 	// Close eventCh when all readers finish
 	go func() {
@@ -161,7 +268,9 @@ func (c *ebpfCollector) Start(ctx context.Context) (<-chan *event.Event, error) 
 	c.logger.Info("eBPF collector started",
 		zap.Bool("process_events", true),
 		zap.Bool("file_events", c.filePerfReader != nil),
+		zap.Bool("network_events", c.netPerfReader != nil),
 		zap.Int("file_kprobes_attached", len(c.fileLinks)),
+		zap.Int("net_hooks_attached", len(c.netLinks)),
 	)
 
 	return c.eventCh, nil
@@ -276,6 +385,9 @@ func (c *ebpfCollector) startFileCollector() error {
 // Stop detaches all BPF programs and releases resources.
 func (c *ebpfCollector) Stop() error {
 	// Close perf readers first — this unblocks reader goroutines.
+	if c.netPerfReader != nil {
+		c.netPerfReader.Close()
+	}
 	if c.filePerfReader != nil {
 		c.filePerfReader.Close()
 	}
@@ -286,12 +398,18 @@ func (c *ebpfCollector) Stop() error {
 	// Wait for all reader goroutines to finish.
 	c.wg.Wait()
 
+	// Detach network hooks.
+	for _, l := range c.netLinks {
+		l.Close()
+	}
+	if c.netObjs != nil {
+		c.netObjs.Close()
+	}
+
 	// Detach file kprobes.
 	for _, l := range c.fileLinks {
 		l.Close()
 	}
-
-	// Release file BPF objects.
 	if c.fileObjs != nil {
 		c.fileObjs.Close()
 	}
@@ -303,8 +421,6 @@ func (c *ebpfCollector) Stop() error {
 	if c.execLink != nil {
 		c.execLink.Close()
 	}
-
-	// Release process BPF objects.
 	if c.procObjs != nil {
 		c.procObjs.Close()
 	}
@@ -372,6 +488,14 @@ func (c *ebpfCollector) decodeProcessEvent(raw []byte) (*event.Event, error) {
 		if pe.InContainer == 1 {
 			evt.SetField("in_container", "true")
 		}
+
+		// Keep /proc scanner's known map in sync with live events
+		if c.scanner != nil {
+			c.scanner.addKnown(int(pe.Tgid), procEntry{
+				pid: int(pe.Tgid), ppid: int(pe.Ppid),
+				uid: int(pe.Uid), exe: filename, cmdline: cmdline,
+			})
+		}
 		return evt, nil
 
 	case bpfEventProcessExit:
@@ -385,6 +509,10 @@ func (c *ebpfCollector) decodeProcessEvent(raw []byte) (*event.Event, error) {
 		evt.SetField("ktime_ns", fmt.Sprintf("%d", pe.StartTs))
 		if pe.InContainer == 1 {
 			evt.SetField("in_container", "true")
+		}
+
+		if c.scanner != nil {
+			c.scanner.removeKnown(int(pe.Tgid))
 		}
 		return evt, nil
 
@@ -476,6 +604,164 @@ func (c *ebpfCollector) decodeFileEvent(raw []byte) (*event.Event, error) {
 		evt.SetField("new_path", newPath)
 	case bpfEventFileChmod:
 		evt.SetField("new_mode", fmt.Sprintf("%04o", fe.NewMode))
+	}
+
+	return evt, nil
+}
+
+// ----- Network event reader -----
+
+// startNetworkCollector loads network BPF objects and attaches kprobes/kretprobes.
+// Each hook attach is independent — one failure does not block others.
+func (c *ebpfCollector) startNetworkCollector() error {
+	objs := &networkObjects{}
+	if err := loadNetworkObjects(objs, &ebpf.CollectionOptions{
+		Programs: ebpf.ProgramOptions{
+			LogLevel: ebpf.LogLevelInstruction,
+		},
+	}); err != nil {
+		return fmt.Errorf("load network BPF objects: %w", err)
+	}
+	c.netObjs = objs
+
+	// kprobe hooks (tcp_connect, udp_sendmsg)
+	type hookSpec struct {
+		name        string
+		program     *ebpf.Program
+		isKretprobe bool
+	}
+	hooks := []hookSpec{
+		{"tcp_connect", objs.KprobeTcpConnect, false},
+		{"inet_csk_accept", objs.KretprobeInetCskAccept, true},
+		{"udp_sendmsg", objs.KprobeUdpSendmsg, false},
+	}
+
+	for _, h := range hooks {
+		var l link.Link
+		var err error
+		if h.isKretprobe {
+			l, err = link.Kretprobe(h.name, h.program, nil)
+		} else {
+			l, err = link.Kprobe(h.name, h.program, nil)
+		}
+		if err != nil {
+			c.logger.Warn("failed to attach network hook, skipping",
+				zap.String("hook", h.name),
+				zap.Bool("kretprobe", h.isKretprobe),
+				zap.Error(err),
+			)
+			continue
+		}
+		c.netLinks = append(c.netLinks, l)
+		c.logger.Debug("network hook attached", zap.String("hook", h.name))
+	}
+
+	if len(c.netLinks) == 0 {
+		objs.Close()
+		c.netObjs = nil
+		return fmt.Errorf("no network hooks attached")
+	}
+
+	// Open perf reader for network events.
+	// Buffer: 16 pages (64 KiB). Network events are ~92 bytes each.
+	reader, err := perf.NewReader(objs.NetEvents, 16*4096)
+	if err != nil {
+		for _, l := range c.netLinks {
+			l.Close()
+		}
+		c.netLinks = nil
+		objs.Close()
+		c.netObjs = nil
+		return fmt.Errorf("create network perf reader: %w", err)
+	}
+	c.netPerfReader = reader
+
+	return nil
+}
+
+// readNetworkEvents reads from the network perf buffer and decodes events.
+func (c *ebpfCollector) readNetworkEvents(ctx context.Context) {
+	defer c.wg.Done()
+
+	for {
+		record, err := c.netPerfReader.Read()
+		if err != nil {
+			if errors.Is(err, perf.ErrClosed) {
+				return
+			}
+			c.logger.Warn("network perf reader error", zap.Error(err))
+			continue
+		}
+
+		if record.LostSamples > 0 {
+			c.logger.Warn("network perf buffer lost samples",
+				zap.Uint64("lost", record.LostSamples),
+			)
+			continue
+		}
+
+		evt, err := c.decodeNetworkEvent(record.RawSample)
+		if err != nil {
+			c.logger.Debug("failed to decode network event", zap.Error(err))
+			continue
+		}
+
+		c.sendEvent(ctx, evt)
+	}
+}
+
+// decodeNetworkEvent parses a raw BPF network event sample into an event.Event.
+func (c *ebpfCollector) decodeNetworkEvent(raw []byte) (*event.Event, error) {
+	var ne networkEvent
+	if err := binary.Read(bytes.NewReader(raw), binary.LittleEndian, &ne); err != nil {
+		return nil, fmt.Errorf("binary decode: %w", err)
+	}
+
+	// Convert IP address bytes to string based on ip_version
+	var remoteAddr, localAddr string
+	if ne.IPVersion == 4 {
+		remoteAddr = net.IP(ne.RemoteAddr[:4]).String()
+		localAddr = net.IP(ne.LocalAddr[:4]).String()
+	} else {
+		remoteAddr = net.IP(ne.RemoteAddr[:16]).String()
+		localAddr = net.IP(ne.LocalAddr[:16]).String()
+	}
+
+	var evtType event.EventType
+	switch ne.EventType {
+	case bpfEventNetTCPConnect:
+		evtType = event.TCPConnect
+	case bpfEventNetTCPAccept:
+		evtType = event.TCPAccept
+	case bpfEventNetUDPSend:
+		evtType = event.UDPSend
+	default:
+		return nil, fmt.Errorf("unknown network event type: %d", ne.EventType)
+	}
+
+	// Protocol string
+	proto := "tcp"
+	if ne.Protocol == 17 {
+		proto = "udp"
+	}
+
+	evt := event.NewNetworkEvent(evtType, int(ne.Tgid), remoteAddr, int(ne.RemotePort), proto)
+	evt.SetField("local_addr", localAddr)
+	evt.SetField("local_port", fmt.Sprintf("%d", ne.LocalPort))
+	evt.SetField("ppid", fmt.Sprintf("%d", ne.Ppid))
+	evt.SetField("uid", fmt.Sprintf("%d", ne.Uid))
+	evt.SetField("gid", fmt.Sprintf("%d", ne.Gid))
+	evt.SetField("comm", cString(ne.Comm[:]))
+	evt.SetField("ktime_ns", fmt.Sprintf("%d", ne.StartTs))
+
+	if ne.Direction == 0 {
+		evt.SetField("direction", "outbound")
+	} else {
+		evt.SetField("direction", "inbound")
+	}
+
+	if ne.InContainer == 1 {
+		evt.SetField("in_container", "true")
 	}
 
 	return evt, nil

@@ -55,8 +55,7 @@ type Manager struct {
 	depMgr         *dependency.Manager                              // 依赖管理器
 	agentMeta      agentMetadata                                    // Agent 元信息缓存
 	agentMetaMu    sync.RWMutex                                     // 元信息读写锁
-	mu             sync.RWMutex
-	isConnected    bool // 连接状态
+	isConnected    bool                                             // 连接状态
 	connectedMu    sync.RWMutex
 }
 

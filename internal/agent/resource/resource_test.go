@@ -49,7 +49,7 @@ func TestCollectDiskIO_NoPrev(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(f.Name())
-	f.WriteString(content)
+	_, _ = f.WriteString(content)
 	f.Close()
 
 	// 替换 /proc/diskstats 路径（通过 monkey-patch 不可行；

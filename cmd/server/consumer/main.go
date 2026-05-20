@@ -57,7 +57,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "初始化日志失败: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	// 3. 检查 Kafka 是否启用
 	if !cfg.Kafka.Enabled {
@@ -79,7 +79,7 @@ func main() {
 	if err != nil {
 		logger.Warn("Consumer ClickHouse 初始化失败，跳过指标写入", zap.Error(err))
 	} else if chConn != nil {
-		defer database.CloseClickHouse()
+		defer func() { _ = database.CloseClickHouse() }()
 	}
 	batchSize := cfg.ClickHouse.BatchSize
 	if batchSize <= 0 {
@@ -98,7 +98,7 @@ func main() {
 		logger.Warn("Consumer Redis 初始化失败，跳过 agent:ac: 映射写入", zap.Error(err))
 	} else {
 		redisClient = rc
-		defer database.CloseRedis()
+		defer func() { _ = database.CloseRedis() }()
 		logger.Info("Consumer Redis 已连接", zap.String("addr", cfg.Redis.Addr))
 	}
 

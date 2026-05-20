@@ -104,7 +104,7 @@ func TestEngine_E2E_WithExamplePolicy(t *testing.T) {
 	// 测试场景2: 文件存在但配置不符合要求
 	t.Run("文件存在但配置不符合", func(t *testing.T) {
 		// 创建不符合要求的配置文件
-		os.WriteFile(loginDefs, []byte("# Password aging controls\nPASS_MAX_DAYS 999\nPASS_MIN_LEN 4\n"), 0644)
+		_ = os.WriteFile(loginDefs, []byte("# Password aging controls\nPASS_MAX_DAYS 999\nPASS_MIN_LEN 4\n"), 0644)
 
 		// 修改规则中的文件路径
 		policies := []*Policy{&policy}
@@ -137,7 +137,7 @@ func TestEngine_E2E_WithExamplePolicy(t *testing.T) {
 	// 测试场景3: 文件存在且配置符合要求
 	t.Run("文件存在且配置符合", func(t *testing.T) {
 		// 创建符合要求的配置文件
-		os.WriteFile(loginDefs, []byte("# Password aging controls\nPASS_MAX_DAYS 90\nPASS_MIN_LEN 8\n"), 0644)
+		_ = os.WriteFile(loginDefs, []byte("# Password aging controls\nPASS_MAX_DAYS 90\nPASS_MIN_LEN 8\n"), 0644)
 
 		// 修改规则中的文件路径
 		policies := []*Policy{&policy}

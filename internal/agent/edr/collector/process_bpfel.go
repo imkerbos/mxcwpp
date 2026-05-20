@@ -82,6 +82,7 @@ type processProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type processMapSpecs struct {
+	ConfigMap     *ebpf.MapSpec `ebpf:"config_map"`
 	EventScratch  *ebpf.MapSpec `ebpf:"event_scratch"`
 	Events        *ebpf.MapSpec `ebpf:"events"`
 	WhitelistPids *ebpf.MapSpec `ebpf:"whitelist_pids"`
@@ -113,6 +114,7 @@ func (o *processObjects) Close() error {
 //
 // It can be passed to loadProcessObjects or ebpf.CollectionSpec.LoadAndAssign.
 type processMaps struct {
+	ConfigMap     *ebpf.Map `ebpf:"config_map"`
 	EventScratch  *ebpf.Map `ebpf:"event_scratch"`
 	Events        *ebpf.Map `ebpf:"events"`
 	WhitelistPids *ebpf.Map `ebpf:"whitelist_pids"`
@@ -120,6 +122,7 @@ type processMaps struct {
 
 func (m *processMaps) Close() error {
 	return _ProcessClose(
+		m.ConfigMap,
 		m.EventScratch,
 		m.Events,
 		m.WhitelistPids,

@@ -221,11 +221,11 @@ func (h *PolicyImportExportHandler) convertPolicyToExportFormat(policy *model.Po
 
 		// 转换 CheckConfig
 		checkBytes, _ := json.Marshal(rule.CheckConfig)
-		json.Unmarshal(checkBytes, &ruleExport.Check)
+		_ = json.Unmarshal(checkBytes, &ruleExport.Check)
 
 		// 转换 FixConfig
 		fixBytes, _ := json.Marshal(rule.FixConfig)
-		json.Unmarshal(fixBytes, &ruleExport.Fix)
+		_ = json.Unmarshal(fixBytes, &ruleExport.Fix)
 
 		export.Rules = append(export.Rules, ruleExport)
 	}
@@ -266,11 +266,11 @@ func (h *PolicyImportExportHandler) createPolicy(data *PolicyExportFormat, group
 
 			// 转换 CheckConfig
 			checkBytes, _ := json.Marshal(ruleData.Check)
-			json.Unmarshal(checkBytes, &rule.CheckConfig)
+			_ = json.Unmarshal(checkBytes, &rule.CheckConfig)
 
 			// 转换 FixConfig
 			fixBytes, _ := json.Marshal(ruleData.Fix)
-			json.Unmarshal(fixBytes, &rule.FixConfig)
+			_ = json.Unmarshal(fixBytes, &rule.FixConfig)
 
 			if err := tx.Create(&rule).Error; err != nil {
 				return fmt.Errorf("创建规则 %s 失败: %w", ruleData.RuleID, err)
@@ -318,10 +318,10 @@ func (h *PolicyImportExportHandler) updatePolicy(existing *model.Policy, data *P
 				}
 
 				checkBytes, _ := json.Marshal(ruleData.Check)
-				json.Unmarshal(checkBytes, &rule.CheckConfig)
+				_ = json.Unmarshal(checkBytes, &rule.CheckConfig)
 
 				fixBytes, _ := json.Marshal(ruleData.Fix)
-				json.Unmarshal(fixBytes, &rule.FixConfig)
+				_ = json.Unmarshal(fixBytes, &rule.FixConfig)
 
 				if err := tx.Create(&rule).Error; err != nil {
 					return fmt.Errorf("创建规则 %s 失败: %w", ruleData.RuleID, err)
@@ -346,10 +346,10 @@ func (h *PolicyImportExportHandler) updatePolicy(existing *model.Policy, data *P
 					}
 
 					checkBytes, _ := json.Marshal(ruleData.Check)
-					json.Unmarshal(checkBytes, &rule.CheckConfig)
+					_ = json.Unmarshal(checkBytes, &rule.CheckConfig)
 
 					fixBytes, _ := json.Marshal(ruleData.Fix)
-					json.Unmarshal(fixBytes, &rule.FixConfig)
+					_ = json.Unmarshal(fixBytes, &rule.FixConfig)
 
 					if err := tx.Create(&rule).Error; err != nil {
 						return fmt.Errorf("创建规则 %s 失败: %w", ruleData.RuleID, err)
@@ -360,10 +360,10 @@ func (h *PolicyImportExportHandler) updatePolicy(existing *model.Policy, data *P
 					var fixConfig model.FixConfig
 
 					checkBytes, _ := json.Marshal(ruleData.Check)
-					json.Unmarshal(checkBytes, &checkConfig)
+					_ = json.Unmarshal(checkBytes, &checkConfig)
 
 					fixBytes, _ := json.Marshal(ruleData.Fix)
-					json.Unmarshal(fixBytes, &fixConfig)
+					_ = json.Unmarshal(fixBytes, &fixConfig)
 
 					ruleUpdates := map[string]interface{}{
 						"category":     ruleData.Category,

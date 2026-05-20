@@ -1293,13 +1293,7 @@ func (h *ReportsHandler) GetTopFailedRules(c *gin.Context) {
 
 	topRules := make([]TopFailedRule, 0, len(ruleStats))
 	for _, rs := range ruleStats {
-		topRules = append(topRules, TopFailedRule{
-			RuleID:        rs.RuleID,
-			Title:         rs.Title,
-			Severity:      rs.Severity,
-			Category:      rs.Category,
-			AffectedHosts: rs.AffectedHosts,
-		})
+		topRules = append(topRules, TopFailedRule(rs))
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -46,6 +46,21 @@ struct {
 	__type(value, __u8);
 } whitelist_pids SEC(".maps");
 
+// Dynamic degradation level (0=normal, 1-3=degraded). Updated by Go side.
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u32);
+} config_map SEC(".maps");
+
+// get_degrade_level reads current degradation level from config_map.
+static __always_inline __u32 get_degrade_level(void) {
+	__u32 zero = 0;
+	__u32 *level = bpf_map_lookup_elem(&config_map, &zero);
+	return level ? *level : 0;
+}
+
 // ----- Helpers -----
 
 // get_event_buf returns a zeroed process_event from the per-CPU scratch buffer.
@@ -161,6 +176,10 @@ int tracepoint_sched_process_exit(struct bpf_raw_tracepoint_args *ctx) {
 	// Only report thread group leader exits (the main "process" exit).
 	// Individual thread exits are noise for EDR purposes.
 	if (pid != tgid)
+		return 0;
+
+	// Degradation level 3: only process_exec, skip process_exit
+	if (get_degrade_level() >= 3)
 		return 0;
 
 	// Fast path: skip whitelisted PIDs
