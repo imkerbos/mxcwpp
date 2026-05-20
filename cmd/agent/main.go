@@ -134,7 +134,7 @@ func main() {
 	pluginMgr := plugin.NewManager(cfg, log, transportMgr)
 
 	// 7.5 创建 EDR 引擎（内置模块，与 Agent 同进程）
-	edrEngine, err := edr.NewEngine(log, transportMgr)
+	edrEngine, err := edr.NewEngine(log, transportMgr, "")
 	if err != nil {
 		log.Warn("EDR engine initialization failed, continuing without EDR",
 			zap.Error(err))

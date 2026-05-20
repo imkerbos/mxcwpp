@@ -49,6 +49,9 @@ type EDRStatusGetter interface {
 	GetEDRCapabilities() []string
 	GetEDRHookType() string
 	GetEDRStats() (forwarded, dropped uint64)
+	RulesVersion() string
+	RulesCount() int
+	RulesMatched() uint64
 }
 
 // NewManager 创建新的心跳管理器
@@ -256,6 +259,9 @@ func (m *Manager) sendHeartbeat() {
 		fwd, drop := m.edrEngine.GetEDRStats()
 		record.Data.Fields["edr_events_fwd"] = fmt.Sprintf("%d", fwd)
 		record.Data.Fields["edr_events_drop"] = fmt.Sprintf("%d", drop)
+		record.Data.Fields["edr_rules_version"] = m.edrEngine.RulesVersion()
+		record.Data.Fields["edr_rules_count"] = fmt.Sprintf("%d", m.edrEngine.RulesCount())
+		record.Data.Fields["edr_rules_matched"] = fmt.Sprintf("%d", m.edrEngine.RulesMatched())
 	}
 
 	// 添加业务线信息（从环境变量读取）
