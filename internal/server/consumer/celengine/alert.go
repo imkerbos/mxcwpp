@@ -60,7 +60,7 @@ func (g *AlertGenerator) createAlert(hostID string, rule *model.DetectionRule, f
 		ResultID:    resultID,
 		HostID:      hostID,
 		RuleID:      fmt.Sprintf("cel-%d", rule.ID),
-		Source:      model.AlertSourceEDR,
+		Source:      model.AlertSourceDetection,
 		Severity:    rule.Severity,
 		Category:    categorize(rule),
 		Title:       rule.Name,
@@ -82,9 +82,8 @@ func (g *AlertGenerator) createAlert(hostID string, rule *model.DetectionRule, f
 		zap.String("severity", rule.Severity),
 	)
 
-	// 异步发送 EDR 告警通知
+	// 异步发送检测告警通知
 	go func(a *model.Alert) {
-		// 查询主机信息
 		var host model.Host
 		hostname, ip := "", ""
 		if g.db.Select("hostname, ipv4").First(&host, "host_id = ?", a.HostID).Error == nil {
@@ -94,7 +93,7 @@ func (g *AlertGenerator) createAlert(hostID string, rule *model.DetectionRule, f
 			}
 		}
 		ns := biz.NewNotificationService(g.db, g.log)
-		if err := ns.SendEDRAlertNotification(&biz.EDRAlertData{
+		if err := ns.SendDetectionAlertNotification(&biz.DetectionAlertData{
 			HostID:      a.HostID,
 			Hostname:    hostname,
 			IP:          ip,
@@ -104,7 +103,7 @@ func (g *AlertGenerator) createAlert(hostID string, rule *model.DetectionRule, f
 			Description: a.Description,
 			DetectedAt:  a.FirstSeenAt.Time(),
 		}); err != nil {
-			g.log.Error("发送 EDR 告警通知失败", zap.Error(err))
+			g.log.Error("发送检测告警通知失败", zap.Error(err))
 		}
 	}(&alert)
 

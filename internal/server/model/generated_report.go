@@ -10,7 +10,6 @@ const (
 	ReportTypeAntivirus     ReportType = "antivirus"
 	ReportTypeVulnerability ReportType = "vulnerability"
 	ReportTypeKube          ReportType = "kube"
-	ReportTypeEDR           ReportType = "edr"
 	ReportTypeRemediation   ReportType = "remediation"
 )
 

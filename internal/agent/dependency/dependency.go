@@ -3,8 +3,6 @@ package dependency
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
 
 	"go.uber.org/zap"
 )
@@ -29,31 +27,5 @@ func NewManager(logger *zap.Logger) *Manager {
 
 // Execute 执行依赖操作
 func (m *Manager) Execute(name, action, version string) Result {
-	switch name {
-	case "tetragon":
-		return m.executeTetragon(action, version)
-	default:
-		return Result{Success: false, Message: fmt.Sprintf("unknown dependency: %s", name)}
-	}
-}
-
-// detectPackageManager 检测系统包管理器
-func detectPackageManager() string {
-	if _, err := exec.LookPath("apt-get"); err == nil {
-		return "apt"
-	}
-	if _, err := exec.LookPath("yum"); err == nil {
-		return "yum"
-	}
-	if _, err := exec.LookPath("dnf"); err == nil {
-		return "dnf"
-	}
-	return ""
-}
-
-// runCommand 执行命令并返回输出
-func runCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	return Result{Success: false, Message: fmt.Sprintf("unknown dependency: %s", name)}
 }

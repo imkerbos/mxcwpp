@@ -57,8 +57,8 @@
           </a-descriptions>
         </a-card>
 
-        <!-- 事件详情卡片（仅 EDR 告警） -->
-        <template v-if="isEDRAlert && eventDetail">
+        <!-- 事件详情卡片（仅 CEL 规则检测告警） -->
+        <template v-if="isCELAlert && eventDetail">
           <a-card title="事件详情" :bordered="false" class="info-card">
             <a-descriptions bordered :column="2">
               <a-descriptions-item label="事件类型">
@@ -219,10 +219,10 @@ const resolveModalVisible = ref(false)
 const ignoreModalVisible = ref(false)
 const resolveReason = ref('')
 
-const isEDRAlert = computed(() => alert.value?.rule_id?.startsWith('cel-'))
+const isCELAlert = computed(() => alert.value?.rule_id?.startsWith('cel-'))
 
 const eventDetail = computed(() => {
-  if (!isEDRAlert.value || !alert.value?.actual) return null
+  if (!isCELAlert.value || !alert.value?.actual) return null
   try {
     return JSON.parse(alert.value.actual)
   } catch {

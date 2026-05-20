@@ -135,9 +135,6 @@
       <div v-if="selectedRowKeys.length > 0" class="batch-bar">
         <span>已选择 {{ selectedRowKeys.length }} 台主机</span>
         <a-space>
-          <a-popconfirm title="确定为选中主机批量安装 Tetragon？" @confirm="handleBatchInstallTetragon">
-            <a-button type="primary" size="small" :loading="depInstalling">批量安装 Tetragon</a-button>
-          </a-popconfirm>
           <a-popconfirm title="确定批量重启选中主机的 Agent？" @confirm="handleBatchRestart">
             <a-button type="primary" danger size="small">批量重启 Agent</a-button>
           </a-popconfirm>
@@ -308,20 +305,6 @@ const handleRestartAgent = async (record: InspectionHostItem) => {
   }
 }
 
-const depInstalling = ref(false)
-
-const handleBatchInstallTetragon = async () => {
-  depInstalling.value = true
-  try {
-    await hostsApi.installDependency(selectedRowKeys.value, 'tetragon')
-    message.success(`已向 ${selectedRowKeys.value.length} 台主机下发 Tetragon 安装命令`)
-    selectedRowKeys.value = []
-  } catch (error: any) {
-    message.error(error?.message || '批量安装 Tetragon 失败')
-  } finally {
-    depInstalling.value = false
-  }
-}
 
 const handleBatchRestart = async () => {
   try {

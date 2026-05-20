@@ -1656,11 +1656,11 @@ func (s *NotificationService) buildWebhookFIM(data *FIMAlertData) map[string]int
 }
 
 // ============================================================
-// EDR 告警通知
+// CEL 规则检测告警通知
 // ============================================================
 
-// EDRAlertData EDR 告警数据
-type EDRAlertData struct {
+// DetectionAlertData 检测告警数据
+type DetectionAlertData struct {
 	HostID      string
 	Hostname    string
 	IP          string
@@ -1673,10 +1673,10 @@ type EDRAlertData struct {
 	FrontendURL string
 }
 
-// SendEDRAlertNotification 发送 EDR 告警通知
-func (s *NotificationService) SendEDRAlertNotification(data *EDRAlertData) error {
+// SendDetectionAlertNotification 发送检测告警通知
+func (s *NotificationService) SendDetectionAlertNotification(data *DetectionAlertData) error {
 	var notifications []model.Notification
-	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryEDRAlert).Find(&notifications).Error; err != nil {
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryDetection).Find(&notifications).Error; err != nil {
 		return err
 	}
 	for _, n := range notifications {
@@ -1688,24 +1688,24 @@ func (s *NotificationService) SendEDRAlertNotification(data *EDRAlertData) error
 		}
 		var msg map[string]interface{}
 		if n.Type == model.NotificationTypeLark {
-			msg = s.buildLarkEDRCard(&n, data)
+			msg = s.buildLarkDetectionCard(&n, data)
 		} else {
-			msg = s.buildWebhookEDR(data)
+			msg = s.buildWebhookDetection(data)
 		}
 		if err := s.postWebhook(n.Config.WebhookURL, msg); err != nil {
-			s.logger.Error("发送 EDR 告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
+			s.logger.Error("发送检测告警通知失败", zap.Uint("notification_id", n.ID), zap.Error(err))
 		}
 	}
 	return nil
 }
 
-func (s *NotificationService) buildLarkEDRCard(notification *model.Notification, data *EDRAlertData) map[string]interface{} {
+func (s *NotificationService) buildLarkDetectionCard(notification *model.Notification, data *DetectionAlertData) map[string]interface{} {
 	mitreInfo := ""
 	if data.MitreID != "" {
 		mitreInfo = fmt.Sprintf("\n**MITRE ATT&CK：** %s", data.MitreID)
 	}
 	desc := fmt.Sprintf(
-		"矩阵云安全平台 EDR 引擎触发安全告警。\n\n"+
+		"矩阵云安全平台检测引擎触发安全告警。\n\n"+
 			"**规则名称：** %s\n"+
 			"**告警分类：** %s%s\n"+
 			"**主机名称：** %s\n"+
@@ -1723,12 +1723,12 @@ func (s *NotificationService) buildLarkEDRCard(notification *model.Notification,
 		url := fmt.Sprintf("%s/detection/alerts?host_id=%s", strings.TrimSuffix(notification.FrontendURL, "/"), data.HostID)
 		elements = append(elements, larkHR(), larkActionButton("查看详情", url))
 	}
-	return s.buildLarkCardMessage(notification, "🛡️ EDR 告警", s.getSeverityTemplate(data.Severity), elements)
+	return s.buildLarkCardMessage(notification, "🛡️ 检测告警", s.getSeverityTemplate(data.Severity), elements)
 }
 
-func (s *NotificationService) buildWebhookEDR(data *EDRAlertData) map[string]interface{} {
+func (s *NotificationService) buildWebhookDetection(data *DetectionAlertData) map[string]interface{} {
 	return map[string]interface{}{
-		"alert_type":  "edr_detection",
+		"alert_type":  "detection",
 		"host_id":     data.HostID,
 		"hostname":    data.Hostname,
 		"ip":          data.IP,
@@ -2139,8 +2139,8 @@ func (s *NotificationService) BuildTestLarkCard(notification *model.Notification
 			FilePath: "/etc/passwd", ChangeType: "changed", Category: "auth",
 			Severity: "high", DetectedAt: now, FrontendURL: notification.FrontendURL,
 		})
-	case model.NotifyCategoryEDRAlert:
-		return s.buildLarkEDRCard(notification, &EDRAlertData{
+	case model.NotifyCategoryDetection:
+		return s.buildLarkDetectionCard(notification, &DetectionAlertData{
 			HostID: "test-host-001", Hostname: "测试主机", IP: "192.168.1.100",
 			RuleName: "检测可疑进程执行", Severity: "high", Category: "process",
 			MitreID: "T1059", Description: "检测到可疑的命令执行行为",

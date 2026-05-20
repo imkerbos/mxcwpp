@@ -6,7 +6,7 @@
     </div>
 
     <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
-      <a-tab-pane key="runtime" tab="EDR 告警">
+      <a-tab-pane key="detection" tab="检测告警">
     <!-- 统计卡片 -->
     <a-row :gutter="[16, 16]" class="section-row">
       <a-col :span="6">

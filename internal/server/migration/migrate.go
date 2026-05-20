@@ -116,12 +116,12 @@ func migrateAlertSource(db *gorm.DB, logger *zap.Logger) error {
 		logger.Info("回填 agent 来源", zap.Int64("count", r.RowsAffected))
 	}
 
-	// 2. EDR 告警（CEL 规则 + 端口扫描）
+	// 2. 检测告警（CEL 规则 + 端口扫描）
 	r = db.Model(&model.Alert{}).
 		Where("(source IS NULL OR source = '') AND (rule_id LIKE ? OR rule_id = ?)", "cel-%", "scan-detector").
-		Update("source", model.AlertSourceEDR)
+		Update("source", model.AlertSourceDetection)
 	if r.RowsAffected > 0 {
-		logger.Info("回填 edr 来源", zap.Int64("count", r.RowsAffected))
+		logger.Info("回填 detection 来源", zap.Int64("count", r.RowsAffected))
 	}
 
 	// 3. 其余未标记的 → 基线告警

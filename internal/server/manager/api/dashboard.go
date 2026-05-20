@@ -195,7 +195,7 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	} else {
 		stats["vulnHostPercent"] = 0.0
 	}
-	// EDR 告警：来自 CEL 规则引擎的告警（category = 'detection_rule'）
+	// 检测告警：来自 CEL 规则引擎的告警（category = 'detection_rule'）
 	var edrAlertHostCount int64
 	h.db.Model(&model.Alert{}).Where("status = ? AND category = ?", model.AlertStatusActive, "detection_rule").Distinct("host_id").Count(&edrAlertHostCount)
 	if totalHosts > 0 {

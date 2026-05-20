@@ -287,13 +287,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Virus/Quarantine.vue'),
         meta: { title: '文件隔离箱' },
       },
-      // EDR 告警事件
-      {
-        path: 'detection/events',
-        name: 'EDRAlerts',
-        component: () => import('@/views/EDRAlerts/index.vue'),
-        meta: { title: 'EDR 告警事件' },
-      },
       // 检测规则管理
       {
         path: 'detection/rules',
@@ -397,7 +390,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Kube/ImageScan.vue'),
         meta: { title: '镜像扫描' },
       },
-      // RASP 已弃用，由 Tetragon eBPF EDR 替代
+      // RASP 已弃用
       // 保留路由兼容旧书签，重定向到检测规则页
       {
         path: 'rasp/apps',
