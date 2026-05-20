@@ -18,7 +18,7 @@ func TestEngine_Execute(t *testing.T) {
 
 	// 创建测试文件
 	testFile := filepath.Join(tmpDir, "test.conf")
-	os.WriteFile(testFile, []byte("PermitRootLogin no\nPort 22\n"), 0644)
+	_ = os.WriteFile(testFile, []byte("PermitRootLogin no\nPort 22\n"), 0644)
 
 	tests := []struct {
 		name            string
@@ -238,7 +238,7 @@ func TestEngine_executeCheck(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.conf")
-	os.WriteFile(testFile, []byte("PermitRootLogin no\nPort 22\n"), 0644)
+	_ = os.WriteFile(testFile, []byte("PermitRootLogin no\nPort 22\n"), 0644)
 
 	tests := []struct {
 		name     string
@@ -526,7 +526,7 @@ func TestEngine_executeRule(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.conf")
-	os.WriteFile(testFile, []byte("PermitRootLogin no\n"), 0644)
+	_ = os.WriteFile(testFile, []byte("PermitRootLogin no\n"), 0644)
 
 	policy := &Policy{
 		ID:          "TEST_POLICY",

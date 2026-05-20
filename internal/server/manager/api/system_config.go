@@ -621,7 +621,7 @@ func (h *SystemConfigHandler) GetLogo(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=31536000") // 缓存1年
 
 	// 返回文件内容
-	io.Copy(c.Writer, file)
+	_, _ = io.Copy(c.Writer, file)
 }
 
 // GetAlertConfig 获取告警配置

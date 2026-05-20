@@ -1,0 +1,4 @@
+issues:
+  exclude-dirs:
+    - deploy/data
+    - deploy/data-perf

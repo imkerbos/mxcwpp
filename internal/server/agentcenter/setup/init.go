@@ -246,7 +246,7 @@ func (s *AgentCenterServices) Cleanup() {
 		s.GRPCServer.GracefulStop()
 	}
 	if s.Logger != nil {
-		s.Logger.Sync()
+		_ = s.Logger.Sync()
 	}
 	if s.HTTPServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

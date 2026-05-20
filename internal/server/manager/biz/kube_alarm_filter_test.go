@@ -359,7 +359,7 @@ func TestWhitelistHitCountUpdate(t *testing.T) {
 	}
 
 	// 再次命中
-	svc.CreateAlarmWithFilter(alarm)
+	_, _ = svc.CreateAlarmWithFilter(alarm)
 	db.Model(&model.KubeWhitelist{}).Select("hit_count").Where("name = ?", "test-rule").Scan(&hitCount)
 	if hitCount != 2 {
 		t.Errorf("hit_count 应为 2，实际 %d", hitCount)

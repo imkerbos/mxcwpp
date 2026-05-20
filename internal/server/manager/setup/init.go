@@ -189,7 +189,7 @@ func extractPrometheusQueryURL(cfg *config.Config, logger *zap.Logger) string {
 // Cleanup 清理资源
 func (s *ManagerServices) Cleanup() {
 	if s.Logger != nil {
-		s.Logger.Sync()
+		_ = s.Logger.Sync()
 	}
 	if s.DB != nil {
 		if err := database.Close(); err != nil {

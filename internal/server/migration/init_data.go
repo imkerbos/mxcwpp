@@ -351,27 +351,6 @@ func initDefaultPolicyGroup(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// associateExistingPoliciesWithGroup 将没有分组的策略关联到默认策略组
-func associateExistingPoliciesWithGroup(db *gorm.DB, logger *zap.Logger) error {
-	// 查找没有分组的策略
-	result := db.Model(&model.Policy{}).
-		Where("group_id IS NULL OR group_id = ''").
-		Update("group_id", DefaultPolicyGroupID)
-
-	if result.Error != nil {
-		return fmt.Errorf("更新策略分组失败: %w", result.Error)
-	}
-
-	if result.RowsAffected > 0 {
-		logger.Info("已将未分组策略关联到默认策略组",
-			zap.Int64("count", result.RowsAffected),
-			zap.String("group_id", DefaultPolicyGroupID),
-		)
-	}
-
-	return nil
-}
-
 // initDefaultPluginConfigs 初始化默认插件配置
 func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *config.PluginsConfig) error {
 	managedPlugins := []managedPluginBootstrap{

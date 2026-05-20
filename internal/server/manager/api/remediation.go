@@ -133,7 +133,10 @@ func (h *RemediationHandler) VerifyRemediation(c *gin.Context) {
 	var req struct {
 		HostID string `json:"hostId"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "无效的请求参数")
+		return
+	}
 
 	verifier := biz.NewRemediationVerifier(h.db, h.logger)
 

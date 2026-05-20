@@ -331,7 +331,7 @@ func (t *TaskTracker) CleanupOldTasks(maxAge time.Duration) {
 				zap.String("token", token),
 				zap.Duration("age", now.Sub(tracked.ReceivedAt)))
 			delete(t.tasks, token)
-			t.removeTask(token)
+			_ = t.removeTask(token)
 		}
 	}
 }

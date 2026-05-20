@@ -3,24 +3,6 @@ package mvp1
 
 // MVP1 API 响应结构（与 MVP2 model 独立，避免耦合）
 
-// apiResponse MVP1 统一 API 响应
-type apiResponse struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-}
-
-// paginatedData MVP1 分页数据
-type paginatedData struct {
-	Total int64       `json:"total"`
-	Items interface{} `json:"items"`
-}
-
-// loginResponse MVP1 登录响应
-type loginResponse struct {
-	Token string `json:"token"`
-}
-
 // mvp1User MVP1 用户
 type mvp1User struct {
 	ID        uint   `json:"id"`

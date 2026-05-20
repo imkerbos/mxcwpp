@@ -19,8 +19,6 @@ import (
 type NetworkBlockHandler struct {
 	db     *gorm.DB
 	logger *zap.Logger
-	// dispatcher 用于向 Agent 下发网络阻断命令（可选，AC 内部 HTTP 转发）
-	acBaseURL string
 }
 
 // NewNetworkBlockHandler 创建网络阻断处理器

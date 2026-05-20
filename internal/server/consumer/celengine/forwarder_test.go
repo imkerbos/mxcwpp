@@ -22,7 +22,7 @@ func TestCommandForwarder_SendCommand(t *testing.T) {
 			t.Errorf("请求方法 = %s, want POST", r.Method)
 		}
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedReq)
+		_ = json.Unmarshal(body, &receivedReq)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -113,7 +113,7 @@ func TestCommandForwarder_SendCommandTypeConversion(t *testing.T) {
 	var receivedReq commandReq
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedReq)
+		_ = json.Unmarshal(body, &receivedReq)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

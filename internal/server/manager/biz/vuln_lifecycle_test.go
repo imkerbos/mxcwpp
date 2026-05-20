@@ -38,31 +38,39 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			status   TEXT DEFAULT 'offline'
 		)`,
 		`CREATE TABLE vulnerabilities (
-			id              INTEGER PRIMARY KEY AUTOINCREMENT,
-			cve_id          TEXT NOT NULL UNIQUE,
-			osv_id          TEXT,
-			purl            TEXT,
-			severity        TEXT NOT NULL DEFAULT 'medium',
-			cvss_score      REAL DEFAULT 0,
-			component       TEXT,
-			description     TEXT,
-			affected_hosts  INTEGER DEFAULT 0,
-			patched_hosts   INTEGER DEFAULT 0,
-			status          TEXT NOT NULL DEFAULT 'unpatched',
-			discovered_at   DATETIME,
-			patched_at      DATETIME,
-			current_version TEXT,
-			fixed_version   TEXT,
-			reference_url   TEXT,
-			cnvd_id         TEXT,
-			cnnvd_id        TEXT,
-			has_exploit     INTEGER DEFAULT 0,
-			in_kev          INTEGER DEFAULT 0,
-			exploit_ref     TEXT,
-			priority_score  REAL DEFAULT 0,
-			exposure_score  REAL DEFAULT 0,
-			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			cve_id            TEXT NOT NULL UNIQUE,
+			osv_id            TEXT,
+			purl              TEXT,
+			severity          TEXT NOT NULL DEFAULT 'medium',
+			cvss_score        REAL DEFAULT 0,
+			component         TEXT,
+			description       TEXT,
+			affected_hosts    INTEGER DEFAULT 0,
+			patched_hosts     INTEGER DEFAULT 0,
+			status            TEXT NOT NULL DEFAULT 'unpatched',
+			discovered_at     DATETIME,
+			patched_at        DATETIME,
+			current_version   TEXT,
+			fixed_version     TEXT,
+			reference_url     TEXT,
+			cvss_vector       TEXT,
+			attack_vector     TEXT,
+			vuln_type         TEXT,
+			affected_versions TEXT,
+			source            TEXT,
+			patch_available   INTEGER DEFAULT 0,
+			epss_score        REAL DEFAULT 0,
+			cwe_id            TEXT,
+			cnvd_id           TEXT,
+			cnnvd_id          TEXT,
+			has_exploit       INTEGER DEFAULT 0,
+			in_kev            INTEGER DEFAULT 0,
+			exploit_ref       TEXT,
+			priority_score    REAL DEFAULT 0,
+			exposure_score    REAL DEFAULT 0,
+			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE host_vulnerabilities (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -506,7 +514,7 @@ func TestScenario_IgnoreUnignore(t *testing.T) {
 	db.Create(&model.HostVulnerability{VulnID: vuln.ID, HostID: "host-002", Status: "unpatched"})
 
 	// ===== 忽略操作（模拟 API handler 事务）=====
-	db.Transaction(func(tx *gorm.DB) error {
+	_ = db.Transaction(func(tx *gorm.DB) error {
 		tx.Model(&model.Vulnerability{}).Where("id = ?", vuln.ID).Update("status", "ignored")
 		tx.Model(&model.HostVulnerability{}).
 			Where("vuln_id = ? AND status = ?", vuln.ID, "unpatched").
@@ -525,7 +533,7 @@ func TestScenario_IgnoreUnignore(t *testing.T) {
 	}
 
 	// ===== 取消忽略 =====
-	db.Transaction(func(tx *gorm.DB) error {
+	_ = db.Transaction(func(tx *gorm.DB) error {
 		tx.Model(&model.Vulnerability{}).Where("id = ?", vuln.ID).Update("status", "unpatched")
 		tx.Model(&model.HostVulnerability{}).
 			Where("vuln_id = ? AND status = ?", vuln.ID, "ignored").

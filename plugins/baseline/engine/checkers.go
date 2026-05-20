@@ -473,10 +473,9 @@ func NewServiceStatusChecker(logger *zap.Logger) *ServiceStatusChecker {
 
 // serviceCheckResult 服务检查的内部结果
 type serviceCheckResult struct {
-	status      string // active, inactive, not_installed 等
-	enabled     string // enabled, disabled, not_found 等
-	installed   bool   // 服务单元是否存在
-	description string // 额外描述信息
+	status    string // active, inactive, not_installed 等
+	enabled   string // enabled, disabled, not_found 等
+	installed bool   // 服务单元是否存在
 }
 
 // Check 执行检查
@@ -799,21 +798,6 @@ func (c *ServiceStatusChecker) checkSystemdServiceDetailed(ctx context.Context, 
 	}
 
 	return result, nil
-}
-
-// checkSystemdService 检查 systemd 服务状态（兼容旧接口）
-func (c *ServiceStatusChecker) checkSystemdService(ctx context.Context, serviceName string) (string, error) {
-	result, err := c.checkSystemdServiceDetailed(ctx, serviceName)
-	if err != nil {
-		return "", err
-	}
-	if !result.installed {
-		return "not_installed", nil
-	}
-	if result.enabled != "" && result.enabled != "not_found" {
-		return fmt.Sprintf("%s+%s", result.status, result.enabled), nil
-	}
-	return result.status, nil
 }
 
 // checkSysVService 检查 SysV 服务状态
@@ -1170,7 +1154,7 @@ func (c *PackageInstalledChecker) compareVersionValues(v1, v2 string) int {
 			v1Part := v1Parts[i]
 			for j := 0; j < len(v1Part); j++ {
 				if v1Part[j] >= '0' && v1Part[j] <= '9' {
-					fmt.Sscanf(v1Part[j:], "%d", &v1Num)
+					_, _ = fmt.Sscanf(v1Part[j:], "%d", &v1Num)
 					break
 				}
 			}
@@ -1179,7 +1163,7 @@ func (c *PackageInstalledChecker) compareVersionValues(v1, v2 string) int {
 			v2Part := v2Parts[i]
 			for j := 0; j < len(v2Part); j++ {
 				if v2Part[j] >= '0' && v2Part[j] <= '9' {
-					fmt.Sscanf(v2Part[j:], "%d", &v2Num)
+					_, _ = fmt.Sscanf(v2Part[j:], "%d", &v2Num)
 					break
 				}
 			}

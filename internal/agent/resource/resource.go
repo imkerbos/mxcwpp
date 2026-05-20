@@ -198,10 +198,6 @@ func (m *Monitor) collectCPU() (float64, error) {
 
 	// 计算 CPU 使用率
 	now := time.Now()
-	elapsed := now.Sub(m.lastUpdate).Seconds()
-	if elapsed < 1.0 {
-		elapsed = 1.0 // 避免除零
-	}
 
 	if m.lastCPU.Total > 0 {
 		totalDiff := stat.Total - m.lastCPU.Total

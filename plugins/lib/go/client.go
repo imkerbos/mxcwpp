@@ -147,7 +147,7 @@ func (c *Client) ReceiveTask() (*bridge.Task, error) {
 
 		// 拦截心跳 ping：自动回复 pong，不返回给业务调用方
 		if task.DataType == dataTypeHeartbeatPing {
-			c.SendRecord(&bridge.Record{DataType: dataTypeHeartbeatPong})
+			_ = c.SendRecord(&bridge.Record{DataType: dataTypeHeartbeatPong})
 			continue
 		}
 

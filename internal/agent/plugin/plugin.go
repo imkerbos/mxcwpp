@@ -227,7 +227,7 @@ func (m *Manager) SyncPlugins(ctx context.Context, configs []*grpc.Config) error
 					m.logger.Error("failed to stop old plugin", zap.String("name", cfg.Name), zap.Error(err))
 					// 如果停止失败，尝试强制停止
 					if plugin.cmd.Process != nil {
-						plugin.cmd.Process.Kill()
+						_ = plugin.cmd.Process.Kill()
 					}
 				}
 				// 等待一小段时间，确保进程完全退出
@@ -1199,7 +1199,7 @@ func (m *Manager) forceRestartPlugin(name string) {
 	}
 
 	// 先停止（等待 waitProcess 完成全部清理）
-	m.stopPlugin(plugin)
+	_ = m.stopPlugin(plugin)
 
 	// 显式确保任务通道已清理（防止旧 sendTask defer 延迟执行的竞争）
 	m.transport.UnregisterTaskChannel(name)
@@ -1251,7 +1251,7 @@ func (m *Manager) receiveData(plugin *Plugin) {
 			if len > maxMessageSize {
 				plugin.logger.Error("record size exceeds maximum", zap.Uint32("size", len))
 				// 跳过这个记录
-				io.CopyN(io.Discard, reader, int64(len))
+				_, _ = io.CopyN(io.Discard, reader, int64(len))
 				continue
 			}
 
@@ -1371,7 +1371,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err != nil {
 				plugin.logger.Error("failed to marshal task", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1381,7 +1381,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err := binary.Write(writer, binary.LittleEndian, len); err != nil {
 				plugin.logger.Error("failed to write task size", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1390,7 +1390,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if _, err := writer.Write(taskData); err != nil {
 				plugin.logger.Error("failed to write task data", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1399,7 +1399,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err := writer.Flush(); err != nil {
 				plugin.logger.Error("failed to flush task data", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1446,7 +1446,7 @@ func (m *Manager) stopPlugin(plugin *Plugin) error {
 	case <-time.After(5 * time.Second):
 		plugin.logger.Warn("plugin did not stop gracefully, killing")
 		if plugin.cmd.Process != nil {
-			plugin.cmd.Process.Kill()
+			_ = plugin.cmd.Process.Kill()
 		}
 		// Kill 后再等 waitProcess 完成
 		select {

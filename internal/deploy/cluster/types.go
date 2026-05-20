@@ -3,7 +3,6 @@ package cluster
 import (
 	"fmt"
 	"net"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -566,8 +565,4 @@ func optionalPort(scheme string, port int) string {
 		return ""
 	}
 	return fmt.Sprintf(":%d", port)
-}
-
-func remoteWorkDir(installDir string) string {
-	return filepath.Clean(installDir)
 }
