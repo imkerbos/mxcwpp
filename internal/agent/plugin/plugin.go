@@ -296,6 +296,25 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		return nil, fmt.Errorf("failed to download plugin: %w", err)
 	}
 
+	// 3.5 数据类插件（如 virus-database）：只需下载解压，不启动进程
+	if cfg.Type == "virus-database" || execPath == workDir {
+		m.logger.Info("data-only plugin synced (no process)",
+			zap.String("name", cfg.Name),
+			zap.String("version", cfg.Version),
+			zap.String("path", workDir))
+		plugin := &Plugin{
+			Config:    cfg,
+			workDir:   workDir,
+			status:    StatusRunning,
+			startTime: time.Now(),
+			lastPong:  time.Now(),
+			pingCh:    make(chan struct{}, 1),
+			stopCh:    make(chan struct{}),
+			logger:    m.logger.With(zap.String("plugin", cfg.Name)),
+		}
+		return plugin, nil
+	}
+
 	// 4. 创建 Pipe
 	rx_r, rx_w, err := os.Pipe()
 	if err != nil {
@@ -569,7 +588,14 @@ func (m *Manager) downloadPlugin(cfg *grpc.Config, workDir string) (string, erro
 			}
 			os.Remove(tmpPath)
 
-			// 设置可执行权限
+			// 设置可执行权限（数据类插件无可执行文件，跳过）
+			if _, statErr := os.Stat(execPath); statErr != nil && os.IsNotExist(statErr) {
+				// 数据类插件（如 virus-database）：tar.gz 只含数据文件，无同名可执行文件
+				m.logger.Info("archive extracted (data-only plugin, no executable)",
+					zap.String("name", cfg.Name),
+					zap.String("work_dir", workDir))
+				return workDir, nil
+			}
 			if err := os.Chmod(execPath, 0755); err != nil {
 				lastErr = fmt.Errorf("failed to set executable permission: %w", err)
 				continue
@@ -1431,6 +1457,15 @@ func (m *Manager) stopPlugin(plugin *Plugin) error {
 	plugin.mu.Unlock()
 
 	plugin.logger.Info("stopping plugin")
+
+	// 数据类插件（无进程）：直接标记停止
+	if plugin.cmd == nil {
+		plugin.mu.Lock()
+		plugin.status = StatusStopped
+		plugin.mu.Unlock()
+		plugin.logger.Info("plugin stopped")
+		return nil
+	}
 
 	// 发送 SIGTERM 信号
 	if plugin.cmd.Process != nil {
