@@ -19,11 +19,17 @@ import (
 
 	"go.uber.org/zap"
 
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/collector"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/event"
+	"github.com/imkerbos/mxsec-platform/internal/agent/edr/ioc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/rule"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 )
+
+// iocTaskDataType is the DataType for IOC data push from AgentCenter.
+// Registered in docs/datatype-allocation.md — do not reuse.
+const iocTaskDataType = int32(9300)
 
 // Engine is the core EDR engine that manages the event collection pipeline.
 type Engine struct {
@@ -34,12 +40,15 @@ type Engine struct {
 	actionExec  *rule.ActionExecutor
 	auditLog    *rule.AuditLogger
 	selfProtect *SelfProtect
+	iocStore    *ioc.Store
+	taskCh      <-chan *grpcProto.Task
 	wg          sync.WaitGroup
 
 	// Pipeline counters for monitoring and heartbeat reporting.
 	eventsForwarded atomic.Uint64
 	eventsDropped   atomic.Uint64
 	rulesMatched    atomic.Uint64
+	iocMatched      atomic.Uint64
 }
 
 // DefaultRuleDir is the default rule directory on Linux agents.
@@ -86,6 +95,10 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 		zap.Int("rules_loaded", rm.Rules().Count),
 	)
 
+	// Initialize IOC store and register task channel for IOC data delivery.
+	iocStore := ioc.NewStore(logger.Named("ioc"))
+	taskCh := transportMgr.RegisterTaskChannel("edr")
+
 	return &Engine{
 		logger:      logger,
 		transport:   transportMgr,
@@ -94,6 +107,8 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 		actionExec:  actionExec,
 		auditLog:    auditLog,
 		selfProtect: NewSelfProtect(logger.Named("selfprotect")),
+		iocStore:    iocStore,
+		taskCh:      taskCh,
 	}, nil
 }
 
@@ -107,8 +122,9 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Start self-protection (systemd notify + chattr).
 	e.selfProtect.Start(ctx, &e.wg)
 
-	e.wg.Add(1)
+	e.wg.Add(2)
 	go e.forwardEvents(ctx, eventCh)
+	go e.processTaskLoop(ctx)
 
 	e.logger.Info("EDR engine started")
 	return nil
@@ -196,6 +212,13 @@ func (e *Engine) ReloadRules() error {
 	return e.ruleMgr.Load()
 }
 
+// SelfProtectManager returns the self-protection manager for use by other
+// modules (e.g., updater needs to temporarily unlock file immutability
+// before installing packages).
+func (e *Engine) SelfProtectManager() *SelfProtect {
+	return e.selfProtect
+}
+
 // forwardEvents reads events from the collector channel, evaluates rules,
 // annotates matching events, and sends them through the transport layer.
 func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event) {
@@ -213,6 +236,9 @@ func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event)
 
 			// Rule matching: evaluate all rules indexed for this event type.
 			e.evaluateRules(evt)
+
+			// IOC collision: check network events against threat intelligence.
+			e.checkIOC(evt)
 
 			record := evt.ToRecord()
 
@@ -302,4 +328,84 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// IOCVersion returns the current IOC store version for heartbeat reporting.
+func (e *Engine) IOCVersion() string {
+	return e.iocStore.Version()
+}
+
+// IOCCount returns the total number of loaded IOC entries.
+func (e *Engine) IOCCount() int {
+	return e.iocStore.Count()
+}
+
+// IOCMatched returns the cumulative count of IOC match events.
+func (e *Engine) IOCMatched() uint64 {
+	return e.iocMatched.Load()
+}
+
+// processTaskLoop listens for tasks dispatched to the "edr" channel
+// and handles IOC data delivery (DataType 9100).
+func (e *Engine) processTaskLoop(ctx context.Context) {
+	defer e.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task, ok := <-e.taskCh:
+			if !ok {
+				return
+			}
+			e.handleTask(task)
+		}
+	}
+}
+
+// handleTask processes a single task delivered to the EDR engine.
+func (e *Engine) handleTask(task *grpcProto.Task) {
+	switch task.DataType {
+	case iocTaskDataType:
+		if err := e.iocStore.Load(task.Data); err != nil {
+			e.logger.Warn("failed to load IOC data",
+				zap.Error(err),
+				zap.Int("data_len", len(task.Data)),
+			)
+		}
+	default:
+		e.logger.Debug("ignoring unknown EDR task",
+			zap.Int32("data_type", task.DataType),
+		)
+	}
+}
+
+// checkIOC checks event fields against the IOC store.
+// Currently only network events (DataType 3002) are checked against IP IOCs.
+func (e *Engine) checkIOC(evt *event.Event) {
+	if evt.DataType != event.DataTypeNetwork {
+		return
+	}
+
+	remoteAddr := evt.Fields["remote_addr"]
+	if remoteAddr == "" {
+		return
+	}
+
+	if !e.iocStore.CheckIP(remoteAddr) {
+		return
+	}
+
+	e.iocMatched.Add(1)
+
+	evt.SetField("ioc_match", "true")
+	evt.SetField("ioc_type", "ip")
+	evt.SetField("ioc_value", remoteAddr)
+	evt.SetField("ioc_source", "abuse.ch")
+
+	e.logger.Warn("IOC hit: malicious IP connection detected",
+		zap.String("remote_addr", remoteAddr),
+		zap.String("event_type", string(evt.EventType)),
+		zap.String("pid", evt.Fields["pid"]),
+	)
 }

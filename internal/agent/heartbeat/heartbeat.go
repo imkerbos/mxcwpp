@@ -52,6 +52,9 @@ type EDRStatusGetter interface {
 	RulesVersion() string
 	RulesCount() int
 	RulesMatched() uint64
+	IOCVersion() string
+	IOCCount() int
+	IOCMatched() uint64
 }
 
 // NewManager 创建新的心跳管理器
@@ -262,6 +265,9 @@ func (m *Manager) sendHeartbeat() {
 		record.Data.Fields["edr_rules_version"] = m.edrEngine.RulesVersion()
 		record.Data.Fields["edr_rules_count"] = fmt.Sprintf("%d", m.edrEngine.RulesCount())
 		record.Data.Fields["edr_rules_matched"] = fmt.Sprintf("%d", m.edrEngine.RulesMatched())
+		record.Data.Fields["edr_ioc_version"] = m.edrEngine.IOCVersion()
+		record.Data.Fields["edr_ioc_count"] = fmt.Sprintf("%d", m.edrEngine.IOCCount())
+		record.Data.Fields["edr_ioc_matched"] = fmt.Sprintf("%d", m.edrEngine.IOCMatched())
 	}
 
 	// 添加业务线信息（从环境变量读取）

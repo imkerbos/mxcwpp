@@ -4,9 +4,12 @@ package edr
 
 import (
 	"context"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,7 +18,7 @@ import (
 
 // SelfProtect implements agent self-protection mechanisms:
 //   - systemd sd_notify integration (READY + WATCHDOG heartbeat)
-//   - chattr +i file immutability for critical directories
+//   - chattr +i file immutability for critical files and directories
 type SelfProtect struct {
 	logger     *zap.Logger
 	notifyConn net.Conn
@@ -33,7 +36,7 @@ func (sp *SelfProtect) Start(ctx context.Context, wg *sync.WaitGroup) {
 	// 1. sd_notify READY=1
 	sp.sdNotify("READY=1")
 
-	// 2. Apply file immutability to critical paths.
+	// 2. Apply file immutability to critical paths (directories + files within).
 	sp.applyImmutable()
 
 	// 3. Start watchdog heartbeat goroutine.
@@ -49,13 +52,14 @@ func (sp *SelfProtect) Stop() {
 	}
 }
 
-// TemporaryUnlock temporarily removes immutable flag for file operations
-// (e.g., rule updates, agent upgrades). Caller must call the returned
+// TemporaryUnlock temporarily removes the immutable flag for file operations
+// (e.g., rule updates, agent upgrades). If path is a directory, all files
+// within are also unlocked recursively. Caller must call the returned
 // function to re-apply immutability.
 func (sp *SelfProtect) TemporaryUnlock(path string) func() {
-	sp.removeImmutable(path)
+	sp.removeImmutableRecursive(path)
 	return func() {
-		sp.setImmutable(path)
+		sp.setImmutableRecursive(path)
 	}
 }
 
@@ -83,7 +87,8 @@ func (sp *SelfProtect) sdNotify(state string) {
 		)
 	}
 
-	// Keep connection for WATCHDOG=1 heartbeats.
+	// Keep connection for WATCHDOG=1 heartbeats; reuse avoids opening
+	// a new socket every tick.
 	if state == "READY=1" {
 		sp.notifyConn = conn
 	} else {
@@ -91,20 +96,29 @@ func (sp *SelfProtect) sdNotify(state string) {
 	}
 }
 
-// watchdogLoop sends WATCHDOG=1 to systemd at half the watchdog interval.
+// watchdogInterval returns the interval for sending WATCHDOG=1 heartbeats.
+// Reads WATCHDOG_USEC set by systemd and uses half that value, per the
+// sd_watchdog_enabled(3) recommendation. Falls back to 30s if unset.
+func watchdogInterval() time.Duration {
+	usecStr := os.Getenv("WATCHDOG_USEC")
+	if usec, err := strconv.ParseInt(usecStr, 10, 64); err == nil && usec > 0 {
+		return time.Duration(usec) * time.Microsecond / 2
+	}
+	return 30 * time.Second
+}
+
+// watchdogLoop sends WATCHDOG=1 to systemd at half the configured interval.
 // systemd restarts the agent if it stops receiving heartbeats.
 func (sp *SelfProtect) watchdogLoop(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// WatchdogSec is configured in the systemd unit file (e.g., 60s).
-	// We send heartbeats at half that interval.
-	interval := 30 * time.Second
-
-	socketPath := os.Getenv("NOTIFY_SOCKET")
-	if socketPath == "" {
-		sp.logger.Debug("no NOTIFY_SOCKET, watchdog loop skipped")
+	if sp.notifyConn == nil {
+		sp.logger.Debug("no notify connection, watchdog loop skipped")
 		return
 	}
+
+	interval := watchdogInterval()
+	sp.logger.Info("watchdog heartbeat started", zap.Duration("interval", interval))
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -114,19 +128,11 @@ func (sp *SelfProtect) watchdogLoop(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sp.sdNotifyDirect(socketPath, "WATCHDOG=1")
+			if _, err := sp.notifyConn.Write([]byte("WATCHDOG=1")); err != nil {
+				sp.logger.Warn("watchdog heartbeat failed", zap.Error(err))
+			}
 		}
 	}
-}
-
-// sdNotifyDirect sends to the notify socket directly (for watchdog loop).
-func (sp *SelfProtect) sdNotifyDirect(socketPath, state string) {
-	conn, err := net.Dial("unixgram", socketPath)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-	_, _ = conn.Write([]byte(state))
 }
 
 // protectedDirs are directories that get chattr +i protection.
@@ -135,17 +141,62 @@ var protectedDirs = []string{
 	"/usr/local/mxsec",
 }
 
-// applyImmutable sets the immutable attribute on protected directories.
+// applyImmutable sets the immutable attribute on protected directories
+// and all files within them recursively.
 func (sp *SelfProtect) applyImmutable() {
 	for _, dir := range protectedDirs {
-		sp.setImmutable(dir)
+		sp.setImmutableRecursive(dir)
 	}
 }
 
-// setImmutable applies chattr +i to a path.
+// setImmutableRecursive applies chattr +i to a path. If the path is a
+// directory, all entries within are protected first, then the directory
+// itself (so the walk completes before the directory entry is locked).
+func (sp *SelfProtect) setImmutableRecursive(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return // Path doesn't exist yet, skip.
+	}
+
+	if info.IsDir() {
+		_ = filepath.WalkDir(path, func(p string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil || p == path {
+				return nil // handle root dir after the walk
+			}
+			sp.setImmutable(p)
+			return nil
+		})
+	}
+
+	sp.setImmutable(path)
+}
+
+// removeImmutableRecursive removes chattr +i from a path. If the path is a
+// directory, the directory is unlocked first, then all entries within.
+func (sp *SelfProtect) removeImmutableRecursive(path string) {
+	// Remove directory +i first so the walk can proceed.
+	sp.removeImmutable(path)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+
+	if info.IsDir() {
+		_ = filepath.WalkDir(path, func(p string, _ fs.DirEntry, walkErr error) error {
+			if walkErr != nil || p == path {
+				return nil
+			}
+			sp.removeImmutable(p)
+			return nil
+		})
+	}
+}
+
+// setImmutable applies chattr +i to a single path.
 func (sp *SelfProtect) setImmutable(path string) {
 	if _, err := os.Stat(path); err != nil {
-		return // Path doesn't exist yet, skip.
+		return
 	}
 
 	cmd := exec.Command("chattr", "+i", path)
@@ -162,7 +213,7 @@ func (sp *SelfProtect) setImmutable(path string) {
 	}
 }
 
-// removeImmutable removes chattr +i from a path.
+// removeImmutable removes chattr +i from a single path.
 func (sp *SelfProtect) removeImmutable(path string) {
 	if _, err := os.Stat(path); err != nil {
 		return
