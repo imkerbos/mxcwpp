@@ -100,6 +100,18 @@ type Host struct {
 	PodUID       string `gorm:"column:pod_uid;type:varchar(64)" json:"pod_uid"`              // Pod UID（K8s 环境）
 	// Agent 版本信息
 	AgentVersion string `gorm:"column:agent_version;type:varchar(32)" json:"agent_version"` // Agent 当前版本号
+	// EDR 引擎状态（由心跳上报）
+	EDRMode             string `gorm:"column:edr_mode;type:varchar(20)" json:"edr_mode"`                         // ebpf / userspace / disabled
+	EDRCapabilities     string `gorm:"column:edr_capabilities;type:varchar(255)" json:"edr_capabilities"`        // 逗号分隔的能力列表
+	EDRHookType         string `gorm:"column:edr_hook_type;type:varchar(20)" json:"edr_hook_type"`               // kprobe / fentry / tracepoint
+	EDREventsForwarded  int64  `gorm:"column:edr_events_fwd;type:bigint;default:0" json:"edr_events_fwd"`        // 累计已转发事件数
+	EDREventsDropped    int64  `gorm:"column:edr_events_drop;type:bigint;default:0" json:"edr_events_drop"`      // 累计丢弃事件数
+	EDRRulesVersion     string `gorm:"column:edr_rules_version;type:varchar(32)" json:"edr_rules_version"`       // 规则集版本
+	EDRRulesCount       int    `gorm:"column:edr_rules_count;type:int;default:0" json:"edr_rules_count"`         // 已加载规则数
+	EDRRulesMatched     int64  `gorm:"column:edr_rules_matched;type:bigint;default:0" json:"edr_rules_matched"`  // 累计规则命中数
+	EDRIOCVersion       string `gorm:"column:edr_ioc_version;type:varchar(32)" json:"edr_ioc_version"`           // IOC 数据版本
+	EDRIOCCount         int    `gorm:"column:edr_ioc_count;type:int;default:0" json:"edr_ioc_count"`             // 已加载 IOC 条目数
+	EDRIOCMatched       int64  `gorm:"column:edr_ioc_matched;type:bigint;default:0" json:"edr_ioc_matched"`      // 累计 IOC 碰撞数
 	// 标签
 	Tags      StringArray `gorm:"column:tags;type:json" json:"tags"`
 	CreatedAt LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`

@@ -275,16 +275,19 @@ func (m *Manager) handleUpdate(ctx context.Context, update *grpc.AgentUpdate) {
 		return
 	}
 
-	// 检查是否为版本降级
+	// 检查是否为版本降级：非 force 降级必须拒绝，防止 Server 端旧版本配置导致自动回滚
 	if IsDowngrade(m.currentVersion, update.Version) {
-		m.logger.Warn("detected version downgrade (rollback)",
+		if !update.Force {
+			m.logger.Warn("rejecting version downgrade without force flag",
+				zap.String("current_version", m.currentVersion),
+				zap.String("target_version", update.Version),
+			)
+			return
+		}
+		m.logger.Warn("forced version downgrade (rollback)",
 			zap.String("current_version", m.currentVersion),
 			zap.String("target_version", update.Version),
-			zap.Bool("force", update.Force),
 		)
-		if !update.Force {
-			m.logger.Info("allowing downgrade without force flag")
-		}
 	}
 
 	// 验证架构匹配

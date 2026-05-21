@@ -214,18 +214,41 @@ func (s *ClamAVScanner) parseOutput(output string) ([]ScanResult, error) {
 	return results, nil
 }
 
-// availableMemoryMB reads MemAvailable from /proc/meminfo.
+// availableMemoryMB returns the lesser of system MemAvailable and cgroup
+// remaining memory (cgroup v2: memory.max - memory.current).
+// If running under a cgroup with MemoryMax (e.g. systemd service), the cgroup
+// limit is typically the binding constraint, not system-wide MemAvailable.
 // Returns -1 if the value cannot be determined (non-Linux or read error).
 func availableMemoryMB() int64 {
+	sysAvail := sysMemAvailableMB()
+	cgAvail := cgroupAvailableMB()
+
+	switch {
+	case sysAvail > 0 && cgAvail > 0:
+		if cgAvail < sysAvail {
+			return cgAvail
+		}
+		return sysAvail
+	case cgAvail > 0:
+		return cgAvail
+	case sysAvail > 0:
+		return sysAvail
+	default:
+		return -1
+	}
+}
+
+// sysMemAvailableMB reads MemAvailable from /proc/meminfo.
+func sysMemAvailableMB() int64 {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
 		return -1
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
 		if strings.HasPrefix(line, "MemAvailable:") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
@@ -237,6 +260,69 @@ func availableMemoryMB() int64 {
 		}
 	}
 	return -1
+}
+
+// cgroupAvailableMB returns (memory.max - memory.current) in MB for cgroup v2.
+// Returns -1 if not running under cgroup v2 or values unreadable.
+func cgroupAvailableMB() int64 {
+	maxBytes, err := readCgroupValue("/sys/fs/cgroup/memory.max")
+	if err != nil {
+		// Try service-scoped cgroup path
+		maxBytes, err = readCgroupValueFromProc()
+		if err != nil {
+			return -1
+		}
+	}
+	if maxBytes <= 0 {
+		return -1 // "max" means no limit
+	}
+
+	curBytes, err := readCgroupValue("/sys/fs/cgroup/memory.current")
+	if err != nil {
+		curPath := strings.Replace("/sys/fs/cgroup/memory.max", "memory.max", "memory.current", 1)
+		curBytes, _ = readCgroupValue(curPath)
+	}
+	if curBytes < 0 {
+		curBytes = 0
+	}
+
+	avail := (maxBytes - curBytes) / (1024 * 1024)
+	if avail < 0 {
+		return 0
+	}
+	return avail
+}
+
+// readCgroupValue reads a single int64 value from a cgroup file.
+// Returns -1 for "max" (no limit).
+func readCgroupValue(path string) (int64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "max" {
+		return -1, nil
+	}
+	return strconv.ParseInt(s, 10, 64)
+}
+
+// readCgroupValueFromProc discovers the cgroup path from /proc/self/cgroup
+// and reads memory.max from it (cgroup v2).
+func readCgroupValueFromProc() (int64, error) {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		// cgroup v2 line: "0::/system.slice/mxsec-agent.service"
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) == 3 && parts[0] == "0" {
+			cgPath := "/sys/fs/cgroup" + parts[2] + "/memory.max"
+			return readCgroupValue(strings.TrimSpace(cgPath))
+		}
+	}
+	return 0, fmt.Errorf("cgroup v2 path not found")
 }
 
 // classifyThreat 根据 ClamAV 威胁名称分类
