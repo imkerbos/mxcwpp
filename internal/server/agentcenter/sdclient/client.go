@@ -20,22 +20,24 @@ const (
 
 // Client 负责 AC 实例向 Manager SD 的生命周期上报
 type Client struct {
-	managerAddr string
-	instanceID  string
-	grpcAddr    string
-	httpAddr    string
-	connCount   func() int // 获取当前在线 Agent 数的回调
-	httpClient  *http.Client
-	logger      *zap.Logger
+	managerAddr    string
+	instanceID     string
+	grpcAddr       string
+	httpAddr       string
+	internalSecret string     // Manager 内部通信共享密钥
+	connCount      func() int // 获取当前在线 Agent 数的回调
+	httpClient     *http.Client
+	logger         *zap.Logger
 }
 
 // NewClient 创建 SD Client
-// managerAddr: Manager HTTP 地址，如 http://manager:8080
-// instanceID:  AC 实例唯一 ID，留空则用 hostname
-// grpcAddr:    AC gRPC 地址（Agent 连接用）
-// httpAddr:    AC HTTP 管理地址（Manager 探测用）
-// connCount:   返回当前在线连接数的回调
-func NewClient(managerAddr, instanceID, grpcAddr, httpAddr string, connCount func() int, logger *zap.Logger) *Client {
+// managerAddr:    Manager HTTP 地址，如 http://manager:8080
+// instanceID:     AC 实例唯一 ID，留空则用 hostname
+// grpcAddr:       AC gRPC 地址（Agent 连接用）
+// httpAddr:       AC HTTP 管理地址（Manager 探测用）
+// internalSecret: 内部通信共享密钥（与 Manager 端 internal_secret 一致）
+// connCount:      返回当前在线连接数的回调
+func NewClient(managerAddr, instanceID, grpcAddr, httpAddr, internalSecret string, connCount func() int, logger *zap.Logger) *Client {
 	if instanceID == "" {
 		if h, err := os.Hostname(); err == nil {
 			instanceID = h
@@ -44,13 +46,14 @@ func NewClient(managerAddr, instanceID, grpcAddr, httpAddr string, connCount fun
 		}
 	}
 	return &Client{
-		managerAddr: managerAddr,
-		instanceID:  instanceID,
-		grpcAddr:    grpcAddr,
-		httpAddr:    httpAddr,
-		connCount:   connCount,
-		httpClient:  &http.Client{Timeout: requestTimeout},
-		logger:      logger,
+		managerAddr:    managerAddr,
+		instanceID:     instanceID,
+		grpcAddr:       grpcAddr,
+		httpAddr:       httpAddr,
+		internalSecret: internalSecret,
+		connCount:      connCount,
+		httpClient:     &http.Client{Timeout: requestTimeout},
+		logger:         logger,
 	}
 }
 
@@ -139,6 +142,9 @@ func (c *Client) deregister() error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.internalSecret != "" {
+		req.Header.Set("X-Internal-Secret", c.internalSecret)
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
@@ -152,7 +158,15 @@ func (c *Client) deregister() error {
 
 // post 发送 JSON POST 请求到 Manager
 func (c *Client) post(path string, body []byte) error {
-	resp, err := c.httpClient.Post(c.managerAddr+path, "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, c.managerAddr+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.internalSecret != "" {
+		req.Header.Set("X-Internal-Secret", c.internalSecret)
+	}
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -324,7 +324,7 @@ services:
       - /workspace/deploy/data
       - agent_data:/var/lib/mxsec-agent
       - agent_logs:/var/log/mxsec-agent
-      - ./certs:/var/lib/mxsec-agent/certs:ro
+      - ./certs:/var/lib/mxsec-agent/certs:rw
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
     working_dir: /workspace

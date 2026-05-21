@@ -1151,8 +1151,13 @@ func (m *Manager) watchPlugins() {
 					plugin.mu.Unlock()
 				}
 
+				// 数据类插件（无进程）：跳过心跳检查
+				if plugin.cmd == nil {
+					continue
+				}
+
 				// 检查进程是否还存活（signal 0 不会杀进程，只检测是否存在）
-				if plugin.cmd != nil && plugin.cmd.Process != nil {
+				if plugin.cmd.Process != nil {
 					if err := plugin.cmd.Process.Signal(syscall.Signal(0)); err != nil {
 						m.logger.Warn("plugin process not alive, will be cleaned up by waitProcess",
 							zap.String("plugin", name),

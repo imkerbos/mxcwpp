@@ -13,6 +13,7 @@ package edr
 
 import (
 	"context"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,11 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 
 	if ruleDir == "" {
 		ruleDir = DefaultRuleDir
+	}
+
+	// Ensure rule directory exists so rule manager can load files later.
+	if err := os.MkdirAll(ruleDir, 0755); err != nil {
+		logger.Warn("failed to create rule directory", zap.String("path", ruleDir), zap.Error(err))
 	}
 
 	rm := rule.NewManager(logger.Named("rule"), ruleDir)

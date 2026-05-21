@@ -140,6 +140,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 			cfg.Server.InstanceID,
 			advertiseGRPCAddr,
 			advertiseHTTPAddr,
+			cfg.Server.InternalSecret,
 			transferService.GetOnlineAgentCount,
 			logger,
 		)

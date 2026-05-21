@@ -24,6 +24,10 @@ const (
 	TaskStatusFailed     TaskStatus = "failed"     // Task failed
 )
 
+// maxTaskRetries is the maximum number of times a task can be re-dispatched
+// after plugin crashes. Prevents infinite OOM/crash loops.
+const maxTaskRetries = 3
+
 // TrackedTask represents a task with tracking information
 type TrackedTask struct {
 	Task         *grpc.Task `json:"task"`
@@ -32,6 +36,7 @@ type TrackedTask struct {
 	ReceivedAt   time.Time  `json:"received_at"`
 	DispatchedAt time.Time  `json:"dispatched_at,omitempty"`
 	CompletedAt  time.Time  `json:"completed_at,omitempty"`
+	RetryCount   int        `json:"retry_count"`
 }
 
 // TaskTracker tracks and persists plugin tasks
@@ -177,26 +182,50 @@ func (t *TaskTracker) MarkFailed(token string) error {
 	return nil
 }
 
-// GetPendingTasks returns tasks that haven't been executed yet (received or dispatched)
-// failed 状态的任务不再重试，由 Server 端决定是否重新下发
+// GetPendingTasks returns tasks that haven't been executed yet (received or dispatched).
+// Tasks exceeding maxTaskRetries are automatically marked as failed to prevent
+// infinite crash/OOM loops. Server can re-dispatch if needed.
 func (t *TaskTracker) GetPendingTasks(pluginName string) []*grpc.Task {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	var pending []*grpc.Task
+	var expired []string
 	for _, tracked := range t.tasks {
 		if tracked.PluginName != pluginName {
 			continue
 		}
-		if tracked.Status == TaskStatusReceived ||
-			tracked.Status == TaskStatusDispatched {
-			pending = append(pending, tracked.Task)
-			t.logger.Info("found pending task for retry",
+		if tracked.Status != TaskStatusReceived && tracked.Status != TaskStatusDispatched {
+			continue
+		}
+
+		tracked.RetryCount++
+
+		if tracked.RetryCount > maxTaskRetries {
+			t.logger.Warn("task exceeded max retries, marking as failed",
 				zap.String("token", tracked.Task.Token),
 				zap.String("plugin", pluginName),
-				zap.String("status", string(tracked.Status)),
-				zap.Time("received_at", tracked.ReceivedAt))
+				zap.Int("retry_count", tracked.RetryCount))
+			expired = append(expired, tracked.Task.Token)
+			continue
 		}
+
+		// Persist updated retry count
+		_ = t.saveTask(tracked)
+
+		pending = append(pending, tracked.Task)
+		t.logger.Info("found pending task for retry",
+			zap.String("token", tracked.Task.Token),
+			zap.String("plugin", pluginName),
+			zap.String("status", string(tracked.Status)),
+			zap.Int("retry_count", tracked.RetryCount),
+			zap.Time("received_at", tracked.ReceivedAt))
+	}
+
+	// Clean up expired tasks
+	for _, token := range expired {
+		delete(t.tasks, token)
+		_ = t.removeTask(token)
 	}
 
 	return pending
