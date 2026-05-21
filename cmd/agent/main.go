@@ -192,7 +192,11 @@ func main() {
 	go plugin.StartupWithManager(ctx, wg, pluginMgr)
 
 	// 自更新模块（监听来自 Server 的更新命令）
-	go updater.Startup(ctx, wg, log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
+	updaterMgr := updater.NewManager(log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
+	if edrEngine != nil {
+		updaterMgr.SetProtector(edrEngine.SelfProtectManager())
+	}
+	go updater.StartupWithManager(ctx, wg, updaterMgr)
 
 	// EDR 引擎（内置模块，不计入 WaitGroup — 通过 context 取消后自行停止）
 	if edrEngine != nil {

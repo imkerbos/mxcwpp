@@ -233,5 +233,6 @@ var (
 		&RemediationPolicy{},
 		&RemediationPolicyExecution{},
 		&VulnBulletin{},
+		&IOCSnapshot{},
 	}
 )

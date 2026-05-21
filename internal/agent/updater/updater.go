@@ -177,6 +177,13 @@ func GetCurrentArch() string {
 
 // --- Manager: gRPC push 更新（原有逻辑，内部调用公共函数） ---
 
+// FileProtector provides file-immutability unlock/relock operations.
+// Implemented by edr.SelfProtect; used to temporarily disable chattr +i
+// during package installation so rpm/dpkg can replace protected binaries.
+type FileProtector interface {
+	TemporaryUnlock(path string) func()
+}
+
 // Manager 是更新管理器（处理 Server 推送的更新命令）
 type Manager struct {
 	logger         *zap.Logger
@@ -185,6 +192,13 @@ type Manager struct {
 	workDir        string
 	mu             sync.Mutex
 	updating       bool
+	protector      FileProtector
+}
+
+// SetProtector sets the file protection handler for unlocking chattr +i
+// during package installation.
+func (m *Manager) SetProtector(p FileProtector) {
+	m.protector = p
 }
 
 // NewManager 创建更新管理器
@@ -352,6 +366,12 @@ func (m *Manager) doUpdate(ctx context.Context, update *grpc.AgentUpdate) error 
 
 	// 5. 诊断系统环境
 	m.diagnoseSystemEnv(update.PkgType)
+
+	// 5.5 临时解除文件保护（chattr +i），否则 rpm/dpkg 无法替换受保护的二进制
+	if m.protector != nil {
+		relock := m.protector.TemporaryUnlock("/usr/local/mxsec")
+		defer relock()
+	}
 
 	// 6. 安装包
 	m.logger.Info("installing update package",

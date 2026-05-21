@@ -57,3 +57,15 @@ func (e *Engine) RulesMatched() uint64 { return 0 }
 
 // ReloadRules is a no-op stub.
 func (e *Engine) ReloadRules() error { return nil }
+
+// IOCVersion is a no-op stub.
+func (e *Engine) IOCVersion() string { return "" }
+
+// IOCCount is a no-op stub.
+func (e *Engine) IOCCount() int { return 0 }
+
+// IOCMatched is a no-op stub.
+func (e *Engine) IOCMatched() uint64 { return 0 }
+
+// SelfProtectManager is a no-op stub.
+func (e *Engine) SelfProtectManager() *SelfProtect { return NewSelfProtect(nil) }

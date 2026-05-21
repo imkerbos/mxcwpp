@@ -4,8 +4,11 @@ package biz
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -136,6 +139,12 @@ func (t *ThreatIntel) doSyncIOCs(ctx context.Context) error {
 	}
 
 	t.logger.Info("威胁情报同步完成", zap.Int("total", totalCount))
+
+	// Export snapshot to DB for AgentCenter to broadcast to agents.
+	if err := t.exportSnapshot(ctx); err != nil {
+		t.logger.Warn("IOC 快照导出失败", zap.Error(err))
+	}
+
 	return nil
 }
 
@@ -230,4 +239,130 @@ func (t *ThreatIntel) CheckIOC(ctx context.Context, iocType, value string) bool 
 		return false
 	}
 	return result
+}
+
+// ── IOC Snapshot Export ─────────────────────────────────────
+
+// iocData is the JSON structure for IOC snapshots.
+type iocData struct {
+	IP   []string `json:"ip"`
+	Hash []string `json:"hash"`
+	URL  []string `json:"url"`
+}
+
+// exportSnapshot reads all IOC data from Redis, computes diff against previous
+// snapshot, and writes a new IOCSnapshot record for AgentCenter to distribute.
+func (t *ThreatIntel) exportSnapshot(ctx context.Context) error {
+	if t.redisClient == nil {
+		return fmt.Errorf("Redis 不可用")
+	}
+
+	// 1. Read all IOC sets from Redis.
+	current := iocData{}
+	for _, entry := range []struct {
+		key  string
+		dest *[]string
+	}{
+		{iocRedisKeyPrefix + "ip", &current.IP},
+		{iocRedisKeyPrefix + "hash", &current.Hash},
+		{iocRedisKeyPrefix + "url", &current.URL},
+	} {
+		members, err := t.redisClient.SMembers(ctx, entry.key).Result()
+		if err != nil {
+			return fmt.Errorf("读取 Redis Set %s 失败: %w", entry.key, err)
+		}
+		sort.Strings(members)
+		*entry.dest = members
+	}
+
+	// 2. Serialize full data.
+	fullJSON, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("序列化 IOC 数据失败: %w", err)
+	}
+
+	version := fmt.Sprintf("%x", sha256.Sum256(fullJSON))[:16]
+	totalCount := len(current.IP) + len(current.Hash) + len(current.URL)
+
+	// 3. Load previous snapshot for diff.
+	var prev model.IOCSnapshot
+	prevExists := t.db.Order("id DESC").First(&prev).Error == nil
+
+	var diffAdded, diffRemoved iocData
+	prevVersion := ""
+	if prevExists {
+		prevVersion = prev.Version
+		if prevVersion == version {
+			t.logger.Info("IOC 快照无变化，跳过导出", zap.String("version", version))
+			return nil
+		}
+
+		var prevData iocData
+		if err := json.Unmarshal([]byte(prev.Data), &prevData); err == nil {
+			diffAdded.IP, diffRemoved.IP = diffSets(prevData.IP, current.IP)
+			diffAdded.Hash, diffRemoved.Hash = diffSets(prevData.Hash, current.Hash)
+			diffAdded.URL, diffRemoved.URL = diffSets(prevData.URL, current.URL)
+		}
+	} else {
+		// First snapshot: everything is "added".
+		diffAdded = current
+	}
+
+	addedJSON, _ := json.Marshal(diffAdded)
+	removedJSON, _ := json.Marshal(diffRemoved)
+
+	// 4. Write snapshot.
+	snapshot := model.IOCSnapshot{
+		Version:   version,
+		Data:      string(fullJSON),
+		DiffAdded: string(addedJSON),
+		DiffRemov: string(removedJSON),
+		PrevVer:   prevVersion,
+		Count:     totalCount,
+	}
+	if err := t.db.Create(&snapshot).Error; err != nil {
+		return fmt.Errorf("写入 IOC 快照失败: %w", err)
+	}
+
+	// 5. Clean up old snapshots (keep 5).
+	var old []model.IOCSnapshot
+	if err := t.db.Order("id DESC").Offset(5).Find(&old).Error; err == nil && len(old) > 0 {
+		ids := make([]uint, len(old))
+		for i, o := range old {
+			ids[i] = o.ID
+		}
+		t.db.Delete(&model.IOCSnapshot{}, ids)
+	}
+
+	t.logger.Info("IOC 快照导出完成",
+		zap.String("version", version),
+		zap.Int("total", totalCount),
+		zap.Int("added", len(diffAdded.IP)+len(diffAdded.Hash)+len(diffAdded.URL)),
+		zap.Int("removed", len(diffRemoved.IP)+len(diffRemoved.Hash)+len(diffRemoved.URL)),
+	)
+	return nil
+}
+
+// diffSets returns (added, removed) between old and new sorted string slices.
+func diffSets(old, cur []string) (added, removed []string) {
+	oldSet := make(map[string]struct{}, len(old))
+	for _, v := range old {
+		oldSet[v] = struct{}{}
+	}
+	curSet := make(map[string]struct{}, len(cur))
+	for _, v := range cur {
+		curSet[v] = struct{}{}
+	}
+
+	for _, v := range cur {
+		if _, ok := oldSet[v]; !ok {
+			added = append(added, v)
+		}
+	}
+	for _, v := range old {
+		if _, ok := curSet[v]; !ok {
+			removed = append(removed, v)
+		}
+	}
+	return
 }
