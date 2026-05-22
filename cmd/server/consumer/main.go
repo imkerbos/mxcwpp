@@ -19,6 +19,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/rulesync"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
@@ -159,6 +160,20 @@ func main() {
 		}
 	}
 
+	// 6.5 上下文（后续多个组件需要 ctx 控制生命周期）
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 6.6 初始化 Git 规则同步（可选，定期从 Git 仓库同步检测规则）
+	if cfg.RuleSync.Enabled {
+		syncer := rulesync.New(cfg.RuleSync, db, logger)
+		syncer.Start(ctx)
+		logger.Info("Git 规则同步已启动",
+			zap.String("git_url", cfg.RuleSync.GitURL),
+			zap.Duration("interval", cfg.RuleSync.Interval),
+		)
+	}
+
 	// 7. 创建消费路由器
 	router, err := consumer.NewRouter(
 		cfg.Kafka.Brokers,
@@ -181,9 +196,6 @@ func main() {
 	defer router.Close()
 
 	// 8. 启动消费
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// 启动进程树清理协程
 	if celEng != nil {
 		celEng.StartCleanup(ctx)

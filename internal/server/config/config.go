@@ -24,7 +24,17 @@ type Config struct {
 	Agent      AgentConfig      `mapstructure:"agent"`
 	Metrics    MetricsConfig    `mapstructure:"metrics"`
 	Plugins    PluginsConfig    `mapstructure:"plugins"`
+	RuleSync   RuleSyncConfig   `mapstructure:"rule_sync"`
 	LLM        LLMConfig        `mapstructure:"llm"`
+}
+
+// RuleSyncConfig 规则 Git 同步配置
+type RuleSyncConfig struct {
+	Enabled  bool          `mapstructure:"enabled"`   // 是否启用 Git 规则同步
+	GitURL   string        `mapstructure:"git_url"`   // Git 仓库 URL（支持 HTTPS/SSH）
+	Branch   string        `mapstructure:"branch"`    // 分支名（默认 main）
+	LocalDir string        `mapstructure:"local_dir"` // 本地克隆目录（默认 /var/mxsec/rules-repo）
+	Interval time.Duration `mapstructure:"interval"`  // 同步间隔（默认 10m）
 }
 
 // LLMConfig LLM 服务配置
