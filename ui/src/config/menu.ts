@@ -121,6 +121,7 @@ export const menuConfig: MenuItem[] = [
     title: '威胁检测',
     icon: ThunderboltOutlined,
     children: [
+      { key: 'edr-events', title: 'EDR 事件', route: '/edr/events' },
       { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },
       { key: 'threat-intel', title: '威胁情报', route: '/threat-intel' },
     ],

@@ -294,6 +294,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Detection/Rules.vue'),
         meta: { title: '检测规则' },
       },
+      // EDR 事件
+      {
+        path: 'edr/events',
+        name: 'EDREvents',
+        component: () => import('@/views/EDR/Events/index.vue'),
+        meta: { title: 'EDR 事件' },
+      },
       // 威胁情报
       {
         path: 'threat-intel',

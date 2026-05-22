@@ -159,6 +159,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupThreatIntelAPI(router, db, logger, redisClient)
 	setupNetworkBlockAPI(router, db, logger)
 	setupDependencyAPI(router, db, logger, acDispatcher)
+	setupEDREventsAPI(router, logger, chConn)
 }
 
 // setupAdminAPIRoutes 注册需要管理员权限的 API 路由
@@ -786,4 +787,11 @@ func setupDependencyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 	handler := api.NewDependencyHandler(db, logger, acDispatcher)
 	router.POST("/hosts/dependency/install", handler.Install)
 	router.POST("/hosts/dependency/status", handler.Status)
+}
+
+// setupEDREventsAPI 设置 EDR 事件查询 API 路由
+func setupEDREventsAPI(router *gin.RouterGroup, logger *zap.Logger, chConn chdriver.Conn) {
+	handler := api.NewEDREventsHandler(logger, chConn)
+	router.GET("/edr/events", handler.ListEDREvents)
+	router.GET("/edr/events/stats", handler.GetEDREventStats)
 }
