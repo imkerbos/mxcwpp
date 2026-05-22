@@ -23,11 +23,11 @@ const (
 // circuitBreaker 响应动作熔断器
 // 防止坏规则或误配导致大量 kill/suspend 动作瘫痪主机
 type circuitBreaker struct {
-	mu          sync.Mutex
-	logger      *zap.Logger
-	actions     []time.Time // 滑动窗口内的动作时间戳
-	trippedAt   time.Time   // 熔断触发时间（零值 = 未熔断）
-	tripCount   int         // 累计熔断次数
+	mu        sync.Mutex
+	logger    *zap.Logger
+	actions   []time.Time // 滑动窗口内的动作时间戳
+	trippedAt time.Time   // 熔断触发时间（零值 = 未熔断）
+	tripCount int         // 累计熔断次数
 }
 
 // newCircuitBreaker 创建熔断器

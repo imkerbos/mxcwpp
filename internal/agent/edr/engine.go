@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	agentrules "github.com/imkerbos/mxsec-platform/configs/agent-rules"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/collector"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/event"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/ioc"
@@ -77,6 +79,9 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 	if err := os.MkdirAll(ruleDir, 0755); err != nil {
 		logger.Warn("failed to create rule directory", zap.String("path", ruleDir), zap.Error(err))
 	}
+
+	// Install built-in rules on first run (don't overwrite existing).
+	installBuiltinRules(logger, ruleDir)
 
 	rm := rule.NewManager(logger.Named("rule"), ruleDir)
 	if err := rm.Load(); err != nil {
@@ -492,4 +497,43 @@ func (e *Engine) markIOCHit(evt *event.Event, iocType, iocValue string) {
 		zap.String("event_type", string(evt.EventType)),
 		zap.String("pid", evt.Fields["pid"]),
 	)
+}
+
+// installBuiltinRules copies embedded YAML rules to the rule directory
+// if no rule files exist yet (first run). Existing files are not overwritten.
+func installBuiltinRules(logger *zap.Logger, ruleDir string) {
+	entries, err := agentrules.BuiltinRules.ReadDir(".")
+	if err != nil {
+		logger.Warn("failed to read embedded rules", zap.Error(err))
+		return
+	}
+
+	var installed int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		dest := filepath.Join(ruleDir, entry.Name())
+
+		// Don't overwrite existing rules (may have been customized or pushed by Server).
+		if _, err := os.Stat(dest); err == nil {
+			continue
+		}
+
+		data, err := agentrules.BuiltinRules.ReadFile(entry.Name())
+		if err != nil {
+			logger.Warn("failed to read embedded rule", zap.String("file", entry.Name()), zap.Error(err))
+			continue
+		}
+
+		if err := os.WriteFile(dest, data, 0644); err != nil {
+			logger.Warn("failed to install builtin rule", zap.String("file", entry.Name()), zap.Error(err))
+			continue
+		}
+		installed++
+	}
+
+	if installed > 0 {
+		logger.Info("installed built-in rules", zap.Int("count", installed), zap.String("dir", ruleDir))
+	}
 }

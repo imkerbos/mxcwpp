@@ -1,0 +1,26 @@
+schema_version: 1
+id: MXEDR-0012
+name: cryptominer_pool_port
+version: 1
+category: network
+severity: high
+mitre:
+  tactic: impact
+  technique: T1496
+tags: [cryptomining, pool]
+agent:
+  enabled: true
+  action: alert
+  enforce: false
+  match:
+    event_type: tcp_connect
+    conditions:
+      - field: remote_port
+        op: in
+        values: ["3333", "14444", "14433", "7777", "9999", "45700"]
+    logic: and
+metadata:
+  description: "连接常见矿池端口（Stratum 协议端口）"
+  confidence: 80
+  false_positive:
+    - "某些合法服务可能使用这些端口"

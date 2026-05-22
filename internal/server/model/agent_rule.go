@@ -6,11 +6,11 @@ type AgentRule struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
 	RuleID    string    `gorm:"column:rule_id;type:varchar(100);not null;uniqueIndex" json:"rule_id"` // YAML 中的 id 字段
 	Name      string    `gorm:"type:varchar(200);not null" json:"name"`
-	Category  string    `gorm:"type:varchar(50);index" json:"category"`    // process / file / network
+	Category  string    `gorm:"type:varchar(50);index" json:"category"` // process / file / network
 	Severity  string    `gorm:"type:varchar(20);not null;index" json:"severity"`
-	Content   string    `gorm:"type:text;not null" json:"content"`         // 完整 YAML 规则文本
+	Content   string    `gorm:"type:text;not null" json:"content"` // 完整 YAML 规则文本
 	Enabled   bool      `gorm:"default:true;index" json:"enabled"`
-	Version   int       `gorm:"default:1" json:"version"`                 // 规则版本号
+	Version   int       `gorm:"default:1" json:"version"` // 规则版本号
 	CreatedAt LocalTime `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt LocalTime `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"updated_at"`
 }

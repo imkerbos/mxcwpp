@@ -1,0 +1,26 @@
+schema_version: 1
+id: MXEDR-0080
+name: c2_high_risk_port
+version: 1
+category: network
+severity: high
+mitre:
+  tactic: command_and_control
+  technique: T1571
+tags: [c2, backdoor]
+agent:
+  enabled: true
+  action: alert
+  enforce: false
+  match:
+    event_type: tcp_connect
+    conditions:
+      - field: remote_port
+        op: in
+        values: ["4444", "5555", "6666", "8888", "1337", "31337"]
+    logic: and
+metadata:
+  description: "连接常见 C2/后门端口"
+  confidence: 75
+  false_positive:
+    - "某些合法开发工具使用这些端口"

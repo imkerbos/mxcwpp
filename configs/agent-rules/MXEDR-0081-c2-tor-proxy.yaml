@@ -1,0 +1,24 @@
+schema_version: 1
+id: MXEDR-0081
+name: c2_tor_proxy
+version: 1
+category: network
+severity: high
+mitre:
+  tactic: command_and_control
+  technique: T1090.003
+tags: [c2, tor, anonymity]
+agent:
+  enabled: true
+  action: alert
+  enforce: false
+  match:
+    event_type: tcp_connect
+    conditions:
+      - field: remote_port
+        op: in
+        values: ["9050", "9150", "9001", "9030"]
+    logic: and
+metadata:
+  description: "连接 Tor 常用端口，可能为匿名通信"
+  confidence: 85
