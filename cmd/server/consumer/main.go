@@ -172,6 +172,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// 启动进程树清理协程
+	if celEng != nil {
+		celEng.StartCleanup(ctx)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("Consumer 启动",

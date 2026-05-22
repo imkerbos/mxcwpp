@@ -3,6 +3,8 @@ package celengine
 import (
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -168,6 +170,94 @@ func TestCompileInvalidExpression(t *testing.T) {
 				t.Error("期望编译失败，但成功了")
 			}
 		})
+	}
+}
+
+// TestProcessTreeAncestorEval 测试进程树祖先链 CEL 求值
+func TestProcessTreeAncestorEval(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+
+	// 创建内存引擎，包含使用 ancestor_exes 的规则
+	rules := []model.DetectionRule{
+		{
+			ID:         1,
+			Name:       "bash_spawned_from_nginx",
+			Expression: `ancestor_exes.exists(e, e.contains("nginx")) && exe.contains("bash")`,
+			Severity:   "high",
+			Enabled:    true,
+		},
+		{
+			ID:         2,
+			Name:       "normal_bash",
+			Expression: `exe.contains("bash") && ancestor_exes.size() == 0`,
+			Severity:   "info",
+			Enabled:    true,
+		},
+	}
+
+	eng, err := NewInMemory(logger, rules)
+	if err != nil {
+		t.Fatalf("创建内存引擎失败: %v", err)
+	}
+
+	hostID := "host-001"
+
+	// 模拟进程树：nginx(pid=100) → worker(pid=200) → bash(pid=300)
+	eng.Evaluate(3000, map[string]string{
+		"agent_id":   hostID,
+		"event_type": "process_exec",
+		"pid":        "100",
+		"ppid":       "1",
+		"exe":        "/usr/sbin/nginx",
+	})
+	eng.Evaluate(3000, map[string]string{
+		"agent_id":   hostID,
+		"event_type": "process_exec",
+		"pid":        "200",
+		"ppid":       "100",
+		"exe":        "/usr/sbin/nginx",
+	})
+
+	// bash(pid=300) spawned from nginx worker — 应触发规则 1
+	matched := eng.Evaluate(3000, map[string]string{
+		"agent_id":   hostID,
+		"event_type": "process_exec",
+		"pid":        "300",
+		"ppid":       "200",
+		"exe":        "/bin/bash",
+		"cmdline":    "bash -i",
+	})
+
+	var foundRule1 bool
+	for _, m := range matched {
+		if m.Name == "bash_spawned_from_nginx" {
+			foundRule1 = true
+		}
+		if m.Name == "normal_bash" {
+			t.Error("不应匹配 normal_bash 规则（有祖先链）")
+		}
+	}
+	if !foundRule1 {
+		t.Error("应匹配 bash_spawned_from_nginx 规则")
+	}
+
+	// 无祖先进程的 bash（pid=500, ppid=999 不存在）— 应触发规则 2
+	matched2 := eng.Evaluate(3000, map[string]string{
+		"agent_id":   hostID,
+		"event_type": "process_exec",
+		"pid":        "500",
+		"ppid":       "999",
+		"exe":        "/bin/bash",
+	})
+
+	var foundRule2 bool
+	for _, m := range matched2 {
+		if m.Name == "normal_bash" {
+			foundRule2 = true
+		}
+	}
+	if !foundRule2 {
+		t.Error("应匹配 normal_bash 规则（无祖先链）")
 	}
 }
 

@@ -3,8 +3,10 @@
 package celengine
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"go.uber.org/zap"
@@ -22,11 +24,12 @@ type compiledRule struct {
 // Engine CEL 规则引擎
 // 负责维护 CEL 环境、编译规则、评估事件
 type Engine struct {
-	mu    sync.RWMutex
-	env   *cel.Env
-	rules []compiledRule
-	db    *gorm.DB
-	log   *zap.Logger
+	mu       sync.RWMutex
+	env      *cel.Env
+	rules    []compiledRule
+	db       *gorm.DB
+	log      *zap.Logger
+	procTree *ProcessTree // 进程树（自动维护，用于祖先链查询）
 }
 
 // New 创建 CEL 规则引擎实例
@@ -38,9 +41,10 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 	}
 
 	e := &Engine{
-		env: env,
-		db:  db,
-		log: logger,
+		env:      env,
+		db:       db,
+		log:      logger,
+		procTree: NewProcessTree(logger),
 	}
 
 	// 首次加载规则
@@ -59,8 +63,9 @@ func NewInMemory(logger *zap.Logger, rules []model.DetectionRule) (*Engine, erro
 	}
 
 	e := &Engine{
-		env: env,
-		log: logger,
+		env:      env,
+		log:      logger,
+		procTree: NewProcessTree(logger),
 	}
 
 	compiled := make([]compiledRule, 0, len(rules))
@@ -129,6 +134,9 @@ func newCELEnv() (*cel.Env, error) {
 		// 性能相关
 		cel.Variable("cpu_usage", cel.StringType),
 		cel.Variable("mem_usage", cel.StringType),
+
+		// 进程树：祖先链 exe 列表（由 Engine 自动填充）
+		cel.Variable("ancestor_exes", cel.ListType(cel.StringType)),
 	)
 }
 
@@ -196,6 +204,11 @@ func (e *Engine) compile(expression string) (cel.Program, error) {
 // fields: 事件字段键值对
 // 返回匹配的规则列表
 func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.DetectionRule {
+	// 进程事件自动维护进程树
+	if dataType == 3000 && e.procTree != nil {
+		e.feedProcessTree(fields)
+	}
+
 	e.mu.RLock()
 	rules := e.rules
 	e.mu.RUnlock()
@@ -203,6 +216,17 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 	// 构建 CEL 求值变量：将 fields 中的 string 值填充到 activation map
 	// 未提供的变量默认为空字符串，data_type 单独处理为 int64
 	activation := buildActivation(dataType, fields)
+
+	// 填充祖先链 exe 列表
+	if e.procTree != nil && fields["pid"] != "" {
+		chain := e.procTree.GetAncestorChain(fields["agent_id"], fields["pid"])
+		if chain == nil {
+			chain = []string{}
+		}
+		activation["ancestor_exes"] = chain
+	} else {
+		activation["ancestor_exes"] = []string{}
+	}
 
 	var matched []model.DetectionRule
 
@@ -275,4 +299,53 @@ func buildActivation(dataType int32, fields map[string]string) map[string]interf
 	}
 
 	return activation
+}
+
+// feedProcessTree 将进程事件路由到进程树
+func (e *Engine) feedProcessTree(fields map[string]string) {
+	hostID := fields["agent_id"]
+	if hostID == "" {
+		return
+	}
+	switch fields["event_type"] {
+	case "process_exec":
+		e.procTree.HandleExec(hostID, fields)
+	case "process_exit":
+		e.procTree.HandleExit(hostID, fields)
+	}
+}
+
+// StartCleanup 启动进程树定期清理协程
+func (e *Engine) StartCleanup(ctx context.Context) {
+	if e.procTree == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(processTreeCleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				removed := e.procTree.Cleanup()
+				if removed > 0 {
+					hosts, nodes := e.procTree.Stats()
+					e.log.Info("进程树定期清理",
+						zap.Int("removed", removed),
+						zap.Int("hosts", hosts),
+						zap.Int("nodes", nodes),
+					)
+				}
+			}
+		}
+	}()
+}
+
+// ProcessTreeStats 返回进程树统计信息
+func (e *Engine) ProcessTreeStats() (hosts, nodes int) {
+	if e.procTree == nil {
+		return 0, 0
+	}
+	return e.procTree.Stats()
 }
