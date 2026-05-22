@@ -13,10 +13,12 @@ package edr
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -28,9 +30,11 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 )
 
-// iocTaskDataType is the DataType for IOC data push from AgentCenter.
-// Registered in docs/datatype-allocation.md — do not reuse.
-const iocTaskDataType = int32(9300)
+// Task DataType constants for Server→Agent push (registered in docs/datatype-allocation.md).
+const (
+	iocTaskDataType  = int32(9300) // IOC data push
+	ruleTaskDataType = int32(9400) // Detection rule push
+)
 
 // Engine is the core EDR engine that manages the event collection pipeline.
 type Engine struct {
@@ -42,6 +46,7 @@ type Engine struct {
 	auditLog    *rule.AuditLogger
 	selfProtect *SelfProtect
 	iocStore    *ioc.Store
+	aggregator  *eventAggregator
 	taskCh      <-chan *grpcProto.Task
 	wg          sync.WaitGroup
 
@@ -114,6 +119,7 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 		auditLog:    auditLog,
 		selfProtect: NewSelfProtect(logger.Named("selfprotect")),
 		iocStore:    iocStore,
+		aggregator:  newEventAggregator(logger.Named("aggregator")),
 		taskCh:      taskCh,
 	}, nil
 }
@@ -227,16 +233,35 @@ func (e *Engine) SelfProtectManager() *SelfProtect {
 
 // forwardEvents reads events from the collector channel, evaluates rules,
 // annotates matching events, and sends them through the transport layer.
+// High-frequency duplicate events are aggregated in a 10s window before forwarding.
 func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event) {
 	defer e.wg.Done()
 
 	const sourceName = "edr"
+
+	// Flush aggregation buffer periodically.
+	flushTicker := time.NewTicker(5 * time.Second)
+	defer flushTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush remaining aggregated events on shutdown.
+			for _, evt := range e.aggregator.FlushAll() {
+				e.sendEvent(sourceName, evt)
+			}
 			return
+
+		case <-flushTicker.C:
+			for _, evt := range e.aggregator.Flush() {
+				e.sendEvent(sourceName, evt)
+			}
+
 		case evt, ok := <-eventCh:
 			if !ok {
+				for _, remaining := range e.aggregator.FlushAll() {
+					e.sendEvent(sourceName, remaining)
+				}
 				return
 			}
 
@@ -246,18 +271,29 @@ func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event)
 			// IOC collision: check network events against threat intelligence.
 			e.checkIOC(evt)
 
-			record := evt.ToRecord()
-
-			if err := e.transport.SendPluginData(sourceName, record); err != nil {
-				e.eventsDropped.Add(1)
-				e.logger.Warn("failed to send EDR event",
-					zap.String("event_type", string(evt.EventType)),
-					zap.Error(err),
-				)
-			} else {
-				e.eventsForwarded.Add(1)
+			// Aggregation: merge high-frequency duplicate events.
+			// Security events (rule/IOC match) bypass aggregation.
+			if e.aggregator.TryAggregate(evt) {
+				// Event buffered — will be flushed as aggregated summary.
+				continue
 			}
+
+			e.sendEvent(sourceName, evt)
 		}
+	}
+}
+
+// sendEvent converts an event to a record and sends it via the transport layer.
+func (e *Engine) sendEvent(source string, evt *event.Event) {
+	record := evt.ToRecord()
+	if err := e.transport.SendPluginData(source, record); err != nil {
+		e.eventsDropped.Add(1)
+		e.logger.Warn("failed to send EDR event",
+			zap.String("event_type", string(evt.EventType)),
+			zap.Error(err),
+		)
+	} else {
+		e.eventsForwarded.Add(1)
 	}
 }
 
@@ -379,6 +415,8 @@ func (e *Engine) handleTask(task *grpcProto.Task) {
 				zap.Int("data_len", len(task.Data)),
 			)
 		}
+	case ruleTaskDataType:
+		e.handleRulePush(task.Data)
 	default:
 		e.logger.Debug("ignoring unknown EDR task",
 			zap.Int32("data_type", task.DataType),
@@ -386,31 +424,71 @@ func (e *Engine) handleTask(task *grpcProto.Task) {
 	}
 }
 
-// checkIOC checks event fields against the IOC store.
-// Currently only network events (DataType 3002) are checked against IP IOCs.
+// rulePushPayload is the JSON envelope for Server-pushed rule data.
+type rulePushPayload struct {
+	Version string   `json:"version"`
+	Rules   []string `json:"rules"` // Each entry is a YAML rule document.
+}
+
+// handleRulePush processes a Server-pushed rule update.
+func (e *Engine) handleRulePush(data string) {
+	var payload rulePushPayload
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		e.logger.Warn("failed to parse rule push payload", zap.Error(err))
+		return
+	}
+
+	rulesData := make([][]byte, len(payload.Rules))
+	for i, r := range payload.Rules {
+		rulesData[i] = []byte(r)
+	}
+
+	if err := e.ruleMgr.LoadFromData(payload.Version, rulesData); err != nil {
+		e.logger.Warn("failed to hot-load rules", zap.Error(err))
+		return
+	}
+
+	e.logger.Info("rules hot-loaded from Server",
+		zap.String("version", payload.Version),
+		zap.Int("rules_count", len(payload.Rules)),
+	)
+}
+
+// checkIOC checks event fields against the IOC store (IP, Hash, URL).
 func (e *Engine) checkIOC(evt *event.Event) {
-	if evt.DataType != event.DataTypeNetwork {
-		return
+	// IP check: network events (DataType 3002).
+	if evt.DataType == event.DataTypeNetwork {
+		if addr := evt.Fields["remote_addr"]; addr != "" && e.iocStore.CheckIP(addr) {
+			e.markIOCHit(evt, "ip", addr)
+			return
+		}
 	}
 
-	remoteAddr := evt.Fields["remote_addr"]
-	if remoteAddr == "" {
-		return
+	// Hash check: process events with exe_hash field.
+	if evt.DataType == event.DataTypeProcess {
+		if hash := evt.Fields["exe_hash"]; hash != "" && e.iocStore.CheckHash(hash) {
+			e.markIOCHit(evt, "hash", hash)
+			return
+		}
 	}
 
-	if !e.iocStore.CheckIP(remoteAddr) {
-		return
+	// URL check: any event carrying a url field (e.g. DNS query, HTTP log).
+	if url := evt.Fields["url"]; url != "" && e.iocStore.CheckURL(url) {
+		e.markIOCHit(evt, "url", url)
 	}
+}
 
+// markIOCHit annotates an event as IOC-matched and logs the hit.
+func (e *Engine) markIOCHit(evt *event.Event, iocType, iocValue string) {
 	e.iocMatched.Add(1)
 
 	evt.SetField("ioc_match", "true")
-	evt.SetField("ioc_type", "ip")
-	evt.SetField("ioc_value", remoteAddr)
-	evt.SetField("ioc_source", "abuse.ch")
+	evt.SetField("ioc_type", iocType)
+	evt.SetField("ioc_value", iocValue)
 
-	e.logger.Warn("IOC hit: malicious IP connection detected",
-		zap.String("remote_addr", remoteAddr),
+	e.logger.Warn("IOC hit detected",
+		zap.String("ioc_type", iocType),
+		zap.String("ioc_value", iocValue),
 		zap.String("event_type", string(evt.EventType)),
 		zap.String("pid", evt.Fields["pid"]),
 	)

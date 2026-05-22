@@ -29,11 +29,12 @@ var protectedPaths = []string{
 const DefaultQuarantineDir = "/var/mxsec/quarantine"
 
 // ActionExecutor handles response actions (kill, suspend, quarantine).
-// All executions are gated by the rule's enforce flag and audited.
+// All executions are gated by the rule's enforce flag, circuit breaker, and audited.
 type ActionExecutor struct {
 	logger        *zap.Logger
 	audit         *AuditLogger
 	quarantineDir string
+	breaker       *circuitBreaker
 }
 
 // NewActionExecutor creates a new action executor.
@@ -45,11 +46,13 @@ func NewActionExecutor(logger *zap.Logger, audit *AuditLogger, quarantineDir str
 		logger:        logger,
 		audit:         audit,
 		quarantineDir: quarantineDir,
+		breaker:       newCircuitBreaker(logger.Named("breaker")),
 	}
 }
 
 // Execute runs the appropriate action for a matched rule.
 // If enforce is false, the action is logged but not executed ("dry run").
+// Destructive actions (kill/suspend/quarantine) are gated by the circuit breaker.
 func (a *ActionExecutor) Execute(r *Rule, fields map[string]string) {
 	action := r.Agent.Action
 	enforce := r.Agent.Enforce
@@ -69,15 +72,27 @@ func (a *ActionExecutor) Execute(r *Rule, fields map[string]string) {
 			Fields:    fields,
 		})
 
-	case ActionSuspend:
-		a.executeSuspend(r, fields, enforce)
+	case ActionSuspend, ActionKill, ActionQuarantine:
+		// Circuit breaker: prevent runaway destructive actions.
+		if enforce && !a.breaker.Allow() {
+			a.logAction(r, fields, "circuit_breaker", "action rate exceeded threshold, downgraded to alert")
+			return
+		}
 
-	case ActionKill:
-		a.executeKill(r, fields, enforce)
-
-	case ActionQuarantine:
-		a.executeQuarantine(r, fields, enforce)
+		switch action {
+		case ActionSuspend:
+			a.executeSuspend(r, fields, enforce)
+		case ActionKill:
+			a.executeKill(r, fields, enforce)
+		case ActionQuarantine:
+			a.executeQuarantine(r, fields, enforce)
+		}
 	}
+}
+
+// BreakerStats returns circuit breaker status for heartbeat reporting.
+func (a *ActionExecutor) BreakerStats() (tripped bool, tripCount int, windowActions int) {
+	return a.breaker.Stats()
 }
 
 // executeSuspend sends SIGSTOP to a process (reversible via SIGCONT).

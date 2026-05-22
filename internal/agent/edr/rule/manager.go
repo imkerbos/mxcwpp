@@ -147,6 +147,80 @@ func (m *Manager) Load() error {
 	return nil
 }
 
+// LoadFromData loads rules from raw YAML documents (one per entry).
+// Used for Server-pushed rule hot-reload. Each entry is a single rule YAML.
+// Successfully loaded rules are also persisted to ruleDir for offline use.
+func (m *Manager) LoadFromData(version string, rulesYAML [][]byte) error {
+	all := make(map[string]*Rule)
+	index := make(map[string][]*Rule)
+	var loadErrors []string
+	var agentCount int
+
+	for i, data := range rulesYAML {
+		var r Rule
+		if err := yaml.Unmarshal(data, &r); err != nil {
+			errMsg := fmt.Sprintf("rule[%d]: parse YAML: %v", i, err)
+			loadErrors = append(loadErrors, errMsg)
+			m.logger.Warn("skipping pushed rule", zap.Int("index", i), zap.Error(err))
+			continue
+		}
+		if err := r.Validate(); err != nil {
+			errMsg := fmt.Sprintf("rule[%d] %s: %v", i, r.ID, err)
+			loadErrors = append(loadErrors, errMsg)
+			m.logger.Warn("skipping invalid pushed rule", zap.String("id", r.ID), zap.Error(err))
+			continue
+		}
+
+		if _, exists := all[r.ID]; exists {
+			continue
+		}
+		all[r.ID] = &r
+
+		if r.Agent.Enabled {
+			et := r.Agent.Match.EventType
+			index[et] = append(index[et], &r)
+			agentCount++
+		}
+
+		// Persist to disk for offline use.
+		filePath := filepath.Join(m.ruleDir, r.ID+".yaml")
+		if err := os.WriteFile(filePath, data, 0644); err != nil {
+			m.logger.Warn("failed to persist pushed rule",
+				zap.String("id", r.ID), zap.Error(err))
+		}
+	}
+
+	// Sort conditions by cost.
+	for _, rules := range index {
+		for _, r := range rules {
+			sortConditionsByCost(r.Agent.Match.Conditions)
+		}
+	}
+
+	rs := &RuleSet{
+		All:         all,
+		ByEventType: index,
+		Version:     version,
+		Count:       agentCount,
+		LoadErrors:  loadErrors,
+	}
+
+	current := m.rules.Load()
+	if current != nil && current.Count > 0 {
+		m.previous.Store(current)
+	}
+	m.rules.Store(rs)
+
+	m.logger.Info("rules hot-loaded from Server push",
+		zap.String("version", version),
+		zap.Int("total", len(all)),
+		zap.Int("agent_enabled", agentCount),
+		zap.Int("errors", len(loadErrors)),
+	)
+
+	return nil
+}
+
 // Rollback reverts to the previous rule set.
 // Returns false if no previous version is available.
 func (m *Manager) Rollback() bool {

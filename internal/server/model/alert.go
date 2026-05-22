@@ -39,6 +39,7 @@ type Alert struct {
 	Status         AlertStatus `gorm:"column:status;type:varchar(20);not null;default:'active';index" json:"status"`
 	FirstSeenAt    LocalTime   `gorm:"column:first_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"first_seen_at"` // 首次发现时间
 	LastSeenAt     LocalTime   `gorm:"column:last_seen_at;type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"last_seen_at"`   // 最后发现时间
+	HitCount       int         `gorm:"column:hit_count;type:int;default:1" json:"hit_count"`                                        // 累计命中次数（去重计数）
 	LastNotifiedAt *LocalTime  `gorm:"column:last_notified_at;type:timestamp" json:"last_notified_at"`                              // 上次通知时间（用于定期告警）
 	NotifyCount    int         `gorm:"column:notify_count;type:int;default:0" json:"notify_count"`                                  // 通知次数
 	ResolvedAt     *LocalTime  `gorm:"column:resolved_at;type:timestamp" json:"resolved_at"`                                        // 解决时间
