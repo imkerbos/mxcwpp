@@ -24,6 +24,7 @@ type procEntry struct {
 	uid     int
 	exe     string
 	cmdline string
+	cwd     string
 }
 
 // procScanner scans /proc for process snapshots and periodic reconciliation.
@@ -69,6 +70,7 @@ func (s *procScanner) initialSnapshot() error {
 	for _, entry := range entries {
 		evt := event.NewProcessExec(entry.pid, entry.ppid, entry.exe, entry.cmdline)
 		evt.SetField("uid", fmt.Sprintf("%d", entry.uid))
+		evt.SetField("cwd", entry.cwd)
 		evt.SetField("source", "proc_snapshot")
 
 		select {
@@ -139,6 +141,7 @@ func (s *procScanner) reconcile() {
 			s.known[pid] = entry
 			evt := event.NewProcessExec(entry.pid, entry.ppid, entry.exe, entry.cmdline)
 			evt.SetField("uid", fmt.Sprintf("%d", entry.uid))
+			evt.SetField("cwd", entry.cwd)
 			evt.SetField("source", "reconciliation")
 			s.trySend(evt)
 			execCount++
@@ -225,6 +228,12 @@ func (s *procScanner) scanProc() (map[int]procEntry, error) {
 		statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
 		if err == nil {
 			entry.uid = parseUIDFromStatus(string(statusData))
+		}
+
+		// Read cwd (symlink)
+		cwdPath, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+		if err == nil {
+			entry.cwd = cwdPath
 		}
 
 		result[pid] = entry

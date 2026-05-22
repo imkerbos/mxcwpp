@@ -489,11 +489,16 @@ func (c *ebpfCollector) decodeProcessEvent(raw []byte) (*event.Event, error) {
 			evt.SetField("in_container", "true")
 		}
 
+		// Read cwd from /proc (userspace, not available in BPF struct)
+		cwd := readProcCwd(int(pe.Tgid))
+		evt.SetField("cwd", cwd)
+
 		// Keep /proc scanner's known map in sync with live events
 		if c.scanner != nil {
 			c.scanner.addKnown(int(pe.Tgid), procEntry{
 				pid: int(pe.Tgid), ppid: int(pe.Ppid),
 				uid: int(pe.Uid), exe: filename, cmdline: cmdline,
+				cwd: cwd,
 			})
 		}
 		return evt, nil

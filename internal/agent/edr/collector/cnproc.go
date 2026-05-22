@@ -134,6 +134,7 @@ func (l *cnProcListener) parseProcEvent(data []byte) {
 		ppid := readProcPPID(tgid)
 
 		evt := event.NewProcessExec(tgid, ppid, exe, cmdline)
+		evt.SetField("cwd", readProcCwd(tgid))
 		evt.SetField("source", "cn_proc")
 
 		select {
@@ -195,6 +196,15 @@ func sendProcCnMcast(fd int, op uint32) error {
 		Pid:    0, // kernel
 	}
 	return syscall.Sendto(fd, buf, 0, dest)
+}
+
+// readProcCwd reads /proc/[pid]/cwd symlink (current working directory).
+func readProcCwd(pid int) string {
+	path, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // readProcExe reads /proc/[pid]/exe symlink.
