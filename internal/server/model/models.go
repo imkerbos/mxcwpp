@@ -235,5 +235,6 @@ var (
 		&VulnBulletin{},
 		&IOCSnapshot{},
 		&AgentRule{},
+		&SequenceRule{},
 	}
 )

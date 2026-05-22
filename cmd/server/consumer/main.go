@@ -148,6 +148,17 @@ func main() {
 		logger.Info("端口扫描检测器已启动")
 	}
 
+	// 6.4 初始化序列检测器（依赖 CEL 引擎 + Redis，可选）
+	var seqDetector *celengine.SequenceDetector
+	if celEng != nil {
+		seqDetector = celengine.NewSequenceDetector(celEng, db, redisClient, logger)
+		if err := seqDetector.ReloadRules(); err != nil {
+			logger.Warn("序列规则加载失败", zap.Error(err))
+		} else {
+			logger.Info("序列检测器已启动", zap.Int("rules", seqDetector.RuleCount()))
+		}
+	}
+
 	// 7. 创建消费路由器
 	router, err := consumer.NewRouter(
 		cfg.Kafka.Brokers,
@@ -161,6 +172,7 @@ func main() {
 		alertGen,
 		autoResponder,
 		scanDetector,
+		seqDetector,
 		logger,
 	)
 	if err != nil {

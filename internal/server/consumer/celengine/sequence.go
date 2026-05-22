@@ -1,5 +1,5 @@
-// Package celengine - C1: 行为序列检测
-// 使用滑动窗口 + 状态机检测多步攻击链
+// Package celengine - 行为序列检测
+// 使用滑动窗口 + Redis 状态机检测多步攻击链
 package celengine
 
 import (
@@ -9,29 +9,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/cel-go/cel"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
+
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
-// SequenceRule 序列检测规则
-type SequenceRule struct {
-	ID       string         `json:"id"`
-	Name     string         `json:"name"`
-	Steps    []SequenceStep `json:"steps"`
-	Window   time.Duration  `json:"window"` // 滑动窗口
-	Severity string         `json:"severity"`
+// compiledSequenceRule 编译后的序列规则，步骤表达式已预编译
+type compiledSequenceRule struct {
+	rule     model.SequenceRule
+	programs []cel.Program // 与 Steps 一一对应的预编译 Program
+	window   time.Duration
 }
 
-// SequenceStep 序列检测的单个步骤
-type SequenceStep struct {
-	Name       string `json:"name"`
-	Expression string `json:"expression"` // CEL 表达式
-	Order      int    `json:"order"`
-}
-
-// SequenceState 序列检测的中间状态
+// SequenceState 序列检测的中间状态（Redis 持久化）
 type SequenceState struct {
-	RuleID       string    `json:"rule_id"`
+	RuleID       uint      `json:"rule_id"`
 	HostID       string    `json:"host_id"`
 	CurrentStep  int       `json:"current_step"`
 	StartTime    time.Time `json:"start_time"`
@@ -40,76 +35,165 @@ type SequenceState struct {
 
 // SequenceDetector 行为序列检测器
 type SequenceDetector struct {
-	rules       []SequenceRule
+	mu          sync.RWMutex
+	rules       []compiledSequenceRule
+	db          *gorm.DB
 	redisClient *redis.Client
 	engine      *Engine
 	logger      *zap.Logger
-	mu          sync.RWMutex
 }
 
 // NewSequenceDetector 创建序列检测器
-func NewSequenceDetector(engine *Engine, redisClient *redis.Client, logger *zap.Logger) *SequenceDetector {
+// db 可为 nil（测试场景），redisClient 为 nil 时使用纯内存状态（不持久化）
+func NewSequenceDetector(engine *Engine, db *gorm.DB, redisClient *redis.Client, logger *zap.Logger) *SequenceDetector {
 	return &SequenceDetector{
 		engine:      engine,
+		db:          db,
 		redisClient: redisClient,
 		logger:      logger,
 	}
 }
 
-// Evaluate 评估事件是否命中序列规则的某个步骤
-func (d *SequenceDetector) Evaluate(hostID string, dataType int32, fields map[string]string) []SequenceRule {
+// ReloadRules 从数据库加载启用的序列规则并预编译
+func (d *SequenceDetector) ReloadRules() error {
+	if d.db == nil {
+		return nil
+	}
+
+	var dbRules []model.SequenceRule
+	if err := d.db.Where("enabled = ?", true).Find(&dbRules).Error; err != nil {
+		return fmt.Errorf("加载序列规则失败: %w", err)
+	}
+
+	compiled, compileErrors := d.compileRules(dbRules)
+
+	d.mu.Lock()
+	d.rules = compiled
+	d.mu.Unlock()
+
+	d.logger.Info("序列规则加载完成",
+		zap.Int("total", len(dbRules)),
+		zap.Int("compiled", len(compiled)),
+		zap.Int("errors", compileErrors),
+	)
+	return nil
+}
+
+// SetRules 设置规则（用于测试，不依赖数据库）
+func (d *SequenceDetector) SetRules(rules []model.SequenceRule) int {
+	compiled, _ := d.compileRules(rules)
+	d.mu.Lock()
+	d.rules = compiled
+	d.mu.Unlock()
+	return len(compiled)
+}
+
+// compileRules 编译序列规则列表
+func (d *SequenceDetector) compileRules(rules []model.SequenceRule) ([]compiledSequenceRule, int) {
+	compiled := make([]compiledSequenceRule, 0, len(rules))
+	var compileErrors int
+
+	for _, rule := range rules {
+		if len(rule.Steps) == 0 {
+			continue
+		}
+
+		programs := make([]cel.Program, 0, len(rule.Steps))
+		ok := true
+		for _, step := range rule.Steps {
+			program, err := d.engine.CompileExpression(step.Expression)
+			if err != nil {
+				compileErrors++
+				d.logger.Error("编译序列步骤失败",
+					zap.String("rule_name", rule.Name),
+					zap.String("step_name", step.Name),
+					zap.Error(err),
+				)
+				ok = false
+				break
+			}
+			programs = append(programs, program)
+		}
+		if !ok {
+			continue
+		}
+
+		compiled = append(compiled, compiledSequenceRule{
+			rule:     rule,
+			programs: programs,
+			window:   time.Duration(rule.WindowSecs) * time.Second,
+		})
+	}
+
+	return compiled, compileErrors
+}
+
+// RuleCount 返回当前加载的序列规则数量
+func (d *SequenceDetector) RuleCount() int {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	return len(d.rules)
+}
 
-	var matched []SequenceRule
+// Evaluate 评估事件是否命中序列规则的某个步骤
+// 返回完整匹配（所有步骤按序命中）的规则列表
+func (d *SequenceDetector) Evaluate(hostID string, dataType int32, fields map[string]string) []model.SequenceRule {
+	d.mu.RLock()
+	rules := d.rules
+	d.mu.RUnlock()
+
+	var matched []model.SequenceRule
 	ctx := context.Background()
 
-	for _, rule := range d.rules {
-		stateKey := fmt.Sprintf("mxsec:seq:%s:%s", rule.ID, hostID)
+	activation := buildActivation(dataType, fields)
 
-		// 获取当前状态
+	for i := range rules {
+		cr := &rules[i]
+		stateKey := fmt.Sprintf("mxsec:seq:%d:%s", cr.rule.ID, hostID)
+
 		state := d.getState(ctx, stateKey)
 
 		if state == nil {
 			// 检查是否匹配第一步
-			if d.matchStep(rule.Steps[0], dataType, fields) {
+			if d.evalProgram(cr.programs[0], activation) {
 				state = &SequenceState{
-					RuleID:       rule.ID,
+					RuleID:       cr.rule.ID,
 					HostID:       hostID,
 					CurrentStep:  1,
 					StartTime:    time.Now(),
 					MatchedSteps: []int{0},
 				}
-				d.setState(ctx, stateKey, state, rule.Window)
+				d.setState(ctx, stateKey, state, cr.window)
 			}
 			continue
 		}
 
-		// 检查窗口是否过期
-		if time.Since(state.StartTime) > rule.Window {
+		// 窗口过期
+		if time.Since(state.StartTime) > cr.window {
 			d.delState(ctx, stateKey)
 			continue
 		}
 
 		// 检查下一步
 		nextStep := state.CurrentStep
-		if nextStep >= len(rule.Steps) {
+		if nextStep >= len(cr.programs) {
 			continue
 		}
 
-		if d.matchStep(rule.Steps[nextStep], dataType, fields) {
+		if d.evalProgram(cr.programs[nextStep], activation) {
 			state.CurrentStep++
 			state.MatchedSteps = append(state.MatchedSteps, nextStep)
 
-			if state.CurrentStep >= len(rule.Steps) {
-				// 完整序列匹配
-				matched = append(matched, rule)
+			if state.CurrentStep >= len(cr.programs) {
+				matched = append(matched, cr.rule)
 				d.delState(ctx, stateKey)
 				d.logger.Info("序列规则命中",
-					zap.String("rule_id", rule.ID),
-					zap.String("host_id", hostID))
+					zap.Uint("rule_id", cr.rule.ID),
+					zap.String("rule_name", cr.rule.Name),
+					zap.String("host_id", hostID),
+				)
 			} else {
-				d.setState(ctx, stateKey, state, rule.Window)
+				d.setState(ctx, stateKey, state, cr.window)
 			}
 		}
 	}
@@ -117,27 +201,12 @@ func (d *SequenceDetector) Evaluate(hostID string, dataType int32, fields map[st
 	return matched
 }
 
-// matchStep 检查事件是否匹配序列步骤
-// 直接编译并评估步骤自身的 CEL 表达式，而非走全量规则评估
-func (d *SequenceDetector) matchStep(step SequenceStep, dataType int32, fields map[string]string) bool {
-	if step.Expression == "" {
-		return false
-	}
-
-	program, err := d.engine.CompileExpression(step.Expression)
-	if err != nil {
-		d.logger.Debug("编译序列步骤表达式失败",
-			zap.String("step_name", step.Name),
-			zap.Error(err))
-		return false
-	}
-
-	activation := buildActivation(dataType, fields)
+// evalProgram 对预编译的 Program 求值
+func (d *SequenceDetector) evalProgram(program cel.Program, activation map[string]interface{}) bool {
 	out, _, err := program.Eval(activation)
 	if err != nil {
 		return false
 	}
-
 	return out.Value() == true
 }
 

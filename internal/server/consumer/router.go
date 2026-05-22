@@ -15,6 +15,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // agentACTTL 是 Redis 中 agent:ac:{agentID} key 的 TTL（3 倍心跳间隔）
@@ -31,15 +32,15 @@ type Router struct {
 	celEngine     *celengine.Engine         // CEL 规则引擎（可选）
 	alertGen      *celengine.AlertGenerator // CEL 告警生成器（可选）
 	autoResponder *celengine.AutoResponder  // 自动响应执行器（可选）
-	scanDetector  *celengine.ScanDetector   // 端口扫描检测器（可选）
+	scanDetector  *celengine.ScanDetector      // 端口扫描检测器（可选）
+	seqDetector   *celengine.SequenceDetector // 序列检测器（可选）
 	topics        []string
 	logger        *zap.Logger
 }
 
 // NewRouter 创建 Router
 // celEng 和 alertGen 可为 nil，此时跳过 CEL 规则评估
-// autoResponder 可为 nil，此时跳过自动响应
-// scanDetector 可为 nil，此时跳过端口扫描检测
+// autoResponder/scanDetector/seqDetector 可为 nil
 func NewRouter(
 	brokers []string,
 	groupID string,
@@ -50,8 +51,9 @@ func NewRouter(
 	redisClient *redis.Client, // 可为 nil，Redis 不可用时跳过 agent:ac: 写入
 	celEng *celengine.Engine,
 	alertGen *celengine.AlertGenerator,
-	autoResponder *celengine.AutoResponder, // 可为 nil，跳过自动响应
-	scanDetector *celengine.ScanDetector, // 可为 nil，端口扫描检测
+	autoResponder *celengine.AutoResponder,  // 可为 nil，跳过自动响应
+	scanDetector *celengine.ScanDetector,    // 可为 nil，端口扫描检测
+	seqDetector *celengine.SequenceDetector, // 可为 nil，序列检测
 	logger *zap.Logger,
 ) (*Router, error) {
 	cfg := sarama.NewConfig()
@@ -87,6 +89,7 @@ func NewRouter(
 		alertGen:      alertGen,
 		autoResponder: autoResponder,
 		scanDetector:  scanDetector,
+		seqDetector:   seqDetector,
 		topics:        topics,
 		logger:        logger,
 	}, nil
@@ -267,6 +270,22 @@ func (r *Router) evaluateCEL(msg *kafka.MQMessage) {
 		// 自动响应：critical 规则命中时下发 kill/隔离/阻断命令
 		if r.autoResponder != nil {
 			r.autoResponder.Execute(msg.AgentID, matched, fields)
+		}
+	}
+
+	// 序列检测：多步攻击链状态机
+	if r.seqDetector != nil {
+		seqMatched := r.seqDetector.Evaluate(msg.AgentID, msg.DataType, fields)
+		if len(seqMatched) > 0 {
+			// 将序列规则命中转换为 DetectionRule 格式，复用告警生成器
+			for _, sr := range seqMatched {
+				r.alertGen.Generate(msg.AgentID, []model.DetectionRule{{
+					ID:       sr.ID,
+					Name:     sr.Name,
+					Severity: sr.Severity,
+					Category: sr.Category,
+				}}, fields)
+			}
 		}
 	}
 }
