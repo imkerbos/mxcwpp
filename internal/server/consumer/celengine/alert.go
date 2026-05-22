@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/sanitize"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
@@ -47,7 +48,14 @@ func (g *AlertGenerator) Generate(hostID string, matchedRules []model.DetectionR
 // upsertAlert 查找已有告警并更新，不存在则创建
 // ResultID = cel-{ruleID}-{hostID}（固定，不含 timestamp）
 func (g *AlertGenerator) upsertAlert(hostID string, rule *model.DetectionRule, fields map[string]string) error {
-	detail, err := json.Marshal(fields)
+	// 脱敏后存储：对 cmdline 中的凭据进行遮蔽
+	masked := make(map[string]string, len(fields))
+	for k, v := range fields {
+		masked[k] = v
+	}
+	sanitize.Fields(masked)
+
+	detail, err := json.Marshal(masked)
 	if err != nil {
 		return fmt.Errorf("序列化告警详情失败: %w", err)
 	}
