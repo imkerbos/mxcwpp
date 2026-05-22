@@ -113,6 +113,19 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("severity", cel.StringType),
 		cel.Variable("threat_name", cel.StringType),
 
+		// Agent 端 IOC 碰撞标注（由 Agent EDR 引擎在事件转发前写入）
+		cel.Variable("ioc_match", cel.StringType),
+		cel.Variable("ioc_type", cel.StringType),
+		cel.Variable("ioc_value", cel.StringType),
+
+		// Agent 端规则匹配标注
+		cel.Variable("agent_match", cel.StringType),
+		cel.Variable("agent_rule_id", cel.StringType),
+		cel.Variable("agent_severity", cel.StringType),
+
+		// 聚合标注
+		cel.Variable("agg_count", cel.StringType),
+
 		// 性能相关
 		cel.Variable("cpu_usage", cel.StringType),
 		cel.Variable("mem_usage", cel.StringType),
@@ -241,6 +254,9 @@ func buildActivation(dataType int32, fields map[string]string) map[string]interf
 		"file_path", "file_action",
 		"remote_addr", "remote_port", "local_addr", "local_port", "protocol",
 		"severity", "threat_name",
+		"ioc_match", "ioc_type", "ioc_value",
+		"agent_match", "agent_rule_id", "agent_severity",
+		"agg_count",
 		"cpu_usage", "mem_usage",
 	}
 

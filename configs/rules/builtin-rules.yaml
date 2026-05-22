@@ -309,6 +309,39 @@ rules:
     data_types: ["7001"]
     description: "Scanner 检测到勒索软件"
 
+  # ==================== IOC 碰撞检测 (Agent 端标注) ====================
+
+  - name: "IOC 碰撞 - 恶意 IP 通信"
+    expression: 'ioc_match == "true" && ioc_type == "ip"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1071"
+    data_types: ["3002"]
+    description: "Agent 端 IOC 引擎检测到与恶意 IP 的网络连接"
+
+  - name: "IOC 碰撞 - 恶意文件哈希"
+    expression: 'ioc_match == "true" && ioc_type == "hash"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1204"
+    data_types: ["3000"]
+    description: "Agent 端 IOC 引擎检测到恶意文件哈希匹配"
+
+  - name: "IOC 碰撞 - 恶意 URL 访问"
+    expression: 'ioc_match == "true" && ioc_type == "url"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1071.001"
+    data_types: ["3000", "3002", "3003"]
+    description: "Agent 端 IOC 引擎检测到恶意 URL 访问"
+
+  - name: "Agent 规则命中 - Critical 级别"
+    expression: 'agent_match == "true" && agent_severity == "critical"'
+    severity: critical
+    category: agent_detection
+    data_types: ["3000", "3001", "3002"]
+    description: "Agent 端规则引擎检测到 critical 级别威胁"
+
   # ==================== 关联类 (多 DataType) ====================
 
   - name: "未知进程高 CPU 使用"
