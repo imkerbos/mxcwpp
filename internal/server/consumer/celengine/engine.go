@@ -119,6 +119,7 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("local_addr", cel.StringType),
 		cel.Variable("local_port", cel.StringType),
 		cel.Variable("protocol", cel.StringType),
+		cel.Variable("dns_server", cel.StringType),
 
 		// 安全相关
 		cel.Variable("severity", cel.StringType),
@@ -327,7 +328,7 @@ func buildActivation(dataType int32, fields map[string]string) map[string]interf
 		"agent_id", "hostname",
 		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "uid", "username", "cwd",
 		"file_path", "file_action",
-		"remote_addr", "remote_port", "local_addr", "local_port", "protocol",
+		"remote_addr", "remote_port", "local_addr", "local_port", "protocol", "dns_server",
 		"severity", "threat_name",
 		"ioc_match", "ioc_type", "ioc_value",
 		"agent_match", "agent_rule_id", "agent_severity",

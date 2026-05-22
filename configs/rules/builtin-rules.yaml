@@ -743,3 +743,37 @@ rules:
     mitre_id: "T1611"
     data_types: ["3000", "3001"]
     description: "检测访问 /proc/sysrq-trigger，可能为容器逃逸或系统破坏"
+
+  # ==================== DNS 事件 (DataType 3003) ====================
+
+  - name: "DNS 查询 - 可疑进程"
+    expression: 'exe.contains("/tmp/") || exe.contains("/dev/shm/")'
+    severity: high
+    category: c2_communication
+    mitre_id: "T1071.004"
+    data_types: ["3003"]
+    description: "检测来自临时目录的进程发起 DNS 查询，可能为恶意程序 C2 通信"
+
+  - name: "DNS 查询 - 非标准 DNS 服务器"
+    expression: '!is_private_ip(dns_server) && dns_server != "8.8.8.8" && dns_server != "8.8.4.4" && dns_server != "1.1.1.1" && dns_server != "1.0.0.1" && dns_server != "114.114.114.114" && dns_server != "223.5.5.5" && dns_server != "223.6.6.6"'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1071.004"
+    data_types: ["3003"]
+    description: "检测使用非常见公共 DNS 服务器，可能为 DNS over HTTPS/TLS C2 通道"
+
+  - name: "DNS 查询 - 高频请求"
+    expression: 'recent_remote_addr_count > 20'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1048.001"
+    data_types: ["3003"]
+    description: "检测短时间内大量 DNS 查询，可能为 DNS 隧道数据外传"
+
+  - name: "DNS 查询 - 非 DNS 工具"
+    expression: 'exe != "/usr/bin/dig" && exe != "/usr/bin/nslookup" && exe != "/usr/bin/host" && exe != "/usr/bin/systemd-resolved" && exe != "/usr/lib/systemd/systemd-resolved"'
+    severity: low
+    category: discovery
+    mitre_id: "T1018"
+    data_types: ["3003"]
+    description: "记录非 DNS 工具发起的 DNS 查询（低优先级基线事件）"

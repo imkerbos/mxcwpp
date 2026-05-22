@@ -769,6 +769,14 @@ func (c *ebpfCollector) decodeNetworkEvent(raw []byte) (*event.Event, error) {
 		evt.SetField("in_container", "true")
 	}
 
+	// DNS 事件标记：UDP 目标端口 53 的出站流量标记为 DataType 3003
+	if evtType == event.UDPSend && ne.RemotePort == 53 {
+		evt.DataType = event.DataTypeDNS
+		evt.EventType = event.DNSQuery
+		evt.Fields["event_type"] = string(event.DNSQuery)
+		evt.SetField("dns_server", remoteAddr)
+	}
+
 	return evt, nil
 }
 

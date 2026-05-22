@@ -119,6 +119,14 @@ func (p *procNetPoller) emitConnection(key connKey) {
 	evt.SetField("local_addr", key.localIP)
 	evt.SetField("local_port", fmt.Sprintf("%d", key.localPort))
 
+	// DNS 事件标记：UDP 目标端口 53 标记为 DataType 3003
+	if evtType == event.UDPSend && key.remotePort == 53 {
+		evt.DataType = event.DataTypeDNS
+		evt.EventType = event.DNSQuery
+		evt.Fields["event_type"] = string(event.DNSQuery)
+		evt.SetField("dns_server", key.remoteIP)
+	}
+
 	select {
 	case p.eventCh <- evt:
 	default:

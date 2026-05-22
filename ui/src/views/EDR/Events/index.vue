@@ -82,6 +82,7 @@
         <a-select-option value="file_open">文件访问</a-select-option>
         <a-select-option value="tcp_connect">TCP 连接</a-select-option>
         <a-select-option value="udp_send">UDP 发送</a-select-option>
+        <a-select-option value="dns_query">DNS 查询</a-select-option>
       </a-select>
       <a-select
         v-model:value="filters.data_type"
@@ -93,6 +94,7 @@
         <a-select-option :value="3000">3000 进程</a-select-option>
         <a-select-option :value="3001">3001 文件</a-select-option>
         <a-select-option :value="3002">3002 网络</a-select-option>
+        <a-select-option :value="3003">3003 DNS</a-select-option>
       </a-select>
       <a-input
         v-model:value="filters.remote_addr"
@@ -267,8 +269,13 @@ const getEventTypeColor = (type: string) => {
   const colors: Record<string, string> = {
     process_exec: 'blue',
     file_open: 'orange',
+    file_rename: 'orange',
+    file_unlink: 'red',
+    file_chmod: 'orange',
     tcp_connect: 'cyan',
+    tcp_accept: 'cyan',
     udp_send: 'green',
+    dns_query: 'purple',
   }
   return colors[type] || 'default'
 }
@@ -277,8 +284,13 @@ const getEventTypeText = (type: string) => {
   const texts: Record<string, string> = {
     process_exec: '进程执行',
     file_open: '文件访问',
+    file_rename: '文件重命名',
+    file_unlink: '文件删除',
+    file_chmod: '权限修改',
     tcp_connect: 'TCP 连接',
+    tcp_accept: 'TCP 接收',
     udp_send: 'UDP 发送',
+    dns_query: 'DNS 查询',
   }
   return texts[type] || type
 }
@@ -287,10 +299,13 @@ const getEventDetail = (record: EDREvent) => {
   if (record.event_type === 'process_exec') {
     return record.cmdline || record.exe
   }
-  if (record.event_type === 'file_open') {
+  if (record.event_type === 'file_open' || record.event_type === 'file_rename' || record.event_type === 'file_unlink' || record.event_type === 'file_chmod') {
     return record.file_path || '-'
   }
-  if (record.event_type === 'tcp_connect' || record.event_type === 'udp_send') {
+  if (record.event_type === 'dns_query') {
+    return record.remote_addr ? `DNS → ${record.remote_addr}` : '-'
+  }
+  if (record.event_type === 'tcp_connect' || record.event_type === 'tcp_accept' || record.event_type === 'udp_send') {
     return record.remote_addr ? `${record.remote_addr}:${record.remote_port} (${record.protocol || 'tcp'})` : '-'
   }
   return record.cmdline || record.file_path || '-'

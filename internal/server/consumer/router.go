@@ -207,8 +207,8 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	case msg.DataType == 7004:
 		writeErr = r.mysql.WriteQuarantineResult(&msg)
 
-	// eBPF 事件（3000-3002）
-	case msg.DataType >= 3000 && msg.DataType <= 3002:
+	// eBPF 事件（3000-3003，含 DNS 事件）
+	case msg.DataType >= 3000 && msg.DataType <= 3003:
 		_ = r.ch.WriteEBPFEvent(&msg)
 		r.evaluateCEL(&msg)
 		// 网络事件额外进行端口扫描检测

@@ -43,10 +43,15 @@ const (
 	UDPSend    EventType = "udp_send"
 )
 
+// DNS event types.
+const (
+	DNSQuery EventType = "dns_query"
+)
+
 // Event is the unified EDR event structure produced by collectors.
 // All event types share a common header; type-specific data goes into Fields.
 type Event struct {
-	DataType  int32             // 3000 / 3001 / 3002
+	DataType  int32             // 3000 / 3001 / 3002 / 3003
 	EventType EventType         // e.g. "process_exec"
 	Timestamp time.Time         // event timestamp (kernel or userspace)
 	Fields    map[string]string // all event data as string KV (matches bridge.Payload)
