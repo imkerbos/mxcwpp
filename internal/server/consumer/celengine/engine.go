@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -29,7 +31,8 @@ type Engine struct {
 	rules    []compiledRule
 	db       *gorm.DB
 	log      *zap.Logger
-	procTree *ProcessTree // 进程树（自动维护，用于祖先链查询）
+	procTree *ProcessTree   // 进程树（自动维护，用于祖先链查询）
+	tracker  *EventTracker  // 事件频率/首次出现追踪
 }
 
 // New 创建 CEL 规则引擎实例
@@ -45,6 +48,7 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 		db:       db,
 		log:      logger,
 		procTree: NewProcessTree(logger),
+		tracker:  NewEventTracker(logger),
 	}
 
 	// 首次加载规则
@@ -66,6 +70,7 @@ func NewInMemory(logger *zap.Logger, rules []model.DetectionRule) (*Engine, erro
 		env:      env,
 		log:      logger,
 		procTree: NewProcessTree(logger),
+		tracker:  NewEventTracker(logger),
 	}
 
 	compiled := make([]compiledRule, 0, len(rules))
@@ -138,6 +143,30 @@ func newCELEnv() (*cel.Env, error) {
 
 		// 进程树：祖先链 exe 列表（由 Engine 自动填充）
 		cel.Variable("ancestor_exes", cel.ListType(cel.StringType)),
+
+		// EventTracker 预计算变量：滑动窗口计数
+		cel.Variable("recent_exe_count", cel.IntType),
+		cel.Variable("recent_remote_addr_count", cel.IntType),
+		cel.Variable("recent_file_path_count", cel.IntType),
+
+		// EventTracker 预计算变量：首次出现标记
+		cel.Variable("first_seen_exe", cel.BoolType),
+		cel.Variable("first_seen_remote_addr", cel.BoolType),
+
+		// 自定义函数：is_private_ip(string) -> bool
+		cel.Function("is_private_ip",
+			cel.Overload("is_private_ip_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					addr, ok := val.Value().(string)
+					if !ok {
+						return types.Bool(false)
+					}
+					return types.Bool(isPrivateIP(addr))
+				}),
+			),
+		),
 	)
 }
 
@@ -229,6 +258,27 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 		activation["ancestor_exes"] = []string{}
 	}
 
+	// EventTracker：计算滑动窗口计数和首次出现标记
+	hostID := fields["agent_id"]
+	if e.tracker != nil && hostID != "" {
+		exeCount, exeFirst := e.tracker.Observe(hostID, "exe", fields["exe"])
+		activation["recent_exe_count"] = exeCount
+		activation["first_seen_exe"] = exeFirst
+
+		addrCount, addrFirst := e.tracker.Observe(hostID, "remote_addr", fields["remote_addr"])
+		activation["recent_remote_addr_count"] = addrCount
+		activation["first_seen_remote_addr"] = addrFirst
+
+		fpCount, _ := e.tracker.Observe(hostID, "file_path", fields["file_path"])
+		activation["recent_file_path_count"] = fpCount
+	} else {
+		activation["recent_exe_count"] = int64(0)
+		activation["recent_remote_addr_count"] = int64(0)
+		activation["recent_file_path_count"] = int64(0)
+		activation["first_seen_exe"] = false
+		activation["first_seen_remote_addr"] = false
+	}
+
 	var matched []model.DetectionRule
 
 	for _, cr := range rules {
@@ -316,31 +366,56 @@ func (e *Engine) feedProcessTree(fields map[string]string) {
 	}
 }
 
-// StartCleanup 启动进程树定期清理协程
+// StartCleanup 启动进程树和事件追踪器的定期清理协程
 func (e *Engine) StartCleanup(ctx context.Context) {
-	if e.procTree == nil {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(processTreeCleanupInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				removed := e.procTree.Cleanup()
-				if removed > 0 {
-					hosts, nodes := e.procTree.Stats()
-					e.log.Info("进程树定期清理",
-						zap.Int("removed", removed),
-						zap.Int("hosts", hosts),
-						zap.Int("nodes", nodes),
-					)
+	// 进程树清理
+	if e.procTree != nil {
+		go func() {
+			ticker := time.NewTicker(processTreeCleanupInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					removed := e.procTree.Cleanup()
+					if removed > 0 {
+						hosts, nodes := e.procTree.Stats()
+						e.log.Info("进程树定期清理",
+							zap.Int("removed", removed),
+							zap.Int("hosts", hosts),
+							zap.Int("nodes", nodes),
+						)
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
+
+	// EventTracker 清理
+	if e.tracker != nil {
+		go func() {
+			ticker := time.NewTicker(trackerWindowDuration)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					removed := e.tracker.Cleanup()
+					if removed > 0 {
+						hosts, wKeys, kKeys := e.tracker.Stats()
+						e.log.Info("事件追踪器定期清理",
+							zap.Int("removed", removed),
+							zap.Int("hosts", hosts),
+							zap.Int("window_keys", wKeys),
+							zap.Int("known_keys", kKeys),
+						)
+					}
+				}
+			}
+		}()
+	}
 }
 
 // ProcessTreeStats 返回进程树统计信息
@@ -349,4 +424,12 @@ func (e *Engine) ProcessTreeStats() (hosts, nodes int) {
 		return 0, 0
 	}
 	return e.procTree.Stats()
+}
+
+// TrackerStats 返回事件追踪器统计信息
+func (e *Engine) TrackerStats() (hosts, windowKeys, knownKeys int) {
+	if e.tracker == nil {
+		return 0, 0, 0
+	}
+	return e.tracker.Stats()
 }
