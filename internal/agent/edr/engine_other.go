@@ -67,5 +67,11 @@ func (e *Engine) IOCCount() int { return 0 }
 // IOCMatched is a no-op stub.
 func (e *Engine) IOCMatched() uint64 { return 0 }
 
+// YARAAvailable is a no-op stub.
+func (e *Engine) YARAAvailable() bool { return false }
+
+// YARAStats is a no-op stub.
+func (e *Engine) YARAStats() (scanned, matched uint64) { return 0, 0 }
+
 // SelfProtectManager is a no-op stub.
 func (e *Engine) SelfProtectManager() *SelfProtect { return NewSelfProtect(nil) }

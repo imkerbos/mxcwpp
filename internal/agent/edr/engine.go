@@ -29,6 +29,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/event"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/ioc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/rule"
+	edryara "github.com/imkerbos/mxsec-platform/internal/agent/edr/yara"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 )
 
@@ -48,6 +49,8 @@ type Engine struct {
 	auditLog    *rule.AuditLogger
 	selfProtect *SelfProtect
 	iocStore    *ioc.Store
+	yaraScanner *edryara.Scanner
+	yaraEventCh chan *event.Event
 	aggregator  *eventAggregator
 	taskCh      <-chan *grpcProto.Task
 	wg          sync.WaitGroup
@@ -57,6 +60,8 @@ type Engine struct {
 	eventsDropped   atomic.Uint64
 	rulesMatched    atomic.Uint64
 	iocMatched      atomic.Uint64
+	yaraScanned     atomic.Uint64
+	yaraMatched     atomic.Uint64
 }
 
 // DefaultRuleDir is the default rule directory on Linux agents.
@@ -115,6 +120,10 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 	iocStore := ioc.NewStore(logger.Named("ioc"))
 	taskCh := transportMgr.RegisterTaskChannel("edr")
 
+	// Initialize YARA scanner (nil if yr binary or rules not available).
+	yaraEventCh := make(chan *event.Event, 64)
+	yaraScanner := edryara.NewScanner(logger.Named("yara"), yaraEventCh)
+
 	return &Engine{
 		logger:      logger,
 		transport:   transportMgr,
@@ -124,6 +133,8 @@ func NewEngine(logger *zap.Logger, transportMgr *transport.Manager, ruleDir stri
 		auditLog:    auditLog,
 		selfProtect: NewSelfProtect(logger.Named("selfprotect")),
 		iocStore:    iocStore,
+		yaraScanner: yaraScanner,
+		yaraEventCh: yaraEventCh,
 		aggregator:  newEventAggregator(logger.Named("aggregator")),
 		taskCh:      taskCh,
 	}, nil
@@ -139,11 +150,17 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Start self-protection (systemd notify + chattr).
 	e.selfProtect.Start(ctx, &e.wg)
 
+	// Start YARA scanner (if available).
+	if e.yaraScanner != nil {
+		e.yaraScanner.Start(ctx, &e.wg)
+	}
+
 	e.wg.Add(2)
 	go e.forwardEvents(ctx, eventCh)
 	go e.processTaskLoop(ctx)
 
-	e.logger.Info("EDR engine started")
+	e.logger.Info("EDR engine started",
+		zap.Bool("yara_available", e.yaraScanner != nil))
 	return nil
 }
 
@@ -229,6 +246,16 @@ func (e *Engine) ReloadRules() error {
 	return e.ruleMgr.Load()
 }
 
+// YARAAvailable returns whether the YARA scanner is active.
+func (e *Engine) YARAAvailable() bool {
+	return e.yaraScanner != nil
+}
+
+// YARAStats returns YARA scan counters (scanned, matched).
+func (e *Engine) YARAStats() (scanned, matched uint64) {
+	return e.yaraScanned.Load(), e.yaraMatched.Load()
+}
+
 // SelfProtectManager returns the self-protection manager for use by other
 // modules (e.g., updater needs to temporarily unlock file immutability
 // before installing packages).
@@ -262,6 +289,11 @@ func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event)
 				e.sendEvent(sourceName, evt)
 			}
 
+		case yaraEvt := <-e.yaraEventCh:
+			// YARA detection events bypass aggregation — always forward.
+			e.yaraMatched.Add(1)
+			e.sendEvent(sourceName, yaraEvt)
+
 		case evt, ok := <-eventCh:
 			if !ok {
 				for _, remaining := range e.aggregator.FlushAll() {
@@ -275,6 +307,12 @@ func (e *Engine) forwardEvents(ctx context.Context, eventCh <-chan *event.Event)
 
 			// IOC collision: check network events against threat intelligence.
 			e.checkIOC(evt)
+
+			// YARA scan: trigger async scan for suspicious executables.
+			if e.yaraScanner != nil && e.yaraScanner.ShouldScan(evt) {
+				e.yaraScanned.Add(1)
+				e.yaraScanner.Enqueue(evt.Fields["exe"], evt.Fields)
+			}
 
 			// Aggregation: merge high-frequency duplicate events.
 			// Security events (rule/IOC match) bypass aggregation.
