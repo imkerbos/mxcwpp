@@ -580,8 +580,8 @@
               <div class="risk-overview-row second-row">
                 <div class="risk-card">
                   <div class="risk-card-header">
-                    <span class="risk-card-title">EDR 告警</span>
-                    <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'runtime')">详情</a-button>
+                    <span class="risk-card-title">检测告警</span>
+                    <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'detection')">详情</a-button>
                   </div>
                   <div class="risk-card-content">
                     <div class="risk-left-section">
@@ -835,16 +835,7 @@
                       {{ record.updated_at ? formatDateTime(record.updated_at) : '-' }}
                     </template>
                     <template v-else-if="column.key === 'action'">
-                      <a-popconfirm
-                        v-if="needsTetragonInstall(record)"
-                        title="确定安装 Tetragon 依赖？安装后 EDR 插件将自动恢复运行。"
-                        @confirm="handleInstallTetragon"
-                      >
-                        <a-button type="link" size="small" :loading="depInstalling" :disabled="host?.status !== 'online'">
-                          安装 Tetragon
-                        </a-button>
-                      </a-popconfirm>
-                      <span v-else style="color: #bfbfbf">-</span>
+                      <span style="color: #bfbfbf">-</span>
                     </template>
                   </template>
                 </a-table>
@@ -1075,25 +1066,6 @@ const loadComponents = async () => {
   }
 }
 
-// EDR 插件依赖（Tetragon）相关
-const depInstalling = ref(false)
-
-const needsTetragonInstall = (record: ComponentInfo) => {
-  return record.name === 'edr' && ['error', 'dormant', 'not_installed'].includes(record.status)
-}
-
-const handleInstallTetragon = async () => {
-  if (!props.host) return
-  depInstalling.value = true
-  try {
-    await hostsApi.installDependency([props.host.host_id], 'tetragon')
-    message.success('Tetragon 安装命令已下发，请稍后刷新查看状态')
-  } catch (error: any) {
-    message.error(error?.message || '安装命令下发失败')
-  } finally {
-    depInstalling.value = false
-  }
-}
 
 // 监听 host 变化，重新加载组件列表
 watch(() => props.host?.host_id, (newHostId) => {

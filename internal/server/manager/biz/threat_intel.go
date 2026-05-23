@@ -4,8 +4,11 @@ package biz
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,11 +31,18 @@ type feedSource struct {
 	IOCType string // IOC 类型：ip / url / hash
 }
 
-// 内置免费公开 Feed 列表
+// 内置免费公开 Feed 列表（abuse.ch + OTX + blocklist.de + emergingthreats）
 var builtinFeeds = []feedSource{
+	// abuse.ch
 	{Name: "abuse.ch Feodo IP", URL: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt", IOCType: "ip"},
 	{Name: "abuse.ch URLhaus", URL: "https://urlhaus.abuse.ch/downloads/text/", IOCType: "url"},
 	{Name: "abuse.ch MalwareBazaar MD5", URL: "https://bazaar.abuse.ch/export/txt/md5/recent/", IOCType: "hash"},
+	// blocklist.de (brute-force / SSH / attack IPs)
+	{Name: "blocklist.de All", URL: "https://lists.blocklist.de/lists/all.txt", IOCType: "ip"},
+	// Emerging Threats (compromised IPs)
+	{Name: "ET Compromised IPs", URL: "https://rules.emergingthreats.net/blockrules/compromised-ips.txt", IOCType: "ip"},
+	// cinsscore.com (CI Army threat list)
+	{Name: "CI Army Bad IPs", URL: "https://cinsscore.com/list/ci-badguys.txt", IOCType: "ip"},
 }
 
 // ThreatIntel 威胁情报服务
@@ -41,6 +51,10 @@ type ThreatIntel struct {
 	redisClient *redis.Client
 	logger      *zap.Logger
 	httpClient  *http.Client
+	customFeeds []feedSource // user-configured external feeds
+	otxAPIKey   string       // AlienVault OTX API key (optional)
+	mispURL     string       // MISP instance URL (optional)
+	mispAPIKey  string       // MISP API key (optional)
 }
 
 // NewThreatIntel 创建威胁情报服务
@@ -51,6 +65,29 @@ func NewThreatIntel(db *gorm.DB, redisClient *redis.Client, logger *zap.Logger) 
 		logger:      logger,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// SetOTXKey configures AlienVault OTX integration (optional).
+func (t *ThreatIntel) SetOTXKey(apiKey string) {
+	t.otxAPIKey = apiKey
+	t.logger.Info("OTX threat intel integration configured")
+}
+
+// SetMISP configures MISP instance integration (optional).
+func (t *ThreatIntel) SetMISP(url, apiKey string) {
+	t.mispURL = strings.TrimSuffix(url, "/")
+	t.mispAPIKey = apiKey
+	t.logger.Info("MISP threat intel integration configured",
+		zap.String("url", t.mispURL))
+}
+
+// AddCustomFeed registers an additional text-line IOC feed.
+func (t *ThreatIntel) AddCustomFeed(name, url, iocType string) {
+	t.customFeeds = append(t.customFeeds, feedSource{
+		Name:    name,
+		URL:     url,
+		IOCType: iocType,
+	})
 }
 
 // IOC 威胁指标
@@ -105,18 +142,27 @@ func (t *ThreatIntel) SyncIOCs(ctx context.Context) error {
 	return err
 }
 
-// doSyncIOCs 遍历内置 Feed 列表，逐个拉取并写入 Redis
+// doSyncIOCs 遍历内置 + 自定义 Feed 列表，逐个拉取并写入 Redis
 func (t *ThreatIntel) doSyncIOCs(ctx context.Context) error {
 	if t.redisClient == nil {
 		return fmt.Errorf("Redis 不可用")
 	}
 
-	t.logger.Info("开始同步威胁情报", zap.Int("feeds", len(builtinFeeds)))
+	// Merge built-in + custom feeds.
+	allFeeds := make([]feedSource, 0, len(builtinFeeds)+len(t.customFeeds))
+	allFeeds = append(allFeeds, builtinFeeds...)
+	allFeeds = append(allFeeds, t.customFeeds...)
+
+	t.logger.Info("开始同步威胁情报",
+		zap.Int("builtin_feeds", len(builtinFeeds)),
+		zap.Int("custom_feeds", len(t.customFeeds)),
+		zap.Bool("otx_enabled", t.otxAPIKey != ""),
+		zap.Bool("misp_enabled", t.mispURL != ""))
 
 	var totalCount int
 	var lastErr error
 
-	for _, feed := range builtinFeeds {
+	for _, feed := range allFeeds {
 		count, err := t.fetchFeed(ctx, feed)
 		if err != nil {
 			t.logger.Warn("拉取 Feed 失败",
@@ -131,12 +177,174 @@ func (t *ThreatIntel) doSyncIOCs(ctx context.Context) error {
 			zap.Int("count", count))
 	}
 
+	// OTX integration (optional).
+	if t.otxAPIKey != "" {
+		count, err := t.fetchOTX(ctx)
+		if err != nil {
+			t.logger.Warn("OTX 拉取失败", zap.Error(err))
+			lastErr = err
+		} else {
+			totalCount += count
+		}
+	}
+
+	// MISP integration (optional).
+	if t.mispURL != "" && t.mispAPIKey != "" {
+		count, err := t.fetchMISP(ctx)
+		if err != nil {
+			t.logger.Warn("MISP 拉取失败", zap.Error(err))
+			lastErr = err
+		} else {
+			totalCount += count
+		}
+	}
+
 	if totalCount == 0 && lastErr != nil {
 		return fmt.Errorf("所有 Feed 拉取失败，最后错误: %w", lastErr)
 	}
 
 	t.logger.Info("威胁情报同步完成", zap.Int("total", totalCount))
+
+	// Export snapshot to DB for AgentCenter to broadcast to agents.
+	if err := t.exportSnapshot(ctx); err != nil {
+		t.logger.Warn("IOC 快照导出失败", zap.Error(err))
+	}
+
 	return nil
+}
+
+// fetchOTX pulls IOCs from AlienVault OTX subscribed pulses.
+func (t *ThreatIntel) fetchOTX(ctx context.Context) (int, error) {
+	// OTX API: GET /api/v1/indicators/export (subscribed IOCs as text lines)
+	url := "https://otx.alienvault.com/api/v1/indicators/export"
+	var totalCount int
+
+	for _, iocType := range []string{"IPv4", "URL", "FileHash-MD5"} {
+		reqURL := fmt.Sprintf("%s?type=%s", url, iocType)
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("X-OTX-API-KEY", t.otxAPIKey)
+
+		resp, err := t.httpClient.Do(req)
+		if err != nil {
+			return totalCount, fmt.Errorf("OTX %s 请求失败: %w", iocType, err)
+		}
+
+		// Map OTX types to our IOC types.
+		var redisType string
+		switch iocType {
+		case "IPv4":
+			redisType = "ip"
+		case "URL":
+			redisType = "url"
+		case "FileHash-MD5":
+			redisType = "hash"
+		}
+
+		key := iocRedisKeyPrefix + redisType
+		pipe := t.redisClient.Pipeline()
+		count := 0
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			pipe.SAdd(ctx, key, line)
+			count++
+			if count%1000 == 0 {
+				if _, err := pipe.Exec(ctx); err != nil {
+					resp.Body.Close()
+					return totalCount, err
+				}
+				pipe = t.redisClient.Pipeline()
+			}
+		}
+		resp.Body.Close()
+
+		pipe.Expire(ctx, key, iocTTL)
+		if _, err := pipe.Exec(ctx); err != nil {
+			return totalCount, err
+		}
+
+		totalCount += count
+		t.logger.Info("OTX Feed 拉取完成",
+			zap.String("type", iocType),
+			zap.Int("count", count))
+	}
+
+	return totalCount, nil
+}
+
+// fetchMISP pulls IOCs from a MISP instance via REST API.
+func (t *ThreatIntel) fetchMISP(ctx context.Context) (int, error) {
+	// MISP API: POST /attributes/restSearch with published=true, last=1d
+	url := t.mispURL + "/attributes/restSearch"
+
+	body := `{"returnFormat":"text","type":["ip-dst","ip-src","md5","url"],"last":"1d","published":true}`
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", t.mispAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/plain")
+
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("MISP 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("MISP HTTP %d", resp.StatusCode)
+	}
+
+	// MISP text output: one IOC per line.
+	pipe := t.redisClient.Pipeline()
+	count := 0
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		// Auto-detect IOC type.
+		var redisType string
+		switch {
+		case strings.Contains(line, "://"):
+			redisType = "url"
+		case len(line) == 32 && !strings.Contains(line, "."):
+			redisType = "hash"
+		default:
+			redisType = "ip"
+		}
+
+		key := iocRedisKeyPrefix + redisType
+		pipe.SAdd(ctx, key, line)
+		count++
+		if count%1000 == 0 {
+			if _, err := pipe.Exec(ctx); err != nil {
+				return count, err
+			}
+			pipe = t.redisClient.Pipeline()
+		}
+	}
+
+	for _, iocType := range []string{"ip", "hash", "url"} {
+		pipe.Expire(ctx, iocRedisKeyPrefix+iocType, iocTTL)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return count, err
+	}
+
+	t.logger.Info("MISP Feed 拉取完成", zap.Int("count", count))
+	return count, nil
 }
 
 // fetchFeed 拉取单个 Feed 并写入 Redis Set
@@ -230,4 +438,130 @@ func (t *ThreatIntel) CheckIOC(ctx context.Context, iocType, value string) bool 
 		return false
 	}
 	return result
+}
+
+// ── IOC Snapshot Export ─────────────────────────────────────
+
+// iocData is the JSON structure for IOC snapshots.
+type iocData struct {
+	IP   []string `json:"ip"`
+	Hash []string `json:"hash"`
+	URL  []string `json:"url"`
+}
+
+// exportSnapshot reads all IOC data from Redis, computes diff against previous
+// snapshot, and writes a new IOCSnapshot record for AgentCenter to distribute.
+func (t *ThreatIntel) exportSnapshot(ctx context.Context) error {
+	if t.redisClient == nil {
+		return fmt.Errorf("Redis 不可用")
+	}
+
+	// 1. Read all IOC sets from Redis.
+	current := iocData{}
+	for _, entry := range []struct {
+		key  string
+		dest *[]string
+	}{
+		{iocRedisKeyPrefix + "ip", &current.IP},
+		{iocRedisKeyPrefix + "hash", &current.Hash},
+		{iocRedisKeyPrefix + "url", &current.URL},
+	} {
+		members, err := t.redisClient.SMembers(ctx, entry.key).Result()
+		if err != nil {
+			return fmt.Errorf("读取 Redis Set %s 失败: %w", entry.key, err)
+		}
+		sort.Strings(members)
+		*entry.dest = members
+	}
+
+	// 2. Serialize full data.
+	fullJSON, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("序列化 IOC 数据失败: %w", err)
+	}
+
+	version := fmt.Sprintf("%x", sha256.Sum256(fullJSON))[:16]
+	totalCount := len(current.IP) + len(current.Hash) + len(current.URL)
+
+	// 3. Load previous snapshot for diff.
+	var prev model.IOCSnapshot
+	prevExists := t.db.Order("id DESC").First(&prev).Error == nil
+
+	var diffAdded, diffRemoved iocData
+	prevVersion := ""
+	if prevExists {
+		prevVersion = prev.Version
+		if prevVersion == version {
+			t.logger.Info("IOC 快照无变化，跳过导出", zap.String("version", version))
+			return nil
+		}
+
+		var prevData iocData
+		if err := json.Unmarshal([]byte(prev.Data), &prevData); err == nil {
+			diffAdded.IP, diffRemoved.IP = diffSets(prevData.IP, current.IP)
+			diffAdded.Hash, diffRemoved.Hash = diffSets(prevData.Hash, current.Hash)
+			diffAdded.URL, diffRemoved.URL = diffSets(prevData.URL, current.URL)
+		}
+	} else {
+		// First snapshot: everything is "added".
+		diffAdded = current
+	}
+
+	addedJSON, _ := json.Marshal(diffAdded)
+	removedJSON, _ := json.Marshal(diffRemoved)
+
+	// 4. Write snapshot.
+	snapshot := model.IOCSnapshot{
+		Version:   version,
+		Data:      string(fullJSON),
+		DiffAdded: string(addedJSON),
+		DiffRemov: string(removedJSON),
+		PrevVer:   prevVersion,
+		Count:     totalCount,
+	}
+	if err := t.db.Create(&snapshot).Error; err != nil {
+		return fmt.Errorf("写入 IOC 快照失败: %w", err)
+	}
+
+	// 5. Clean up old snapshots (keep 5).
+	var old []model.IOCSnapshot
+	if err := t.db.Order("id DESC").Offset(5).Find(&old).Error; err == nil && len(old) > 0 {
+		ids := make([]uint, len(old))
+		for i, o := range old {
+			ids[i] = o.ID
+		}
+		t.db.Delete(&model.IOCSnapshot{}, ids)
+	}
+
+	t.logger.Info("IOC 快照导出完成",
+		zap.String("version", version),
+		zap.Int("total", totalCount),
+		zap.Int("added", len(diffAdded.IP)+len(diffAdded.Hash)+len(diffAdded.URL)),
+		zap.Int("removed", len(diffRemoved.IP)+len(diffRemoved.Hash)+len(diffRemoved.URL)),
+	)
+	return nil
+}
+
+// diffSets returns (added, removed) between old and new sorted string slices.
+func diffSets(old, cur []string) (added, removed []string) {
+	oldSet := make(map[string]struct{}, len(old))
+	for _, v := range old {
+		oldSet[v] = struct{}{}
+	}
+	curSet := make(map[string]struct{}, len(cur))
+	for _, v := range cur {
+		curSet[v] = struct{}{}
+	}
+
+	for _, v := range cur {
+		if _, ok := oldSet[v]; !ok {
+			added = append(added, v)
+		}
+	}
+	for _, v := range old {
+		if _, ok := curSet[v]; !ok {
+			removed = append(removed, v)
+		}
+	}
+	return
 }

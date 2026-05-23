@@ -19,7 +19,7 @@ func TestReadProcNetDev(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(f.Name())
-	f.WriteString(content)
+	_, _ = f.WriteString(content)
 	f.Close()
 
 	// readProcNetDev 读取系统路径，这里直接验证解析逻辑（内联）

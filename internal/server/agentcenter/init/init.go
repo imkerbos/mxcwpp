@@ -104,6 +104,13 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 	// 启动任务调度器（定期分发待执行任务）
 	go scheduler.StartTaskScheduler(s.TaskService, s.TransferService, s.DB, s.Logger)
 
+	// 启动 IOC 同步调度器（定期广播威胁情报到 Agent EDR）
+	iocScheduler := scheduler.NewIOCSyncScheduler(s.DB, s.TransferService, s.Logger)
+	go iocScheduler.Start(s.StatusCtx)
+
+	// 启动规则同步调度器（定期广播 Agent 检测规则）
+	ruleScheduler := scheduler.NewRuleSyncScheduler(s.DB, s.TransferService, s.Logger)
+	go ruleScheduler.Start(s.StatusCtx)
 }
 
 // Cleanup 清理资源
@@ -122,7 +129,7 @@ func (s *AgentCenterServices) Cleanup() {
 		s.GRPCServer.GracefulStop()
 	}
 	if s.Logger != nil {
-		s.Logger.Sync()
+		_ = s.Logger.Sync()
 	}
 	if s.DB != nil {
 		if err := database.Close(); err != nil {

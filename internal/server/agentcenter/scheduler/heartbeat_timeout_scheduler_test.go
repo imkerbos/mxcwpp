@@ -46,6 +46,7 @@ func setupHeartbeatTestDB(t *testing.T) *gorm.DB {
 		expected TEXT,
 		fix_suggestion TEXT,
 		status TEXT DEFAULT 'active',
+		hit_count INTEGER DEFAULT 1,
 		first_seen_at TIMESTAMP,
 		last_seen_at TIMESTAMP,
 		last_notified_at TIMESTAMP,

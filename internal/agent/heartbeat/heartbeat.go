@@ -34,6 +34,7 @@ type Manager struct {
 	agentID     string
 	startTime   time.Time          // Agent 启动时间
 	pluginMgr   PluginStatusGetter // 插件管理器接口（用于获取插件状态）
+	edrEngine   EDRStatusGetter    // EDR 引擎状态接口（可选）
 	resourceMon *resource.Monitor  // 资源监控器
 }
 
@@ -42,8 +43,25 @@ type PluginStatusGetter interface {
 	GetAllPluginStats() map[string]interface{}
 }
 
+// EDRStatusGetter 是 EDR 引擎状态获取接口（避免循环依赖）
+type EDRStatusGetter interface {
+	GetEDRMode() string
+	GetEDRCapabilities() []string
+	GetEDRHookType() string
+	GetEDRStats() (forwarded, dropped uint64)
+	RulesVersion() string
+	RulesCount() int
+	RulesMatched() uint64
+	IOCVersion() string
+	IOCCount() int
+	IOCMatched() uint64
+	YARAAvailable() bool
+	YARAStats() (scanned, matched uint64)
+	ContainerRuntime() string
+}
+
 // NewManager 创建新的心跳管理器
-func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter) *Manager {
+func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter, edrEngine EDRStatusGetter) *Manager {
 	return &Manager{
 		cfg:         cfg,
 		logger:      logger,
@@ -51,15 +69,16 @@ func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.
 		agentID:     agentID,
 		startTime:   time.Now(),
 		pluginMgr:   pluginMgr,
+		edrEngine:   edrEngine,
 		resourceMon: resource.NewMonitor(logger),
 	}
 }
 
 // Startup 启动心跳模块
-func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter) {
+func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter, edrEngine EDRStatusGetter) {
 	defer wg.Done()
 
-	mgr := NewManager(cfg, logger, transportMgr, agentID, pluginMgr)
+	mgr := NewManager(cfg, logger, transportMgr, agentID, pluginMgr, edrEngine)
 
 	currentInterval := cfg.GetHeartbeatInterval()
 	ticker := time.NewTicker(currentInterval)
@@ -233,6 +252,32 @@ func (m *Manager) sendHeartbeat() {
 	if networkInterfacesJSON != "" {
 		record.Data.Fields["network_interfaces"] = networkInterfacesJSON
 		m.logger.Debug("network interfaces collected", zap.Int("length", len(networkInterfacesJSON)))
+	}
+
+	// 添加 EDR 引擎状态
+	if m.edrEngine != nil {
+		record.Data.Fields["edr_mode"] = m.edrEngine.GetEDRMode()
+		record.Data.Fields["edr_hook_type"] = m.edrEngine.GetEDRHookType()
+		caps := m.edrEngine.GetEDRCapabilities()
+		if len(caps) > 0 {
+			record.Data.Fields["edr_capabilities"] = strings.Join(caps, ",")
+		}
+		fwd, drop := m.edrEngine.GetEDRStats()
+		record.Data.Fields["edr_events_fwd"] = fmt.Sprintf("%d", fwd)
+		record.Data.Fields["edr_events_drop"] = fmt.Sprintf("%d", drop)
+		record.Data.Fields["edr_rules_version"] = m.edrEngine.RulesVersion()
+		record.Data.Fields["edr_rules_count"] = fmt.Sprintf("%d", m.edrEngine.RulesCount())
+		record.Data.Fields["edr_rules_matched"] = fmt.Sprintf("%d", m.edrEngine.RulesMatched())
+		record.Data.Fields["edr_ioc_version"] = m.edrEngine.IOCVersion()
+		record.Data.Fields["edr_ioc_count"] = fmt.Sprintf("%d", m.edrEngine.IOCCount())
+		record.Data.Fields["edr_ioc_matched"] = fmt.Sprintf("%d", m.edrEngine.IOCMatched())
+		record.Data.Fields["edr_yara_available"] = fmt.Sprintf("%t", m.edrEngine.YARAAvailable())
+		yaraScanned, yaraMatched := m.edrEngine.YARAStats()
+		record.Data.Fields["edr_yara_scanned"] = fmt.Sprintf("%d", yaraScanned)
+		record.Data.Fields["edr_yara_matched"] = fmt.Sprintf("%d", yaraMatched)
+		if rt := m.edrEngine.ContainerRuntime(); rt != "" {
+			record.Data.Fields["edr_container_runtime"] = rt
+		}
 	}
 
 	// 添加业务线信息（从环境变量读取）

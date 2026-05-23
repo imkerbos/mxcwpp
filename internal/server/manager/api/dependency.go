@@ -85,7 +85,7 @@ func (h *DependencyHandler) Status(c *gin.Context) {
 
 // doInstall 是 Install 的核心逻辑，供 Install 和 Status 复用
 func (h *DependencyHandler) doInstall(c *gin.Context, req depInstallRequest) {
-	allowedDeps := map[string]bool{"tetragon": true}
+	allowedDeps := map[string]bool{}
 	if !allowedDeps[req.Dependency] {
 		BadRequest(c, fmt.Sprintf("不支持的依赖: %s", req.Dependency))
 		return

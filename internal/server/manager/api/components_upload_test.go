@@ -28,7 +28,9 @@ func TestUploadPackage_ArchParsing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
-	db.AutoMigrate(&model.Component{}, &model.ComponentVersion{}, &model.ComponentPackage{})
+	if err := db.AutoMigrate(&model.Component{}, &model.ComponentVersion{}, &model.ComponentPackage{}); err != nil {
+		t.Fatalf("failed to auto migrate: %v", err)
+	}
 
 	handler := &ComponentsHandler{
 		db:     db,
@@ -75,12 +77,12 @@ func TestUploadPackage_ArchParsing(t *testing.T) {
 			// 构造 multipart form（模拟浏览器行为）
 			var buf bytes.Buffer
 			writer := multipart.NewWriter(&buf)
-			writer.WriteField("arch", tt.arch)
-			writer.WriteField("pkg_type", tt.pkgType)
+			_ = writer.WriteField("arch", tt.arch)
+			_ = writer.WriteField("pkg_type", tt.pkgType)
 
 			// 添加一个空文件
 			part, _ := writer.CreateFormFile("file", "test.bin")
-			part.Write([]byte("test content"))
+			_, _ = part.Write([]byte("test content"))
 			writer.Close()
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/components/1/versions/1/packages", &buf)
@@ -100,7 +102,7 @@ func TestUploadPackage_ArchParsing(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, w.Code)
 			if tt.wantMessage != "" {
 				var resp map[string]any
-				json.Unmarshal(w.Body.Bytes(), &resp)
+				_ = json.Unmarshal(w.Body.Bytes(), &resp)
 				assert.Contains(t, resp["message"], tt.wantMessage)
 			}
 		})
@@ -117,7 +119,9 @@ func TestUploadPackage_NoBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open sqlite: %v", err)
 	}
-	db.AutoMigrate(&model.Component{}, &model.ComponentVersion{}, &model.ComponentPackage{})
+	if err := db.AutoMigrate(&model.Component{}, &model.ComponentVersion{}, &model.ComponentPackage{}); err != nil {
+		t.Fatalf("failed to auto migrate: %v", err)
+	}
 
 	handler := &ComponentsHandler{
 		db:     db,
@@ -127,10 +131,10 @@ func TestUploadPackage_NoBoundary(t *testing.T) {
 	// 构造 multipart body 但 Content-Type 不带 boundary（复现前端旧 bug）
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
-	writer.WriteField("arch", "amd64")
-	writer.WriteField("pkg_type", "binary")
+	_ = writer.WriteField("arch", "amd64")
+	_ = writer.WriteField("pkg_type", "binary")
 	part, _ := writer.CreateFormFile("file", "test.bin")
-	part.Write([]byte("test content"))
+	_, _ = part.Write([]byte("test content"))
 	writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/components/1/versions/1/packages", &buf)
@@ -150,6 +154,6 @@ func TestUploadPackage_NoBoundary(t *testing.T) {
 	// 没有 boundary 时，Gin 无法解析 PostForm，arch 为空，返回 400
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.Contains(t, resp["message"], "无效的架构")
 }

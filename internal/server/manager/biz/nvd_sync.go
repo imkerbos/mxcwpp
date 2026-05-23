@@ -522,11 +522,6 @@ type nvdCVSSResult struct {
 	VectorString string
 }
 
-func (v *VulnScanner) extractNVDCVSS(cve nvdCVE) (float64, string) {
-	r := v.extractNVDCVSSFull(cve)
-	return r.BaseScore, r.Severity
-}
-
 func (v *VulnScanner) extractNVDCVSSFull(cve nvdCVE) nvdCVSSResult {
 	// 优先 CVSS v3.1
 	if len(cve.Metrics.CvssMetricV31) > 0 {

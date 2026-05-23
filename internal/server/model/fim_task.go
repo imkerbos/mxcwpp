@@ -11,6 +11,7 @@ type FIMTask struct {
 	CompletedHostCount  int          `gorm:"column:completed_host_count;type:int;default:0" json:"completed_host_count"`
 	TotalEvents         int          `gorm:"column:total_events;type:int;default:0" json:"total_events"`
 	CreatedAt           LocalTime    `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt           LocalTime    `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"updated_at"`
 	ExecutedAt          *LocalTime   `gorm:"column:executed_at;type:timestamp" json:"executed_at"`
 	CompletedAt         *LocalTime   `gorm:"column:completed_at;type:timestamp" json:"completed_at"`
 }

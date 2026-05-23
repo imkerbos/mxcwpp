@@ -82,7 +82,7 @@ func TestBaselineStoreLoadCorrupt(t *testing.T) {
 	t.Cleanup(func() { baselineDir = origDir })
 
 	// 写入非法 JSON
-	os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid"), 0600)
+	_ = os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid"), 0600)
 
 	store := NewBaselineStore(testLogger())
 	_, err := store.Load("bad")

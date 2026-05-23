@@ -251,7 +251,7 @@ const riskRadarOption = computed(() => {
     roundPercent(stats.value.baselineHostPercent),
     roundPercent(stats.value.hostAlertPercent),
     roundPercent(stats.value.vulnHostPercent),
-    roundPercent(stats.value.edrAlertPercent),
+    roundPercent(stats.value.detectionAlertPercent),
     roundPercent(stats.value.virusHostPercent),
   ]
   return {
@@ -260,7 +260,7 @@ const riskRadarOption = computed(() => {
       backgroundColor: '#fff', borderColor: '#E5E8EF',
       textStyle: { color: '#1D2129', fontSize: 12 },
       formatter: (params: any) => {
-        const dims = ['基线不合规', '告警未处理', '漏洞未修复', 'EDR 风险', '病毒感染']
+        const dims = ['基线不合规', '告警未处理', '漏洞未修复', '检测风险', '病毒感染']
         return dims.map((name, i) => `${name}：<b>${params.value[i]}%</b>`).join('<br/>')
       },
     },
@@ -271,7 +271,7 @@ const riskRadarOption = computed(() => {
         { name: '基线不合规', max: 100 },
         { name: '告警未处理', max: 100 },
         { name: '漏洞未修复', max: 100 },
-        { name: 'EDR 风险', max: 100 },
+        { name: '检测风险', max: 100 },
         { name: '病毒感染', max: 100 },
       ],
       axisName: { color: '#4E5969', fontSize: 12 },

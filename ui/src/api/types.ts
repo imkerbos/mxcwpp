@@ -880,3 +880,54 @@ export interface FixableItem {
   expected?: string
   has_fix: boolean
 }
+
+// ===== EDR 事件 =====
+
+export interface EDREvent {
+  timestamp: string
+  host_id: string
+  hostname: string
+  event_type: string // process_exec, file_open, tcp_connect, udp_send
+  data_type: number  // 3000=进程, 3001=文件, 3002=网络
+  pid: string
+  ppid: string
+  exe: string
+  cmdline: string
+  parent_exe: string
+  file_path: string
+  remote_addr: string
+  remote_port: string
+  local_addr: string
+  local_port: string
+  protocol: string
+  uid: string
+  gid: string
+  return_code: string
+}
+
+export interface EDRHostEventCount {
+  host_id: string
+  hostname: string
+  count: number
+}
+
+export interface EDRExeCount {
+  exe: string
+  count: number
+}
+
+export interface EDREventTrendPoint {
+  time: string
+  count: number
+}
+
+export interface EDREventStats {
+  total: number
+  process_exec: number
+  file_open: number
+  network_connect: number
+  by_data_type: Record<number, number>
+  top_hosts: EDRHostEventCount[]
+  top_exes: EDRExeCount[]
+  trend: EDREventTrendPoint[]
+}

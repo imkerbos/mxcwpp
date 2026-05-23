@@ -309,6 +309,39 @@ rules:
     data_types: ["7001"]
     description: "Scanner 检测到勒索软件"
 
+  # ==================== IOC 碰撞检测 (Agent 端标注) ====================
+
+  - name: "IOC 碰撞 - 恶意 IP 通信"
+    expression: 'ioc_match == "true" && ioc_type == "ip"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1071"
+    data_types: ["3002"]
+    description: "Agent 端 IOC 引擎检测到与恶意 IP 的网络连接"
+
+  - name: "IOC 碰撞 - 恶意文件哈希"
+    expression: 'ioc_match == "true" && ioc_type == "hash"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1204"
+    data_types: ["3000"]
+    description: "Agent 端 IOC 引擎检测到恶意文件哈希匹配"
+
+  - name: "IOC 碰撞 - 恶意 URL 访问"
+    expression: 'ioc_match == "true" && ioc_type == "url"'
+    severity: critical
+    category: ioc_hit
+    mitre_id: "T1071.001"
+    data_types: ["3000", "3002", "3003"]
+    description: "Agent 端 IOC 引擎检测到恶意 URL 访问"
+
+  - name: "Agent 规则命中 - Critical 级别"
+    expression: 'agent_match == "true" && agent_severity == "critical"'
+    severity: critical
+    category: agent_detection
+    data_types: ["3000", "3001", "3002"]
+    description: "Agent 端规则引擎检测到 critical 级别威胁"
+
   # ==================== 关联类 (多 DataType) ====================
 
   - name: "未知进程高 CPU 使用"
@@ -318,3 +351,429 @@ rules:
     mitre_id: "T1496"
     data_types: ["3000"]
     description: "来自 /tmp 目录的进程消耗 CPU，可能为挖矿或恶意程序"
+
+  # ==================== 进程类扩展 (DataType 3000) ====================
+
+  - name: "持久化 - systemd 服务创建"
+    expression: 'exe.contains("systemctl") && cmdline.contains("enable")'
+    severity: medium
+    category: persistence
+    mitre_id: "T1543.002"
+    data_types: ["3000"]
+    description: "检测通过 systemctl enable 注册系统服务，可能为持久化后门"
+
+  - name: "信息收集 - 主机枚举"
+    expression: 'exe.contains("uname") || (exe.contains("cat") && cmdline.contains("/etc/os-release")) || exe.contains("lsb_release")'
+    severity: low
+    category: discovery
+    mitre_id: "T1082"
+    data_types: ["3000"]
+    description: "检测系统信息收集命令（uname、os-release），攻击侦察阶段常见操作"
+
+  - name: "信息收集 - 网络枚举"
+    expression: 'exe.contains("ifconfig") || exe.contains("ip addr") || (exe.contains("netstat") && cmdline.contains("-a")) || exe.contains("ss")'
+    severity: low
+    category: discovery
+    mitre_id: "T1016"
+    data_types: ["3000"]
+    description: "检测网络配置与连接信息收集"
+
+  - name: "信息收集 - 进程枚举"
+    expression: '(exe.contains("ps") && (cmdline.contains("aux") || cmdline.contains("-ef"))) || (exe.contains("top") && cmdline.contains("-bn1"))'
+    severity: low
+    category: discovery
+    mitre_id: "T1057"
+    data_types: ["3000"]
+    description: "检测进程列表枚举，侦察阶段常见操作"
+
+  - name: "信息收集 - 用户枚举"
+    expression: 'exe.contains("whoami") || exe.contains("id") || (exe.contains("cat") && cmdline.contains("/etc/group")) || exe.contains("last") || exe.contains("w")'
+    severity: low
+    category: discovery
+    mitre_id: "T1033"
+    data_types: ["3000"]
+    description: "检测当前用户/组/登录信息收集"
+
+  - name: "防御规避 - 时间戳伪造"
+    expression: 'exe.contains("touch") && (cmdline.contains("-t") || cmdline.contains("-r") || cmdline.contains("--reference"))'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1070.006"
+    data_types: ["3000"]
+    description: "检测 touch 命令修改文件时间戳，可能为反取证操作"
+
+  - name: "防御规避 - 进程名伪装"
+    expression: 'exe.contains("/tmp/") && (exe.endsWith("sshd") || exe.endsWith("kworker") || exe.endsWith("systemd") || exe.endsWith("crond"))'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1036.004"
+    data_types: ["3000"]
+    description: "检测从 /tmp 目录执行的伪装系统进程名称的二进制文件"
+
+  - name: "数据窃取 - 压缩打包"
+    expression: '(exe.contains("tar") || exe.contains("zip") || exe.contains("gzip")) && (cmdline.contains("/etc/") || cmdline.contains("/home/") || cmdline.contains("/root/"))'
+    severity: medium
+    category: collection
+    mitre_id: "T1560.001"
+    data_types: ["3000"]
+    description: "检测对敏感目录的压缩打包操作，可能为数据窃取前的准备"
+
+  - name: "数据窃取 - SCP/rsync 外传"
+    expression: '(exe.contains("scp") || exe.contains("rsync")) && !is_private_ip(remote_addr) && remote_addr != ""'
+    severity: high
+    category: exfiltration
+    mitre_id: "T1048"
+    data_types: ["3000"]
+    description: "检测通过 SCP/rsync 向外网传输数据"
+
+  - name: "权限提升 - pkexec 利用"
+    expression: 'exe.contains("pkexec")'
+    severity: high
+    category: privilege_escalation
+    mitre_id: "T1548"
+    data_types: ["3000"]
+    description: "检测 pkexec 执行，CVE-2021-4034 (PwnKit) 利用向量"
+
+  - name: "持久化 - at/batch 计划任务"
+    expression: 'exe.contains("/usr/bin/at") || exe.contains("atd") || exe.contains("batch")'
+    severity: medium
+    category: persistence
+    mitre_id: "T1053.001"
+    data_types: ["3000"]
+    description: "检测 at/batch 计划任务创建，可能为持久化手段"
+
+  - name: "工具下载 - Python HTTP Server"
+    expression: '(exe.contains("python") || exe.contains("python3")) && (cmdline.contains("http.server") || cmdline.contains("SimpleHTTPServer"))'
+    severity: medium
+    category: execution
+    mitre_id: "T1105"
+    data_types: ["3000"]
+    description: "检测 Python 内置 HTTP 服务器，常用于攻击工具传输"
+
+  - name: "凭据访问 - tcpdump 抓包"
+    expression: 'exe.contains("tcpdump") && (cmdline.contains("-w") || cmdline.contains("-i"))'
+    severity: medium
+    category: credential_access
+    mitre_id: "T1040"
+    data_types: ["3000"]
+    description: "检测 tcpdump 网络抓包操作，可能窃取明文凭据"
+
+  - name: "持久化 - .bashrc/.profile 修改"
+    expression: '(cmdline.contains(">>") || cmdline.contains(" > ")) && (cmdline.contains(".bashrc") || cmdline.contains(".profile") || cmdline.contains(".bash_profile"))'
+    severity: medium
+    category: persistence
+    mitre_id: "T1546.004"
+    data_types: ["3000"]
+    description: "检测通过写入 shell 配置文件实现登录持久化"
+
+  - name: "横向移动 - 内网扫描工具"
+    expression: 'exe.contains("nmap") || exe.contains("masscan") || exe.contains("fscan") || exe.contains("ladon")'
+    severity: high
+    category: discovery
+    mitre_id: "T1046"
+    data_types: ["3000"]
+    description: "检测内网扫描工具执行（nmap、masscan、fscan、ladon）"
+
+  - name: "权限提升 - su 切换 root"
+    expression: 'exe.contains("/bin/su") && (cmdline.contains("root") || cmdline == "su" || cmdline == "su -")'
+    severity: medium
+    category: privilege_escalation
+    mitre_id: "T1078"
+    data_types: ["3000"]
+    description: "检测 su 切换到 root 用户"
+
+  - name: "反弹 Shell - Ruby"
+    expression: 'exe.contains("ruby") && cmdline.contains("TCPSocket") && cmdline.contains("exec")'
+    severity: critical
+    category: reverse_shell
+    mitre_id: "T1059"
+    data_types: ["3000"]
+    description: "检测通过 Ruby TCPSocket 建立的反弹 Shell"
+
+  - name: "反弹 Shell - Lua"
+    expression: 'exe.contains("lua") && cmdline.contains("socket") && cmdline.contains("execute")'
+    severity: critical
+    category: reverse_shell
+    mitre_id: "T1059"
+    data_types: ["3000"]
+    description: "检测通过 Lua socket 建立的反弹 Shell"
+
+  - name: "防御规避 - 进程隐藏 (mount bind)"
+    expression: 'exe.contains("mount") && cmdline.contains("--bind") && cmdline.contains("/proc/")'
+    severity: critical
+    category: defense_evasion
+    mitre_id: "T1564.001"
+    data_types: ["3000"]
+    description: "检测通过 mount --bind 隐藏 /proc 下进程信息"
+
+  - name: "凭据访问 - mimipenguin/LaZagne"
+    expression: 'exe.contains("mimipenguin") || exe.contains("lazagne") || exe.contains("LaZagne")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1003"
+    data_types: ["3000"]
+    description: "检测 Linux 凭据抓取工具执行"
+
+  - name: "隧道工具 - frp/ngrok/nps"
+    expression: 'exe.contains("frpc") || exe.contains("frps") || exe.contains("ngrok") || exe.contains("nps") || exe.contains("npc")'
+    severity: high
+    category: c2_communication
+    mitre_id: "T1572"
+    data_types: ["3000"]
+    description: "检测内网穿透工具执行（frp、ngrok、nps），可能为 C2 隧道"
+
+  - name: "防御规避 - 文件属性锁定"
+    expression: 'exe.contains("chattr") && cmdline.contains("+i")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1222"
+    data_types: ["3000"]
+    description: "检测通过 chattr +i 锁定文件防止删除，常见于挖矿持久化"
+
+  - name: "后门 - pam_unix 后门模块"
+    expression: 'cmdline.contains("pam_unix") && cmdline.contains("auth")'
+    severity: critical
+    category: persistence
+    mitre_id: "T1556.003"
+    data_types: ["3000"]
+    description: "检测可疑 PAM 模块操作，可能为认证后门植入"
+
+  - name: "执行 - 可疑 base64 解码执行"
+    expression: '(exe.contains("base64") && cmdline.contains("-d")) || (cmdline.contains("base64") && cmdline.contains("decode") && (cmdline.contains("| bash") || cmdline.contains("| sh")))'
+    severity: high
+    category: execution
+    mitre_id: "T1140"
+    data_types: ["3000"]
+    description: "检测 base64 解码并管道执行的行为，常见于混淆恶意代码"
+
+  - name: "后门 - 可疑 nohup 后台执行"
+    expression: 'cmdline.contains("nohup") && (cmdline.contains("/tmp/") || cmdline.contains("/dev/shm/"))'
+    severity: high
+    category: execution
+    mitre_id: "T1059"
+    data_types: ["3000"]
+    description: "检测从临时目录 nohup 后台执行程序"
+
+  - name: "防御规避 - iptables 规则修改"
+    expression: 'exe.contains("iptables") && (cmdline.contains("-A") || cmdline.contains("-D") || cmdline.contains("-F"))'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1562.004"
+    data_types: ["3000"]
+    description: "检测 iptables 规则添加/删除/清空，可能为网络防御规避"
+
+  # ==================== 文件类扩展 (DataType 3001, 6001) ====================
+
+  - name: "DNS 解析配置修改"
+    expression: 'file_path == "/etc/resolv.conf" || file_path == "/etc/hosts"'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1565.001"
+    data_types: ["3001", "6001"]
+    description: "检测 DNS 解析配置或 hosts 文件修改，可能为 DNS 劫持"
+
+  - name: "内核参数配置修改"
+    expression: 'file_path.contains("/etc/sysctl") || file_path.contains("/proc/sys/")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1556"
+    data_types: ["3001", "6001"]
+    description: "检测内核参数配置修改，可能影响安全设置"
+
+  - name: "日志配置修改"
+    expression: 'file_path.contains("/etc/rsyslog") || file_path.contains("/etc/logrotate") || file_path.contains("/etc/syslog")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1070"
+    data_types: ["3001", "6001"]
+    description: "检测系统日志配置修改，可能为反取证操作"
+
+  - name: "/tmp 目录可执行文件创建"
+    expression: '(file_path.startsWith("/tmp/") || file_path.startsWith("/dev/shm/") || file_path.startsWith("/var/tmp/"))'
+    severity: medium
+    category: execution
+    mitre_id: "T1059"
+    data_types: ["3001"]
+    description: "检测在临时目录创建文件，常见的恶意文件存放位置"
+
+  - name: "Docker 配置修改"
+    expression: 'file_path.contains("/etc/docker/") || file_path.contains(".docker/config.json")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1610"
+    data_types: ["3001", "6001"]
+    description: "检测 Docker 配置文件修改，可能为容器逃逸准备"
+
+  - name: "Kubernetes 凭据访问"
+    expression: 'file_path.contains("/.kube/config") || file_path.contains("/serviceaccount/token")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.007"
+    data_types: ["3001", "6001"]
+    description: "检测 K8s 凭据文件访问或修改"
+
+  - name: "网络配置修改"
+    expression: 'file_path.contains("/etc/network/") || file_path.contains("/etc/netplan/") || file_path.contains("/etc/sysconfig/network")'
+    severity: medium
+    category: persistence
+    mitre_id: "T1016"
+    data_types: ["3001", "6001"]
+    description: "检测网络配置文件修改"
+
+  - name: "防火墙规则修改"
+    expression: 'file_path.contains("/etc/firewalld/") || file_path.contains("/etc/ufw/") || file_path.contains("/etc/iptables/")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1562.004"
+    data_types: ["3001", "6001"]
+    description: "检测防火墙规则配置文件修改"
+
+  - name: "GRUB 启动配置修改"
+    expression: 'file_path.contains("/etc/default/grub") || file_path.contains("/boot/grub/")'
+    severity: high
+    category: persistence
+    mitre_id: "T1542"
+    data_types: ["3001", "6001"]
+    description: "检测 GRUB 启动配置修改，可能为 bootkit 攻击"
+
+  - name: "内核模块配置修改"
+    expression: 'file_path.contains("/etc/modules") || file_path.contains("/etc/modprobe.d/") || file_path.contains("/lib/modules/")'
+    severity: high
+    category: persistence
+    mitre_id: "T1547.006"
+    data_types: ["3001", "6001"]
+    description: "检测内核模块配置修改，可能为 rootkit 植入"
+
+  - name: "定时任务文件修改"
+    expression: 'file_path.contains("/etc/crontab") || file_path.contains("/var/spool/cron/") || file_path.contains("/etc/cron.d/") || file_path.contains("/etc/cron.daily/")'
+    severity: high
+    category: persistence
+    mitre_id: "T1053.003"
+    data_types: ["3001", "6001"]
+    description: "检测定时任务配置文件修改，常见持久化手段"
+
+  - name: "NFS/SMB 共享配置修改"
+    expression: 'file_path == "/etc/exports" || file_path.contains("/etc/samba/smb.conf")'
+    severity: medium
+    category: lateral_movement
+    mitre_id: "T1021"
+    data_types: ["3001", "6001"]
+    description: "检测 NFS/SMB 共享配置修改，可能为横向移动准备"
+
+  # ==================== 网络类扩展 (DataType 3002) ====================
+
+  - name: "VPN 端口外连"
+    expression: 'remote_port == "1194" || remote_port == "1723" || remote_port == "500" || remote_port == "4500"'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1572"
+    data_types: ["3002"]
+    description: "检测 VPN 常用端口外连（OpenVPN/PPTP/IPSec），可能为加密隧道"
+
+  - name: "FTP 外连"
+    expression: 'remote_port == "21" || remote_port == "20"'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1048"
+    data_types: ["3002"]
+    description: "检测 FTP 端口外连，不安全的明文文件传输协议"
+
+  - name: "SMTP 非标准外连"
+    expression: '(remote_port == "25" || remote_port == "587" || remote_port == "465") && !exe.contains("postfix") && !exe.contains("sendmail")'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1048.002"
+    data_types: ["3002"]
+    description: "检测非邮件服务进程连接 SMTP 端口，可能为数据外传"
+
+  - name: "LDAP 端口访问"
+    expression: 'remote_port == "389" || remote_port == "636"'
+    severity: medium
+    category: discovery
+    mitre_id: "T1018"
+    data_types: ["3002"]
+    description: "检测 LDAP/LDAPS 端口连接，可能为域信息枚举"
+
+  - name: "Cobalt Strike 默认端口"
+    expression: 'remote_port == "50050" || remote_port == "443" && !exe.contains("curl") && !exe.contains("wget") && !exe.contains("firefox") && !exe.contains("chrome")'
+    severity: high
+    category: c2_communication
+    mitre_id: "T1071.001"
+    data_types: ["3002"]
+    description: "检测 Cobalt Strike 管理端口或非浏览器进程 HTTPS 外连"
+
+  - name: "高频外连检测"
+    expression: 'recent_remote_addr_count > 10 && !is_private_ip(remote_addr)'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1071"
+    data_types: ["3002"]
+    description: "检测短时间内对同一外网 IP 高频连接，可能为 C2 心跳通信"
+
+  - name: "新出现进程外网连接"
+    expression: 'first_seen_exe && !is_private_ip(remote_addr) && remote_addr != ""'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1071"
+    data_types: ["3002"]
+    description: "首次出现的进程发起外网连接，可能为新植入的恶意程序"
+
+  # ==================== 容器安全 (DataType 3000) ====================
+
+  - name: "容器内 - 包管理器执行"
+    expression: 'exe.contains("apt") || exe.contains("yum") || exe.contains("apk") || exe.contains("pip")'
+    severity: low
+    category: execution
+    mitre_id: "T1059"
+    data_types: ["3000"]
+    description: "检测容器内包管理器执行，生产容器不应安装新软件"
+
+  - name: "容器逃逸 - cgroup escape"
+    expression: 'cmdline.contains("release_agent") && cmdline.contains("cgroup")'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "检测通过 cgroup release_agent 的容器逃逸尝试"
+
+  - name: "容器逃逸 - /proc/sysrq-trigger"
+    expression: 'file_path == "/proc/sysrq-trigger" || cmdline.contains("sysrq-trigger")'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000", "3001"]
+    description: "检测访问 /proc/sysrq-trigger，可能为容器逃逸或系统破坏"
+
+  # ==================== DNS 事件 (DataType 3003) ====================
+
+  - name: "DNS 查询 - 可疑进程"
+    expression: 'exe.contains("/tmp/") || exe.contains("/dev/shm/")'
+    severity: high
+    category: c2_communication
+    mitre_id: "T1071.004"
+    data_types: ["3003"]
+    description: "检测来自临时目录的进程发起 DNS 查询，可能为恶意程序 C2 通信"
+
+  - name: "DNS 查询 - 非标准 DNS 服务器"
+    expression: '!is_private_ip(dns_server) && dns_server != "8.8.8.8" && dns_server != "8.8.4.4" && dns_server != "1.1.1.1" && dns_server != "1.0.0.1" && dns_server != "114.114.114.114" && dns_server != "223.5.5.5" && dns_server != "223.6.6.6"'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1071.004"
+    data_types: ["3003"]
+    description: "检测使用非常见公共 DNS 服务器，可能为 DNS over HTTPS/TLS C2 通道"
+
+  - name: "DNS 查询 - 高频请求"
+    expression: 'recent_remote_addr_count > 20'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1048.001"
+    data_types: ["3003"]
+    description: "检测短时间内大量 DNS 查询，可能为 DNS 隧道数据外传"
+
+  - name: "DNS 查询 - 非 DNS 工具"
+    expression: 'exe != "/usr/bin/dig" && exe != "/usr/bin/nslookup" && exe != "/usr/bin/host" && exe != "/usr/bin/systemd-resolved" && exe != "/usr/lib/systemd/systemd-resolved"'
+    severity: low
+    category: discovery
+    mitre_id: "T1018"
+    data_types: ["3003"]
+    description: "记录非 DNS 工具发起的 DNS 查询（低优先级基线事件）"

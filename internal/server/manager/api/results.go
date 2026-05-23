@@ -389,16 +389,16 @@ func (h *ResultsHandler) exportExcel(c *gin.Context, host model.Host, results []
 	sheetName := "基线风险"
 	index, _ := f.NewSheet(sheetName)
 	f.SetActiveSheet(index)
-	f.DeleteSheet("Sheet1")
+	_ = f.DeleteSheet("Sheet1")
 
 	// 设置列宽
-	f.SetColWidth(sheetName, "A", "A", 15)
-	f.SetColWidth(sheetName, "B", "B", 20)
-	f.SetColWidth(sheetName, "C", "C", 40)
-	f.SetColWidth(sheetName, "D", "D", 12)
-	f.SetColWidth(sheetName, "E", "E", 20)
-	f.SetColWidth(sheetName, "F", "F", 20)
-	f.SetColWidth(sheetName, "G", "G", 50)
+	_ = f.SetColWidth(sheetName, "A", "A", 15)
+	_ = f.SetColWidth(sheetName, "B", "B", 20)
+	_ = f.SetColWidth(sheetName, "C", "C", 40)
+	_ = f.SetColWidth(sheetName, "D", "D", 12)
+	_ = f.SetColWidth(sheetName, "E", "E", 20)
+	_ = f.SetColWidth(sheetName, "F", "F", 20)
+	_ = f.SetColWidth(sheetName, "G", "G", 50)
 
 	// 标题样式
 	titleStyle, _ := f.NewStyle(&excelize.Style{
@@ -421,49 +421,49 @@ func (h *ResultsHandler) exportExcel(c *gin.Context, host model.Host, results []
 	})
 
 	// 主机信息
-	f.MergeCell(sheetName, "A1", "G1")
-	f.SetCellValue(sheetName, "A1", "主机基线风险报告")
-	f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
-	f.SetRowHeight(sheetName, 1, 25)
+	_ = f.MergeCell(sheetName, "A1", "G1")
+	_ = f.SetCellValue(sheetName, "A1", "主机基线风险报告")
+	_ = f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
+	_ = f.SetRowHeight(sheetName, 1, 25)
 
 	row := 3
-	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "主机名:")
-	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.Hostname)
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "主机名:")
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.Hostname)
 	row++
-	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "主机ID:")
-	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.HostID)
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "主机ID:")
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.HostID)
 	row++
-	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "操作系统:")
-	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), fmt.Sprintf("%s %s", host.OSFamily, host.OSVersion))
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "操作系统:")
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), fmt.Sprintf("%s %s", host.OSFamily, host.OSVersion))
 	row++
 	if len(host.IPv4) > 0 {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "IPv4地址:")
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.IPv4[0])
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "IPv4地址:")
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), host.IPv4[0])
 		row++
 	}
-	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "导出时间:")
-	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), time.Now().Format("2006-01-02 15:04:05"))
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "导出时间:")
+	_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), time.Now().Format("2006-01-02 15:04:05"))
 	row += 2
 
 	// 表头
 	headers := []string{"规则ID", "类别", "标题", "严重级别", "实际值", "期望值", "修复建议"}
 	for i, header := range headers {
 		cell := fmt.Sprintf("%c%d", 'A'+i, row)
-		f.SetCellValue(sheetName, cell, header)
-		f.SetCellStyle(sheetName, cell, cell, headerStyle)
+		_ = f.SetCellValue(sheetName, cell, header)
+		_ = f.SetCellStyle(sheetName, cell, cell, headerStyle)
 	}
-	f.SetRowHeight(sheetName, row, 20)
+	_ = f.SetRowHeight(sheetName, row, 20)
 	row++
 
 	// 数据行
 	for _, r := range results {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), r.RuleID)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), r.Category)
-		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), r.Title)
-		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), r.Severity)
-		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), r.Actual)
-		f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), r.Expected)
-		f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), r.FixSuggestion)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), r.RuleID)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), r.Category)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), r.Title)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), r.Severity)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), r.Actual)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("F%d", row), r.Expected)
+		_ = f.SetCellValue(sheetName, fmt.Sprintf("G%d", row), r.FixSuggestion)
 		row++
 	}
 

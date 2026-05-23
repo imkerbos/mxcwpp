@@ -20,6 +20,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
 	"github.com/imkerbos/mxsec-platform/internal/agent/dependency"
 	"github.com/imkerbos/mxsec-platform/internal/agent/updater"
+	"github.com/imkerbos/mxsec-platform/internal/agent/wal"
 	_ "github.com/imkerbos/mxsec-platform/internal/common/compressor" // 注册 Snappy 压缩器
 )
 
@@ -52,11 +53,11 @@ type Manager struct {
 	onConfigUpdate func(*grpc.AgentConfig, *grpc.CertificateBundle) // 配置更新回调 (agentConfig, certBundle)
 	onTaskCancel   func(token string)                               // 任务取消回调
 	cacheMgr       *cache.Manager                                   // 缓存管理器
+	eventWAL       *wal.WAL                                         // EDR 事件 WAL（断网兜底）
 	depMgr         *dependency.Manager                              // 依赖管理器
 	agentMeta      agentMetadata                                    // Agent 元信息缓存
 	agentMetaMu    sync.RWMutex                                     // 元信息读写锁
-	mu             sync.RWMutex
-	isConnected    bool // 连接状态
+	isConnected    bool                                             // 连接状态
 	connectedMu    sync.RWMutex
 }
 
@@ -67,6 +68,13 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 	cacheMgr, err := cache.NewManager(cacheDir, 100*1024*1024, 7*24*time.Hour, logger) // 100MB, 7天
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cache manager: %w", err)
+	}
+
+	// 创建 EDR 事件 WAL（断网时兜底缓冲）
+	walDir := cfg.GetWorkDir() + "/wal"
+	eventWAL, err := wal.New(walDir, wal.DefaultMaxSize, logger.Named("wal"))
+	if err != nil {
+		logger.Warn("failed to create WAL, EDR events may be lost on disconnect", zap.Error(err))
 	}
 
 	return &Manager{
@@ -80,6 +88,7 @@ func NewManager(cfg *config.Config, logger *zap.Logger, connMgr *connection.Mana
 		taskCh:         make(chan *grpc.Task, 100),
 		taskChannels:   make(map[string]chan *grpc.Task),
 		cacheMgr:       cacheMgr,
+		eventWAL:       eventWAL,
 		depMgr:         dependency.NewManager(logger),
 		isConnected:    false,
 	}, nil
@@ -186,6 +195,15 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 			// 连接建立后，先发送缓存的数据
 			if err := mgr.sendCachedData(ctx, stream); err != nil {
 				mgr.logger.Warn("failed to send cached data", zap.Error(err))
+			}
+
+			// WAL 重放：将断网期间持久化的 EDR 事件重发到 Server
+			if mgr.eventWAL != nil && mgr.eventWAL.HasData() {
+				mgr.logger.Info("replaying WAL events after reconnection",
+					zap.Int64("wal_size", mgr.eventWAL.Size()))
+				if err := mgr.replayWAL(stream); err != nil {
+					mgr.logger.Warn("WAL replay failed", zap.Error(err))
+				}
 			}
 
 			// 启动发送和接收 goroutine
@@ -524,7 +542,16 @@ func (m *Manager) SendPluginData(pluginName string, record *bridge.Record) error
 	}
 
 	if !m.ringBuffer.WriteEncodedRecord(encodedRecord) {
-		m.logger.Warn("ring buffer full, dropping plugin data (will re-collect next cycle)", zap.String("plugin", pluginName))
+		// Ring buffer full: EDR events (3000-3099) go to WAL, others are dropped.
+		if m.eventWAL != nil && record.DataType >= 3000 && record.DataType <= 3099 {
+			if !m.eventWAL.Write(encodedRecord) {
+				m.logger.Warn("WAL full, dropping EDR event",
+					zap.Int32("data_type", record.DataType))
+			}
+		} else {
+			m.logger.Warn("ring buffer full, dropping plugin data",
+				zap.String("plugin", pluginName))
+		}
 	}
 
 	return nil
@@ -555,6 +582,21 @@ func (m *Manager) sendCachedData(ctx context.Context, stream grpc.Transfer_Trans
 	}
 
 	return nil
+}
+
+// replayWAL replays persisted EDR events from the WAL after reconnection.
+func (m *Manager) replayWAL(stream grpc.Transfer_TransferClient) error {
+	sendTimeout := 30 * time.Second
+
+	return m.eventWAL.Replay(100, func(records []*grpc.EncodedRecord) error {
+		data := m.buildPackagedData(records)
+		if err := m.sendWithTimeout(stream, data, sendTimeout); err != nil {
+			return fmt.Errorf("WAL replay send: %w", err)
+		}
+		m.logger.Debug("WAL batch sent",
+			zap.Int("records", len(records)))
+		return nil
+	})
 }
 
 // retryCachedData 定期清理残留缓存（正常情况下 sendCachedData 已清空，这里做兜底）

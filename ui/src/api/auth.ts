@@ -47,3 +47,21 @@ export const authApi = {
     return apiClient.post('/auth/change-password', data)
   },
 }
+
+export const rbacApi = {
+  listPermissions: async () => {
+    return apiClient.get('/rbac/permissions')
+  },
+
+  listRoles: async () => {
+    return apiClient.get('/rbac/roles')
+  },
+
+  getRolePermissions: async (role: string): Promise<{ role: string; permissions: string[] }> => {
+    return apiClient.get(`/rbac/roles/${role}/permissions`)
+  },
+
+  updateRolePermissions: async (role: string, permissions: string[]): Promise<void> => {
+    return apiClient.put(`/rbac/roles/${role}/permissions`, { permissions })
+  },
+}

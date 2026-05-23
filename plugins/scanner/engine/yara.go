@@ -40,9 +40,23 @@ func NewYARAScanner(logger *zap.Logger) *YARAScanner {
 	}
 }
 
-// Available 检查 yr (YARA-X) 是否可用
+// Available 检查 yr (YARA-X) 是否可用（验证二进制可执行，非仅文件存在）
 func (s *YARAScanner) Available() bool {
-	return s.findBinary() != ""
+	bin := s.findBinary()
+	if bin == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
+	if err != nil {
+		s.logger.Warn("yr 二进制存在但无法执行",
+			zap.String("path", bin),
+			zap.String("output", string(out)),
+			zap.Error(err))
+		return false
+	}
+	return true
 }
 
 // findBinary 查找 yr 路径：优先插件目录 → 系统 PATH
@@ -61,18 +75,19 @@ func (s *YARAScanner) findBinary() string {
 	return ""
 }
 
-// yaraMatch YARA-X JSON 输出结构
-type yaraMatch struct {
-	Path  string `json:"path"`
-	Rules []struct {
-		Identifier string   `json:"identifier"`
-		Namespace  string   `json:"namespace"`
-		Tags       []string `json:"tags,omitempty"`
-		Metadata   []struct {
-			Identifier string      `json:"identifier"`
-			Value      interface{} `json:"value"`
-		} `json:"metadata,omitempty"`
-	} `json:"rules"`
+// yaraOutput is the top-level YARA-X v1.15+ JSON output structure.
+type yaraOutput struct {
+	Version string          `json:"version"`
+	Matches []yaraMatchItem `json:"matches"`
+}
+
+// yaraMatchItem represents a single match in YARA-X v1.15+ JSON output.
+type yaraMatchItem struct {
+	Rule      string            `json:"rule"`
+	File      string            `json:"file"`
+	Namespace string            `json:"namespace,omitempty"`
+	Tags      []string          `json:"tags,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // Scan 使用 YARA-X 扫描指定路径
@@ -134,99 +149,75 @@ func (s *YARAScanner) scanPath(ctx context.Context, scanPath string) ([]ScanResu
 	return s.parseOutput(output)
 }
 
-// parseOutput 解析 YARA-X JSON 输出
+// parseOutput 解析 YARA-X JSON 输出（v1.15+ 格式）
 func (s *YARAScanner) parseOutput(output []byte) ([]ScanResult, error) {
 	if len(output) == 0 {
 		return nil, nil
 	}
 
+	var out yaraOutput
+	if err := json.Unmarshal(output, &out); err != nil {
+		s.logger.Warn("解析 YARA-X JSON 输出失败", zap.Error(err))
+		return nil, nil
+	}
+
 	var results []ScanResult
+	for _, m := range out.Matches {
+		threatType := s.extractThreatTypeV2(m.Tags, m.Metadata)
+		severity := s.extractSeverityV2(m.Metadata, threatType)
 
-	// YARA-X JSON 输出是换行分隔的 JSON 对象
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+		result := ScanResult{
+			FilePath:   m.File,
+			ThreatName: m.Rule,
+			ThreatType: threatType,
+			Severity:   severity,
+			Engine:     "yara",
+			RuleName:   m.Rule,
+			DetectedAt: time.Now(),
 		}
 
-		var match yaraMatch
-		if err := json.Unmarshal([]byte(line), &match); err != nil {
-			s.logger.Warn("解析 YARA 输出失败", zap.String("line", line), zap.Error(err))
-			continue
-		}
-
-		for _, rule := range match.Rules {
-			threatType := s.extractThreatType(rule.Tags, rule.Metadata)
-			severity := s.extractSeverity(rule.Metadata, threatType)
-
-			result := ScanResult{
-				FilePath:   match.Path,
-				ThreatName: rule.Identifier,
-				ThreatType: threatType,
-				Severity:   severity,
-				Engine:     "yara",
-				RuleName:   rule.Identifier,
-				DetectedAt: time.Now(),
-			}
-
-			result.FileHash, result.FileSize = getFileInfo(match.Path)
-			results = append(results, result)
-		}
+		result.FileHash, result.FileSize = getFileInfo(m.File)
+		results = append(results, result)
 	}
 
 	return results, nil
 }
 
-// extractThreatType 从 YARA 规则标签和元数据提取威胁类型
-func (s *YARAScanner) extractThreatType(tags []string, metadata []struct {
-	Identifier string      `json:"identifier"`
-	Value      interface{} `json:"value"`
-}) string {
+// extractThreatTypeV2 从 YARA-X v1.15+ 规则标签和元数据提取威胁类型
+func (s *YARAScanner) extractThreatTypeV2(tags []string, metadata map[string]string) string {
 	// 先检查标签
 	for _, tag := range tags {
 		lower := strings.ToLower(tag)
-		switch {
-		case lower == "ransomware":
+		switch lower {
+		case "ransomware":
 			return "ransomware"
-		case lower == "rootkit":
+		case "rootkit":
 			return "rootkit"
-		case lower == "backdoor":
+		case "backdoor":
 			return "backdoor"
-		case lower == "trojan":
+		case "trojan":
 			return "trojan"
-		case lower == "miner" || lower == "coinminer":
+		case "miner", "coinminer":
 			return "miner"
-		case lower == "worm":
+		case "worm":
 			return "worm"
-		case lower == "virus":
+		case "virus":
 			return "virus"
 		}
 	}
 
 	// 检查元数据中的 threat_type
-	for _, m := range metadata {
-		if m.Identifier == "threat_type" {
-			if v, ok := m.Value.(string); ok {
-				return v
-			}
-		}
+	if v, ok := metadata["threat_type"]; ok {
+		return v
 	}
 
 	return "other"
 }
 
-// extractSeverity 从元数据提取严重级别
-func (s *YARAScanner) extractSeverity(metadata []struct {
-	Identifier string      `json:"identifier"`
-	Value      interface{} `json:"value"`
-}, threatType string) string {
-	for _, m := range metadata {
-		if m.Identifier == "severity" {
-			if v, ok := m.Value.(string); ok {
-				return v
-			}
-		}
+// extractSeverityV2 从元数据提取严重级别
+func (s *YARAScanner) extractSeverityV2(metadata map[string]string, threatType string) string {
+	if v, ok := metadata["severity"]; ok {
+		return v
 	}
 	return getSeverity(threatType)
 }

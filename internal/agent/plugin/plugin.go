@@ -227,7 +227,7 @@ func (m *Manager) SyncPlugins(ctx context.Context, configs []*grpc.Config) error
 					m.logger.Error("failed to stop old plugin", zap.String("name", cfg.Name), zap.Error(err))
 					// 如果停止失败，尝试强制停止
 					if plugin.cmd.Process != nil {
-						plugin.cmd.Process.Kill()
+						_ = plugin.cmd.Process.Kill()
 					}
 				}
 				// 等待一小段时间，确保进程完全退出
@@ -294,6 +294,25 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	execPath, err := m.downloadPlugin(cfg, workDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download plugin: %w", err)
+	}
+
+	// 3.5 数据类插件（如 virus-database）：只需下载解压，不启动进程
+	if cfg.Type == "virus-database" || execPath == workDir {
+		m.logger.Info("data-only plugin synced (no process)",
+			zap.String("name", cfg.Name),
+			zap.String("version", cfg.Version),
+			zap.String("path", workDir))
+		plugin := &Plugin{
+			Config:    cfg,
+			workDir:   workDir,
+			status:    StatusRunning,
+			startTime: time.Now(),
+			lastPong:  time.Now(),
+			pingCh:    make(chan struct{}, 1),
+			stopCh:    make(chan struct{}),
+			logger:    m.logger.With(zap.String("plugin", cfg.Name)),
+		}
+		return plugin, nil
 	}
 
 	// 4. 创建 Pipe
@@ -569,7 +588,14 @@ func (m *Manager) downloadPlugin(cfg *grpc.Config, workDir string) (string, erro
 			}
 			os.Remove(tmpPath)
 
-			// 设置可执行权限
+			// 设置可执行权限（数据类插件无可执行文件，跳过）
+			if _, statErr := os.Stat(execPath); statErr != nil && os.IsNotExist(statErr) {
+				// 数据类插件（如 virus-database）：tar.gz 只含数据文件，无同名可执行文件
+				m.logger.Info("archive extracted (data-only plugin, no executable)",
+					zap.String("name", cfg.Name),
+					zap.String("work_dir", workDir))
+				return workDir, nil
+			}
 			if err := os.Chmod(execPath, 0755); err != nil {
 				lastErr = fmt.Errorf("failed to set executable permission: %w", err)
 				continue
@@ -1125,8 +1151,13 @@ func (m *Manager) watchPlugins() {
 					plugin.mu.Unlock()
 				}
 
+				// 数据类插件（无进程）：跳过心跳检查
+				if plugin.cmd == nil {
+					continue
+				}
+
 				// 检查进程是否还存活（signal 0 不会杀进程，只检测是否存在）
-				if plugin.cmd != nil && plugin.cmd.Process != nil {
+				if plugin.cmd.Process != nil {
 					if err := plugin.cmd.Process.Signal(syscall.Signal(0)); err != nil {
 						m.logger.Warn("plugin process not alive, will be cleaned up by waitProcess",
 							zap.String("plugin", name),
@@ -1199,7 +1230,7 @@ func (m *Manager) forceRestartPlugin(name string) {
 	}
 
 	// 先停止（等待 waitProcess 完成全部清理）
-	m.stopPlugin(plugin)
+	_ = m.stopPlugin(plugin)
 
 	// 显式确保任务通道已清理（防止旧 sendTask defer 延迟执行的竞争）
 	m.transport.UnregisterTaskChannel(name)
@@ -1251,7 +1282,7 @@ func (m *Manager) receiveData(plugin *Plugin) {
 			if len > maxMessageSize {
 				plugin.logger.Error("record size exceeds maximum", zap.Uint32("size", len))
 				// 跳过这个记录
-				io.CopyN(io.Discard, reader, int64(len))
+				_, _ = io.CopyN(io.Discard, reader, int64(len))
 				continue
 			}
 
@@ -1371,7 +1402,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err != nil {
 				plugin.logger.Error("failed to marshal task", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1381,7 +1412,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err := binary.Write(writer, binary.LittleEndian, len); err != nil {
 				plugin.logger.Error("failed to write task size", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1390,7 +1421,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if _, err := writer.Write(taskData); err != nil {
 				plugin.logger.Error("failed to write task data", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1399,7 +1430,7 @@ func (m *Manager) sendTask(plugin *Plugin) {
 			if err := writer.Flush(); err != nil {
 				plugin.logger.Error("failed to flush task data", zap.Error(err))
 				if m.taskTracker != nil {
-					m.taskTracker.MarkFailed(task.Token)
+					_ = m.taskTracker.MarkFailed(task.Token)
 				}
 				continue
 			}
@@ -1432,6 +1463,15 @@ func (m *Manager) stopPlugin(plugin *Plugin) error {
 
 	plugin.logger.Info("stopping plugin")
 
+	// 数据类插件（无进程）：直接标记停止
+	if plugin.cmd == nil {
+		plugin.mu.Lock()
+		plugin.status = StatusStopped
+		plugin.mu.Unlock()
+		plugin.logger.Info("plugin stopped")
+		return nil
+	}
+
 	// 发送 SIGTERM 信号
 	if plugin.cmd.Process != nil {
 		if err := plugin.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -1446,7 +1486,7 @@ func (m *Manager) stopPlugin(plugin *Plugin) error {
 	case <-time.After(5 * time.Second):
 		plugin.logger.Warn("plugin did not stop gracefully, killing")
 		if plugin.cmd.Process != nil {
-			plugin.cmd.Process.Kill()
+			_ = plugin.cmd.Process.Kill()
 		}
 		// Kill 后再等 waitProcess 完成
 		select {

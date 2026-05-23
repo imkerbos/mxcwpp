@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"cloud.google.com/go/pubsub"
+	"cloud.google.com/go/pubsub" //nolint:staticcheck // TODO: migrate to cloud.google.com/go/pubsub/v2
 	"go.uber.org/zap"
 	"google.golang.org/api/option"
 	"gorm.io/gorm"
@@ -53,7 +53,7 @@ func (c *Consumer) Start(ctx context.Context) {
 	// 创建 Pub/Sub 客户端
 	var opts []option.ClientOption
 	if c.cfg.CredentialsJSON != "" {
-		opts = append(opts, option.WithCredentialsJSON([]byte(c.cfg.CredentialsJSON)))
+		opts = append(opts, option.WithCredentialsJSON([]byte(c.cfg.CredentialsJSON))) //nolint:staticcheck // TODO: migrate to newer auth approach
 	}
 
 	client, err := pubsub.NewClient(ctx, c.cfg.ProjectID, opts...)

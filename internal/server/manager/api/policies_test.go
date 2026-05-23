@@ -149,7 +149,7 @@ func TestDeletePolicy_WithPendingTask(t *testing.T) {
 
 	// 验证响应包含冲突信息
 	var resp map[string]any
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.Contains(t, resp["message"], "活跃任务")
 
 	// 验证策略未被删除

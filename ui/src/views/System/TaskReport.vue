@@ -18,7 +18,6 @@
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="remediation" tab="漏洞修复" />
       <a-tab-pane key="kube" tab="容器安全" />
-      <a-tab-pane key="edr" tab="EDR" />
     </a-tabs>
 
     <!-- 基线检查 Tab（现有全部内容） -->
@@ -475,7 +474,6 @@
     <VulnTaskReport v-if="activeTab === 'vulnerability'" />
     <RemediationTaskReport v-if="activeTab === 'remediation'" />
     <KubeTaskReport v-if="activeTab === 'kube'" />
-    <EDRTaskReport v-if="activeTab === 'edr'" />
   </div>
 </template>
 
@@ -505,12 +503,11 @@ import AntivirusTaskReport from './task-reports/AntivirusTaskReport.vue'
 import VulnTaskReport from './task-reports/VulnTaskReport.vue'
 import RemediationTaskReport from './task-reports/RemediationTaskReport.vue'
 import KubeTaskReport from './task-reports/KubeTaskReport.vue'
-import EDRTaskReport from './task-reports/EDRTaskReport.vue'
 
 // Tab 切换 — 从 URL query 持久化
 const route = useRoute()
 const router = useRouter()
-const validTabs = ['baseline', 'antivirus', 'vulnerability', 'kube', 'edr']
+const validTabs = ['baseline', 'antivirus', 'vulnerability', 'kube']
 const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'baseline'
 const activeTab = ref(initialTab)
 
