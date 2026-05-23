@@ -37,5 +37,17 @@ func (s *Scanner) ShouldScan(_ *event.Event) bool { return false }
 // Enqueue is a no-op stub.
 func (s *Scanner) Enqueue(_ string, _ map[string]string) {}
 
+// EnqueuePreBlock is a no-op stub.
+func (s *Scanner) EnqueuePreBlock(_ string, _ int, _ map[string]string) {}
+
+// EnablePreBlock is a no-op stub.
+func (s *Scanner) EnablePreBlock(_ bool) {}
+
+// PreBlockEnabled always returns false on non-Linux.
+func (s *Scanner) PreBlockEnabled() bool { return false }
+
+// PreBlockStats returns zero on non-Linux.
+func (s *Scanner) PreBlockStats() uint64 { return 0 }
+
 // Stats returns zero counters.
 func (s *Scanner) Stats() (total, matched uint64) { return 0, 0 }

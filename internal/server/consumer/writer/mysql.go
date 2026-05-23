@@ -600,3 +600,35 @@ func (w *MySQLWriter) WriteQuarantineResult(msg *kafka.MQMessage) error {
 
 	return nil
 }
+
+// WriteMemoryThreat persists a memory threat detection event (DataType 3004).
+func (w *MySQLWriter) WriteMemoryThreat(msg *kafka.MQMessage) error {
+	fields, err := ParseRecordFields(msg.Body)
+	if err != nil {
+		return fmt.Errorf("解析内存威胁事件失败: %w", err)
+	}
+
+	severity := "high"
+	switch fields["threat_type"] {
+	case "memfd_exec":
+		severity = "critical"
+	case "deleted_exe", "anonymous_exec":
+		severity = "high"
+	}
+
+	record := &model.MemoryThreat{
+		HostID:     msg.AgentID,
+		Hostname:   msg.Hostname,
+		ThreatType: fields["threat_type"],
+		Severity:   severity,
+		PID:        fields["pid"],
+		PPID:       fields["ppid"],
+		UID:        fields["uid"],
+		Exe:        fields["exe"],
+		Cmdline:    fields["cmdline"],
+		Detail:     fields["detail"],
+		StoryID:    fields["story_id"],
+	}
+
+	return w.db.Create(record).Error
+}

@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/sanitize"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/siem"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
@@ -18,8 +19,9 @@ const notifyThrottleWindow = 30 * time.Minute
 
 // AlertGenerator 负责将 CEL 引擎匹配结果写入 alerts 表（去重模式）
 type AlertGenerator struct {
-	db  *gorm.DB
-	log *zap.Logger
+	db            *gorm.DB
+	log           *zap.Logger
+	siemForwarder *siem.Forwarder // SIEM 转发器（可选）
 }
 
 // NewAlertGenerator 创建 AlertGenerator
@@ -28,6 +30,11 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 		db:  db,
 		log: logger,
 	}
+}
+
+// SetSIEMForwarder 设置 SIEM 转发器
+func (g *AlertGenerator) SetSIEMForwarder(f *siem.Forwarder) {
+	g.siemForwarder = f
 }
 
 // Generate 根据匹配的规则和事件字段生成或更新告警
@@ -97,6 +104,9 @@ func (g *AlertGenerator) upsertAlert(hostID string, rule *model.DetectionRule, f
 			g.sendNotification(&existing)
 		}
 
+		// SIEM 转发每次告警命中都发送（SIEM 需要实时事件流）
+		g.forwardToSIEM(&existing, masked)
+
 		return nil
 	}
 
@@ -133,6 +143,7 @@ func (g *AlertGenerator) upsertAlert(hostID string, rule *model.DetectionRule, f
 	)
 
 	g.sendNotification(&alert)
+	g.forwardToSIEM(&alert, masked)
 
 	return nil
 }
@@ -170,6 +181,27 @@ func (g *AlertGenerator) sendNotification(alert *model.Alert) {
 			g.log.Error("发送检测告警通知失败", zap.Error(err))
 		}
 	}(alert)
+}
+
+// forwardToSIEM 将告警转发到 SIEM 系统
+func (g *AlertGenerator) forwardToSIEM(alert *model.Alert, fields map[string]string) {
+	if g.siemForwarder == nil {
+		return
+	}
+	go g.siemForwarder.SendAlert(siem.AlertEvent{
+		EventID:  "rule_match",
+		Name:     alert.Title,
+		Severity: alert.Severity,
+		HostID:   alert.HostID,
+		Hostname: fields["hostname"],
+		SourceIP: fields["src_ip"],
+		DestIP:   fields["dst_ip"],
+		PID:      fields["pid"],
+		Exe:      fields["exe"],
+		Cmdline:  fields["cmdline"],
+		RuleID:   alert.RuleID,
+		MITRE:    fields["mitre_id"],
+	})
 }
 
 // categorize 根据规则信息确定告警分类

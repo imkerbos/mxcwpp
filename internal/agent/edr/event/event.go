@@ -15,6 +15,8 @@ const (
 	DataTypeFile    int32 = 3001 // file_open / file_write / file_rename / file_unlink / file_chmod
 	DataTypeNetwork int32 = 3002 // tcp_connect / tcp_accept / tcp_close / udp_send
 	DataTypeDNS     int32 = 3003 // dns_query (Phase 6)
+	DataTypeBDE     int32 = 3010 // behavior_profile (BDE Phase 10)
+	DataTypeMemory  int32 = 3004 // memory threat (memfd/deleted_exe/anonymous_exec, Phase 15)
 )
 
 // EventType is the specific event subtype string carried in the "event_type" field.
@@ -45,7 +47,20 @@ const (
 
 // DNS event types.
 const (
-	DNSQuery EventType = "dns_query"
+	DNSQuery    EventType = "dns_query"
+	DNSResponse EventType = "dns_response"
+)
+
+// Signal event types.
+const (
+	SignalSend EventType = "signal_send"
+)
+
+// Memory threat event types (Phase 15).
+const (
+	MemfdExec     EventType = "memfd_exec"     // process using memfd-backed file descriptor
+	DeletedExe    EventType = "deleted_exe"    // process running from deleted executable
+	AnonymousExec EventType = "anonymous_exec" // suspicious anonymous rwx memory regions
 )
 
 // Event is the unified EDR event structure produced by collectors.

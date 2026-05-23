@@ -48,7 +48,9 @@
 | 3001 | Agent→Server | 文件事件 (open/write/rename/unlink/chmod) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
 | 3002 | Agent→Server | 网络事件 (tcp_connect/accept/close, udp_send) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL + 端口扫描检测 |
 | 3003 | Agent→Server | DNS 查询事件 (dns_query) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
-| 3004-3099 | - | **未分配** | - | - |
+| 3004 | Agent→Server | 内存威胁事件 (memfd_exec/deleted_exe/anonymous_exec) | Agent 内置 EDR 引擎 | Consumer→MySQL + CEL |
+| 3010 | Agent→Server | BDE 行为画像快照 (behavior_profile) | Agent 内置 EDR 引擎 | Consumer→BDE 基线引擎 |
+| 3005-3009, 3011-3099 | - | **未分配** | - | - |
 
 ### 资产采集 (5050-5060) → Kafka: `TopicAsset`
 
@@ -147,7 +149,9 @@
 | DataType | 方向 | 说明 | 生产者 | 消费者 |
 |----------|------|------|--------|--------|
 | 9900 | Server→Agent | 任务取消信号 | Manager | Agent 内部处理（不走 Kafka） |
-| 9901-9998 | - | **未分配** | - | - |
+| 9901-9996 | - | **未分配** | - | - |
+| 9997 | Server→Agent | 网络阻断/隔离命令 (block_ip/unblock_ip/isolate/release) | Manager/AutoResponder | Agent EDR 引擎 (isolate.Manager) |
+| 9998 | Server→Agent | 自动响应命令 (kill_process/quarantine_file) | AutoResponder | Agent EDR 引擎 (rule.ActionExecutor) |
 | 9999 | Agent→Server | 命令执行回包 | Agent | Consumer→MySQL |
 
 ---
@@ -197,6 +201,7 @@ Kafka 启用时只走 Kafka 路径，直写路径仅在 Kafka 关闭时兜底。
 | 1000 | heartbeat | MySQL+CH+Redis | Y | 完整双路径 |
 | 1001 | heartbeat | ClickHouse | - | Kafka-only，指标数据无需持久化到 MySQL |
 | 3000-3003 | ebpf | ClickHouse+CEL | - | Kafka-only，时序数据写 ClickHouse（生产者: Agent 内置 EDR 引擎） |
+| 3004 | ebpf | MySQL+CEL | - | Kafka-only，内存威胁事件持久化到 MySQL |
 | 5050-5060 | asset | MySQL | Y | 完整双路径 |
 | 6001 | events | MySQL+CH+CEL | Y | 完整双路径 |
 | 6002 | events | MySQL | Y | 完整双路径 |

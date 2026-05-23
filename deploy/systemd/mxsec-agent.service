@@ -17,7 +17,7 @@ SyslogIdentifier=mxsec-agent
 # 资源限制
 LimitNOFILE=65536
 LimitNPROC=4096
-MemoryMax=1G
+MemoryMax=2G
 CPUQuota=100%
 
 # 环境变量

@@ -73,6 +73,7 @@ type FixTask struct {
 	Progress     int           `gorm:"column:progress;type:int;default:0" json:"progress"` // 进度百分比 0-100
 	CreatedBy    string        `gorm:"column:created_by;type:varchar(64)" json:"created_by"`
 	CreatedAt    LocalTime     `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt    LocalTime     `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"updated_at"`
 	CompletedAt  *LocalTime    `gorm:"column:completed_at;type:timestamp" json:"completed_at"`
 }
 

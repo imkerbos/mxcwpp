@@ -1,6 +1,9 @@
 package rule
 
 import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +25,10 @@ type Manager struct {
 
 	// previous keeps the last known-good rule set for rollback.
 	previous atomic.Pointer[RuleSet]
+
+	// verifyKey is the Ed25519 public key for signature verification (optional).
+	// When set, Server-pushed rules must include a valid signature.
+	verifyKey ed25519.PublicKey
 }
 
 // RuleSet is an immutable snapshot of loaded rules, indexed by event_type.
@@ -312,6 +319,52 @@ func loadRuleFile(path string) (*Rule, error) {
 	}
 
 	return &r, nil
+}
+
+// SetVerifyKey configures the Ed25519 public key for rule signature verification.
+// When set, LoadFromDataSigned rejects payloads with invalid signatures.
+func (m *Manager) SetVerifyKey(pubKeyBase64 string) error {
+	keyBytes, err := base64.StdEncoding.DecodeString(pubKeyBase64)
+	if err != nil {
+		return fmt.Errorf("decode public key: %w", err)
+	}
+	if len(keyBytes) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid public key size: %d", len(keyBytes))
+	}
+	m.verifyKey = ed25519.PublicKey(keyBytes)
+	m.logger.Info("rule signature verification enabled")
+	return nil
+}
+
+// LoadFromDataSigned loads Server-pushed rules with signature verification.
+// payload is the raw YAML bundle, signature is the base64-encoded Ed25519 signature.
+// If no verifyKey is configured, falls back to LoadFromData without verification.
+func (m *Manager) LoadFromDataSigned(version string, rulesYAML [][]byte, signatureBase64 string) error {
+	if m.verifyKey != nil {
+		// Build the signed content: concatenate all rule data for verification.
+		h := sha256.New()
+		h.Write([]byte(version))
+		for _, data := range rulesYAML {
+			h.Write(data)
+		}
+		digest := h.Sum(nil)
+
+		sigBytes, err := base64.StdEncoding.DecodeString(signatureBase64)
+		if err != nil {
+			return fmt.Errorf("invalid signature encoding: %w", err)
+		}
+
+		if !ed25519.Verify(m.verifyKey, digest, sigBytes) {
+			m.logger.Warn("rule signature verification FAILED, rejecting rule push",
+				zap.String("version", version))
+			return fmt.Errorf("rule signature verification failed")
+		}
+
+		m.logger.Info("rule signature verified",
+			zap.String("version", version))
+	}
+
+	return m.LoadFromData(version, rulesYAML)
 }
 
 // sortConditionsByCost sorts conditions by evaluation cost (ascending).

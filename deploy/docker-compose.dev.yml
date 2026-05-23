@@ -185,6 +185,9 @@ services:
     image: mxsec-manager:dev
     container_name: mxsec-manager-dev
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       mysql:
         condition: service_healthy

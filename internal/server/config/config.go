@@ -26,6 +26,15 @@ type Config struct {
 	Plugins    PluginsConfig    `mapstructure:"plugins"`
 	RuleSync   RuleSyncConfig   `mapstructure:"rule_sync"`
 	LLM        LLMConfig        `mapstructure:"llm"`
+	SIEM       SIEMConfig       `mapstructure:"siem"`
+}
+
+// SIEMConfig SIEM 转发配置
+type SIEMConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Protocol string `mapstructure:"protocol"` // "tcp" or "udp"
+	Address  string `mapstructure:"address"`  // "siem.example.com:514"
+	Facility int    `mapstructure:"facility"` // syslog facility (default 1 = user-level)
 }
 
 // RuleSyncConfig 规则 Git 同步配置

@@ -308,6 +308,41 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ThreatIntel/index.vue'),
         meta: { title: '威胁情报' },
       },
+      // M4: 攻击故事线
+      {
+        path: 'storylines',
+        name: 'Storylines',
+        component: () => import('@/views/Storyline/index.vue'),
+        meta: { title: '攻击故事线' },
+      },
+      // M4: 威胁狩猎
+      {
+        path: 'hunting',
+        name: 'Hunting',
+        component: () => import('@/views/Hunting/index.vue'),
+        meta: { title: '威胁狩猎' },
+      },
+      // M4: ML 异常检测
+      {
+        path: 'anomaly',
+        name: 'Anomaly',
+        component: () => import('@/views/Anomaly/index.vue'),
+        meta: { title: 'ML 异常检测' },
+      },
+      // M4: 行为基线引擎
+      {
+        path: 'bde',
+        name: 'BDE',
+        component: () => import('@/views/BDE/index.vue'),
+        meta: { title: '行为基线' },
+      },
+      // M4: 主机隔离管理
+      {
+        path: 'host-isolation',
+        name: 'HostIsolation',
+        component: () => import('@/views/HostIsolation/index.vue'),
+        meta: { title: '主机隔离' },
+      },
       // 系统管理 — 迁移助手
       {
         path: 'system/migration',

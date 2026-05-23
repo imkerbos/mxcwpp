@@ -18,8 +18,12 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/anomaly"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/baseline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/rulesync"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/siem"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
@@ -160,11 +164,39 @@ func main() {
 		}
 	}
 
-	// 6.5 上下文（后续多个组件需要 ctx 控制生命周期）
+	// 6.5 初始化 SIEM 转发器（可选，未配置时 forwarder 为 nil）
+	siemForwarder := siem.NewForwarder(logger, siem.Config{
+		Enabled:  cfg.SIEM.Enabled,
+		Protocol: cfg.SIEM.Protocol,
+		Address:  cfg.SIEM.Address,
+		Facility: cfg.SIEM.Facility,
+	})
+	if siemForwarder != nil {
+		defer siemForwarder.Close()
+		logger.Info("SIEM 转发器已启动",
+			zap.String("address", cfg.SIEM.Address),
+			zap.String("protocol", cfg.SIEM.Protocol))
+		// 将 SIEM 转发器注入 AlertGenerator
+		if alertGen != nil {
+			alertGen.SetSIEMForwarder(siemForwarder)
+		}
+	}
+
+	// 6.6 上下文（后续多个组件需要 ctx 控制生命周期）
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 6.6 初始化 Git 规则同步（可选，定期从 Git 仓库同步检测规则）
+	// 6.7 初始化 BDE 基线引擎（行为检测，支持持久化和冷启动）
+	bdeEngine := baseline.NewEngine(db, logger.Named("bde"))
+	bdeEngine.StartCheckpoint(ctx.Done())
+	logger.Info("BDE 基线引擎已启动")
+
+	// 6.8 初始化攻击故事线引擎（聚合 story_id 标记的事件为攻击叙事）
+	storyEngine := storyline.NewEngine(db, logger.Named("storyline"))
+	storyEngine.StartFlush(ctx.Done())
+	logger.Info("攻击故事线引擎已启动")
+
+	// 6.9 初始化 Git 规则同步（可选，定期从 Git 仓库同步检测规则）
 	if cfg.RuleSync.Enabled {
 		syncer := rulesync.New(cfg.RuleSync, db, logger)
 		syncer.Start(ctx)
@@ -194,6 +226,14 @@ func main() {
 		logger.Fatal("创建 Consumer 路由器失败", zap.Error(err))
 	}
 	defer router.Close()
+	router.SetBDEEngine(bdeEngine)
+	router.SetStorylineEngine(storyEngine)
+
+	// 初始化 ML 异常检测引擎（IForest + 关联检测）
+	anomalyDet := anomaly.NewDetector(db, logger.Named("anomaly"))
+	anomalyDet.StartRetrain(ctx.Done())
+	router.SetAnomalyDetector(anomalyDet)
+	logger.Info("ML 异常检测引擎已启动")
 
 	// 8. 启动消费
 	// 启动进程树清理协程

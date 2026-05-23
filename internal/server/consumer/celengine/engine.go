@@ -17,6 +17,13 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
+const (
+	// defaultWorkers 默认并行 worker 数量
+	defaultWorkers = 4
+	// parallelThreshold 规则数达到此阈值时启用并行求值
+	parallelThreshold = 20
+)
+
 // compiledRule 编译后的规则，包含原始规则信息和 CEL Program
 type compiledRule struct {
 	rule    model.DetectionRule
@@ -31,8 +38,9 @@ type Engine struct {
 	rules    []compiledRule
 	db       *gorm.DB
 	log      *zap.Logger
-	procTree *ProcessTree   // 进程树（自动维护，用于祖先链查询）
-	tracker  *EventTracker  // 事件频率/首次出现追踪
+	procTree *ProcessTree  // 进程树（自动维护，用于祖先链查询）
+	tracker  *EventTracker // 事件频率/首次出现追踪
+	workers  int           // 并行 worker 数量
 }
 
 // New 创建 CEL 规则引擎实例
@@ -49,6 +57,7 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 		log:      logger,
 		procTree: NewProcessTree(logger),
 		tracker:  NewEventTracker(logger),
+		workers:  defaultWorkers,
 	}
 
 	// 首次加载规则
@@ -57,6 +66,14 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 	}
 
 	return e, nil
+}
+
+// SetWorkers 设置并行求值 worker 数量（1 = 禁用并行）
+func (e *Engine) SetWorkers(n int) {
+	if n < 1 {
+		n = 1
+	}
+	e.workers = n
 }
 
 // NewInMemory 创建内存 CEL 引擎（用于测试，不依赖数据库）
@@ -234,6 +251,8 @@ func (e *Engine) compile(expression string) (cel.Program, error) {
 // dataType: 事件类型（用于过滤适用规则）
 // fields: 事件字段键值对
 // 返回匹配的规则列表
+//
+// 当适用规则数 >= parallelThreshold 且 workers > 1 时，自动切换为并行求值。
 func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.DetectionRule {
 	// 进程事件自动维护进程树
 	if dataType == 3000 && e.procTree != nil {
@@ -244,8 +263,7 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 	rules := e.rules
 	e.mu.RUnlock()
 
-	// 构建 CEL 求值变量：将 fields 中的 string 值填充到 activation map
-	// 未提供的变量默认为空字符串，data_type 单独处理为 int64
+	// 构建 CEL 求值变量
 	activation := buildActivation(dataType, fields)
 
 	// 填充祖先链 exe 列表
@@ -280,17 +298,32 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 		activation["first_seen_remote_addr"] = false
 	}
 
-	var matched []model.DetectionRule
-
+	// 按 DataType 过滤适用规则
+	applicable := make([]compiledRule, 0, len(rules))
 	for _, cr := range rules {
-		// DataType 过滤：如果规则指定了 DataTypes，则只对匹配的事件求值
-		if !cr.rule.MatchesDataType(dataType) {
-			continue
+		if cr.rule.MatchesDataType(dataType) {
+			applicable = append(applicable, cr)
 		}
+	}
 
+	if len(applicable) == 0 {
+		return nil
+	}
+
+	// 规则数超过阈值时并行求值
+	if len(applicable) >= parallelThreshold && e.workers > 1 {
+		return e.evaluateParallel(applicable, activation)
+	}
+
+	return e.evaluateSequential(applicable, activation)
+}
+
+// evaluateSequential 顺序求值（规则数少时使用，避免 goroutine 开销）
+func (e *Engine) evaluateSequential(rules []compiledRule, activation map[string]any) []model.DetectionRule {
+	var matched []model.DetectionRule
+	for _, cr := range rules {
 		out, _, err := cr.program.Eval(activation)
 		if err != nil {
-			// CEL 运行时错误（类型不匹配、字段缺失等），记录但不中断
 			e.log.Debug("CEL 规则求值错误",
 				zap.Uint("rule_id", cr.rule.ID),
 				zap.String("rule_name", cr.rule.Name),
@@ -298,13 +331,49 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 			)
 			continue
 		}
-
-		// 结果为 true 表示规则命中
 		if out.Value() == true {
 			matched = append(matched, cr.rule)
 		}
 	}
+	return matched
+}
 
+// evaluateParallel 将规则分片到多个 goroutine 并行求值
+// activation 是只读的，cel.Program.Eval 是线程安全的。
+func (e *Engine) evaluateParallel(rules []compiledRule, activation map[string]any) []model.DetectionRule {
+	workers := min(e.workers, len(rules))
+	chunkSize := (len(rules) + workers - 1) / workers
+
+	var mu sync.Mutex
+	var matched []model.DetectionRule
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(rules); i += chunkSize {
+		end := min(i+chunkSize, len(rules))
+		batch := rules[i:end]
+
+		wg.Add(1)
+		go func(chunk []compiledRule) {
+			defer wg.Done()
+			var local []model.DetectionRule
+			for _, cr := range chunk {
+				out, _, err := cr.program.Eval(activation)
+				if err != nil {
+					continue
+				}
+				if out.Value() == true {
+					local = append(local, cr.rule)
+				}
+			}
+			if len(local) > 0 {
+				mu.Lock()
+				matched = append(matched, local...)
+				mu.Unlock()
+			}
+		}(batch)
+	}
+
+	wg.Wait()
 	return matched
 }
 
@@ -322,7 +391,7 @@ func (e *Engine) RuleCount() int {
 
 // buildActivation 将事件字段构建为 CEL 求值变量 map
 // 所有在 CEL 环境中声明的 string 变量，如果 fields 中未提供则默认为空字符串
-func buildActivation(dataType int32, fields map[string]string) map[string]interface{} {
+func buildActivation(dataType int32, fields map[string]string) map[string]any {
 	// 声明所有 CEL 环境中定义的 string 变量名
 	stringVars := []string{
 		"agent_id", "hostname",
@@ -336,7 +405,7 @@ func buildActivation(dataType int32, fields map[string]string) map[string]interf
 		"cpu_usage", "mem_usage",
 	}
 
-	activation := make(map[string]interface{}, len(stringVars)+1)
+	activation := make(map[string]any, len(stringVars)+1)
 
 	// data_type 为 int 类型
 	activation["data_type"] = int64(dataType)

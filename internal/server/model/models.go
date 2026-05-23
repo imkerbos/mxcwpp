@@ -236,5 +236,13 @@ var (
 		&IOCSnapshot{},
 		&AgentRule{},
 		&SequenceRule{},
+		&BehaviorAlert{},
+		&HostBaselineState{},
+		&Storyline{},
+		&StorylineEvent{},
+		&MemoryThreat{},
+		&HuntQuery{},
+		&HostIsolation{},
+		&AnomalyAlert{},
 	}
 )

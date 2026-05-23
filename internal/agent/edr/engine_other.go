@@ -18,7 +18,7 @@ import (
 type Engine struct{}
 
 // NewEngine returns an error on non-Linux platforms.
-func NewEngine(_ *zap.Logger, _ *transport.Manager, _ string) (*Engine, error) {
+func NewEngine(_ *zap.Logger, _ *transport.Manager, _ string, _ string) (*Engine, error) {
 	return nil, fmt.Errorf("EDR engine requires Linux")
 }
 
@@ -72,6 +72,23 @@ func (e *Engine) YARAAvailable() bool { return false }
 
 // YARAStats is a no-op stub.
 func (e *Engine) YARAStats() (scanned, matched uint64) { return 0, 0 }
+
+// ContainerRuntime is a no-op stub.
+func (e *Engine) ContainerRuntime() string { return "" }
+
+// MemfdAvailable is a no-op stub.
+func (e *Engine) MemfdAvailable() bool { return false }
+
+// MemfdStats is a no-op stub.
+func (e *Engine) MemfdStats() (scans, threats uint64) { return 0, 0 }
+
+// IsolationLevel is a no-op stub.
+func (e *Engine) IsolationLevel() string { return "none" }
+
+// IsolationStatus is a no-op stub.
+func (e *Engine) IsolationStatus() (level string, reason string, blockCount int) {
+	return "none", "", 0
+}
 
 // SelfProtectManager is a no-op stub.
 func (e *Engine) SelfProtectManager() *SelfProtect { return NewSelfProtect(nil) }
