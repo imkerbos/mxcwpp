@@ -289,9 +289,9 @@ func TestIsPrivateIPFunction(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		addr      string
-		wantRule  string
+		name     string
+		addr     string
+		wantRule string
 	}{
 		{"外网 IP", "8.8.8.8", "external_connection"},
 		{"内网 10.x", "10.0.1.5", "internal_connection"},
@@ -447,6 +447,77 @@ func TestIsPrivateIPUtil(t *testing.T) {
 				t.Errorf("isPrivateIP(%q) = %v, want %v", tt.addr, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestParallelEvaluate 测试并行求值与顺序求值结果一致性
+func TestParallelEvaluate(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+
+	// 生成 30 条规则，超过 parallelThreshold
+	var rules []model.DetectionRule
+	for i := 1; i <= 30; i++ {
+		rules = append(rules, model.DetectionRule{
+			ID:         uint(i),
+			Name:       fmt.Sprintf("rule_%d", i),
+			Expression: fmt.Sprintf(`exe.contains("match%d")`, i),
+			Severity:   "medium",
+			Enabled:    true,
+		})
+	}
+	// 加一条通配规则
+	rules = append(rules, model.DetectionRule{
+		ID:         100,
+		Name:       "catch_all",
+		Expression: `exe != ""`,
+		Severity:   "low",
+		Enabled:    true,
+	})
+
+	eng, err := NewInMemory(logger, rules)
+	if err != nil {
+		t.Fatalf("创建引擎失败: %v", err)
+	}
+
+	fields := map[string]string{
+		"agent_id":   "host-parallel",
+		"event_type": "process_exec",
+		"pid":        "1",
+		"ppid":       "0",
+		"exe":        "/tmp/match5",
+		"cmdline":    "/tmp/match5 --test",
+	}
+
+	// 顺序求值
+	eng.SetWorkers(1)
+	seqMatched := eng.Evaluate(3000, fields)
+
+	// 并行求值
+	eng.SetWorkers(4)
+	parMatched := eng.Evaluate(3000, fields)
+
+	// 结果数量应一致
+	if len(seqMatched) != len(parMatched) {
+		t.Errorf("并行结果数 %d != 顺序结果数 %d", len(parMatched), len(seqMatched))
+	}
+
+	// 转为 map 对比
+	seqSet := make(map[string]bool, len(seqMatched))
+	for _, m := range seqMatched {
+		seqSet[m.Name] = true
+	}
+	for _, m := range parMatched {
+		if !seqSet[m.Name] {
+			t.Errorf("并行结果包含顺序结果中没有的规则: %s", m.Name)
+		}
+	}
+
+	// 应匹配 rule_5 和 catch_all
+	if !seqSet["rule_5"] {
+		t.Error("应匹配 rule_5")
+	}
+	if !seqSet["catch_all"] {
+		t.Error("应匹配 catch_all")
 	}
 }
 

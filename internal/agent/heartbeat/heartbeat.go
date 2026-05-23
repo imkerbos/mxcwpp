@@ -55,6 +55,9 @@ type EDRStatusGetter interface {
 	IOCVersion() string
 	IOCCount() int
 	IOCMatched() uint64
+	YARAAvailable() bool
+	YARAStats() (scanned, matched uint64)
+	ContainerRuntime() string
 }
 
 // NewManager 创建新的心跳管理器
@@ -268,6 +271,13 @@ func (m *Manager) sendHeartbeat() {
 		record.Data.Fields["edr_ioc_version"] = m.edrEngine.IOCVersion()
 		record.Data.Fields["edr_ioc_count"] = fmt.Sprintf("%d", m.edrEngine.IOCCount())
 		record.Data.Fields["edr_ioc_matched"] = fmt.Sprintf("%d", m.edrEngine.IOCMatched())
+		record.Data.Fields["edr_yara_available"] = fmt.Sprintf("%t", m.edrEngine.YARAAvailable())
+		yaraScanned, yaraMatched := m.edrEngine.YARAStats()
+		record.Data.Fields["edr_yara_scanned"] = fmt.Sprintf("%d", yaraScanned)
+		record.Data.Fields["edr_yara_matched"] = fmt.Sprintf("%d", yaraMatched)
+		if rt := m.edrEngine.ContainerRuntime(); rt != "" {
+			record.Data.Fields["edr_container_runtime"] = rt
+		}
 	}
 
 	// 添加业务线信息（从环境变量读取）

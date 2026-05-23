@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -9,7 +11,9 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -18,11 +22,12 @@ type AntivirusHandler struct {
 	db             *gorm.DB
 	logger         *zap.Logger
 	virusDBUpdater *biz.VirusDBUpdater
+	acDispatcher   *sd.ACDispatcher
 }
 
 // NewAntivirusHandler 创建病毒查杀处理器
-func NewAntivirusHandler(db *gorm.DB, logger *zap.Logger, virusDBUpdater *biz.VirusDBUpdater) *AntivirusHandler {
-	return &AntivirusHandler{db: db, logger: logger, virusDBUpdater: virusDBUpdater}
+func NewAntivirusHandler(db *gorm.DB, logger *zap.Logger, virusDBUpdater *biz.VirusDBUpdater, acDispatcher *sd.ACDispatcher) *AntivirusHandler {
+	return &AntivirusHandler{db: db, logger: logger, virusDBUpdater: virusDBUpdater, acDispatcher: acDispatcher}
 }
 
 // ---------- 扫描任务 CRUD ----------
@@ -311,22 +316,22 @@ func (h *AntivirusHandler) GetResult(c *gin.Context) {
 // QuarantineResult 隔离威胁文件
 // POST /api/v1/antivirus/results/:id/quarantine
 func (h *AntivirusHandler) QuarantineResult(c *gin.Context) {
-	h.updateResultAction(c, "quarantined", "隔离")
+	h.updateResultAction(c, "quarantined", "隔离", "quarantine")
 }
 
 // IgnoreResult 忽略威胁
 // POST /api/v1/antivirus/results/:id/ignore
 func (h *AntivirusHandler) IgnoreResult(c *gin.Context) {
-	h.updateResultAction(c, "ignored", "忽略")
+	h.updateResultAction(c, "ignored", "忽略", "")
 }
 
 // DeleteFileResult 删除威胁文件
 // POST /api/v1/antivirus/results/:id/delete-file
 func (h *AntivirusHandler) DeleteFileResult(c *gin.Context) {
-	h.updateResultAction(c, "deleted", "删除")
+	h.updateResultAction(c, "deleted", "删除", "delete")
 }
 
-func (h *AntivirusHandler) updateResultAction(c *gin.Context, action string, label string) {
+func (h *AntivirusHandler) updateResultAction(c *gin.Context, action string, label string, agentAction string) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		BadRequest(c, "无效的结果 ID")
@@ -350,12 +355,48 @@ func (h *AntivirusHandler) updateResultAction(c *gin.Context, action string, lab
 		return
 	}
 
+	// 需要 Agent 执行文件操作的动作（quarantine/delete），下发 DataType 7003 到 Agent
+	if agentAction != "" && h.acDispatcher != nil {
+		h.dispatchQuarantineCmd(&result, agentAction)
+	}
+
 	h.logger.Info(label+"威胁",
 		zap.Uint("result_id", result.ID),
 		zap.String("threat_name", result.ThreatName),
 		zap.String("file_path", result.FilePath),
 	)
 	SuccessMessage(c, "威胁已"+label)
+}
+
+// dispatchQuarantineCmd 下发隔离/删除命令到 Agent（DataType 7003）
+func (h *AntivirusHandler) dispatchQuarantineCmd(result *model.AntivirusScanResult, action string) {
+	taskData, _ := json.Marshal(map[string]string{
+		"task_id":   fmt.Sprintf("%d", result.ID),
+		"file_path": result.FilePath,
+		"file_hash": result.FileHash,
+		"action":    action,
+	})
+
+	cmd := &grpcProto.Command{
+		Tasks: []*grpcProto.Task{{
+			DataType:   7003,
+			ObjectName: "scanner",
+			Data:       string(taskData),
+			Token:      fmt.Sprintf("q-%d", result.ID),
+		}},
+	}
+
+	if err := h.acDispatcher.SendCommand(result.HostID, cmd); err != nil {
+		h.logger.Error("下发隔离命令到 Agent 失败",
+			zap.Uint("result_id", result.ID),
+			zap.String("host_id", result.HostID),
+			zap.Error(err))
+	} else {
+		h.logger.Info("隔离命令已下发到 Agent",
+			zap.Uint("result_id", result.ID),
+			zap.String("host_id", result.HostID),
+			zap.String("action", action))
+	}
 }
 
 // ---------- 统计 ----------

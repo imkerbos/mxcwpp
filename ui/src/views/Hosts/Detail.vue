@@ -74,7 +74,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
-import { alertsApi } from '@/api/alerts'
+
 import { antivirusApi } from '@/api/antivirus'
 import type { HostDetail, BaselineScore } from '@/api/types'
 import HostOverview from './components/HostOverview.vue'

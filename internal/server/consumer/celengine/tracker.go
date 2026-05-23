@@ -18,10 +18,10 @@ const (
 // EventTracker 维护事件频率统计和首次出现追踪
 // 用于 CEL 规则中的 recent_*_count 和 first_seen_* 变量
 type EventTracker struct {
-	mu       sync.Mutex
-	windows  map[string]map[string][]time.Time   // hostID → "field:value" → timestamps
-	known    map[string]map[string]struct{}       // hostID → set of "field:value"
-	logger   *zap.Logger
+	mu      sync.Mutex
+	windows map[string]map[string][]time.Time // hostID → "field:value" → timestamps
+	known   map[string]map[string]struct{}    // hostID → set of "field:value"
+	logger  *zap.Logger
 }
 
 // NewEventTracker 创建事件追踪器

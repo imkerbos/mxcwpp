@@ -152,14 +152,20 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
 	setupVulnerabilitiesAPI(router, db, logger)
 	setupVulnBulletinsAPI(router, db, logger)
-	setupAntivirusAPI(router, db, logger, virusDBUpdater)
+	setupAntivirusAPI(router, db, logger, virusDBUpdater, acDispatcher)
 	setupQuarantineAPI(router, db, logger)
 	setupDetectionRulesAPI(router, db, logger)
 	setupAlertContextAPI(router, db, logger, chConn)
 	setupThreatIntelAPI(router, db, logger, redisClient)
-	setupNetworkBlockAPI(router, db, logger)
+	setupNetworkBlockAPI(router, db, logger, acDispatcher)
 	setupDependencyAPI(router, db, logger, acDispatcher)
 	setupEDREventsAPI(router, logger, chConn)
+	setupBDEBaselineAPI(router, db, logger)
+	setupStorylineAPI(router, db, logger)
+	setupMemoryThreatAPI(router, db, logger)
+	setupHuntingAPI(router, db, logger, chConn)
+	setupHostIsolationAPI(router, db, logger, acDispatcher)
+	setupAnomalyAPI(router, db, logger)
 }
 
 // setupAdminAPIRoutes 注册需要管理员权限的 API 路由
@@ -171,6 +177,16 @@ func setupAdminAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logge
 	setupBackupsAPI(router, db, logger)
 	setupMigrationAPI(router, db, logger)
 	setupAuditLogAPI(router, db, logger)
+	setupRBACAPI(router, db, logger)
+}
+
+// setupRBACAPI 设置 RBAC 权限管理 API 路由
+func setupRBACAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewRBACHandler(db, logger)
+	router.GET("/rbac/permissions", handler.ListPermissions)
+	router.GET("/rbac/roles", handler.ListRoles)
+	router.GET("/rbac/roles/:role/permissions", handler.GetRolePermissions)
+	router.PUT("/rbac/roles/:role/permissions", handler.UpdateRolePermissions)
 }
 
 // setupMigrationAPI 设置 MVP1 → MVP2 迁移助手 API 路由
@@ -184,12 +200,63 @@ func setupMigrationAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger)
 }
 
 // setupNetworkBlockAPI 设置网络阻断 API 路由
-func setupNetworkBlockAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewNetworkBlockHandler(db, logger)
+func setupNetworkBlockAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewNetworkBlockHandler(db, logger, acDispatcher)
 	router.GET("/network-block/rules", handler.ListRules)
 	router.POST("/network-block/rules", handler.CreateRule)
 	router.POST("/network-block/rules/:id/remove", handler.RemoveRule)
 	router.DELETE("/network-block/rules/:id", handler.DeleteRule)
+}
+
+// setupStorylineAPI 设置攻击故事线 API 路由
+func setupStorylineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewStorylineHandler(db, logger)
+	router.GET("/storylines", handler.ListStorylines)
+	router.GET("/storylines/stats", handler.GetStorylineStats)
+	router.GET("/storylines/:story_id", handler.GetStoryline)
+	router.POST("/storylines/:story_id/resolve", handler.ResolveStoryline)
+}
+
+// setupBDEBaselineAPI 设置 BDE 行为基线 API 路由
+func setupBDEBaselineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewBDEBaselineHandler(db, logger)
+	router.GET("/bde/baseline/states", handler.ListBaselineStates)
+	router.GET("/bde/baseline/stats", handler.GetBaselineStats)
+	router.GET("/bde/alerts", handler.ListBehaviorAlerts)
+}
+
+// setupHuntingAPI 设置威胁狩猎 API 路由
+func setupHuntingAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
+	handler := api.NewHuntingHandler(db, chConn, logger)
+	router.POST("/hunting/query", handler.ExecuteQuery)
+	router.GET("/hunting/queries", handler.ListSavedQueries)
+	router.POST("/hunting/queries", handler.CreateSavedQuery)
+	router.DELETE("/hunting/queries/:id", handler.DeleteSavedQuery)
+}
+
+// setupAnomalyAPI 设置 ML 异常检测 API 路由
+func setupAnomalyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewAnomalyHandler(db, logger)
+	router.GET("/anomalies", handler.ListAnomalies)
+	router.GET("/anomalies/stats", handler.GetAnomalyStats)
+	router.PUT("/anomalies/:id/resolve", handler.ResolveAnomaly)
+}
+
+// setupHostIsolationAPI 设置主机隔离 API 路由
+func setupHostIsolationAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewHostIsolationHandler(db, logger, acDispatcher)
+	router.POST("/hosts/isolate", handler.IsolateHost)
+	router.POST("/hosts/release", handler.ReleaseHost)
+	router.GET("/hosts/:host_id/isolation-status", handler.GetIsolationStatus)
+	router.GET("/hosts/isolations", handler.ListIsolations)
+}
+
+// setupMemoryThreatAPI 设置内存威胁 API 路由
+func setupMemoryThreatAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	handler := api.NewMemoryThreatHandler(db, logger)
+	router.GET("/memory-threats", handler.ListMemoryThreats)
+	router.GET("/memory-threats/stats", handler.GetMemoryThreatStats)
+	router.PUT("/memory-threats/:id/resolve", handler.ResolveMemoryThreat)
 }
 
 // setupHostsAPI 设置主机 API 路由
@@ -610,8 +677,8 @@ func setupBackupsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupAntivirusAPI 设置病毒查杀 API 路由
-func setupAntivirusAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, virusDBUpdater *biz.VirusDBUpdater) {
-	handler := api.NewAntivirusHandler(db, logger, virusDBUpdater)
+func setupAntivirusAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, virusDBUpdater *biz.VirusDBUpdater, acDispatcher *sd.ACDispatcher) {
+	handler := api.NewAntivirusHandler(db, logger, virusDBUpdater, acDispatcher)
 
 	// 扫描任务 CRUD
 	router.GET("/antivirus/tasks", handler.ListTasks)

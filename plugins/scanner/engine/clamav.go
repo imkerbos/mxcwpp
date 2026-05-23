@@ -265,24 +265,19 @@ func sysMemAvailableMB() int64 {
 // cgroupAvailableMB returns (memory.max - memory.current) in MB for cgroup v2.
 // Returns -1 if not running under cgroup v2 or values unreadable.
 func cgroupAvailableMB() int64 {
-	maxBytes, err := readCgroupValue("/sys/fs/cgroup/memory.max")
-	if err != nil {
-		// Try service-scoped cgroup path
-		maxBytes, err = readCgroupValueFromProc()
-		if err != nil {
-			return -1
-		}
-	}
-	if maxBytes <= 0 {
-		return -1 // "max" means no limit
+	// Discover the cgroup directory once, then read both max and current from it.
+	cgDir := discoverCgroupDir()
+	if cgDir == "" {
+		return -1
 	}
 
-	curBytes, err := readCgroupValue("/sys/fs/cgroup/memory.current")
-	if err != nil {
-		curPath := strings.Replace("/sys/fs/cgroup/memory.max", "memory.max", "memory.current", 1)
-		curBytes, _ = readCgroupValue(curPath)
+	maxBytes, err := readCgroupValue(filepath.Join(cgDir, "memory.max"))
+	if err != nil || maxBytes <= 0 {
+		return -1 // "max" or unreadable means no limit
 	}
-	if curBytes < 0 {
+
+	curBytes, err := readCgroupValue(filepath.Join(cgDir, "memory.current"))
+	if err != nil || curBytes < 0 {
 		curBytes = 0
 	}
 
@@ -291,6 +286,27 @@ func cgroupAvailableMB() int64 {
 		return 0
 	}
 	return avail
+}
+
+// discoverCgroupDir returns the cgroup v2 directory for this process.
+// Tries /proc/self/cgroup to find the service-scoped path (e.g.
+// /sys/fs/cgroup/system.slice/mxsec-agent.service).
+func discoverCgroupDir() string {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		// cgroup v2 line: "0::/system.slice/mxsec-agent.service"
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) == 3 && parts[0] == "0" {
+			dir := "/sys/fs/cgroup" + strings.TrimSpace(parts[2])
+			if _, err := os.Stat(filepath.Join(dir, "memory.max")); err == nil {
+				return dir
+			}
+		}
+	}
+	return ""
 }
 
 // readCgroupValue reads a single int64 value from a cgroup file.
@@ -305,24 +321,6 @@ func readCgroupValue(path string) (int64, error) {
 		return -1, nil
 	}
 	return strconv.ParseInt(s, 10, 64)
-}
-
-// readCgroupValueFromProc discovers the cgroup path from /proc/self/cgroup
-// and reads memory.max from it (cgroup v2).
-func readCgroupValueFromProc() (int64, error) {
-	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return 0, err
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		// cgroup v2 line: "0::/system.slice/mxsec-agent.service"
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) == 3 && parts[0] == "0" {
-			cgPath := "/sys/fs/cgroup" + parts[2] + "/memory.max"
-			return readCgroupValue(strings.TrimSpace(cgPath))
-		}
-	}
-	return 0, fmt.Errorf("cgroup v2 path not found")
 }
 
 // classifyThreat 根据 ClamAV 威胁名称分类

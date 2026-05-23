@@ -12,18 +12,21 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // NetworkBlockHandler 网络阻断 API 处理器
 type NetworkBlockHandler struct {
-	db     *gorm.DB
-	logger *zap.Logger
+	db           *gorm.DB
+	logger       *zap.Logger
+	acDispatcher *sd.ACDispatcher
 }
 
 // NewNetworkBlockHandler 创建网络阻断处理器
-func NewNetworkBlockHandler(db *gorm.DB, logger *zap.Logger) *NetworkBlockHandler {
-	return &NetworkBlockHandler{db: db, logger: logger}
+func NewNetworkBlockHandler(db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) *NetworkBlockHandler {
+	return &NetworkBlockHandler{db: db, logger: logger, acDispatcher: acDispatcher}
 }
 
 // ListRules 查询阻断规则列表
@@ -116,7 +119,12 @@ func (h *NetworkBlockHandler) CreateRule(c *gin.Context) {
 	}
 
 	// 下发阻断命令到 AC
-	h.dispatchBlockCommand(rule)
+	if err := h.dispatchBlockCommand(rule); err != nil {
+		h.logger.Error("下发阻断命令失败", zap.Error(err))
+		h.db.Model(&rule).Update("status", "failed")
+	} else {
+		h.db.Model(&rule).Update("status", "active")
+	}
 
 	Success(c, rule)
 }
@@ -140,7 +148,7 @@ func (h *NetworkBlockHandler) RemoveRule(c *gin.Context) {
 	h.db.Save(&rule)
 
 	// 下发解除阻断命令
-	h.dispatchUnblockCommand(rule)
+	_ = h.dispatchUnblockCommand(rule)
 
 	Success(c, rule)
 }
@@ -162,9 +170,14 @@ func (h *NetworkBlockHandler) DeleteRule(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "已删除"})
 }
 
-// dispatchBlockCommand 下发阻断命令（通过 AC 内部 HTTP API）
-func (h *NetworkBlockHandler) dispatchBlockCommand(rule model.NetworkBlockRule) {
-	taskData := map[string]interface{}{
+// dispatchBlockCommand 下发阻断命令（通过 AC 精准路由/广播）
+func (h *NetworkBlockHandler) dispatchBlockCommand(rule model.NetworkBlockRule) error {
+	if h.acDispatcher == nil {
+		h.logger.Warn("阻断命令未下发: AC dispatcher 未初始化")
+		return nil
+	}
+
+	taskData := map[string]any{
 		"action":    "block_ip",
 		"ip":        rule.IP,
 		"port":      rule.Port,
@@ -179,18 +192,24 @@ func (h *NetworkBlockHandler) dispatchBlockCommand(rule model.NetworkBlockRule) 
 		zap.String("ip", rule.IP),
 		zap.Int("port", rule.Port))
 
-	// 更新规则状态
-	h.db.Model(&rule).Update("status", "active")
+	cmd := &grpcProto.Command{
+		Tasks: []*grpcProto.Task{{
+			DataType:   9997,
+			ObjectName: "edr",
+			Data:       string(taskJSON),
+		}},
+	}
 
-	// 通过 AC HTTP 内部接口下发
-	// 实际生产中应通过 AC 内部 HTTP 端点 POST /command 发送
-	// 这里记录命令数据，由 task_scheduler 调度实际下发
-	_ = taskJSON
+	return h.acDispatcher.SendCommand(rule.HostID, cmd)
 }
 
 // dispatchUnblockCommand 下发解除阻断命令
-func (h *NetworkBlockHandler) dispatchUnblockCommand(rule model.NetworkBlockRule) {
-	taskData := map[string]interface{}{
+func (h *NetworkBlockHandler) dispatchUnblockCommand(rule model.NetworkBlockRule) error {
+	if h.acDispatcher == nil {
+		return nil
+	}
+
+	taskData := map[string]any{
 		"action":    "unblock_ip",
 		"ip":        rule.IP,
 		"port":      rule.Port,
@@ -204,5 +223,13 @@ func (h *NetworkBlockHandler) dispatchUnblockCommand(rule model.NetworkBlockRule
 		zap.String("host_id", rule.HostID),
 		zap.String("ip", rule.IP))
 
-	_ = taskJSON
+	cmd := &grpcProto.Command{
+		Tasks: []*grpcProto.Task{{
+			DataType:   9997,
+			ObjectName: "edr",
+			Data:       string(taskJSON),
+		}},
+	}
+
+	return h.acDispatcher.SendCommand(rule.HostID, cmd)
 }

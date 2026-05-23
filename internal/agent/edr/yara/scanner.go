@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -54,11 +55,29 @@ type Result struct {
 	Tags       []string
 }
 
+// preBlockWhitelist contains exe basenames that must never be SIGSTOP'd.
+var preBlockWhitelist = map[string]bool{
+	"systemd":      true,
+	"init":         true,
+	"sshd":         true,
+	"mxsec-agent":  true,
+	"mxcsec-agent": true,
+	"dockerd":      true,
+	"containerd":   true,
+	"kubelet":      true,
+	"journald":     true,
+	"dbus-daemon":  true,
+	"agetty":       true,
+}
+
 // Scanner wraps the YARA-X CLI for async file scanning.
 type Scanner struct {
 	logger   *zap.Logger
 	rulesDir string
 	binPath  string
+
+	// Pre-block mode: SIGSTOP process before scan, SIGCONT/SIGKILL after.
+	preBlock bool
 
 	// Dedup: track recently scanned files.
 	mu      sync.Mutex
@@ -71,10 +90,12 @@ type Scanner struct {
 	// Counters.
 	scansTotal   uint64
 	scansMatched uint64
+	preBlocked   uint64
 }
 
 type scanRequest struct {
 	filePath string
+	pid      int               // PID to SIGSTOP/SIGCONT (0 = async mode)
 	fields   map[string]string // original event fields for annotation
 }
 
@@ -168,12 +189,55 @@ func (s *Scanner) ShouldScan(evt *event.Event) bool {
 	return false
 }
 
+// EnablePreBlock enables pre-block mode (SIGSTOP before scan).
+func (s *Scanner) EnablePreBlock(enabled bool) {
+	s.preBlock = enabled
+	s.logger.Info("YARA pre-block mode", zap.Bool("enabled", enabled))
+}
+
+// PreBlockEnabled returns whether pre-block mode is active.
+func (s *Scanner) PreBlockEnabled() bool {
+	return s.preBlock
+}
+
 // Enqueue submits a file for async YARA scanning. Non-blocking; drops if queue full.
 func (s *Scanner) Enqueue(filePath string, fields map[string]string) {
+	s.enqueue(filePath, 0, fields)
+}
+
+// EnqueuePreBlock submits a file for YARA scanning with pre-block (SIGSTOP).
+// The process PID is stopped before scanning and resumed/killed after.
+// Falls back to async mode for whitelisted or critical processes.
+func (s *Scanner) EnqueuePreBlock(filePath string, pid int, fields map[string]string) {
+	if !s.preBlock || pid <= 1 || s.isWhitelisted(filePath) {
+		s.enqueue(filePath, 0, fields)
+		return
+	}
+
+	// SIGSTOP the process immediately.
+	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+		s.logger.Debug("pre-block SIGSTOP failed, falling back to async",
+			zap.Int("pid", pid), zap.Error(err))
+		s.enqueue(filePath, 0, fields)
+		return
+	}
+
+	s.preBlocked++
+	s.logger.Debug("pre-block: process stopped",
+		zap.Int("pid", pid), zap.String("exe", filePath))
+
+	s.enqueue(filePath, pid, fields)
+}
+
+func (s *Scanner) enqueue(filePath string, pid int, fields map[string]string) {
 	// Dedup check.
 	s.mu.Lock()
 	if t, ok := s.scanned[filePath]; ok && time.Since(t) < dedupWindow {
 		s.mu.Unlock()
+		// If pre-blocked, must resume — dedup means no scan needed.
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+		}
 		return
 	}
 	s.scanned[filePath] = time.Now()
@@ -181,15 +245,33 @@ func (s *Scanner) Enqueue(filePath string, fields map[string]string) {
 
 	// Check file still exists (process may have already exited).
 	if _, err := os.Stat(filePath); err != nil {
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+		}
 		return
 	}
 
 	select {
-	case s.scanCh <- scanRequest{filePath: filePath, fields: fields}:
+	case s.scanCh <- scanRequest{filePath: filePath, pid: pid, fields: fields}:
 	default:
 		s.logger.Warn("YARA scan queue full, dropping request",
 			zap.String("file", filePath))
+		// Must resume if pre-blocked.
+		if pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGCONT)
+		}
 	}
+}
+
+// isWhitelisted returns true if the exe should never be SIGSTOP'd.
+func (s *Scanner) isWhitelisted(exe string) bool {
+	base := filepath.Base(exe)
+	return preBlockWhitelist[base]
+}
+
+// PreBlockStats returns the number of processes that were pre-blocked.
+func (s *Scanner) PreBlockStats() uint64 {
+	return s.preBlocked
 }
 
 // Stats returns scan counters.
@@ -204,6 +286,8 @@ func (s *Scanner) scanLoop(ctx context.Context, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ctx.Done():
+			// On shutdown, resume any pre-blocked processes still in queue.
+			s.drainAndResume()
 			return
 		case req, ok := <-s.scanCh:
 			if !ok {
@@ -215,12 +299,48 @@ func (s *Scanner) scanLoop(ctx context.Context, wg *sync.WaitGroup) {
 				s.logger.Warn("YARA scan failed",
 					zap.String("file", req.filePath),
 					zap.Error(err))
+				// Fail-open: resume pre-blocked process on scan error.
+				if req.pid > 0 {
+					_ = syscall.Kill(req.pid, syscall.SIGCONT)
+					s.logger.Warn("pre-block: resumed after scan error",
+						zap.Int("pid", req.pid))
+				}
 				continue
 			}
+
 			if len(results) > 0 {
 				s.scansMatched++
 				s.emitDetection(req, results)
+
+				// Pre-block mode: kill the malicious process.
+				if req.pid > 0 {
+					_ = syscall.Kill(req.pid, syscall.SIGKILL)
+					s.logger.Warn("pre-block: killed malicious process",
+						zap.Int("pid", req.pid),
+						zap.String("rule", results[0].RuleName))
+				}
+			} else {
+				// No match — resume pre-blocked process.
+				if req.pid > 0 {
+					_ = syscall.Kill(req.pid, syscall.SIGCONT)
+					s.logger.Debug("pre-block: resumed clean process",
+						zap.Int("pid", req.pid))
+				}
 			}
+		}
+	}
+}
+
+// drainAndResume resumes all pre-blocked processes remaining in the queue on shutdown.
+func (s *Scanner) drainAndResume() {
+	for {
+		select {
+		case req := <-s.scanCh:
+			if req.pid > 0 {
+				_ = syscall.Kill(req.pid, syscall.SIGCONT)
+			}
+		default:
+			return
 		}
 	}
 }
