@@ -18,7 +18,12 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/anomaly"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/baseline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/rulesync"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/siem"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
@@ -57,7 +62,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "初始化日志失败: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	// 3. 检查 Kafka 是否启用
 	if !cfg.Kafka.Enabled {
@@ -79,7 +84,7 @@ func main() {
 	if err != nil {
 		logger.Warn("Consumer ClickHouse 初始化失败，跳过指标写入", zap.Error(err))
 	} else if chConn != nil {
-		defer database.CloseClickHouse()
+		defer func() { _ = database.CloseClickHouse() }()
 	}
 	batchSize := cfg.ClickHouse.BatchSize
 	if batchSize <= 0 {
@@ -98,7 +103,7 @@ func main() {
 		logger.Warn("Consumer Redis 初始化失败，跳过 agent:ac: 映射写入", zap.Error(err))
 	} else {
 		redisClient = rc
-		defer database.CloseRedis()
+		defer func() { _ = database.CloseRedis() }()
 		logger.Info("Consumer Redis 已连接", zap.String("addr", cfg.Redis.Addr))
 	}
 
@@ -148,6 +153,59 @@ func main() {
 		logger.Info("端口扫描检测器已启动")
 	}
 
+	// 6.4 初始化序列检测器（依赖 CEL 引擎 + Redis，可选）
+	var seqDetector *celengine.SequenceDetector
+	if celEng != nil {
+		seqDetector = celengine.NewSequenceDetector(celEng, db, redisClient, logger)
+		if err := seqDetector.ReloadRules(); err != nil {
+			logger.Warn("序列规则加载失败", zap.Error(err))
+		} else {
+			logger.Info("序列检测器已启动", zap.Int("rules", seqDetector.RuleCount()))
+		}
+	}
+
+	// 6.5 初始化 SIEM 转发器（可选，未配置时 forwarder 为 nil）
+	siemForwarder := siem.NewForwarder(logger, siem.Config{
+		Enabled:  cfg.SIEM.Enabled,
+		Protocol: cfg.SIEM.Protocol,
+		Address:  cfg.SIEM.Address,
+		Facility: cfg.SIEM.Facility,
+	})
+	if siemForwarder != nil {
+		defer siemForwarder.Close()
+		logger.Info("SIEM 转发器已启动",
+			zap.String("address", cfg.SIEM.Address),
+			zap.String("protocol", cfg.SIEM.Protocol))
+		// 将 SIEM 转发器注入 AlertGenerator
+		if alertGen != nil {
+			alertGen.SetSIEMForwarder(siemForwarder)
+		}
+	}
+
+	// 6.6 上下文（后续多个组件需要 ctx 控制生命周期）
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 6.7 初始化 BDE 基线引擎（行为检测，支持持久化和冷启动）
+	bdeEngine := baseline.NewEngine(db, logger.Named("bde"))
+	bdeEngine.StartCheckpoint(ctx.Done())
+	logger.Info("BDE 基线引擎已启动")
+
+	// 6.8 初始化攻击故事线引擎（聚合 story_id 标记的事件为攻击叙事）
+	storyEngine := storyline.NewEngine(db, logger.Named("storyline"))
+	storyEngine.StartFlush(ctx.Done())
+	logger.Info("攻击故事线引擎已启动")
+
+	// 6.9 初始化 Git 规则同步（可选，定期从 Git 仓库同步检测规则）
+	if cfg.RuleSync.Enabled {
+		syncer := rulesync.New(cfg.RuleSync, db, logger)
+		syncer.Start(ctx)
+		logger.Info("Git 规则同步已启动",
+			zap.String("git_url", cfg.RuleSync.GitURL),
+			zap.Duration("interval", cfg.RuleSync.Interval),
+		)
+	}
+
 	// 7. 创建消费路由器
 	router, err := consumer.NewRouter(
 		cfg.Kafka.Brokers,
@@ -161,16 +219,27 @@ func main() {
 		alertGen,
 		autoResponder,
 		scanDetector,
+		seqDetector,
 		logger,
 	)
 	if err != nil {
 		logger.Fatal("创建 Consumer 路由器失败", zap.Error(err))
 	}
 	defer router.Close()
+	router.SetBDEEngine(bdeEngine)
+	router.SetStorylineEngine(storyEngine)
+
+	// 初始化 ML 异常检测引擎（IForest + 关联检测）
+	anomalyDet := anomaly.NewDetector(db, logger.Named("anomaly"))
+	anomalyDet.StartRetrain(ctx.Done())
+	router.SetAnomalyDetector(anomalyDet)
+	logger.Info("ML 异常检测引擎已启动")
 
 	// 8. 启动消费
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 启动进程树清理协程
+	if celEng != nil {
+		celEng.StartCleanup(ctx)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

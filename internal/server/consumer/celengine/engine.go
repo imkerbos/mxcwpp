@@ -3,14 +3,25 @@
 package celengine
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
+)
+
+const (
+	// defaultWorkers 默认并行 worker 数量
+	defaultWorkers = 4
+	// parallelThreshold 规则数达到此阈值时启用并行求值
+	parallelThreshold = 20
 )
 
 // compiledRule 编译后的规则，包含原始规则信息和 CEL Program
@@ -22,11 +33,14 @@ type compiledRule struct {
 // Engine CEL 规则引擎
 // 负责维护 CEL 环境、编译规则、评估事件
 type Engine struct {
-	mu    sync.RWMutex
-	env   *cel.Env
-	rules []compiledRule
-	db    *gorm.DB
-	log   *zap.Logger
+	mu       sync.RWMutex
+	env      *cel.Env
+	rules    []compiledRule
+	db       *gorm.DB
+	log      *zap.Logger
+	procTree *ProcessTree  // 进程树（自动维护，用于祖先链查询）
+	tracker  *EventTracker // 事件频率/首次出现追踪
+	workers  int           // 并行 worker 数量
 }
 
 // New 创建 CEL 规则引擎实例
@@ -38,9 +52,12 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 	}
 
 	e := &Engine{
-		env: env,
-		db:  db,
-		log: logger,
+		env:      env,
+		db:       db,
+		log:      logger,
+		procTree: NewProcessTree(logger),
+		tracker:  NewEventTracker(logger),
+		workers:  defaultWorkers,
 	}
 
 	// 首次加载规则
@@ -51,6 +68,14 @@ func New(db *gorm.DB, logger *zap.Logger) (*Engine, error) {
 	return e, nil
 }
 
+// SetWorkers 设置并行求值 worker 数量（1 = 禁用并行）
+func (e *Engine) SetWorkers(n int) {
+	if n < 1 {
+		n = 1
+	}
+	e.workers = n
+}
+
 // NewInMemory 创建内存 CEL 引擎（用于测试，不依赖数据库）
 func NewInMemory(logger *zap.Logger, rules []model.DetectionRule) (*Engine, error) {
 	env, err := newCELEnv()
@@ -59,8 +84,10 @@ func NewInMemory(logger *zap.Logger, rules []model.DetectionRule) (*Engine, erro
 	}
 
 	e := &Engine{
-		env: env,
-		log: logger,
+		env:      env,
+		log:      logger,
+		procTree: NewProcessTree(logger),
+		tracker:  NewEventTracker(logger),
 	}
 
 	compiled := make([]compiledRule, 0, len(rules))
@@ -97,6 +124,7 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("parent_exe", cel.StringType),
 		cel.Variable("uid", cel.StringType),
 		cel.Variable("username", cel.StringType),
+		cel.Variable("cwd", cel.StringType),
 
 		// 文件相关
 		cel.Variable("file_path", cel.StringType),
@@ -108,14 +136,55 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("local_addr", cel.StringType),
 		cel.Variable("local_port", cel.StringType),
 		cel.Variable("protocol", cel.StringType),
+		cel.Variable("dns_server", cel.StringType),
 
 		// 安全相关
 		cel.Variable("severity", cel.StringType),
 		cel.Variable("threat_name", cel.StringType),
 
+		// Agent 端 IOC 碰撞标注（由 Agent EDR 引擎在事件转发前写入）
+		cel.Variable("ioc_match", cel.StringType),
+		cel.Variable("ioc_type", cel.StringType),
+		cel.Variable("ioc_value", cel.StringType),
+
+		// Agent 端规则匹配标注
+		cel.Variable("agent_match", cel.StringType),
+		cel.Variable("agent_rule_id", cel.StringType),
+		cel.Variable("agent_severity", cel.StringType),
+
+		// 聚合标注
+		cel.Variable("agg_count", cel.StringType),
+
 		// 性能相关
 		cel.Variable("cpu_usage", cel.StringType),
 		cel.Variable("mem_usage", cel.StringType),
+
+		// 进程树：祖先链 exe 列表（由 Engine 自动填充）
+		cel.Variable("ancestor_exes", cel.ListType(cel.StringType)),
+
+		// EventTracker 预计算变量：滑动窗口计数
+		cel.Variable("recent_exe_count", cel.IntType),
+		cel.Variable("recent_remote_addr_count", cel.IntType),
+		cel.Variable("recent_file_path_count", cel.IntType),
+
+		// EventTracker 预计算变量：首次出现标记
+		cel.Variable("first_seen_exe", cel.BoolType),
+		cel.Variable("first_seen_remote_addr", cel.BoolType),
+
+		// 自定义函数：is_private_ip(string) -> bool
+		cel.Function("is_private_ip",
+			cel.Overload("is_private_ip_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					addr, ok := val.Value().(string)
+					if !ok {
+						return types.Bool(false)
+					}
+					return types.Bool(isPrivateIP(addr))
+				}),
+			),
+		),
 	)
 }
 
@@ -182,26 +251,79 @@ func (e *Engine) compile(expression string) (cel.Program, error) {
 // dataType: 事件类型（用于过滤适用规则）
 // fields: 事件字段键值对
 // 返回匹配的规则列表
+//
+// 当适用规则数 >= parallelThreshold 且 workers > 1 时，自动切换为并行求值。
 func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.DetectionRule {
+	// 进程事件自动维护进程树
+	if dataType == 3000 && e.procTree != nil {
+		e.feedProcessTree(fields)
+	}
+
 	e.mu.RLock()
 	rules := e.rules
 	e.mu.RUnlock()
 
-	// 构建 CEL 求值变量：将 fields 中的 string 值填充到 activation map
-	// 未提供的变量默认为空字符串，data_type 单独处理为 int64
+	// 构建 CEL 求值变量
 	activation := buildActivation(dataType, fields)
 
-	var matched []model.DetectionRule
-
-	for _, cr := range rules {
-		// DataType 过滤：如果规则指定了 DataTypes，则只对匹配的事件求值
-		if !cr.rule.MatchesDataType(dataType) {
-			continue
+	// 填充祖先链 exe 列表
+	if e.procTree != nil && fields["pid"] != "" {
+		chain := e.procTree.GetAncestorChain(fields["agent_id"], fields["pid"])
+		if chain == nil {
+			chain = []string{}
 		}
+		activation["ancestor_exes"] = chain
+	} else {
+		activation["ancestor_exes"] = []string{}
+	}
 
+	// EventTracker：计算滑动窗口计数和首次出现标记
+	hostID := fields["agent_id"]
+	if e.tracker != nil && hostID != "" {
+		exeCount, exeFirst := e.tracker.Observe(hostID, "exe", fields["exe"])
+		activation["recent_exe_count"] = exeCount
+		activation["first_seen_exe"] = exeFirst
+
+		addrCount, addrFirst := e.tracker.Observe(hostID, "remote_addr", fields["remote_addr"])
+		activation["recent_remote_addr_count"] = addrCount
+		activation["first_seen_remote_addr"] = addrFirst
+
+		fpCount, _ := e.tracker.Observe(hostID, "file_path", fields["file_path"])
+		activation["recent_file_path_count"] = fpCount
+	} else {
+		activation["recent_exe_count"] = int64(0)
+		activation["recent_remote_addr_count"] = int64(0)
+		activation["recent_file_path_count"] = int64(0)
+		activation["first_seen_exe"] = false
+		activation["first_seen_remote_addr"] = false
+	}
+
+	// 按 DataType 过滤适用规则
+	applicable := make([]compiledRule, 0, len(rules))
+	for _, cr := range rules {
+		if cr.rule.MatchesDataType(dataType) {
+			applicable = append(applicable, cr)
+		}
+	}
+
+	if len(applicable) == 0 {
+		return nil
+	}
+
+	// 规则数超过阈值时并行求值
+	if len(applicable) >= parallelThreshold && e.workers > 1 {
+		return e.evaluateParallel(applicable, activation)
+	}
+
+	return e.evaluateSequential(applicable, activation)
+}
+
+// evaluateSequential 顺序求值（规则数少时使用，避免 goroutine 开销）
+func (e *Engine) evaluateSequential(rules []compiledRule, activation map[string]any) []model.DetectionRule {
+	var matched []model.DetectionRule
+	for _, cr := range rules {
 		out, _, err := cr.program.Eval(activation)
 		if err != nil {
-			// CEL 运行时错误（类型不匹配、字段缺失等），记录但不中断
 			e.log.Debug("CEL 规则求值错误",
 				zap.Uint("rule_id", cr.rule.ID),
 				zap.String("rule_name", cr.rule.Name),
@@ -209,13 +331,49 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 			)
 			continue
 		}
-
-		// 结果为 true 表示规则命中
 		if out.Value() == true {
 			matched = append(matched, cr.rule)
 		}
 	}
+	return matched
+}
 
+// evaluateParallel 将规则分片到多个 goroutine 并行求值
+// activation 是只读的，cel.Program.Eval 是线程安全的。
+func (e *Engine) evaluateParallel(rules []compiledRule, activation map[string]any) []model.DetectionRule {
+	workers := min(e.workers, len(rules))
+	chunkSize := (len(rules) + workers - 1) / workers
+
+	var mu sync.Mutex
+	var matched []model.DetectionRule
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(rules); i += chunkSize {
+		end := min(i+chunkSize, len(rules))
+		batch := rules[i:end]
+
+		wg.Add(1)
+		go func(chunk []compiledRule) {
+			defer wg.Done()
+			var local []model.DetectionRule
+			for _, cr := range chunk {
+				out, _, err := cr.program.Eval(activation)
+				if err != nil {
+					continue
+				}
+				if out.Value() == true {
+					local = append(local, cr.rule)
+				}
+			}
+			if len(local) > 0 {
+				mu.Lock()
+				matched = append(matched, local...)
+				mu.Unlock()
+			}
+		}(batch)
+	}
+
+	wg.Wait()
 	return matched
 }
 
@@ -233,18 +391,21 @@ func (e *Engine) RuleCount() int {
 
 // buildActivation 将事件字段构建为 CEL 求值变量 map
 // 所有在 CEL 环境中声明的 string 变量，如果 fields 中未提供则默认为空字符串
-func buildActivation(dataType int32, fields map[string]string) map[string]interface{} {
+func buildActivation(dataType int32, fields map[string]string) map[string]any {
 	// 声明所有 CEL 环境中定义的 string 变量名
 	stringVars := []string{
 		"agent_id", "hostname",
-		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "uid", "username",
+		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "uid", "username", "cwd",
 		"file_path", "file_action",
-		"remote_addr", "remote_port", "local_addr", "local_port", "protocol",
+		"remote_addr", "remote_port", "local_addr", "local_port", "protocol", "dns_server",
 		"severity", "threat_name",
+		"ioc_match", "ioc_type", "ioc_value",
+		"agent_match", "agent_rule_id", "agent_severity",
+		"agg_count",
 		"cpu_usage", "mem_usage",
 	}
 
-	activation := make(map[string]interface{}, len(stringVars)+1)
+	activation := make(map[string]any, len(stringVars)+1)
 
 	// data_type 为 int 类型
 	activation["data_type"] = int64(dataType)
@@ -259,4 +420,86 @@ func buildActivation(dataType int32, fields map[string]string) map[string]interf
 	}
 
 	return activation
+}
+
+// feedProcessTree 将进程事件路由到进程树
+func (e *Engine) feedProcessTree(fields map[string]string) {
+	hostID := fields["agent_id"]
+	if hostID == "" {
+		return
+	}
+	switch fields["event_type"] {
+	case "process_exec":
+		e.procTree.HandleExec(hostID, fields)
+	case "process_exit":
+		e.procTree.HandleExit(hostID, fields)
+	}
+}
+
+// StartCleanup 启动进程树和事件追踪器的定期清理协程
+func (e *Engine) StartCleanup(ctx context.Context) {
+	// 进程树清理
+	if e.procTree != nil {
+		go func() {
+			ticker := time.NewTicker(processTreeCleanupInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					removed := e.procTree.Cleanup()
+					if removed > 0 {
+						hosts, nodes := e.procTree.Stats()
+						e.log.Info("进程树定期清理",
+							zap.Int("removed", removed),
+							zap.Int("hosts", hosts),
+							zap.Int("nodes", nodes),
+						)
+					}
+				}
+			}
+		}()
+	}
+
+	// EventTracker 清理
+	if e.tracker != nil {
+		go func() {
+			ticker := time.NewTicker(trackerWindowDuration)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					removed := e.tracker.Cleanup()
+					if removed > 0 {
+						hosts, wKeys, kKeys := e.tracker.Stats()
+						e.log.Info("事件追踪器定期清理",
+							zap.Int("removed", removed),
+							zap.Int("hosts", hosts),
+							zap.Int("window_keys", wKeys),
+							zap.Int("known_keys", kKeys),
+						)
+					}
+				}
+			}
+		}()
+	}
+}
+
+// ProcessTreeStats 返回进程树统计信息
+func (e *Engine) ProcessTreeStats() (hosts, nodes int) {
+	if e.procTree == nil {
+		return 0, 0
+	}
+	return e.procTree.Stats()
+}
+
+// TrackerStats 返回事件追踪器统计信息
+func (e *Engine) TrackerStats() (hosts, windowKeys, knownKeys int) {
+	if e.tracker == nil {
+		return 0, 0, 0
+	}
+	return e.tracker.Stats()
 }

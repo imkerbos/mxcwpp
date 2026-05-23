@@ -33,7 +33,7 @@
         @change="handleAlertTypeChange"
       >
         <a-select-option value="baseline">基线安全</a-select-option>
-        <a-select-option value="runtime">EDR</a-select-option>
+        <a-select-option value="detection">检测告警</a-select-option>
         <a-select-option value="agent">Agent 状态</a-select-option>
         <a-select-option value="vulnerability">漏洞管理</a-select-option>
         <a-select-option value="fim">文件完整性</a-select-option>
@@ -442,7 +442,7 @@ const getSourceColor = (source: string) => {
 const getSourceText = (source: string) => {
   const texts: Record<string, string> = {
     baseline: '基线安全',
-    runtime: 'EDR',
+    detection: '检测告警',
     agent: 'Agent 状态',
     vulnerability: '漏洞管理',
     fim: '文件完整性',
@@ -559,14 +559,14 @@ const handleIgnoreConfirm = () => {
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  background: #E8F3FF;
+  background: var(--mxsec-primary-bg);
   border: 1px solid #91d5ff;
   border-radius: 4px;
   margin-bottom: 16px;
 }
 
 .selection-info {
-  color: #165DFF;
+  color: var(--mxsec-primary);
   font-size: 14px;
   
   strong {

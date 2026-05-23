@@ -1,6 +1,6 @@
 # DataType 分配表
 
-**最后更新**: 2026-05-18 | **维护者**: Kerbos
+**最后更新**: 2026-05-20 | **维护者**: Kerbos
 
 > **强制规则**: 新增任何 DataType 前必须先在本文档注册，确认无冲突后再写代码。
 > 违反此规则会导致消息被错误路由（静默丢弃或写入错误 Topic），排查成本极高。
@@ -22,7 +22,9 @@
 8000-8099 ─────────── 基线合规检查
 9000-9001 ─────────── 插件 SDK 内部心跳（禁止业务使用）
 9100-9299 ─────────── 漏洞修复
-9300-9899 ─────────── (保留，未来安全模块)
+9300-9399 ─────────── 威胁情报（IOC 分发）
+9400-9499 ─────────── 规则分发（Agent 检测规则）
+9500-9899 ─────────── (保留，未来安全模块)
 9900-9999 ─────────── 控制指令 / 命令回包
 ```
 
@@ -42,10 +44,13 @@
 
 | DataType | 方向 | 说明 | 生产者 | 消费者 |
 |----------|------|------|--------|--------|
-| 3000 | Plugin→Server | 进程事件 (exec/exit) | EDR 插件 | Consumer→ClickHouse + CEL |
-| 3001 | Plugin→Server | 文件事件 (file_open) | EDR 插件 | Consumer→ClickHouse + CEL |
-| 3002 | Plugin→Server | 网络事件 (tcp_connect/accept) | EDR 插件 | Consumer→ClickHouse + CEL + 端口扫描检测 |
-| 3003-3099 | - | **未分配** | - | - |
+| 3000 | Agent→Server | 进程事件 (exec/exit) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3001 | Agent→Server | 文件事件 (open/write/rename/unlink/chmod) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3002 | Agent→Server | 网络事件 (tcp_connect/accept/close, udp_send) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL + 端口扫描检测 |
+| 3003 | Agent→Server | DNS 查询事件 (dns_query) | Agent 内置 EDR 引擎 | Consumer→ClickHouse + CEL |
+| 3004 | Agent→Server | 内存威胁事件 (memfd_exec/deleted_exe/anonymous_exec) | Agent 内置 EDR 引擎 | Consumer→MySQL + CEL |
+| 3010 | Agent→Server | BDE 行为画像快照 (behavior_profile) | Agent 内置 EDR 引擎 | Consumer→BDE 基线引擎 |
+| 3005-3009, 3011-3099 | - | **未分配** | - | - |
 
 ### 资产采集 (5050-5060) → Kafka: `TopicAsset`
 
@@ -119,12 +124,34 @@
 | 9200 | Plugin→Server | 修复执行结果 | Remediation 插件 | Consumer→MySQL |
 | 9201-9299 | - | **预留修复结果扩展** | - | - |
 
+### 威胁情报 (9300-9399) — AC→Agent 直接下发（不走 Kafka）
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 9300 | Server→Agent | IOC 数据下发（全量/增量） | AC IOCSyncScheduler | Agent 内置 EDR 引擎（ioc.Store） |
+| 9301-9399 | - | **预留威胁情报扩展** | - | - |
+
+### 规则分发 (9400-9499) — AC→Agent 直接下发（不走 Kafka）
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 9400 | Server→Agent | Agent 检测规则下发（YAML 全量推送） | AC RuleSyncScheduler | Agent 内置 EDR 引擎（rule.Manager） |
+| 9401-9499 | - | **预留规则分发扩展** | - | - |
+
+> **特殊路径**: 9400 通过 gRPC Task 机制 (ObjectName="edr") 直接推送到 Agent，
+> 不经过 Kafka。Agent EDR 引擎接收后将 YAML 规则热加载到内存并持久化到本地规则目录。
+
+> **特殊路径**: 9300 通过 gRPC Task 机制 (ObjectName="edr") 直接推送到 Agent，
+> 不经过 Kafka。Agent EDR 引擎接收后加载到内存 HashMap，用于事件实时碰撞检测。
+
 ### 控制指令 (9900-9999) → Kafka: `TopicCommandAck` (仅 9999)
 
 | DataType | 方向 | 说明 | 生产者 | 消费者 |
 |----------|------|------|--------|--------|
 | 9900 | Server→Agent | 任务取消信号 | Manager | Agent 内部处理（不走 Kafka） |
-| 9901-9998 | - | **未分配** | - | - |
+| 9901-9996 | - | **未分配** | - | - |
+| 9997 | Server→Agent | 网络阻断/隔离命令 (block_ip/unblock_ip/isolate/release) | Manager/AutoResponder | Agent EDR 引擎 (isolate.Manager) |
+| 9998 | Server→Agent | 自动响应命令 (kill_process/quarantine_file) | AutoResponder | Agent EDR 引擎 (rule.ActionExecutor) |
 | 9999 | Agent→Server | 命令执行回包 | Agent | Consumer→MySQL |
 
 ---
@@ -173,7 +200,8 @@ Kafka 启用时只走 Kafka 路径，直写路径仅在 Kafka 关闭时兜底。
 |----------|-----------|---------------|---------|------|
 | 1000 | heartbeat | MySQL+CH+Redis | Y | 完整双路径 |
 | 1001 | heartbeat | ClickHouse | - | Kafka-only，指标数据无需持久化到 MySQL |
-| 3000-3002 | ebpf | ClickHouse+CEL | - | Kafka-only，时序数据写 ClickHouse |
+| 3000-3003 | ebpf | ClickHouse+CEL | - | Kafka-only，时序数据写 ClickHouse（生产者: Agent 内置 EDR 引擎） |
+| 3004 | ebpf | MySQL+CEL | - | Kafka-only，内存威胁事件持久化到 MySQL |
 | 5050-5060 | asset | MySQL | Y | 完整双路径 |
 | 6001 | events | MySQL+CH+CEL | Y | 完整双路径 |
 | 6002 | events | MySQL | Y | 完整双路径 |

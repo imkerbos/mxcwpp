@@ -87,22 +87,14 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		)
 	}
 
-	// 创建带超时的 context（10 秒连接超时，加快重连速度）
-	connectTimeout := 10 * time.Second
-	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
-
 	m.logger.Info("establishing gRPC connection",
 		zap.String("server", serverAddr),
-		zap.Duration("timeout", connectTimeout),
 	)
 
-	// 创建 gRPC 连接（带超时和 keepalive）
-	conn, err := grpc.DialContext(
-		connectCtx,
-		serverAddr,
+	// 创建 gRPC 连接（惰性连接 + keepalive）
+	conn, err := grpc.NewClient(
+		"dns:///"+serverAddr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
-		grpc.WithBlock(),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                30 * time.Second, // 每 30 秒发送一次 keepalive ping（降低频率避免 too_many_pings）
 			Timeout:             5 * time.Second,  // keepalive ping 超时时间
@@ -110,19 +102,11 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		}),
 	)
 	if err != nil {
-		if connectCtx.Err() == context.DeadlineExceeded {
-			m.logger.Error("connection timeout",
-				zap.String("server", serverAddr),
-				zap.Duration("timeout", connectTimeout),
-				zap.Error(err),
-			)
-			return nil, fmt.Errorf("connection timeout after %v: %w", connectTimeout, err)
-		}
-		m.logger.Error("failed to dial server",
+		m.logger.Error("failed to create gRPC client",
 			zap.String("server", serverAddr),
 			zap.Error(err),
 		)
-		return nil, fmt.Errorf("failed to dial server: %w", err)
+		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
 	}
 
 	// 等待连接就绪（最多等待 5 秒）

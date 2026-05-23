@@ -387,7 +387,7 @@ const notifyCategoryOptions = [
   { value: 'agent_offline', label: 'Agent 离线通知', description: 'Agent 断开连接时发送通知', hasSeverity: false },
   { value: 'virus_alert', label: '病毒查杀告警', description: '检测到病毒或恶意文件时发送通知', hasSeverity: true },
   { value: 'fim_alert', label: '文件完整性告警', description: '关键文件被篡改、新增或删除时发送通知', hasSeverity: true },
-  { value: 'edr_alert', label: 'EDR 告警', description: 'EDR 检测规则触发告警时发送通知', hasSeverity: true },
+  { value: 'detection', label: '检测告警', description: 'CEL 检测规则触发告警时发送通知', hasSeverity: true },
   { value: 'kube_alert', label: 'K8s 安全告警', description: 'K8s 审计检测规则触发告警时发送通知', hasSeverity: true },
   { value: 'vuln_bulletin', label: '漏洞通报', description: '漏洞通报创建时发送通知，通报等级在漏洞通报配置中管理', hasSeverity: false },
 ]
@@ -399,7 +399,7 @@ const NOTIFY_CATEGORY_TEXT_MAP: Record<string, string> = {
   vuln_bulletin: '漏洞通报',
   virus_alert: '病毒查杀告警',
   fim_alert: '文件完整性告警',
-  edr_alert: 'EDR 告警',
+  detection: '检测告警',
   kube_alert: 'K8s 安全告警',
 }
 
@@ -410,7 +410,7 @@ const NOTIFY_CATEGORY_COLOR_MAP: Record<string, string> = {
   vuln_bulletin: 'magenta',
   virus_alert: 'volcano',
   fim_alert: 'gold',
-  edr_alert: 'purple',
+  detection: 'purple',
   kube_alert: 'blue',
 }
 
@@ -819,7 +819,7 @@ const handleNotifyCategoryChange = () => {
     vuln_bulletin: '漏洞通报通知',
     virus_alert: '病毒查杀告警',
     fim_alert: '文件完整性告警',
-    edr_alert: 'EDR 告警',
+    detection: '检测告警',
     kube_alert: 'K8s 安全告警',
   }
   formData.name = formData.name || defaultNames[formData.notify_category] || ''
@@ -863,13 +863,13 @@ onMounted(() => {
     margin: 0 0 8px 0;
     font-size: 20px;
     font-weight: 600;
-    color: #262626;
+    color: var(--mxsec-text-1);
   }
 
   .page-description {
     margin: 0;
     font-size: 14px;
-    color: #86909C;
+    color: var(--mxsec-text-3);
   }
 }
 
@@ -879,9 +879,9 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #F7F8FA;
+  background: var(--mxsec-fill-1);
   border-radius: 6px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--mxsec-border);
 
   .search-input {
     width: 280px;
@@ -894,7 +894,7 @@ onMounted(() => {
 
 .config-url {
   font-size: 12px;
-  color: #86909C;
+  color: var(--mxsec-text-3);
   word-break: break-all;
 }
 
@@ -929,7 +929,7 @@ onMounted(() => {
 .form-tip {
   margin-top: 8px;
   font-size: 12px;
-  color: #86909C;
+  color: var(--mxsec-text-3);
   line-height: 1.5;
 }
 

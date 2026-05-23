@@ -117,12 +117,18 @@ export const menuConfig: MenuItem[] = [
     ],
   },
   {
-    key: 'edr',
-    title: 'EDR',
+    key: 'detection',
+    title: '威胁检测',
     icon: ThunderboltOutlined,
     children: [
+      { key: 'edr-events', title: 'EDR 事件', route: '/edr/events' },
       { key: 'detection-rules', title: '检测规则', route: '/detection/rules' },
       { key: 'threat-intel', title: '威胁情报', route: '/threat-intel' },
+      { key: 'storylines', title: '攻击故事线', route: '/storylines' },
+      { key: 'hunting', title: '威胁狩猎', route: '/hunting' },
+      { key: 'anomaly', title: 'ML 异常检测', route: '/anomaly' },
+      { key: 'bde', title: '行为基线', route: '/bde' },
+      { key: 'host-isolation', title: '主机隔离', route: '/host-isolation' },
     ],
   },
   {

@@ -287,13 +287,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Virus/Quarantine.vue'),
         meta: { title: '文件隔离箱' },
       },
-      // EDR 告警事件
-      {
-        path: 'detection/events',
-        name: 'EDRAlerts',
-        component: () => import('@/views/EDRAlerts/index.vue'),
-        meta: { title: 'EDR 告警事件' },
-      },
       // 检测规则管理
       {
         path: 'detection/rules',
@@ -301,12 +294,54 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Detection/Rules.vue'),
         meta: { title: '检测规则' },
       },
+      // EDR 事件
+      {
+        path: 'edr/events',
+        name: 'EDREvents',
+        component: () => import('@/views/EDR/Events/index.vue'),
+        meta: { title: 'EDR 事件' },
+      },
       // 威胁情报
       {
         path: 'threat-intel',
         name: 'ThreatIntel',
         component: () => import('@/views/ThreatIntel/index.vue'),
         meta: { title: '威胁情报' },
+      },
+      // M4: 攻击故事线
+      {
+        path: 'storylines',
+        name: 'Storylines',
+        component: () => import('@/views/Storyline/index.vue'),
+        meta: { title: '攻击故事线' },
+      },
+      // M4: 威胁狩猎
+      {
+        path: 'hunting',
+        name: 'Hunting',
+        component: () => import('@/views/Hunting/index.vue'),
+        meta: { title: '威胁狩猎' },
+      },
+      // M4: ML 异常检测
+      {
+        path: 'anomaly',
+        name: 'Anomaly',
+        component: () => import('@/views/Anomaly/index.vue'),
+        meta: { title: 'ML 异常检测' },
+      },
+      // M4: 行为基线引擎
+      {
+        path: 'bde',
+        name: 'BDE',
+        component: () => import('@/views/BDE/index.vue'),
+        meta: { title: '行为基线' },
+      },
+      // M4: 主机隔离管理
+      {
+        path: 'host-isolation',
+        name: 'HostIsolation',
+        component: () => import('@/views/HostIsolation/index.vue'),
+        meta: { title: '主机隔离' },
       },
       // 系统管理 — 迁移助手
       {
@@ -397,7 +432,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Kube/ImageScan.vue'),
         meta: { title: '镜像扫描' },
       },
-      // RASP 已弃用，由 Tetragon eBPF EDR 替代
+      // RASP 已弃用
       // 保留路由兼容旧书签，重定向到检测规则页
       {
         path: 'rasp/apps',

@@ -1,0 +1,24 @@
+schema_version: 1
+id: MXEDR-0082
+name: c2_irc_connect
+version: 1
+category: network
+severity: high
+mitre:
+  tactic: command_and_control
+  technique: T1071.001
+tags: [c2, irc, botnet]
+agent:
+  enabled: true
+  action: alert
+  enforce: false
+  match:
+    event_type: tcp_connect
+    conditions:
+      - field: remote_port
+        op: in
+        values: ["6667", "6668", "6669", "6697"]
+    logic: and
+metadata:
+  description: "连接 IRC 端口，可能为僵尸网络 C2 通信"
+  confidence: 80

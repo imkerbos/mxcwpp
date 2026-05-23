@@ -235,12 +235,6 @@ func processNotificationAlerts(db *gorm.DB, logger *zap.Logger, notification *mo
 	return sentCount
 }
 
-// matchAlertScope 检查告警是否在通知配置的主机范围内
-func matchAlertScope(db *gorm.DB, logger *zap.Logger, notification *model.Notification, alert *model.Alert) bool {
-	matched, _ := matchAlertScopeWithReason(db, logger, notification, alert)
-	return matched
-}
-
 // matchAlertScopeWithReason 检查告警是否在通知配置的主机范围内，并返回不匹配的原因
 func matchAlertScopeWithReason(db *gorm.DB, logger *zap.Logger, notification *model.Notification, alert *model.Alert) (bool, string) {
 	switch notification.Scope {

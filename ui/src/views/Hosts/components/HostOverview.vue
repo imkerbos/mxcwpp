@@ -580,8 +580,8 @@
               <div class="risk-overview-row second-row">
                 <div class="risk-card">
                   <div class="risk-card-header">
-                    <span class="risk-card-title">EDR 告警</span>
-                    <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'runtime')">详情</a-button>
+                    <span class="risk-card-title">检测告警</span>
+                    <a-button type="link" size="small" class="risk-card-link" @click="$emit('view-detail', 'detection')">详情</a-button>
                   </div>
                   <div class="risk-card-content">
                     <div class="risk-left-section">
@@ -803,7 +803,7 @@
                       <span style="font-weight: 500;">{{ record.name }}</span>
                     </template>
                     <template v-else-if="column.key === 'version'">
-                      <span :style="{ color: record.need_update && !(host?.is_container && record.status === 'not_installed') ? '#FF7D00' : 'inherit' }">
+                      <span :style="{ color: record.need_update && !(host?.is_container && record.status === 'not_installed') ? '#F59E0B' : 'inherit' }">
                         {{ record.version || '-' }}
                         <template v-if="record.need_update && !(host?.is_container && record.status === 'not_installed')">
                           <a-tooltip v-if="host?.is_container" title="容器环境请通过重建镜像更新，不支持在线推送">
@@ -835,16 +835,7 @@
                       {{ record.updated_at ? formatDateTime(record.updated_at) : '-' }}
                     </template>
                     <template v-else-if="column.key === 'action'">
-                      <a-popconfirm
-                        v-if="needsTetragonInstall(record)"
-                        title="确定安装 Tetragon 依赖？安装后 EDR 插件将自动恢复运行。"
-                        @confirm="handleInstallTetragon"
-                      >
-                        <a-button type="link" size="small" :loading="depInstalling" :disabled="host?.status !== 'online'">
-                          安装 Tetragon
-                        </a-button>
-                      </a-popconfirm>
-                      <span v-else style="color: #bfbfbf">-</span>
+                      <span style="color: #bfbfbf">-</span>
                     </template>
                   </template>
                 </a-table>
@@ -1075,25 +1066,6 @@ const loadComponents = async () => {
   }
 }
 
-// EDR 插件依赖（Tetragon）相关
-const depInstalling = ref(false)
-
-const needsTetragonInstall = (record: ComponentInfo) => {
-  return record.name === 'edr' && ['error', 'dormant', 'not_installed'].includes(record.status)
-}
-
-const handleInstallTetragon = async () => {
-  if (!props.host) return
-  depInstalling.value = true
-  try {
-    await hostsApi.installDependency([props.host.host_id], 'tetragon')
-    message.success('Tetragon 安装命令已下发，请稍后刷新查看状态')
-  } catch (error: any) {
-    message.error(error?.message || '安装命令下发失败')
-  } finally {
-    depInstalling.value = false
-  }
-}
 
 // 监听 host 变化，重新加载组件列表
 watch(() => props.host?.host_id, (newHostId) => {
@@ -1544,14 +1516,14 @@ onMounted(() => {
 }
 
 .host-info-card :deep(.ant-card-head) {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--mxsec-border);
   padding: 16px 16px;
 }
 
 .host-info-card :deep(.ant-card-head-title) {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
 .host-info-card :deep(.ant-card-body) {
@@ -1582,7 +1554,7 @@ onMounted(() => {
   grid-template-columns: 100px 1fr;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--mxsec-border-light);
   min-height: 44px;
   gap: 8px;
 }
@@ -1594,7 +1566,7 @@ onMounted(() => {
 .info-label {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
   text-align: left;
   line-height: 20px;
   white-space: nowrap;
@@ -1603,7 +1575,7 @@ onMounted(() => {
 
 .info-value {
   font-size: 14px;
-  color: #4E5969;
+  color: var(--mxsec-text-2);
   line-height: 20px;
   word-break: break-word;
   min-width: 0;
@@ -1617,7 +1589,7 @@ onMounted(() => {
 
 /* 无数据状态（Agent 已连接但采集不到数据，如容器环境） */
 .info-value.empty-value.status-no-data {
-  color: #86909C;
+  color: var(--mxsec-text-3);
   font-style: italic;
 }
 
@@ -1636,12 +1608,12 @@ onMounted(() => {
 }
 
 .copyable-text:hover {
-  color: #165DFF;
+  color: var(--mxsec-primary);
   text-decoration: underline;
 }
 
 .cpu-info-text:hover {
-  color: #165DFF;
+  color: var(--mxsec-primary);
 }
 
 
@@ -1663,12 +1635,12 @@ onMounted(() => {
 }
 
 .status-dot.online {
-  background-color: #00B42A;
+  background-color: #22C55E;
   box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
 }
 
 .status-dot.offline {
-  background-color: #F53F3F;
+  background-color: #EF4444;
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.2);
 }
 
@@ -1695,7 +1667,7 @@ onMounted(() => {
 
 .risk-card {
   flex: 1;
-  background: #fff;
+  background: var(--mxsec-card-bg);
   border: none;
   border-radius: 8px;
   padding: 16px;
@@ -1720,13 +1692,13 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--mxsec-border-light);
 }
 
 .risk-card-title {
   font-size: 14px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
 .risk-card-title-with-tags {
@@ -1740,7 +1712,7 @@ onMounted(() => {
   padding: 0;
   height: auto;
   font-size: 12px;
-  color: #165DFF;
+  color: var(--mxsec-primary);
 }
 
 .risk-card-content {
@@ -1770,14 +1742,14 @@ onMounted(() => {
 
 .risk-unprocessed-label {
   font-size: 12px;
-  color: #4E5969;
+  color: var(--mxsec-text-2);
   line-height: 1.2;
 }
 
 .risk-unprocessed-value {
   font-size: 28px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
   line-height: 1;
 }
 
@@ -1795,7 +1767,7 @@ onMounted(() => {
   height: 70px;
   border: 3px solid #e8e8e8;
   border-radius: 50%;
-  background: #F7F8FA;
+  background: var(--mxsec-fill-1);
   transition: all 0.3s;
 }
 
@@ -1833,7 +1805,7 @@ onMounted(() => {
 }
 
 .risk-stat-dot.critical {
-  background-color: #F53F3F;
+  background-color: #EF4444;
   box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.15);
 }
 
@@ -1843,25 +1815,25 @@ onMounted(() => {
 }
 
 .risk-stat-dot.medium {
-  background-color: #FF7D00;
+  background-color: #F59E0B;
   box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.15);
 }
 
 .risk-stat-dot.low {
-  background-color: #165DFF;
+  background-color: var(--mxsec-primary);
   box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
 }
 
 .risk-stat-label {
   font-size: 12px;
-  color: #4E5969;
+  color: var(--mxsec-text-2);
   white-space: nowrap;
 }
 
 .risk-stat-value {
   font-size: 12px;
   font-weight: 500;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
   margin-left: auto;
 }
 
@@ -1874,7 +1846,7 @@ onMounted(() => {
 
 /* 资产指纹 */
 .fingerprint-section {
-  background: #fff;
+  background: var(--mxsec-card-bg);
   border: none;
   border-radius: 8px;
   padding: 20px;
@@ -1889,13 +1861,13 @@ onMounted(() => {
   align-items: center;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--mxsec-border);
 }
 
 .fingerprint-title {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
 .fingerprint-link {
@@ -1916,15 +1888,15 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: #F7F8FA;
-  border: 1px solid #f0f0f0;
+  background: var(--mxsec-fill-1);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
   transition: all 0.3s ease;
   cursor: pointer;
 }
 
 .fingerprint-item:hover {
-  background: #E8F3FF;
+  background: var(--mxsec-primary-bg);
   border-color: #91d5ff;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(24, 144, 255, 0.12);
@@ -1933,14 +1905,14 @@ onMounted(() => {
 .fingerprint-value {
   font-size: 28px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
   margin-bottom: 8px;
   line-height: 1;
 }
 
 .fingerprint-label {
   font-size: 14px;
-  color: #4E5969;
+  color: var(--mxsec-text-2);
   text-align: center;
 }
 
@@ -1955,7 +1927,7 @@ onMounted(() => {
 }
 
 .content-section :deep(.ant-card .ant-card-head) {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--mxsec-border);
 }
 
 .content-section :deep(.ant-card .ant-card-head-title) {
@@ -2007,11 +1979,11 @@ onMounted(() => {
   
   .info-item {
     grid-template-columns: 100px 1fr;
-    border-bottom: 1px solid #F2F3F5;
+    border-bottom: 1px solid var(--mxsec-border-light);
   }
   
   .info-item:last-child {
-    border-bottom: 1px solid #F2F3F5;
+    border-bottom: 1px solid var(--mxsec-border-light);
   }
   
   .info-group:last-child .info-item:last-child {

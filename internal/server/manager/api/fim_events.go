@@ -296,6 +296,12 @@ func (h *FIMEventsHandler) getFIMEventStatsFromCH(c *gin.Context, days int) {
 	}
 	rows.Close()
 
+	// ClickHouse 表存在但无数据（FIM 事件仅写 MySQL），fallback MySQL
+	if stats.Total == 0 {
+		h.getFIMEventStatsFromMySQL(c, days)
+		return
+	}
+
 	// 2. 按分类统计
 	catRows, err := h.chConn.Query(ctx, `
 		SELECT category, count() AS cnt

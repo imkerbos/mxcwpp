@@ -88,6 +88,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("sensor→edr 迁移处理", zap.Error(err))
 	}
 
+	// 清理废弃的 edr 插件和 tetragon 依赖（EDR 已内置 Agent v1.2.0+）
+	if err := migrateRemoveEDRPlugin(db, logger); err != nil {
+		logger.Warn("edr 插件清理处理", zap.Error(err))
+	}
+
 	// 添加性能优化索引（幂等）
 	if err := AddPerformanceIndexes(db, logger); err != nil {
 		logger.Warn("添加性能索引失败", zap.Error(err))
@@ -116,12 +121,12 @@ func migrateAlertSource(db *gorm.DB, logger *zap.Logger) error {
 		logger.Info("回填 agent 来源", zap.Int64("count", r.RowsAffected))
 	}
 
-	// 2. EDR 告警（CEL 规则 + 端口扫描）
+	// 2. 检测告警（CEL 规则 + 端口扫描）
 	r = db.Model(&model.Alert{}).
 		Where("(source IS NULL OR source = '') AND (rule_id LIKE ? OR rule_id = ?)", "cel-%", "scan-detector").
-		Update("source", model.AlertSourceEDR)
+		Update("source", model.AlertSourceDetection)
 	if r.RowsAffected > 0 {
-		logger.Info("回填 edr 来源", zap.Int64("count", r.RowsAffected))
+		logger.Info("回填 detection 来源", zap.Int64("count", r.RowsAffected))
 	}
 
 	// 3. 其余未标记的 → 基线告警
@@ -136,39 +141,86 @@ func migrateAlertSource(db *gorm.DB, logger *zap.Logger) error {
 }
 
 // migrateSensorToEDR 将数据库中残留的 sensor/runtime 相关数据迁移为 edr
+// 注意：此迁移仅处理历史数据重命名，edr 插件本身已在 migrateRemoveEDRPlugin 中清理
 func migrateSensorToEDR(db *gorm.DB, logger *zap.Logger) error {
-	// 1. plugin_configs 表：name='sensor' → 'edr', type='sensor' → 'edr'
-	r := db.Table("plugin_configs").
-		Where("name = ? AND deleted_at IS NULL", "sensor").
-		Updates(map[string]interface{}{"name": "edr", "type": "edr", "description": "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件"})
-	if r.RowsAffected > 0 {
-		logger.Info("plugin_configs: sensor → edr", zap.Int64("count", r.RowsAffected))
-	}
-
-	// 2. components 表：name='sensor' → 'edr'
-	r = db.Table("components").
-		Where("name = ?", "sensor").
-		Updates(map[string]interface{}{"name": "edr", "description": "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件"})
-	if r.RowsAffected > 0 {
-		logger.Info("components: sensor → edr", zap.Int64("count", r.RowsAffected))
-	}
-
-	// 3. alerts 表：source='runtime' → 'edr'
-	r = db.Table("alerts").Where("source = ?", "runtime").Update("source", "edr")
+	// 1. alerts 表：source='runtime' → 'edr'
+	r := db.Table("alerts").Where("source = ?", "runtime").Update("source", "edr")
 	if r.RowsAffected > 0 {
 		logger.Info("alerts: source runtime → edr", zap.Int64("count", r.RowsAffected))
 	}
 
-	// 4. notifications 表：notify_category='runtime_alert' → 'edr_alert'
+	// 2. notifications 表：notify_category='runtime_alert' → 'edr_alert'
 	r = db.Table("notifications").Where("notify_category = ?", "runtime_alert").Update("notify_category", "edr_alert")
 	if r.RowsAffected > 0 {
 		logger.Info("notifications: runtime_alert → edr_alert", zap.Int64("count", r.RowsAffected))
 	}
 
-	// 5. generated_reports 表：report_type='runtime' → 'edr'
+	// 3. generated_reports 表：report_type='runtime' → 'edr'
 	r = db.Table("generated_reports").Where("report_type = ?", "runtime").Update("report_type", "edr")
 	if r.RowsAffected > 0 {
 		logger.Info("generated_reports: runtime → edr", zap.Int64("count", r.RowsAffected))
+	}
+
+	return nil
+}
+
+// migrateRemoveEDRPlugin 清理废弃的 edr 插件和 tetragon 依赖
+// EDR 检测功能已内置到 Agent 二进制 (v1.2.0+)，不再需要独立的 edr 插件和 tetragon 运行时
+// 此迁移幂等：已清理的环境不会重复执行
+func migrateRemoveEDRPlugin(db *gorm.DB, logger *zap.Logger) error {
+	// 1. 清理 plugin_configs 中的 edr 和 sensor 插件配置
+	// sensor 是 edr 的旧名称，一并清理
+	r := db.Table("plugin_configs").
+		Where("name IN (?, ?) AND deleted_at IS NULL", "edr", "sensor").
+		Update("deleted_at", time.Now())
+	if r.RowsAffected > 0 {
+		logger.Info("已清理 edr/sensor 插件配置", zap.Int64("count", r.RowsAffected))
+	}
+
+	// 2. 软删除 edr、tetragon、tetrgon(历史 typo) 组件及其版本和包
+	obsoleteNames := []string{"edr", "sensor", "tetragon", "tetrgon"}
+
+	// 查找需要清理的组件 ID
+	var componentIDs []uint
+	db.Table("components").
+		Where("name IN ? AND deleted_at IS NULL", obsoleteNames).
+		Pluck("id", &componentIDs)
+
+	if len(componentIDs) == 0 {
+		return nil // 已清理
+	}
+
+	// 软删除关联的包记录
+	var versionIDs []uint
+	db.Table("component_versions").
+		Where("component_id IN ?", componentIDs).
+		Pluck("id", &versionIDs)
+
+	if len(versionIDs) > 0 {
+		r = db.Table("component_packages").
+			Where("version_id IN ? AND deleted_at IS NULL", versionIDs).
+			Update("deleted_at", time.Now())
+		if r.RowsAffected > 0 {
+			logger.Info("已清理废弃组件包", zap.Int64("count", r.RowsAffected))
+		}
+
+		// 软删除版本记录
+		r = db.Table("component_versions").
+			Where("id IN ? AND deleted_at IS NULL", versionIDs).
+			Update("deleted_at", time.Now())
+		if r.RowsAffected > 0 {
+			logger.Info("已清理废弃组件版本", zap.Int64("count", r.RowsAffected))
+		}
+	}
+
+	// 软删除组件记录
+	r = db.Table("components").
+		Where("id IN ? AND deleted_at IS NULL", componentIDs).
+		Update("deleted_at", time.Now())
+	if r.RowsAffected > 0 {
+		logger.Info("已清理废弃组件",
+			zap.Int64("count", r.RowsAffected),
+			zap.Strings("names", obsoleteNames))
 	}
 
 	return nil

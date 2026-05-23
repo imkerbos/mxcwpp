@@ -56,9 +56,6 @@
       <a-tab-pane key="baseline" :tab="`基线风险(${baselineCount})`">
         <BaselineRisk :host-id="hostId" />
       </a-tab-pane>
-      <a-tab-pane key="edr" :tab="`EDR 告警(${edrAlertCount})`">
-        <EDRAlerts :host-id="hostId" />
-      </a-tab-pane>
       <a-tab-pane key="antivirus" :tab="`病毒查杀(${antivirusCount})`">
         <AntivirusScan :host-id="hostId" />
       </a-tab-pane>
@@ -77,14 +74,13 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ArrowLeftOutlined } from '@ant-design/icons-vue'
 import { hostsApi } from '@/api/hosts'
-import { alertsApi } from '@/api/alerts'
+
 import { antivirusApi } from '@/api/antivirus'
 import type { HostDetail, BaselineScore } from '@/api/types'
 import HostOverview from './components/HostOverview.vue'
 import SecurityAlerts from './components/SecurityAlerts.vue'
 import VulnerabilityRisk from './components/VulnerabilityRisk.vue'
 import BaselineRisk from './components/BaselineRisk.vue'
-import EDRAlerts from './components/EDRAlerts.vue'
 import AntivirusScan from './components/AntivirusScan.vue'
 import PerformanceMonitor from './components/PerformanceMonitor.vue'
 import AssetFingerprint from './components/AssetFingerprint.vue'
@@ -96,14 +92,13 @@ const loading = ref(false)
 const loadError = ref('')
 const host = ref<HostDetail | null>(null)
 const scoreData = ref<BaselineScore | null>(null)
-const validTabs = ['overview', 'alerts', 'vulnerabilities', 'baseline', 'edr', 'antivirus', 'performance', 'fingerprint']
+const validTabs = ['overview', 'alerts', 'vulnerabilities', 'baseline', 'antivirus', 'performance', 'fingerprint']
 const activeTab = ref((route.query.tab as string) && validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview')
 const hostId = ref('')
 
 const alertCount = ref(0)
 const vulnerabilityCount = ref(0)
 const baselineCount = ref(0)
-const edrAlertCount = ref(0)
 const antivirusCount = ref(0)
 
 const loadHostDetail = async () => {
@@ -114,11 +109,10 @@ const loadHostDetail = async () => {
   loading.value = true
   loadError.value = ''
   try {
-    const [hostData, scoreResult, riskStats, edrRes, antivirusRes] = await Promise.all([
+    const [hostData, scoreResult, riskStats, antivirusRes] = await Promise.all([
       hostsApi.get(id),
       hostsApi.getScore(id).catch(() => null),
       hostsApi.getRiskStatistics(id).catch(() => null),
-      alertsApi.list({ host_id: id, alert_type: 'edr' as any, page: 1, page_size: 1 }).catch(() => null),
       antivirusApi.listResults({ host_id: id, page: 1, page_size: 1 }).catch(() => null),
     ])
     host.value = hostData
@@ -137,7 +131,6 @@ const loadHostDetail = async () => {
       }
     }
 
-    edrAlertCount.value = edrRes?.total ?? 0
     antivirusCount.value = antivirusRes?.total ?? 0
   } catch (error: any) {
     console.error('加载主机详情失败:', error)
@@ -236,19 +229,19 @@ onMounted(() => {
     border-radius: 6px 6px 0 0;
 
     &:hover {
-      color: #165DFF;
+      color: var(--mxsec-primary);
     }
 
     &.ant-tabs-tab-active {
       .ant-tabs-tab-btn {
-        color: #165DFF;
+        color: var(--mxsec-primary);
         font-weight: 500;
       }
     }
   }
 
   .ant-tabs-ink-bar {
-    background: linear-gradient(90deg, #165DFF, #0E42D2);
+    background: linear-gradient(90deg, #3B82F6, #2563EB);
     height: 3px;
     border-radius: 3px 3px 0 0;
   }

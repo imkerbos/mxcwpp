@@ -42,7 +42,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "pass - key value match (Key Value format)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test1.conf")
-				os.WriteFile(file, []byte("PermitRootLogin no\n"), 0644)
+				_ = os.WriteFile(file, []byte("PermitRootLogin no\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -56,7 +56,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "pass - key value match (Key=Value format)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test2.conf")
-				os.WriteFile(file, []byte("PermitRootLogin=no\n"), 0644)
+				_ = os.WriteFile(file, []byte("PermitRootLogin=no\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -70,7 +70,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "pass - key value match with regex",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test3.conf")
-				os.WriteFile(file, []byte("Port 22\n"), 0644)
+				_ = os.WriteFile(file, []byte("Port 22\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -84,7 +84,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "pass - case insensitive key match",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test4.conf")
-				os.WriteFile(file, []byte("permitrootlogin no\n"), 0644)
+				_ = os.WriteFile(file, []byte("permitrootlogin no\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -98,7 +98,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "fail - key value mismatch",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test5.conf")
-				os.WriteFile(file, []byte("PermitRootLogin yes\n"), 0644)
+				_ = os.WriteFile(file, []byte("PermitRootLogin yes\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -112,7 +112,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "fail - key not found",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test6.conf")
-				os.WriteFile(file, []byte("Port 22\n"), 0644)
+				_ = os.WriteFile(file, []byte("Port 22\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -138,7 +138,7 @@ func TestFileKVChecker(t *testing.T) {
 			name: "pass - ignore comments",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test7.conf")
-				os.WriteFile(file, []byte("# PermitRootLogin yes\nPermitRootLogin no\n"), 0644)
+				_ = os.WriteFile(file, []byte("# PermitRootLogin yes\nPermitRootLogin no\n"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -202,7 +202,7 @@ func TestFileExistsChecker(t *testing.T) {
 			name: "pass - file exists",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "exists.txt")
-				os.WriteFile(file, []byte("test"), 0644)
+				_ = os.WriteFile(file, []byte("test"), 0644)
 				return file
 			},
 			wantPass: true,
@@ -271,7 +271,7 @@ func TestFilePermissionChecker(t *testing.T) {
 			name: "pass - permission matches",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test1.txt")
-				os.WriteFile(file, []byte("test"), 0644)
+				_ = os.WriteFile(file, []byte("test"), 0644)
 				return file
 			},
 			minPerm:  "644",
@@ -282,7 +282,7 @@ func TestFilePermissionChecker(t *testing.T) {
 			name: "pass - permission stricter than min",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test2.txt")
-				os.WriteFile(file, []byte("test"), 0600)
+				_ = os.WriteFile(file, []byte("test"), 0600)
 				return file
 			},
 			minPerm:  "644",
@@ -293,8 +293,8 @@ func TestFilePermissionChecker(t *testing.T) {
 			name: "fail - permission too loose",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test3.txt")
-				os.WriteFile(file, []byte("test"), 0644)
-				os.Chmod(file, 0666)
+				_ = os.WriteFile(file, []byte("test"), 0644)
+				_ = os.Chmod(file, 0666)
 				return file
 			},
 			minPerm:  "644",
@@ -314,7 +314,7 @@ func TestFilePermissionChecker(t *testing.T) {
 			name: "error - invalid permission format",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test4.txt")
-				os.WriteFile(file, []byte("test"), 0644)
+				_ = os.WriteFile(file, []byte("test"), 0644)
 				return file
 			},
 			minPerm:  "invalid",
@@ -325,7 +325,7 @@ func TestFilePermissionChecker(t *testing.T) {
 			name: "error - insufficient parameters",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test5.txt")
-				os.WriteFile(file, []byte("test"), 0644)
+				_ = os.WriteFile(file, []byte("test"), 0644)
 				return file
 			},
 			minPerm:  "",
@@ -374,7 +374,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "pass - pattern matches (default match)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test1.txt")
-				os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
+				_ = os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
 				return file
 			},
 			pattern:       "PASS_MAX_DAYS",
@@ -386,7 +386,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "pass - pattern matches (explicit match)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test2.txt")
-				os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
+				_ = os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
 				return file
 			},
 			pattern:       "PASS_MAX_DAYS",
@@ -398,7 +398,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "pass - pattern not matches (not_match)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test3.txt")
-				os.WriteFile(file, []byte("PASS_MIN_DAYS 7\n"), 0644)
+				_ = os.WriteFile(file, []byte("PASS_MIN_DAYS 7\n"), 0644)
 				return file
 			},
 			pattern:       "PASS_MAX_DAYS",
@@ -410,7 +410,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "fail - pattern not matches (default match)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test4.txt")
-				os.WriteFile(file, []byte("PASS_MIN_DAYS 7\n"), 0644)
+				_ = os.WriteFile(file, []byte("PASS_MIN_DAYS 7\n"), 0644)
 				return file
 			},
 			pattern:       "PASS_MAX_DAYS",
@@ -422,7 +422,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "fail - pattern matches (not_match expected)",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test5.txt")
-				os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
+				_ = os.WriteFile(file, []byte("PASS_MAX_DAYS 90\n"), 0644)
 				return file
 			},
 			pattern:       "PASS_MAX_DAYS",
@@ -444,7 +444,7 @@ func TestFileLineMatchChecker(t *testing.T) {
 			name: "error - invalid regex pattern",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test6.txt")
-				os.WriteFile(file, []byte("test\n"), 0644)
+				_ = os.WriteFile(file, []byte("test\n"), 0644)
 				return file
 			},
 			pattern:       "[invalid",
@@ -741,7 +741,7 @@ func TestFileOwnerChecker(t *testing.T) {
 			name: "pass - uid:gid match",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test1.txt")
-				os.WriteFile(file, []byte("test content"), 0644)
+				_ = os.WriteFile(file, []byte("test content"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -755,7 +755,7 @@ func TestFileOwnerChecker(t *testing.T) {
 			name: "pass - username:groupname match",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test2.txt")
-				os.WriteFile(file, []byte("test content"), 0644)
+				_ = os.WriteFile(file, []byte("test content"), 0644)
 				return file
 			},
 			rule: &CheckRule{
@@ -769,7 +769,7 @@ func TestFileOwnerChecker(t *testing.T) {
 			name: "fail - uid mismatch",
 			setup: func() string {
 				file := filepath.Join(tmpDir, "test3.txt")
-				os.WriteFile(file, []byte("test content"), 0644)
+				_ = os.WriteFile(file, []byte("test content"), 0644)
 				return file
 			},
 			rule: &CheckRule{

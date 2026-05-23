@@ -23,7 +23,6 @@
       <a-tab-pane key="antivirus" tab="病毒查杀" />
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="kube" tab="容器安全" />
-      <a-tab-pane key="edr" tab="EDR" />
     </a-tabs>
 
     <template v-if="activeTab === 'overview'">
@@ -38,7 +37,7 @@
             <a-statistic
               title="主机总数"
               :value="reportStats.hostStats?.total || 0"
-              :value-style="{ color: '#165DFF' }"
+              :value-style="{ color: '#3B82F6' }"
             />
           </div>
         </a-card>
@@ -52,7 +51,7 @@
             <a-statistic
               title="基线检查总数"
               :value="reportStats.baselineStats?.totalChecks || 0"
-              :value-style="{ color: '#00B42A' }"
+              :value-style="{ color: '#22C55E' }"
             />
           </div>
         </a-card>
@@ -224,7 +223,7 @@
                   </a-tag>
                 </template>
                 <template v-else-if="column.key === 'affected_hosts'">
-                  <span style="color: #F53F3F; font-weight: 500">
+                  <span style="color: #EF4444; font-weight: 500">
                     {{ record.affected_hosts }} 台
                   </span>
                 </template>
@@ -305,11 +304,6 @@
       ref="kubeRef"
       :date-range="dateRange"
     />
-    <EDRReport
-      v-else-if="activeTab === 'edr'"
-      ref="edrRef"
-      :date-range="dateRange"
-    />
   </div>
 </template>
 
@@ -339,7 +333,6 @@ import type { EChartsOption } from 'echarts'
 import AntivirusReport from './reports/AntivirusReport.vue'
 import VulnerabilityReport from './reports/VulnerabilityReport.vue'
 import KubeReport from './reports/KubeReport.vue'
-import EDRReport from './reports/EDRReport.vue'
 
 // 报表专用风险分布接口
 interface ReportRiskDistribution {
@@ -355,7 +348,7 @@ const router = useRouter()
 const loading = ref(false)
 const loadingTopLists = ref(false)
 
-const validTabs = ['overview', 'antivirus', 'vulnerability', 'kube', 'edr']
+const validTabs = ['overview', 'antivirus', 'vulnerability', 'kube']
 const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview'
 const activeTab = ref<string>(initialTab)
 
@@ -371,7 +364,6 @@ const dateRange = ref<[Dayjs, Dayjs]>([
 const antivirusRef = ref<InstanceType<typeof AntivirusReport> | null>(null)
 const vulnerabilityRef = ref<InstanceType<typeof VulnerabilityReport> | null>(null)
 const kubeRef = ref<InstanceType<typeof KubeReport> | null>(null)
-const edrRef = ref<InstanceType<typeof EDRReport> | null>(null)
 
 const datePresets = [
   { label: '最近7天', value: [dayjs().subtract(7, 'day'), dayjs()] },
@@ -495,9 +487,9 @@ const hostStatusChartOption = computed<EChartsOption>(() => ({
         },
       },
       data: [
-        { value: hostStatusDistribution.value.running, name: '运行中', itemStyle: { color: '#00B42A' } },
-        { value: hostStatusDistribution.value.abnormal, name: '异常', itemStyle: { color: '#FF7D00' } },
-        { value: hostStatusDistribution.value.offline, name: '离线', itemStyle: { color: '#F53F3F' } },
+        { value: hostStatusDistribution.value.running, name: '运行中', itemStyle: { color: '#22C55E' } },
+        { value: hostStatusDistribution.value.abnormal, name: '异常', itemStyle: { color: '#F59E0B' } },
+        { value: hostStatusDistribution.value.offline, name: '离线', itemStyle: { color: '#EF4444' } },
         { value: hostStatusDistribution.value.not_installed, name: '未安装', itemStyle: { color: '#86909C' } },
         { value: hostStatusDistribution.value.uninstalled, name: '已卸载', itemStyle: { color: '#d9d9d9' } },
       ].filter(item => item.value > 0),
@@ -521,7 +513,7 @@ const hostRiskChartOption = computed<EChartsOption>(() => ({
   },
   xAxis: {
     type: 'category',
-    data: ['主机告警', 'EDR 告警', '高危漏洞', '病毒文件', '高危基线'],
+    data: ['主机告警', '检测告警', '高危漏洞', '病毒文件', '高危基线'],
     axisLabel: {
       rotate: 45,
       interval: 0,
@@ -542,7 +534,7 @@ const hostRiskChartOption = computed<EChartsOption>(() => ({
         hostRiskDistribution.value.high_risk_baselines,
       ],
       itemStyle: {
-        color: '#F53F3F',
+        color: '#EF4444',
       },
     },
   ],
@@ -563,9 +555,9 @@ const baselineResultChartOption = computed<EChartsOption>(() => ({
       type: 'pie',
       radius: '60%',
       data: [
-        { value: reportStats.value.baselineStats.passed, name: '通过', itemStyle: { color: '#00B42A' } },
-        { value: reportStats.value.baselineStats.failed, name: '失败', itemStyle: { color: '#F53F3F' } },
-        { value: reportStats.value.baselineStats.warning, name: '警告', itemStyle: { color: '#FF7D00' } },
+        { value: reportStats.value.baselineStats.passed, name: '通过', itemStyle: { color: '#22C55E' } },
+        { value: reportStats.value.baselineStats.failed, name: '失败', itemStyle: { color: '#EF4444' } },
+        { value: reportStats.value.baselineStats.warning, name: '警告', itemStyle: { color: '#F59E0B' } },
       ].filter(item => item.value > 0),
       emphasis: {
         itemStyle: {
@@ -611,8 +603,8 @@ const severityChartOption = computed<EChartsOption>(() => ({
       ],
       itemStyle: {
         color: (params: any) => {
-          const colors = ['#F53F3F', '#ff7875', '#ffa940', '#ffc53d']
-          return colors[params.dataIndex] || '#165DFF'
+          const colors = ['#EF4444', '#ff7875', '#ffa940', '#ffc53d']
+          return colors[params.dataIndex] || '#3B82F6'
         },
       },
     },
@@ -688,7 +680,7 @@ const categoryChartOption = computed<EChartsOption>(() => {
         type: 'bar',
         data: categoryData.map(item => item.value),
         itemStyle: {
-          color: '#165DFF',
+          color: '#3B82F6',
         },
       },
     ],
@@ -738,7 +730,7 @@ const baselineScoreTrendOption = computed<EChartsOption>(() => ({
       data: baselineScoreTrend.value.scores,
       smooth: true,
       itemStyle: {
-        color: '#165DFF',
+        color: '#3B82F6',
       },
       areaStyle: {
         color: {
@@ -761,7 +753,7 @@ const baselineScoreTrendOption = computed<EChartsOption>(() => ({
       data: baselineScoreTrend.value.passRates,
       smooth: true,
       itemStyle: {
-        color: '#00B42A',
+        color: '#22C55E',
       },
     },
   ],
@@ -797,7 +789,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.passed,
       smooth: true,
       itemStyle: {
-        color: '#00B42A',
+        color: '#22C55E',
       },
       areaStyle: {},
     },
@@ -808,7 +800,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.failed,
       smooth: true,
       itemStyle: {
-        color: '#F53F3F',
+        color: '#EF4444',
       },
       areaStyle: {},
     },
@@ -819,7 +811,7 @@ const checkResultTrendOption = computed<EChartsOption>(() => ({
       data: checkResultTrend.value.warning,
       smooth: true,
       itemStyle: {
-        color: '#FF7D00',
+        color: '#F59E0B',
       },
       areaStyle: {},
     },
@@ -835,8 +827,6 @@ const handleRefresh = () => {
     vulnerabilityRef.value?.refresh()
   } else if (activeTab.value === 'kube') {
     kubeRef.value?.refresh()
-  } else if (activeTab.value === 'edr') {
-    edrRef.value?.refresh()
   }
 }
 
@@ -875,9 +865,9 @@ const getScoreStatus = (score: number): 'success' | 'exception' | 'normal' => {
 }
 
 const getScoreColor = (score: number): string => {
-  if (score >= 80) return '#00B42A'
-  if (score >= 60) return '#FF7D00'
-  return '#F53F3F'
+  if (score >= 80) return '#22C55E'
+  if (score >= 60) return '#F59E0B'
+  return '#EF4444'
 }
 
 // 导航函数
@@ -1052,16 +1042,16 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   font-size: 22px;
-  color: #fff;
+  color: var(--mxsec-card-bg);
   flex-shrink: 0;
 }
 
 .stat-hosts .stat-icon-bg {
-  background: linear-gradient(135deg, #165DFF, #0E42D2);
+  background: linear-gradient(135deg, #3B82F6, #2563EB);
 }
 
 .stat-baseline .stat-icon-bg {
-  background: linear-gradient(135deg, #00B42A, #009A29);
+  background: linear-gradient(135deg, #22C55E, #009A29);
 }
 
 .stat-policy .stat-icon-bg {

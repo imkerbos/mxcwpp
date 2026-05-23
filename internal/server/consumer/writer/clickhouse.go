@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/sanitize"
 )
 
 // hostMetricRow 是 host_metrics 表的一行数据
@@ -324,7 +325,7 @@ func (w *ClickHouseWriter) parseEBPFEvent(msg *kafka.MQMessage) ebpfEventRow {
 			row.PID = fields["pid"]
 			row.PPID = fields["ppid"]
 			row.Exe = fields["exe"]
-			row.Cmdline = fields["cmdline"]
+			row.Cmdline = sanitize.Cmdline(fields["cmdline"])
 			row.ParentExe = fields["parent_exe"]
 			row.FilePath = fields["file_path"]
 			row.RemoteAddr = fields["remote_addr"]

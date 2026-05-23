@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	agentrt "github.com/imkerbos/mxsec-platform/internal/agent/runtime"
 	"github.com/imkerbos/mxsec-platform/internal/common/fileutil"
 )
 
@@ -96,10 +97,26 @@ func InstallPackage(pkgType string, pkgPath string) (string, error) {
 	return outputStr, nil
 }
 
+// restartStrategy 根据运行时环境决定重启策略
+// 返回 "exit"（容器模式）或 "systemctl"（systemd 模式）
+func restartStrategy() string {
+	if agentrt.IsContainer() {
+		return "exit"
+	}
+	return "systemctl"
+}
+
 // RestartAgent 重启 Agent 服务（延迟执行，给调用方时间完成清理）
+// 容器环境中直接退出，由容器编排器（Docker restart policy / K8s）负责重启
 func RestartAgent() {
 	go func() {
 		time.Sleep(2 * time.Second)
+
+		if restartStrategy() == "exit" {
+			// 容器中没有 systemd，直接退出让编排器重启
+			os.Exit(0)
+			return
+		}
 
 		cmd := exec.Command("systemctl", "restart", "mxsec-agent")
 		if err := cmd.Start(); err != nil {
@@ -138,10 +155,10 @@ func IsDowngrade(currentVer, targetVer string) bool {
 	for i := 0; i < maxLen; i++ {
 		var current, target int
 		if i < len(currentParts) {
-			fmt.Sscanf(currentParts[i], "%d", &current)
+			_, _ = fmt.Sscanf(currentParts[i], "%d", &current)
 		}
 		if i < len(targetParts) {
-			fmt.Sscanf(targetParts[i], "%d", &target)
+			_, _ = fmt.Sscanf(targetParts[i], "%d", &target)
 		}
 		if target < current {
 			return true
@@ -160,6 +177,13 @@ func GetCurrentArch() string {
 
 // --- Manager: gRPC push 更新（原有逻辑，内部调用公共函数） ---
 
+// FileProtector provides file-immutability unlock/relock operations.
+// Implemented by edr.SelfProtect; used to temporarily disable chattr +i
+// during package installation so rpm/dpkg can replace protected binaries.
+type FileProtector interface {
+	TemporaryUnlock(path string) func()
+}
+
 // Manager 是更新管理器（处理 Server 推送的更新命令）
 type Manager struct {
 	logger         *zap.Logger
@@ -168,6 +192,13 @@ type Manager struct {
 	workDir        string
 	mu             sync.Mutex
 	updating       bool
+	protector      FileProtector
+}
+
+// SetProtector sets the file protection handler for unlocking chattr +i
+// during package installation.
+func (m *Manager) SetProtector(p FileProtector) {
+	m.protector = p
 }
 
 // NewManager 创建更新管理器
@@ -244,16 +275,19 @@ func (m *Manager) handleUpdate(ctx context.Context, update *grpc.AgentUpdate) {
 		return
 	}
 
-	// 检查是否为版本降级
+	// 检查是否为版本降级：非 force 降级必须拒绝，防止 Server 端旧版本配置导致自动回滚
 	if IsDowngrade(m.currentVersion, update.Version) {
-		m.logger.Warn("detected version downgrade (rollback)",
+		if !update.Force {
+			m.logger.Warn("rejecting version downgrade without force flag",
+				zap.String("current_version", m.currentVersion),
+				zap.String("target_version", update.Version),
+			)
+			return
+		}
+		m.logger.Warn("forced version downgrade (rollback)",
 			zap.String("current_version", m.currentVersion),
 			zap.String("target_version", update.Version),
-			zap.Bool("force", update.Force),
 		)
-		if !update.Force {
-			m.logger.Info("allowing downgrade without force flag")
-		}
 	}
 
 	// 验证架构匹配
@@ -335,6 +369,12 @@ func (m *Manager) doUpdate(ctx context.Context, update *grpc.AgentUpdate) error 
 
 	// 5. 诊断系统环境
 	m.diagnoseSystemEnv(update.PkgType)
+
+	// 5.5 临时解除文件保护（chattr +i），否则 rpm/dpkg 无法替换受保护的二进制
+	if m.protector != nil {
+		relock := m.protector.TemporaryUnlock("/usr/local/mxsec")
+		defer relock()
+	}
 
 	// 6. 安装包
 	m.logger.Info("installing update package",

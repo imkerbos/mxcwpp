@@ -15,10 +15,12 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
+	"github.com/imkerbos/mxsec-platform/internal/agent/edr"
 	"github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
 	"github.com/imkerbos/mxsec-platform/internal/agent/id"
 	"github.com/imkerbos/mxsec-platform/internal/agent/logger"
 	"github.com/imkerbos/mxsec-platform/internal/agent/plugin"
+	agentrt "github.com/imkerbos/mxsec-platform/internal/agent/runtime"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 	"github.com/imkerbos/mxsec-platform/internal/agent/updater"
 )
@@ -95,13 +97,21 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer log.Sync()
+	defer func() { _ = log.Sync() }()
 
 	log.Info("Agent starting",
 		zap.String("version", cfg.GetVersion()),
 		zap.String("product", cfg.GetProduct()),
 		zap.String("server", serverHost),
 		zap.Bool("remote_config_loaded", cfg.Remote.Loaded),
+	)
+
+	// 3.5 初始化运行时环境检测（全局单例，供所有模块使用）
+	rtInfo := agentrt.Init(log)
+	log.Info("runtime environment detected",
+		zap.String("type", string(rtInfo.Type)),
+		zap.Bool("is_container", rtInfo.IsContainer),
+		zap.String("container_id", rtInfo.ContainerID),
 	)
 
 	// 4. 初始化 Agent ID
@@ -122,6 +132,13 @@ func main() {
 
 	// 7. 创建插件管理器（需要在心跳模块之前创建，以便传递引用）
 	pluginMgr := plugin.NewManager(cfg, log, transportMgr)
+
+	// 7.5 创建 EDR 引擎（内置模块，与 Agent 同进程）
+	edrEngine, err := edr.NewEngine(log, transportMgr, "", serverHost)
+	if err != nil {
+		log.Warn("EDR engine initialization failed, continuing without EDR",
+			zap.Error(err))
+	}
 
 	// 8. 设置配置更新回调
 	transportMgr.SetConfigUpdateCallback(func(agentConfig *grpc.AgentConfig, certBundle *grpc.CertificateBundle) {
@@ -161,8 +178,12 @@ func main() {
 	wg := &sync.WaitGroup{}
 	wg.Add(4)
 
-	// 心跳模块（传递插件管理器引用）
-	go heartbeat.Startup(ctx, wg, cfg, log, transportMgr, agentID, pluginMgr)
+	// 心跳模块（传递插件管理器和 EDR 引擎引用）
+	var edrStatus heartbeat.EDRStatusGetter
+	if edrEngine != nil {
+		edrStatus = edrEngine
+	}
+	go heartbeat.Startup(ctx, wg, cfg, log, transportMgr, agentID, pluginMgr, edrStatus)
 
 	// 传输模块（使用已创建的传输管理器）
 	go transport.StartupWithManager(ctx, wg, transportMgr)
@@ -171,7 +192,18 @@ func main() {
 	go plugin.StartupWithManager(ctx, wg, pluginMgr)
 
 	// 自更新模块（监听来自 Server 的更新命令）
-	go updater.Startup(ctx, wg, log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
+	updaterMgr := updater.NewManager(log, transportMgr.GetAgentUpdateChannel(), cfg.GetVersion(), cfg.GetWorkDir())
+	if edrEngine != nil {
+		updaterMgr.SetProtector(edrEngine.SelfProtectManager())
+	}
+	go updater.StartupWithManager(ctx, wg, updaterMgr)
+
+	// EDR 引擎（内置模块，不计入 WaitGroup — 通过 context 取消后自行停止）
+	if edrEngine != nil {
+		if err := edrEngine.Start(ctx); err != nil {
+			log.Error("EDR engine start failed", zap.Error(err))
+		}
+	}
 
 	// 9. 信号处理
 	signalCh := make(chan os.Signal, 1)
@@ -186,6 +218,14 @@ func main() {
 	// 10. 优雅退出
 	log.Info("Shutting down...")
 	cancel()
+
+	// 停止 EDR 引擎（在 cancel 之后，释放 eBPF 资源）
+	if edrEngine != nil {
+		if err := edrEngine.Stop(); err != nil {
+			log.Error("EDR engine stop failed", zap.Error(err))
+		}
+	}
+
 	wg.Wait()
 
 	// 关闭连接

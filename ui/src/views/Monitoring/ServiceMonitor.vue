@@ -118,7 +118,7 @@ interface ServiceInfo {
 type QPSPoint = Record<string, string | number>
 
 const timeRange = ref('1h')
-const qpsPalette = ['#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#722ED1', '#14C9C9']
+const qpsPalette = ['#3B82F6', '#22C55E', '#F59E0B', '#EF4444', '#722ED1', '#14C9C9']
 
 const statusColorMap: Record<string, string> = {
   healthy: 'green', warning: 'orange', error: 'red',
@@ -157,8 +157,8 @@ const qpsChartOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
     backgroundColor: '#fff',
-    borderColor: '#E5E8EF',
-    textStyle: { color: '#1D2129', fontSize: 12 },
+    borderColor: 'rgba(30, 58, 95, 0.4)',
+    textStyle: { color: '#E5E5E5', fontSize: 12 },
   },
   legend: {
     bottom: 0, itemWidth: 12, itemHeight: 3,
@@ -195,8 +195,8 @@ const latencyChartOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
     backgroundColor: '#fff',
-    borderColor: '#E5E8EF',
-    textStyle: { color: '#1D2129', fontSize: 12 },
+    borderColor: 'rgba(30, 58, 95, 0.4)',
+    textStyle: { color: '#E5E5E5', fontSize: 12 },
   },
   legend: {
     bottom: 0, itemWidth: 12, itemHeight: 3,
@@ -217,9 +217,9 @@ const latencyChartOption = computed(() => ({
     splitLine: { lineStyle: { color: '#F2F3F5' } },
   },
   series: [
-    { name: 'P50', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#165DFF' }, data: latencyData.value.map(d => d.p50 ?? 0) },
-    { name: 'P95', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#FF7D00' }, data: latencyData.value.map(d => d.p95 ?? 0) },
-    { name: 'P99', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#F53F3F' }, data: latencyData.value.map(d => d.p99 ?? 0) },
+    { name: 'P50', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#3B82F6' }, data: latencyData.value.map(d => d.p50 ?? 0) },
+    { name: 'P95', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#F59E0B' }, data: latencyData.value.map(d => d.p95 ?? 0) },
+    { name: 'P99', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, itemStyle: { color: '#EF4444' }, data: latencyData.value.map(d => d.p99 ?? 0) },
   ],
 }))
 
@@ -260,13 +260,13 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .section-row { margin-bottom: 16px; }
 
 .service-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
   padding: 20px;
   transition: border-color 0.2s;
 }
-.service-card:hover { border-color: #165DFF; }
+.service-card:hover { border-color: var(--mxsec-primary); }
 .service-card.service-error { border-color: #FDCDC5; }
 
 .service-card-header {
@@ -276,38 +276,38 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   margin-bottom: 16px;
 }
 .service-info { display: flex; align-items: center; gap: 10px; }
-.service-name { font-size: 16px; font-weight: 600; color: #1D2129; }
+.service-name { font-size: 16px; font-weight: 600; color: var(--mxsec-text-1); }
 
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot-healthy { background: #00B42A; box-shadow: 0 0 0 3px rgba(0,180,42,0.15); }
-.dot-warning { background: #FF7D00; box-shadow: 0 0 0 3px rgba(255,125,0,0.15); }
-.dot-error { background: #F53F3F; box-shadow: 0 0 0 3px rgba(245,63,63,0.15); }
+.dot-healthy { background: #22C55E; box-shadow: 0 0 0 3px rgba(0,180,42,0.15); }
+.dot-warning { background: #F59E0B; box-shadow: 0 0 0 3px rgba(255,125,0,0.15); }
+.dot-error { background: #EF4444; box-shadow: 0 0 0 3px rgba(245,63,63,0.15); }
 
 .service-metrics { margin-bottom: 16px; }
 .metric-item { text-align: center; }
-.metric-value { font-size: 20px; font-weight: 600; color: #1D2129; }
-.metric-label { font-size: 12px; color: #86909C; margin-top: 2px; }
+.metric-value { font-size: 20px; font-weight: 600; color: var(--mxsec-text-1); }
+.metric-label { font-size: 12px; color: var(--mxsec-text-3); margin-top: 2px; }
 
 .service-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
   font-size: 12px;
-  color: #86909C;
+  color: var(--mxsec-text-3);
   padding-top: 12px;
-  border-top: 1px solid #F2F3F5;
+  border-top: 1px solid var(--mxsec-fill-2);
 }
 
 .service-detail {
   margin-top: 10px;
   font-size: 12px;
-  color: #4E5969;
+  color: var(--mxsec-text-2);
   word-break: break-all;
 }
 
 .dashboard-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
   height: 100%;
 }
@@ -316,9 +316,9 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
-  border-bottom: 1px solid #F2F3F5;
+  border-bottom: 1px solid var(--mxsec-border-light);
 }
-.card-title { font-size: 14px; font-weight: 600; color: #1D2129; }
+.card-title { font-size: 14px; font-weight: 600; color: var(--mxsec-text-1); }
 .card-body { padding: 16px 20px; }
 .chart-container { display: flex; align-items: center; justify-content: center; }
 </style>

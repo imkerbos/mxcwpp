@@ -244,7 +244,7 @@ func (e *RemediationExecutor) HandleResult(agentID string, data map[string]strin
 
 	exitCodeStr := data["exit_code"]
 	var exitCode int
-	fmt.Sscanf(exitCodeStr, "%d", &exitCode)
+	_, _ = fmt.Sscanf(exitCodeStr, "%d", &exitCode)
 
 	stdout := data["stdout"]
 	stderr := data["stderr"]

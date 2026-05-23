@@ -22,6 +22,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/agent/config"
 	"github.com/imkerbos/mxsec-platform/internal/agent/resource"
+	agentrt "github.com/imkerbos/mxsec-platform/internal/agent/runtime"
 	"github.com/imkerbos/mxsec-platform/internal/agent/transport"
 )
 
@@ -33,6 +34,7 @@ type Manager struct {
 	agentID     string
 	startTime   time.Time          // Agent 启动时间
 	pluginMgr   PluginStatusGetter // 插件管理器接口（用于获取插件状态）
+	edrEngine   EDRStatusGetter    // EDR 引擎状态接口（可选）
 	resourceMon *resource.Monitor  // 资源监控器
 }
 
@@ -41,8 +43,25 @@ type PluginStatusGetter interface {
 	GetAllPluginStats() map[string]interface{}
 }
 
+// EDRStatusGetter 是 EDR 引擎状态获取接口（避免循环依赖）
+type EDRStatusGetter interface {
+	GetEDRMode() string
+	GetEDRCapabilities() []string
+	GetEDRHookType() string
+	GetEDRStats() (forwarded, dropped uint64)
+	RulesVersion() string
+	RulesCount() int
+	RulesMatched() uint64
+	IOCVersion() string
+	IOCCount() int
+	IOCMatched() uint64
+	YARAAvailable() bool
+	YARAStats() (scanned, matched uint64)
+	ContainerRuntime() string
+}
+
 // NewManager 创建新的心跳管理器
-func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter) *Manager {
+func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter, edrEngine EDRStatusGetter) *Manager {
 	return &Manager{
 		cfg:         cfg,
 		logger:      logger,
@@ -50,15 +69,16 @@ func NewManager(cfg *config.Config, logger *zap.Logger, transportMgr *transport.
 		agentID:     agentID,
 		startTime:   time.Now(),
 		pluginMgr:   pluginMgr,
+		edrEngine:   edrEngine,
 		resourceMon: resource.NewMonitor(logger),
 	}
 }
 
 // Startup 启动心跳模块
-func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter) {
+func Startup(ctx context.Context, wg *sync.WaitGroup, cfg *config.Config, logger *zap.Logger, transportMgr *transport.Manager, agentID string, pluginMgr PluginStatusGetter, edrEngine EDRStatusGetter) {
 	defer wg.Done()
 
-	mgr := NewManager(cfg, logger, transportMgr, agentID, pluginMgr)
+	mgr := NewManager(cfg, logger, transportMgr, agentID, pluginMgr, edrEngine)
 
 	currentInterval := cfg.GetHeartbeatInterval()
 	ticker := time.NewTicker(currentInterval)
@@ -194,33 +214,26 @@ func (m *Manager) sendHeartbeat() {
 	// 添加客户端启动时间
 	record.Data.Fields["agent_start_time"] = m.startTime.Format(time.RFC3339)
 
-	// 检测运行时环境类型
-	runtimeInfo := m.detectRuntimeType()
-	record.Data.Fields["runtime_type"] = string(runtimeInfo.Type)
-	if runtimeInfo.IsContainer {
+	// 使用共享的运行时检测（全局单例，只检测一次）
+	rtInfo := agentrt.Get()
+	record.Data.Fields["runtime_type"] = string(rtInfo.Type)
+	if rtInfo.IsContainer {
 		record.Data.Fields["is_container"] = "true"
-		if runtimeInfo.ContainerID != "" {
-			record.Data.Fields["container_id"] = runtimeInfo.ContainerID
+		if rtInfo.ContainerID != "" {
+			record.Data.Fields["container_id"] = rtInfo.ContainerID
 		}
 		// K8s 特有字段
-		if runtimeInfo.Type == RuntimeTypeK8s {
-			if runtimeInfo.PodName != "" {
-				record.Data.Fields["pod_name"] = runtimeInfo.PodName
+		if rtInfo.Type == agentrt.TypeK8s {
+			if rtInfo.PodName != "" {
+				record.Data.Fields["pod_name"] = rtInfo.PodName
 			}
-			if runtimeInfo.Namespace != "" {
-				record.Data.Fields["pod_namespace"] = runtimeInfo.Namespace
+			if rtInfo.Namespace != "" {
+				record.Data.Fields["pod_namespace"] = rtInfo.Namespace
 			}
-			if runtimeInfo.PodUID != "" {
-				record.Data.Fields["pod_uid"] = runtimeInfo.PodUID
+			if rtInfo.PodUID != "" {
+				record.Data.Fields["pod_uid"] = rtInfo.PodUID
 			}
 		}
-		m.logger.Debug("detected container environment",
-			zap.String("runtime_type", string(runtimeInfo.Type)),
-			zap.Bool("is_container", runtimeInfo.IsContainer),
-			zap.String("container_id", runtimeInfo.ContainerID))
-	} else {
-		m.logger.Debug("detected VM/bare metal environment",
-			zap.String("runtime_type", string(runtimeInfo.Type)))
 	}
 
 	// 采集磁盘信息
@@ -239,6 +252,32 @@ func (m *Manager) sendHeartbeat() {
 	if networkInterfacesJSON != "" {
 		record.Data.Fields["network_interfaces"] = networkInterfacesJSON
 		m.logger.Debug("network interfaces collected", zap.Int("length", len(networkInterfacesJSON)))
+	}
+
+	// 添加 EDR 引擎状态
+	if m.edrEngine != nil {
+		record.Data.Fields["edr_mode"] = m.edrEngine.GetEDRMode()
+		record.Data.Fields["edr_hook_type"] = m.edrEngine.GetEDRHookType()
+		caps := m.edrEngine.GetEDRCapabilities()
+		if len(caps) > 0 {
+			record.Data.Fields["edr_capabilities"] = strings.Join(caps, ",")
+		}
+		fwd, drop := m.edrEngine.GetEDRStats()
+		record.Data.Fields["edr_events_fwd"] = fmt.Sprintf("%d", fwd)
+		record.Data.Fields["edr_events_drop"] = fmt.Sprintf("%d", drop)
+		record.Data.Fields["edr_rules_version"] = m.edrEngine.RulesVersion()
+		record.Data.Fields["edr_rules_count"] = fmt.Sprintf("%d", m.edrEngine.RulesCount())
+		record.Data.Fields["edr_rules_matched"] = fmt.Sprintf("%d", m.edrEngine.RulesMatched())
+		record.Data.Fields["edr_ioc_version"] = m.edrEngine.IOCVersion()
+		record.Data.Fields["edr_ioc_count"] = fmt.Sprintf("%d", m.edrEngine.IOCCount())
+		record.Data.Fields["edr_ioc_matched"] = fmt.Sprintf("%d", m.edrEngine.IOCMatched())
+		record.Data.Fields["edr_yara_available"] = fmt.Sprintf("%t", m.edrEngine.YARAAvailable())
+		yaraScanned, yaraMatched := m.edrEngine.YARAStats()
+		record.Data.Fields["edr_yara_scanned"] = fmt.Sprintf("%d", yaraScanned)
+		record.Data.Fields["edr_yara_matched"] = fmt.Sprintf("%d", yaraMatched)
+		if rt := m.edrEngine.ContainerRuntime(); rt != "" {
+			record.Data.Fields["edr_container_runtime"] = rt
+		}
 	}
 
 	// 添加业务线信息（从环境变量读取）
@@ -1011,155 +1050,4 @@ func (m *Manager) collectSystemBootTime() *time.Time {
 
 	m.logger.Debug("failed to collect system boot time")
 	return nil
-}
-
-// RuntimeType 运行时类型
-type RuntimeType string
-
-const (
-	RuntimeTypeVM     RuntimeType = "vm"     // 虚拟机或物理机
-	RuntimeTypeDocker RuntimeType = "docker" // Docker 容器
-	RuntimeTypeK8s    RuntimeType = "k8s"    // Kubernetes Pod
-)
-
-// RuntimeInfo 运行时信息
-type RuntimeInfo struct {
-	Type        RuntimeType // 运行时类型：vm/docker/k8s
-	IsContainer bool        // 是否为容器环境
-	ContainerID string      // 容器 ID（如果是容器）
-	PodName     string      // Pod 名称（如果是 K8s）
-	PodUID      string      // Pod UID（如果是 K8s）
-	Namespace   string      // 命名空间（如果是 K8s）
-}
-
-// detectRuntimeType 检测运行时环境类型
-// 返回详细的运行时信息
-func (m *Manager) detectRuntimeType() *RuntimeInfo {
-	info := &RuntimeInfo{
-		Type:        RuntimeTypeVM,
-		IsContainer: false,
-	}
-
-	// 方法1：检测 Kubernetes 环境（优先级最高）
-	// K8s Pod 会设置这些环境变量
-	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
-		info.Type = RuntimeTypeK8s
-		info.IsContainer = true
-		info.ContainerID = m.getContainerIDFromCgroup()
-
-		// 获取 K8s 相关信息
-		info.PodName = os.Getenv("HOSTNAME") // K8s 默认将 Pod 名称设为 hostname
-		info.Namespace = os.Getenv("POD_NAMESPACE")
-		if info.Namespace == "" {
-			// 尝试从 serviceaccount 读取
-			if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-				info.Namespace = strings.TrimSpace(string(data))
-			}
-		}
-		info.PodUID = os.Getenv("POD_UID")
-
-		m.logger.Debug("detected Kubernetes environment",
-			zap.String("pod_name", info.PodName),
-			zap.String("namespace", info.Namespace),
-			zap.String("container_id", info.ContainerID))
-		return info
-	}
-
-	// 方法2：检查 /.dockerenv 文件（Docker 容器特有）
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		info.Type = RuntimeTypeDocker
-		info.IsContainer = true
-		info.ContainerID = m.getContainerIDFromCgroup()
-		m.logger.Debug("detected Docker environment (/.dockerenv)",
-			zap.String("container_id", info.ContainerID))
-		return info
-	}
-
-	// 方法3：检查 /proc/self/cgroup 中是否包含 docker 或 containerd
-	containerID, containerType := m.getContainerInfoFromCgroup()
-	if containerID != "" {
-		info.IsContainer = true
-		info.ContainerID = containerID
-		// 容器环境下，默认设置为 Docker 类型
-		info.Type = RuntimeTypeDocker
-		m.logger.Debug("detected container environment (cgroup)",
-			zap.String("container_type", containerType),
-			zap.String("container_id", containerID))
-		return info
-	}
-
-	// 方法4：检查环境变量（某些容器环境会设置）
-	if os.Getenv("container") != "" {
-		info.Type = RuntimeTypeDocker
-		info.IsContainer = true
-		m.logger.Debug("detected container environment (env var)")
-		return info
-	}
-
-	// 默认为虚拟机/物理机
-	m.logger.Debug("detected VM/bare metal environment")
-	return info
-}
-
-// detectContainerEnvironment 检测容器环境（保持向后兼容）
-// 返回 (是否为容器, 容器ID)
-func (m *Manager) detectContainerEnvironment() (bool, string) {
-	info := m.detectRuntimeType()
-	return info.IsContainer, info.ContainerID
-}
-
-// getContainerInfoFromCgroup 从 cgroup 中获取容器信息
-// 返回 (容器ID, 容器类型)
-func (m *Manager) getContainerInfoFromCgroup() (string, string) {
-	// 读取 /proc/self/cgroup
-	data, err := os.ReadFile("/proc/self/cgroup")
-	if err != nil {
-		return "", ""
-	}
-
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Docker: 格式如 "12:memory:/docker/container_id"
-		if strings.Contains(line, "/docker/") {
-			parts := strings.Split(line, "/docker/")
-			if len(parts) > 1 {
-				containerID := strings.Split(parts[1], "/")[0]
-				if len(containerID) >= 12 {
-					return containerID[:12], "docker"
-				}
-				return containerID, "docker"
-			}
-		}
-
-		// containerd: 格式如 "12:memory:/containerd/container_id"
-		if strings.Contains(line, "/containerd/") {
-			parts := strings.Split(line, "/containerd/")
-			if len(parts) > 1 {
-				containerID := strings.Split(parts[1], "/")[0]
-				return containerID, "containerd"
-			}
-		}
-
-		// cri-o: 格式如 "12:memory:/crio-xxxxx"
-		if strings.Contains(line, "/crio-") {
-			parts := strings.Split(line, "/crio-")
-			if len(parts) > 1 {
-				containerID := strings.Split(parts[1], "/")[0]
-				return containerID, "crio"
-			}
-		}
-	}
-
-	return "", ""
-}
-
-// getContainerIDFromCgroup 从 cgroup 中获取容器ID（保持向后兼容）
-func (m *Manager) getContainerIDFromCgroup() string {
-	containerID, _ := m.getContainerInfoFromCgroup()
-	return containerID
 }

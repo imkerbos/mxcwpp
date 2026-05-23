@@ -9,8 +9,6 @@
 #   bash -c "$(curl -fsSL http://192.168.8.140:8080/agent/install.sh)"
 #
 # 可选参数:
-#   INSTALL_TETRAGON=1  同时安装 Tetragon（需要 eBPF Sensor 插件，内核 >= 4.19）
-#   TETRAGON_VERSION    Tetragon 版本（默认 1.2.0）
 #
 # 注意：如果使用前端代理（如 3000 端口），请确保代理已配置 /agent 路径
 
@@ -277,89 +275,6 @@ start_service() {
     fi
 }
 
-# ==================== Tetragon 可选安装 ====================
-
-TETRAGON_VERSION="${TETRAGON_VERSION:-1.2.0}"
-
-# 安装 Tetragon（eBPF 安全监控）
-install_tetragon() {
-    echo -e "${GREEN}=== Installing Tetragon (eBPF security monitor) ===${NC}"
-
-    # 检查内核版本 >= 4.19
-    local kernel_version
-    kernel_version=$(uname -r | cut -d. -f1-2)
-    local kernel_major kernel_minor
-    kernel_major=$(echo "$kernel_version" | cut -d. -f1)
-    kernel_minor=$(echo "$kernel_version" | cut -d. -f2)
-
-    if [ "$kernel_major" -lt 4 ] || { [ "$kernel_major" -eq 4 ] && [ "$kernel_minor" -lt 19 ]; }; then
-        echo -e "${RED}Error: Kernel $kernel_version does not meet requirement (>= 4.19)${NC}"
-        echo -e "${YELLOW}Skipping Tetragon installation.${NC}"
-        return 1
-    fi
-
-    # 检查 systemd
-    if ! command -v systemctl &>/dev/null; then
-        echo -e "${RED}Error: systemd is required for Tetragon${NC}"
-        return 1
-    fi
-
-    # 已安装则跳过
-    if command -v tetra &>/dev/null; then
-        echo -e "${GREEN}Tetragon already installed: $(tetra version 2>/dev/null || echo 'unknown')${NC}"
-        return 0
-    fi
-
-    echo -e "${GREEN}Installing Tetragon v${TETRAGON_VERSION}...${NC}"
-
-    # 下载安装
-    if [ "$PKG_TYPE" = "deb" ]; then
-        curl -fSL "https://github.com/cilium/tetragon/releases/download/v${TETRAGON_VERSION}/tetragon-${TETRAGON_VERSION}-${ARCH}.deb" -o /tmp/tetragon.deb
-        dpkg -i /tmp/tetragon.deb
-        rm -f /tmp/tetragon.deb
-    else
-        curl -fSL "https://github.com/cilium/tetragon/releases/download/v${TETRAGON_VERSION}/tetragon-${TETRAGON_VERSION}-${ARCH}.rpm" -o /tmp/tetragon.rpm
-        rpm -ivh /tmp/tetragon.rpm
-        rm -f /tmp/tetragon.rpm
-    fi
-
-    # 配置
-    mkdir -p /etc/tetragon
-    cat > /etc/tetragon/tetragon.yaml <<'TETRAGON_CONF'
-# MxSec Tetragon configuration
-export-filename: ""
-export-file-max-size-mb: 100
-export-file-rotation-interval: 24h
-export-file-max-backups: 3
-export-file-compress: true
-enable-process-cred: true
-enable-process-ns: true
-process-cache-size: 65536
-data-cache-size: 1024
-metrics-server: ""
-health-server: ""
-gops-address: ""
-TETRAGON_CONF
-
-    # 启动
-    systemctl daemon-reload
-    systemctl enable tetragon
-    systemctl restart tetragon
-
-    # 等待就绪
-    local retries=10
-    while [ $retries -gt 0 ]; do
-        if [ -S /var/run/tetragon/tetragon.sock ]; then
-            echo -e "${GREEN}Tetragon is ready (socket: /var/run/tetragon/tetragon.sock)${NC}"
-            return 0
-        fi
-        sleep 1
-        retries=$((retries - 1))
-    done
-
-    echo -e "${YELLOW}Warning: Tetragon socket not ready, check: systemctl status tetragon${NC}"
-}
-
 # 主流程
 main() {
     echo -e "${GREEN}=== Matrix Cloud Security Platform Agent Installer ===${NC}"
@@ -388,17 +303,9 @@ main() {
     # 启动服务
     start_service
 
-    # 可选：安装 Tetragon（INSTALL_TETRAGON=1）
-    if [ "${INSTALL_TETRAGON:-0}" = "1" ]; then
-        install_tetragon || echo -e "${YELLOW}Tetragon installation failed, agent is still running.${NC}"
-    fi
-
     echo ""
     echo -e "${GREEN}Installation completed!${NC}"
     echo -e "${GREEN}Agent will connect to server and download configuration automatically.${NC}"
-    if [ "${INSTALL_TETRAGON:-0}" = "1" ]; then
-        echo -e "${GREEN}Tetragon eBPF monitor is installed for Sensor plugin.${NC}"
-    fi
 }
 
 # 执行主流程

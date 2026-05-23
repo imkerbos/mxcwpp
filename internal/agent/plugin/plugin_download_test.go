@@ -27,7 +27,7 @@ func TestDownloadFromURL_Success(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
-		w.Write(payload)
+		_, _ = w.Write(payload)
 	}))
 	defer srv.Close()
 
@@ -58,13 +58,13 @@ func TestDownloadFromURL_RetryOnEOF(t *testing.T) {
 		if n <= 2 {
 			// 声明较大的 Content-Length，但只发送部分数据后关闭连接
 			w.Header().Set("Content-Length", "10000")
-			w.Write([]byte("partial"))
+			_, _ = w.Write([]byte("partial"))
 			// httptest handler 返回后连接会被关闭，客户端收到 unexpected EOF
 			return
 		}
 		// 第三次：正常响应
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
-		w.Write(payload)
+		_, _ = w.Write(payload)
 	}))
 	defer srv.Close()
 
@@ -98,7 +98,7 @@ func TestDownloadFromURL_NoRetryOn404(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempt.Add(1)
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"code":404,"message":"not found"}`))
+		_, _ = w.Write([]byte(`{"code":404,"message":"not found"}`))
 	}))
 	defer srv.Close()
 
@@ -125,11 +125,11 @@ func TestDownloadFromURL_RetryOn429(t *testing.T) {
 		n := attempt.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte("rate limited"))
+			_, _ = w.Write([]byte("rate limited"))
 			return
 		}
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
-		w.Write(payload)
+		_, _ = w.Write(payload)
 	}))
 	defer srv.Close()
 
@@ -160,7 +160,7 @@ func TestDownloadFromURL_NoRetryOnCreateFailure(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempt.Add(1)
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
 	defer srv.Close()
 

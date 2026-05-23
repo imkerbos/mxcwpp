@@ -311,6 +311,11 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	var businessLine string
 	var runtimeType model.RuntimeType = model.RuntimeTypeVM // 默认为 VM
 	var podName, podNamespace, podUID string
+	// EDR 引擎状态
+	var edrMode, edrCapabilities, edrHookType string
+	var edrEventsFwd, edrEventsDrop, edrRulesMatched, edrIOCMatched int64
+	var edrRulesVersion, edrIOCVersion string
+	var edrRulesCount, edrIOCCount int
 	var hasHeartbeatData bool // 是否包含心跳数据
 	if len(data.Records) > 0 {
 		for _, record := range data.Records {
@@ -419,6 +424,32 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 							s.logger.Debug("收到业务线信息",
 								zap.String("agent_id", conn.AgentID),
 								zap.String("business_line", businessLine))
+						}
+						// 解析 EDR 引擎状态
+						if v, ok := fields["edr_mode"]; ok && v != "" {
+							edrMode = v
+							edrCapabilities = fields["edr_capabilities"]
+							edrHookType = fields["edr_hook_type"]
+							edrRulesVersion = fields["edr_rules_version"]
+							edrIOCVersion = fields["edr_ioc_version"]
+							if n, err := strconv.ParseInt(fields["edr_events_fwd"], 10, 64); err == nil {
+								edrEventsFwd = n
+							}
+							if n, err := strconv.ParseInt(fields["edr_events_drop"], 10, 64); err == nil {
+								edrEventsDrop = n
+							}
+							if n, err := strconv.Atoi(fields["edr_rules_count"]); err == nil {
+								edrRulesCount = n
+							}
+							if n, err := strconv.ParseInt(fields["edr_rules_matched"], 10, 64); err == nil {
+								edrRulesMatched = n
+							}
+							if n, err := strconv.Atoi(fields["edr_ioc_count"]); err == nil {
+								edrIOCCount = n
+							}
+							if n, err := strconv.ParseInt(fields["edr_ioc_matched"], 10, 64); err == nil {
+								edrIOCMatched = n
+							}
 						}
 						// 解析并存储插件状态
 						if pluginStatsStr, ok := fields["plugin_stats"]; ok && pluginStatsStr != "" {
@@ -545,6 +576,18 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		AgentStartTime: model.ToLocalTimePtr(agentStartTime),
 		// 业务线（如果 Agent 提供了，则使用；否则保持现有值）
 		BusinessLine: businessLine,
+		// EDR 引擎状态
+		EDRMode:            edrMode,
+		EDRCapabilities:    edrCapabilities,
+		EDRHookType:        edrHookType,
+		EDREventsForwarded: edrEventsFwd,
+		EDREventsDropped:   edrEventsDrop,
+		EDRRulesVersion:    edrRulesVersion,
+		EDRRulesCount:      edrRulesCount,
+		EDRRulesMatched:    edrRulesMatched,
+		EDRIOCVersion:      edrIOCVersion,
+		EDRIOCCount:        edrIOCCount,
+		EDRIOCMatched:      edrIOCMatched,
 	}
 
 	// 使用 Save 方法（如果不存在则创建，存在则更新）
@@ -588,6 +631,20 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 			updates["pod_uid"] = podUID
 			updates["system_boot_time"] = systemBootTime
 			updates["agent_start_time"] = agentStartTime
+			// EDR 引擎状态
+			if edrMode != "" {
+				updates["edr_mode"] = edrMode
+				updates["edr_capabilities"] = edrCapabilities
+				updates["edr_hook_type"] = edrHookType
+				updates["edr_events_fwd"] = edrEventsFwd
+				updates["edr_events_drop"] = edrEventsDrop
+				updates["edr_rules_version"] = edrRulesVersion
+				updates["edr_rules_count"] = edrRulesCount
+				updates["edr_rules_matched"] = edrRulesMatched
+				updates["edr_ioc_version"] = edrIOCVersion
+				updates["edr_ioc_count"] = edrIOCCount
+				updates["edr_ioc_matched"] = edrIOCMatched
+			}
 		}
 		// 如果 Agent 提供了业务线，则更新（仅在首次设置或 Agent 明确提供时更新）
 		if businessLine != "" {

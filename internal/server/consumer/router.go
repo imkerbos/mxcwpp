@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -13,8 +14,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/anomaly"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/baseline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/consumer/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
+	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
 // agentACTTL 是 Redis 中 agent:ac:{agentID} key 的 TTL（3 倍心跳间隔）
@@ -23,23 +28,26 @@ const agentACTTL = 180 * time.Second
 // Router 订阅所有业务 Topic，根据 DataType 路由到对应写入器
 type Router struct {
 	saramaConsumerGroupHandler
-	group         sarama.ConsumerGroup
-	mysql         *writer.MySQLWriter
-	ch            *writer.ClickHouseWriter
-	dlq           *DLQHandler
-	redisClient   *redis.Client             // 可选，用于写 agent:ac: 映射
-	celEngine     *celengine.Engine         // CEL 规则引擎（可选）
-	alertGen      *celengine.AlertGenerator // CEL 告警生成器（可选）
-	autoResponder *celengine.AutoResponder  // 自动响应执行器（可选）
-	scanDetector  *celengine.ScanDetector   // 端口扫描检测器（可选）
-	topics        []string
-	logger        *zap.Logger
+	group           sarama.ConsumerGroup
+	mysql           *writer.MySQLWriter
+	ch              *writer.ClickHouseWriter
+	dlq             *DLQHandler
+	redisClient     *redis.Client               // 可选，用于写 agent:ac: 映射
+	celEngine       *celengine.Engine           // CEL 规则引擎（可选）
+	alertGen        *celengine.AlertGenerator   // CEL 告警生成器（可选）
+	autoResponder   *celengine.AutoResponder    // 自动响应执行器（可选）
+	scanDetector    *celengine.ScanDetector     // 端口扫描检测器（可选）
+	seqDetector     *celengine.SequenceDetector // 序列检测器（可选）
+	bdeEngine       *baseline.Engine            // BDE 基线引擎（可选）
+	anomalyDetector *anomaly.Detector           // ML 异常检测引擎（可选）
+	storyEngine     *storyline.Engine           // 攻击故事线引擎（可选）
+	topics          []string
+	logger          *zap.Logger
 }
 
 // NewRouter 创建 Router
 // celEng 和 alertGen 可为 nil，此时跳过 CEL 规则评估
-// autoResponder 可为 nil，此时跳过自动响应
-// scanDetector 可为 nil，此时跳过端口扫描检测
+// autoResponder/scanDetector/seqDetector 可为 nil
 func NewRouter(
 	brokers []string,
 	groupID string,
@@ -52,6 +60,7 @@ func NewRouter(
 	alertGen *celengine.AlertGenerator,
 	autoResponder *celengine.AutoResponder, // 可为 nil，跳过自动响应
 	scanDetector *celengine.ScanDetector, // 可为 nil，端口扫描检测
+	seqDetector *celengine.SequenceDetector, // 可为 nil，序列检测
 	logger *zap.Logger,
 ) (*Router, error) {
 	cfg := sarama.NewConfig()
@@ -87,9 +96,25 @@ func NewRouter(
 		alertGen:      alertGen,
 		autoResponder: autoResponder,
 		scanDetector:  scanDetector,
+		seqDetector:   seqDetector,
 		topics:        topics,
 		logger:        logger,
 	}, nil
+}
+
+// SetBDEEngine sets the optional BDE baseline engine for behavior anomaly detection.
+func (r *Router) SetBDEEngine(eng *baseline.Engine) {
+	r.bdeEngine = eng
+}
+
+// SetAnomalyDetector sets the optional ML anomaly detection engine.
+func (r *Router) SetAnomalyDetector(det *anomaly.Detector) {
+	r.anomalyDetector = det
+}
+
+// SetStorylineEngine sets the optional attack storyline engine.
+func (r *Router) SetStorylineEngine(eng *storyline.Engine) {
+	r.storyEngine = eng
 }
 
 // Run 阻塞式消费，直到 ctx 取消
@@ -204,10 +229,19 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	case msg.DataType == 7004:
 		writeErr = r.mysql.WriteQuarantineResult(&msg)
 
-	// eBPF 事件（3000-3002）
-	case msg.DataType >= 3000 && msg.DataType <= 3002:
+	// BDE 行为画像快照
+	case msg.DataType == 3010:
+		r.evaluateBDE(&msg)
+
+	// 内存威胁事件
+	case msg.DataType == 3004:
+		r.writeMemoryThreat(&msg)
+
+	// eBPF 事件（3000-3003，含 DNS 事件）
+	case msg.DataType >= 3000 && msg.DataType <= 3003:
 		_ = r.ch.WriteEBPFEvent(&msg)
 		r.evaluateCEL(&msg)
+		r.ingestStoryline(&msg)
 		// 网络事件额外进行端口扫描检测
 		if msg.DataType == 3002 {
 			r.checkPortScan(&msg)
@@ -269,6 +303,22 @@ func (r *Router) evaluateCEL(msg *kafka.MQMessage) {
 			r.autoResponder.Execute(msg.AgentID, matched, fields)
 		}
 	}
+
+	// 序列检测：多步攻击链状态机
+	if r.seqDetector != nil {
+		seqMatched := r.seqDetector.Evaluate(msg.AgentID, msg.DataType, fields)
+		if len(seqMatched) > 0 {
+			// 将序列规则命中转换为 DetectionRule 格式，复用告警生成器
+			for _, sr := range seqMatched {
+				r.alertGen.Generate(msg.AgentID, []model.DetectionRule{{
+					ID:       sr.ID,
+					Name:     sr.Name,
+					Severity: sr.Severity,
+					Category: sr.Category,
+				}}, fields)
+			}
+		}
+	}
 }
 
 // checkPortScan 对入站连接事件进行端口扫描检测
@@ -293,6 +343,107 @@ func (r *Router) checkPortScan(msg *kafka.MQMessage) {
 		fields["local_port"],
 		fields,
 	)
+}
+
+// evaluateBDE parses a BDE behavior profile snapshot and feeds it to the baseline engine.
+func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
+	if r.bdeEngine == nil {
+		return
+	}
+
+	fields, err := writer.ParseRecordFields(msg.Body)
+	if err != nil {
+		return
+	}
+
+	var metrics [baseline.MetricCount]float64
+	metrics[baseline.MetricProcExecCount] = parseFloat(fields["proc_exec_count"])
+	metrics[baseline.MetricProcUniqueExe] = parseFloat(fields["proc_unique_exe"])
+	metrics[baseline.MetricProcForkRate] = parseFloat(fields["proc_fork_rate"])
+	metrics[baseline.MetricFileWriteCount] = parseFloat(fields["file_write_count"])
+	metrics[baseline.MetricFileUniquePath] = parseFloat(fields["file_unique_path"])
+	metrics[baseline.MetricFileSensitiveHits] = parseFloat(fields["file_sensitive_hits"])
+	metrics[baseline.MetricNetConnectCount] = parseFloat(fields["net_connect_count"])
+	metrics[baseline.MetricNetUniqueIP] = parseFloat(fields["net_unique_ip"])
+	metrics[baseline.MetricNetUniquePort] = parseFloat(fields["net_unique_port"])
+	metrics[baseline.MetricNetExternalRatio] = parseFloat(fields["net_external_ratio"])
+	metrics[baseline.MetricDNSQueryCount] = parseFloat(fields["dns_query_count"])
+	metrics[baseline.MetricDNSUniqueDomain] = parseFloat(fields["dns_unique_domain"])
+	metrics[baseline.MetricDNSNXRatio] = parseFloat(fields["dns_nx_ratio"])
+
+	// Feed ML anomaly detector (IForest + correlation).
+	if r.anomalyDetector != nil {
+		r.anomalyDetector.Ingest(msg.AgentID, msg.Hostname, metrics[:])
+	}
+
+	result := r.bdeEngine.Ingest(msg.AgentID, metrics)
+	if result == nil {
+		return
+	}
+
+	// Generate BDE anomaly alerts.
+	if r.alertGen != nil {
+		for _, dev := range result.Deviations {
+			severity := "medium"
+			if result.RiskScore >= 70 {
+				severity = "critical"
+			} else if result.RiskScore >= 40 {
+				severity = "high"
+			}
+			r.alertGen.Generate(msg.AgentID, []model.DetectionRule{{
+				Name:     "bde_anomaly_" + dev.Metric,
+				Severity: severity,
+				Category: "behavior_anomaly",
+			}}, map[string]string{
+				"agent_id":   msg.AgentID,
+				"hostname":   msg.Hostname,
+				"risk_score": fmt.Sprintf("%.1f", result.RiskScore),
+				"metric":     dev.Metric,
+				"value":      fmt.Sprintf("%.4f", dev.Value),
+				"mean":       fmt.Sprintf("%.4f", dev.Mean),
+				"stddev":     fmt.Sprintf("%.4f", dev.Stddev),
+				"z_score":    fmt.Sprintf("%.2f", dev.ZScore),
+			})
+		}
+	}
+
+	r.logger.Info("BDE 异常检出",
+		zap.String("host_id", msg.AgentID),
+		zap.Float64("risk_score", result.RiskScore),
+		zap.Int("deviations", len(result.Deviations)),
+	)
+}
+
+// ingestStoryline feeds events with story_id to the storyline engine.
+func (r *Router) ingestStoryline(msg *kafka.MQMessage) {
+	if r.storyEngine == nil {
+		return
+	}
+	fields, err := writer.ParseRecordFields(msg.Body)
+	if err != nil {
+		return
+	}
+	storyID := fields["story_id"]
+	if storyID == "" {
+		return
+	}
+	r.storyEngine.Ingest(storyID, msg.AgentID, msg.Hostname, msg.DataType, fields)
+}
+
+func parseFloat(s string) float64 {
+	v, _ := strconv.ParseFloat(s, 64)
+	return v
+}
+
+// writeMemoryThreat persists a memory threat event to MySQL and evaluates CEL rules.
+func (r *Router) writeMemoryThreat(msg *kafka.MQMessage) {
+	if err := r.mysql.WriteMemoryThreat(msg); err != nil {
+		r.logger.Warn("写入内存威胁失败",
+			zap.String("host_id", msg.AgentID),
+			zap.Error(err),
+		)
+	}
+	r.evaluateCEL(msg)
 }
 
 // writeAgentACMapping 将 agent:ac:{agentID}=acID 写入 Redis（TTL=180s）

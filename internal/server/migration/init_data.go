@@ -351,27 +351,6 @@ func initDefaultPolicyGroup(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// associateExistingPoliciesWithGroup 将没有分组的策略关联到默认策略组
-func associateExistingPoliciesWithGroup(db *gorm.DB, logger *zap.Logger) error {
-	// 查找没有分组的策略
-	result := db.Model(&model.Policy{}).
-		Where("group_id IS NULL OR group_id = ''").
-		Update("group_id", DefaultPolicyGroupID)
-
-	if result.Error != nil {
-		return fmt.Errorf("更新策略分组失败: %w", result.Error)
-	}
-
-	if result.RowsAffected > 0 {
-		logger.Info("已将未分组策略关联到默认策略组",
-			zap.Int64("count", result.RowsAffected),
-			zap.String("group_id", DefaultPolicyGroupID),
-		)
-	}
-
-	return nil
-}
-
 // initDefaultPluginConfigs 初始化默认插件配置
 func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *config.PluginsConfig) error {
 	managedPlugins := []managedPluginBootstrap{
@@ -402,13 +381,6 @@ func initDefaultPluginConfigs(db *gorm.DB, logger *zap.Logger, pluginsCfg *confi
 			RuntimeTypes: model.StringArray{"vm"},
 			Description:  "病毒查杀插件，基于 ClamAV + YARA-X 双引擎检测恶意文件",
 			Detail:       `{"quarantine_dir": "/var/mxsec/quarantine", "yara_rules_dir": "/var/mxsec/yara-rules"}`,
-		},
-		{
-			Name:         "edr",
-			Type:         model.PluginTypeEDR,
-			RuntimeTypes: model.StringArray{"vm"},
-			Description:  "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件",
-			Detail:       `{"tetragon_socket": "/var/run/tetragon/tetragon.sock"}`,
 		},
 	}
 
@@ -804,9 +776,7 @@ func initDefaultComponents(db *gorm.DB, logger *zap.Logger) error {
 		{Name: "collector", Category: model.ComponentCategoryPlugin, Description: "资产采集插件，采集主机进程、端口、用户等信息"},
 		{Name: "fim", Category: model.ComponentCategoryPlugin, Description: "文件完整性监控插件，基于 AIDE 检测文件变更"},
 		{Name: "scanner", Category: model.ComponentCategoryPlugin, Description: "病毒查杀插件，基于 ClamAV + YARA-X 双引擎检测恶意文件"},
-		{Name: "edr", Category: model.ComponentCategoryPlugin, Description: "EDR 插件，基于 Tetragon eBPF 采集进程/文件/网络事件"},
 		{Name: "virus-database", Category: model.ComponentCategoryPlugin, Description: "ClamAV 病毒特征库，由 freshclam 自动更新"},
-		{Name: "tetragon", Category: model.ComponentCategoryDependency, Description: "Cilium Tetragon eBPF 安全引擎"},
 	}
 
 	for _, c := range components {

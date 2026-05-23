@@ -14,7 +14,7 @@ func TestScanBasic(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "file1.txt"), "hello world")
 	writeFile(t, filepath.Join(dir, "file2.conf"), "key=value")
-	os.MkdirAll(filepath.Join(dir, "subdir"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0755)
 	writeFile(t, filepath.Join(dir, "subdir", "file3.bin"), "binary content")
 
 	scanner := NewScanner(testLogger())
@@ -53,7 +53,7 @@ func TestScanBasic(t *testing.T) {
 func TestScanExcludePaths(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "keep.txt"), "keep")
-	os.MkdirAll(filepath.Join(dir, "logs"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "logs"), 0755)
 	writeFile(t, filepath.Join(dir, "logs", "app.log"), "log data")
 	writeFile(t, filepath.Join(dir, "temp.tmp"), "temp")
 
