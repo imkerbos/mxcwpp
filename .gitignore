@@ -170,6 +170,15 @@ memory/
 PLATFORM-REVIEW.md
 TODOLIST*.md
 docs/roadmap.md
+.superpowers/
+docs/superpowers/
+
+# ======================
+# Internal test / evaluation reports
+# ======================
+docs/*test*.md
+docs/*evaluation*.md
+ruletest/
 
 # ======================
 # Local data

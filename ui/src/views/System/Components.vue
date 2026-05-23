@@ -635,10 +635,10 @@
               {{ selectedPushRecord.total_count }}
             </a-descriptions-item>
             <a-descriptions-item label="成功数量">
-              <span style="color: #00B42A;">{{ selectedPushRecord.success_count }}</span>
+              <span style="color: #22C55E;">{{ selectedPushRecord.success_count }}</span>
             </a-descriptions-item>
             <a-descriptions-item label="失败数量">
-              <span style="color: #F53F3F;">{{ selectedPushRecord.failed_count }}</span>
+              <span style="color: #EF4444;">{{ selectedPushRecord.failed_count }}</span>
             </a-descriptions-item>
             <a-descriptions-item label="创建者">
               {{ selectedPushRecord.created_by || '-' }}
@@ -1300,15 +1300,15 @@ onMounted(() => {
 .plugin-status-section {
   margin-bottom: 20px;
   padding: 20px;
-  background: linear-gradient(135deg, #F7F8FA 0%, #f0f5ff 100%);
+  background: var(--mxsec-fill-1);
   border-radius: 8px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--mxsec-border);
 }
 
 .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: #262626;
+  color: var(--mxsec-text-1);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -1325,7 +1325,7 @@ onMounted(() => {
   min-width: 200px;
   max-width: 300px;
   padding: 14px 18px;
-  background: #fff;
+  background: var(--mxsec-card-bg);
   border-radius: 8px;
   border: 1px solid #e8e8e8;
   transition: all 0.3s ease;
@@ -1338,19 +1338,19 @@ onMounted(() => {
 }
 
 .plugin-status-card.status-ready {
-  border-left: 3px solid #00B42A;
+  border-left: 3px solid #22C55E;
 }
 
 .plugin-status-card.status-missing-package {
-  border-left: 3px solid #F53F3F;
+  border-left: 3px solid #EF4444;
 }
 
 .plugin-status-card.status-outdated {
-  border-left: 3px solid #FF7D00;
+  border-left: 3px solid #F59E0B;
 }
 
 .plugin-status-card.status-default-config {
-  border-left: 3px solid #165DFF;
+  border-left: 3px solid #3B82F6;
 }
 
 .plugin-name {
@@ -1375,11 +1375,11 @@ onMounted(() => {
 }
 
 .info-row .label {
-  color: #86909C;
+  color: var(--mxsec-text-3);
 }
 
 .info-row .value {
-  color: #262626;
+  color: var(--mxsec-text-1);
   font-weight: 500;
 }
 
@@ -1401,15 +1401,15 @@ onMounted(() => {
 
 .upload-item {
   padding: 16px;
-  background: #F7F8FA;
+  background: var(--mxsec-fill-1);
   border-radius: 8px;
   border: 1px dashed #d9d9d9;
   transition: all 0.2s ease;
 }
 
 .upload-item:hover {
-  border-color: #165DFF;
-  background: #f0f5ff;
+  border-color: var(--mxsec-primary);
+  background: var(--mxsec-primary-bg);
 }
 
 .upload-header {
@@ -1427,7 +1427,7 @@ onMounted(() => {
 
 .upload-file {
   font-size: 12px;
-  color: #165DFF;
+  color: var(--mxsec-primary);
   word-break: break-all;
   line-height: 1.4;
 }
@@ -1435,7 +1435,7 @@ onMounted(() => {
 .upload-hint {
   margin-top: 12px;
   font-size: 12px;
-  color: #165DFF;
+  color: var(--mxsec-primary);
 }
 
 /* 包列表样式 */
@@ -1457,7 +1457,7 @@ onMounted(() => {
 .failed-hosts-section .section-title {
   font-size: 14px;
   font-weight: 600;
-  color: #262626;
+  color: var(--mxsec-text-1);
   margin-bottom: 12px;
 }
 </style>

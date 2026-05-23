@@ -100,7 +100,7 @@
           :maskClosable="false"
           :footer="null"
         >
-          <p style="color: #86909C; margin-bottom: 16px;">为确保账户安全，请设置新密码（至少 8 位）</p>
+          <p style="color: var(--mxsec-text-3); margin-bottom: 16px;">为确保账户安全，请设置新密码（至少 8 位）</p>
           <a-form layout="vertical" @finish="handleChangePassword">
             <a-form-item label="新密码" required>
               <a-input-password
@@ -359,11 +359,12 @@ const handleChangePassword = async () => {
 
 .login-card {
   width: 440px;
-  background: rgba(255, 255, 255, 0.97);
+  background: rgba(22, 27, 34, 0.92);
   backdrop-filter: blur(20px);
+  border: 1px solid rgba(30, 58, 95, 0.4);
   border-radius: 16px;
   padding: 44px 40px 36px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
 }
 
 .card-header {
@@ -375,12 +376,12 @@ const handleChangePassword = async () => {
   margin: 0 0 4px 0;
   font-size: 22px;
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
 .card-header p {
   font-size: 13px;
-  color: #86909C;
+  color: var(--mxsec-text-3);
   margin: 0;
 }
 
@@ -399,7 +400,7 @@ const handleChangePassword = async () => {
 }
 
 .login-input :deep(.anticon) {
-  color: #86909C;
+  color: var(--mxsec-text-3);
   font-size: 16px;
 }
 
@@ -409,7 +410,7 @@ const handleChangePassword = async () => {
   font-size: 16px;
   font-weight: 500;
   margin-top: 4px;
-  background: linear-gradient(135deg, #165DFF 0%, #0E42D2 100%);
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
   border: none;
   box-shadow: 0 4px 12px rgba(22, 93, 255, 0.35);
   transition: all 0.3s ease;
@@ -437,7 +438,7 @@ const handleChangePassword = async () => {
 }
 
 .captcha-input :deep(.anticon) {
-  color: #86909C;
+  color: var(--mxsec-text-3);
   font-size: 16px;
 }
 
@@ -445,7 +446,7 @@ const handleChangePassword = async () => {
   height: 46px;
   border-radius: 8px;
   cursor: pointer;
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--mxsec-border);
   flex-shrink: 0;
   transition: opacity 0.2s;
 }
@@ -458,11 +459,11 @@ const handleChangePassword = async () => {
   height: 46px;
   width: 150px;
   border-radius: 8px;
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--mxsec-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #86909C;
+  color: var(--mxsec-text-3);
   font-size: 13px;
   cursor: pointer;
   flex-shrink: 0;

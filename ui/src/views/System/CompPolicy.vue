@@ -228,8 +228,8 @@ onMounted(() => { loadPolicies() })
 .comp-policy-page { width: 100%; }
 
 .dashboard-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
 }
 .card-body { padding: 20px; }
@@ -240,8 +240,8 @@ onMounted(() => { loadPolicies() })
   align-items: center;
   margin-bottom: 16px;
   padding: 12px 16px;
-  background: #F7F8FA;
+  background: var(--mxsec-fill-1);
   border-radius: 4px;
-  border: 1px solid #E5E8EF;
+  border: 1px solid var(--mxsec-border);
 }
 </style>

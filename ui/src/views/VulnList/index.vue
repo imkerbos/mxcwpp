@@ -306,7 +306,7 @@
               </a-tag>
             </template>
             <a-tooltip v-else-if="record.errorMsg" :title="record.errorMsg">
-              <span style="color: #F53F3F; font-size: 12px; cursor: pointer">{{ record.errorMsg }}</span>
+              <span style="color: #EF4444; font-size: 12px; cursor: pointer">{{ record.errorMsg }}</span>
             </a-tooltip>
             <span v-else>-</span>
           </template>
@@ -739,8 +739,8 @@ onMounted(() => {
 .section-row { margin-bottom: 16px; }
 
 .vuln-stat-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
   padding: 20px;
   text-align: center;
@@ -749,22 +749,22 @@ onMounted(() => {
 .vuln-stat-value {
   font-size: 28px;
   font-weight: 700;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
-.vuln-stat-value.critical { color: #F53F3F; }
-.vuln-stat-value.high { color: #FF7D00; }
-.vuln-stat-value.primary { color: #165DFF; }
+.vuln-stat-value.critical { color: #EF4444; }
+.vuln-stat-value.high { color: #F59E0B; }
+.vuln-stat-value.primary { color: var(--mxsec-primary); }
 
 .vuln-stat-label {
   margin-top: 8px;
   font-size: 12px;
-  color: #86909C;
+  color: var(--mxsec-text-3);
 }
 
 .dashboard-card {
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
 }
 
@@ -786,17 +786,17 @@ onMounted(() => {
 }
 
 .score-critical {
-  color: #F53F3F;
+  color: #EF4444;
   font-weight: 700;
 }
 
 .score-high {
-  color: #FF7D00;
+  color: #F59E0B;
   font-weight: 700;
 }
 
 .score-normal {
-  color: #1D2129;
+  color: var(--mxsec-text-1);
   font-weight: 600;
 }
 
@@ -806,7 +806,7 @@ onMounted(() => {
   gap: 12px;
   padding: 12px 16px;
   margin-bottom: 12px;
-  background: #E8F3FF;
+  background: var(--mxsec-primary-bg);
   border: 1px solid #BEDAFF;
   border-radius: 6px;
   font-size: 13px;
@@ -816,8 +816,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #FFFFFF;
-  border: 1px solid #E5E8EF;
+  background: var(--mxsec-card-bg);
+  border: 1px solid var(--mxsec-border);
   border-radius: 8px;
   padding: 12px 20px;
 }
@@ -831,16 +831,16 @@ onMounted(() => {
 
 .scan-status-label {
   font-weight: 600;
-  color: #1D2129;
+  color: var(--mxsec-text-1);
 }
 
 .scan-status-info {
-  color: #86909C;
+  color: var(--mxsec-text-3);
   font-size: 13px;
 }
 
 .scan-status-error {
-  color: #F53F3F;
+  color: #EF4444;
   font-size: 13px;
   max-width: 300px;
   overflow: hidden;
