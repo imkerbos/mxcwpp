@@ -176,6 +176,26 @@ func GenerateCertificates(cfg *Config) (*CertificateBundle, error) {
 	return bundle, nil
 }
 
+// parseRSAPrivateKey 解析 PEM 编码的 RSA 私钥，兼容 PKCS#1 与 PKCS#8 格式。
+func parseRSAPrivateKey(pemData []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(pemData)
+	if block == nil {
+		return nil, fmt.Errorf("私钥不是有效 PEM")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("PKCS1 与 PKCS8 解析均失败: %w", err)
+	}
+	rsaKey, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("私钥不是 RSA 类型: %T", parsed)
+	}
+	return rsaKey, nil
+}
+
 // ServerCertNeedsReissue 校验 bundle 中 server.crt 的 SAN 是否覆盖 cfg.SANValues()。
 // 缺失任一 IP/DNS 返回 true，调用方需触发 ReissueServerCert。
 // bundle 或 server.crt 解析失败也返回 true（保守重签）。
@@ -233,19 +253,11 @@ func ReissueServerCert(bundle *CertificateBundle, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("解析 CA 证书失败: %w", err)
 	}
-	caKeyBlock, _ := pem.Decode(bundle.CAKey)
-	if caKeyBlock == nil {
-		return fmt.Errorf("CA 私钥不是有效 PEM")
-	}
-	caKey, err := x509.ParsePKCS1PrivateKey(caKeyBlock.Bytes)
+	caKey, err := parseRSAPrivateKey(bundle.CAKey)
 	if err != nil {
 		return fmt.Errorf("解析 CA 私钥失败: %w", err)
 	}
-	serverKeyBlock, _ := pem.Decode(bundle.ServerKey)
-	if serverKeyBlock == nil {
-		return fmt.Errorf("Server 私钥不是有效 PEM")
-	}
-	serverKey, err := x509.ParsePKCS1PrivateKey(serverKeyBlock.Bytes)
+	serverKey, err := parseRSAPrivateKey(bundle.ServerKey)
 	if err != nil {
 		return fmt.Errorf("解析 Server 私钥失败: %w", err)
 	}
