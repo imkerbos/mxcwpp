@@ -490,6 +490,23 @@ func migrateScanResultsCompositeKey(db *gorm.DB, logger *zap.Logger) error {
 			logger.Info("PRIMARY KEY 已不存在，跳过 DROP", zap.String("table", table))
 		}
 
+		// Step 1.5: 去重 — 历史数据可能存在 (task_id, host_id, rule_id) 重复行
+		// （fix_results 业务侧 INSERT 而非 UPSERT，任务重试时会插入重复）。
+		// 保留每组 result_id 字典序最大的一行（视为最新），删其他。
+		dedupSQL := fmt.Sprintf(
+			"DELETE t1 FROM `%s` t1 INNER JOIN `%s` t2 "+
+				"ON t1.task_id = t2.task_id AND t1.host_id = t2.host_id "+
+				"AND t1.rule_id = t2.rule_id AND t1.result_id < t2.result_id",
+			table, table)
+		dedupResult := db.Exec(dedupSQL)
+		if dedupResult.Error != nil {
+			logger.Error("去重失败", zap.String("table", table), zap.Error(dedupResult.Error))
+			return dedupResult.Error
+		}
+		if dedupResult.RowsAffected > 0 {
+			logger.Info("迁移前去重完成", zap.String("table", table), zap.Int64("deleted", dedupResult.RowsAffected))
+		}
+
 		// Step 2: 新复合主键 (task_id, host_id, rule_id) 不存在时才 ADD
 		var newPKColumns int
 		if err := db.Raw(`
