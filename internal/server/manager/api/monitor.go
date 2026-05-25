@@ -290,6 +290,156 @@ func (h *MonitorHandler) queryHostMetricsFromPrometheus(ctx context.Context, sta
 
 // ---- /monitor/services ----
 
+// collectQPSSeries 拉取 4 个核心 mxsec 服务最近 1h QPS 时间序列。
+//
+// 返回扁平结构 [{time, Manager, AgentCenter, Consumer, Prometheus}, ...]
+// 给 UI ServiceMonitor.vue 直接绘制多线 echart。
+// Prom 不可用时返回 []，UI 显示"暂无数据"。
+func (h *MonitorHandler) collectQPSSeries(ctx context.Context) []gin.H {
+	if h.prometheusClient == nil {
+		return []gin.H{}
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	now := time.Now()
+	start := now.Add(-1 * time.Hour)
+	const step = "1m"
+
+	sources := []struct {
+		name  string
+		query string
+	}{
+		{"Manager", `sum(rate(mxsec_http_requests_total[1m]))`},
+		{"AgentCenter", `sum(rate(mxsec_ac_grpc_handled_total[1m]))`},
+		{"Consumer", `sum(rate(mxsec_consumer_records_consumed_total[1m]))`},
+		{"Prometheus", `sum(rate(prometheus_http_requests_total[1m]))`},
+	}
+
+	type point struct {
+		values map[string]float64
+	}
+	pointMap := make(map[string]*point)
+	timeOrder := []string{}
+
+	for _, s := range sources {
+		res, err := h.prometheusClient.QueryRange(queryCtx, s.query, start, now, step)
+		if err != nil || res == nil || len(res.Data.Result) == 0 {
+			continue
+		}
+		for _, v := range res.Data.Result[0].Values {
+			if len(v) < 2 {
+				continue
+			}
+			ts, _ := v[0].(float64)
+			timeStr := time.Unix(int64(ts), 0).Format("15:04:05")
+
+			var val float64
+			switch x := v[1].(type) {
+			case string:
+				_, _ = fmt.Sscanf(x, "%f", &val)
+			case float64:
+				val = x
+			}
+			if math.IsNaN(val) || math.IsInf(val, 0) {
+				val = 0
+			}
+
+			p, ok := pointMap[timeStr]
+			if !ok {
+				p = &point{values: make(map[string]float64)}
+				pointMap[timeStr] = p
+				timeOrder = append(timeOrder, timeStr)
+			}
+			p.values[s.name] = math.Round(val*1000) / 1000
+		}
+	}
+
+	result := make([]gin.H, 0, len(timeOrder))
+	for _, t := range timeOrder {
+		entry := gin.H{"time": t}
+		for k, v := range pointMap[t].values {
+			entry[k] = v
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+// collectLatencySeries 拉取 1h p50/p95/p99 延迟趋势（聚合 Manager HTTP）。
+//
+// 简化方案：只查 Manager HTTP histogram（mxsec 业务流量主要走 Manager），
+// 避免跨 histogram 聚合的复杂性。前端图表显示 p50/p95/p99 三条线。
+func (h *MonitorHandler) collectLatencySeries(ctx context.Context) []gin.H {
+	if h.prometheusClient == nil {
+		return []gin.H{}
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	now := time.Now()
+	start := now.Add(-1 * time.Hour)
+	const step = "1m"
+
+	percentiles := []struct {
+		key string
+		q   string
+	}{
+		{"p50", `histogram_quantile(0.50, sum by (le) (rate(mxsec_http_request_duration_seconds_bucket[5m]))) * 1000`},
+		{"p95", `histogram_quantile(0.95, sum by (le) (rate(mxsec_http_request_duration_seconds_bucket[5m]))) * 1000`},
+		{"p99", `histogram_quantile(0.99, sum by (le) (rate(mxsec_http_request_duration_seconds_bucket[5m]))) * 1000`},
+	}
+
+	type point struct {
+		values map[string]float64
+	}
+	pointMap := make(map[string]*point)
+	timeOrder := []string{}
+
+	for _, p := range percentiles {
+		res, err := h.prometheusClient.QueryRange(queryCtx, p.q, start, now, step)
+		if err != nil || res == nil || len(res.Data.Result) == 0 {
+			continue
+		}
+		for _, v := range res.Data.Result[0].Values {
+			if len(v) < 2 {
+				continue
+			}
+			ts, _ := v[0].(float64)
+			timeStr := time.Unix(int64(ts), 0).Format("15:04:05")
+
+			var val float64
+			switch x := v[1].(type) {
+			case string:
+				_, _ = fmt.Sscanf(x, "%f", &val)
+			case float64:
+				val = x
+			}
+			if math.IsNaN(val) || math.IsInf(val, 0) {
+				val = 0
+			}
+
+			pt, ok := pointMap[timeStr]
+			if !ok {
+				pt = &point{values: make(map[string]float64)}
+				pointMap[timeStr] = pt
+				timeOrder = append(timeOrder, timeStr)
+			}
+			pt.values[p.key] = math.Round(val*10) / 10
+		}
+	}
+
+	result := make([]gin.H, 0, len(timeOrder))
+	for _, t := range timeOrder {
+		entry := gin.H{"time": t}
+		for k, v := range pointMap[t].values {
+			entry[k] = v
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
 // ---- /monitor/services/:name/history ----
 
 // serviceJobMap 服务名 → Prometheus job 标签。
@@ -578,14 +728,15 @@ func (h *MonitorHandler) GetServicesMonitor(c *gin.Context) {
 	jsonBytes, err, _ := h.sfGroup.Do(servicesCacheKey, func() (interface{}, error) {
 		services := h.collectServiceStatus()
 		connections := h.collectConnectionStats()
-
-		// QPS/latency 时间序列字段保留兼容（Tier 1-2 历史趋势 API 单独提供）
+		// 内联 1h QPS / 延迟时间序列（UI 直接渲染，无需额外 API 调用）
+		qpsSeries := h.collectQPSSeries(ctx)
+		latencySeries := h.collectLatencySeries(ctx)
 		return json.Marshal(gin.H{
 			"code": 0,
 			"data": gin.H{
 				"services":    services,
-				"qps":         []gin.H{},
-				"latency":     []gin.H{},
+				"qps":         qpsSeries,
+				"latency":     latencySeries,
 				"connections": connections,
 			},
 		})
