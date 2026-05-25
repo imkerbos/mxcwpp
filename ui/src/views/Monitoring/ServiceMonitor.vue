@@ -21,7 +21,7 @@
           <a-row :gutter="16" class="service-metrics">
             <a-col :span="8">
               <div class="metric-item">
-                <div class="metric-value">{{ svc.qps }}</div>
+                <div class="metric-value">{{ formatQps(svc.qps) }}</div>
                 <div class="metric-label">QPS</div>
               </div>
             </a-col>
@@ -38,10 +38,52 @@
               </div>
             </a-col>
           </a-row>
+          <!-- v2 强类型指标（来自 PromQL 真实数据） -->
+          <a-row v-if="hasV2Metrics(svc)" :gutter="16" class="service-metrics-v2">
+            <a-col v-if="svc.p99LatencyMs !== undefined && svc.p99LatencyMs > 0" :span="8">
+              <div class="metric-item-v2">
+                <span class="metric-v2-label">p99</span>
+                <span class="metric-v2-value">{{ svc.p99LatencyMs.toFixed(1) }}ms</span>
+              </div>
+            </a-col>
+            <a-col v-if="svc.errorRate !== undefined && svc.errorRate > 0" :span="8">
+              <div class="metric-item-v2" :class="{ 'error-warn': svc.errorRate > 0.05 }">
+                <span class="metric-v2-label">错误率</span>
+                <span class="metric-v2-value">{{ (svc.errorRate * 100).toFixed(2) }}%</span>
+              </div>
+            </a-col>
+            <a-col v-if="svc.connections !== undefined && svc.connections > 0" :span="8">
+              <div class="metric-item-v2">
+                <span class="metric-v2-label">连接数</span>
+                <span class="metric-v2-value">{{ svc.connections }}</span>
+              </div>
+            </a-col>
+            <a-col v-if="svc.queueLag !== undefined && svc.queueLag > 0" :span="8">
+              <div class="metric-item-v2" :class="{ 'error-warn': svc.queueLag > 10000 }">
+                <span class="metric-v2-label">队列积压</span>
+                <span class="metric-v2-value">{{ svc.queueLag }}</span>
+              </div>
+            </a-col>
+            <a-col v-if="svc.goroutineCount !== undefined && svc.goroutineCount > 0" :span="8">
+              <div class="metric-item-v2" :class="{ 'error-warn': svc.goroutineCount > 10000 }">
+                <span class="metric-v2-label">goroutine</span>
+                <span class="metric-v2-value">{{ svc.goroutineCount }}</span>
+              </div>
+            </a-col>
+            <a-col v-if="svc.gcPauseP99Ms !== undefined && svc.gcPauseP99Ms > 0" :span="8">
+              <div class="metric-item-v2" :class="{ 'error-warn': svc.gcPauseP99Ms > 500 }">
+                <span class="metric-v2-label">GC p99</span>
+                <span class="metric-v2-value">{{ svc.gcPauseP99Ms }}ms</span>
+              </div>
+            </a-col>
+          </a-row>
           <div class="service-meta">
             <span>PID: {{ svc.pid }}</span>
-            <span>运行时间: {{ svc.uptime }}</span>
+            <span>运行: {{ svc.uptime }}</span>
             <span>版本: {{ svc.version }}</span>
+            <span v-if="svc.dataSource" class="data-source-badge" :title="`数据来源: ${svc.dataSource}`">
+              {{ dataSourceLabel(svc.dataSource) }}
+            </span>
           </div>
           <div v-if="svc.detail" class="service-detail">{{ svc.detail }}</div>
         </div>
@@ -103,16 +145,30 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import apiClient from '@/api/client'
 
+// v2 schema：前向兼容旧字段，新增强类型字段
+// 后端来自 internal/server/manager/api/monitor.go:serviceInfo
 interface ServiceInfo {
   name: string
   status: string
-  qps: number
-  cpu: number
-  memory: string
+  qps: number          // float64（真实 QPS，rate per second）
+  cpu: number          // 0-100 percent
+  memory: string       // 人类可读"234 MB"
   pid: string
   uptime: string
   version: string
   detail?: string
+  // v2 字段（optional，prometheus 数据缺失时 undefined）
+  memRssBytes?: number
+  p99LatencyMs?: number
+  errorRate?: number        // [0, 1]
+  connections?: number
+  queueLag?: number
+  uptimeSec?: number
+  extra?: Record<string, string>
+  dataSource?: string       // prometheus / driver / driver+prometheus / sd-registry
+  goroutineCount?: number
+  fdCount?: number
+  gcPauseP99Ms?: number
 }
 
 type QPSPoint = Record<string, string | number>
@@ -223,6 +279,36 @@ const latencyChartOption = computed(() => ({
   ],
 }))
 
+// QPS 格式化：> 1 显示整数，< 1 显示 2 位小数
+const formatQps = (qps: number): string => {
+  if (qps === undefined || qps === null) return '--'
+  if (qps === 0) return '0'
+  if (qps >= 1) return Math.round(qps).toString()
+  return qps.toFixed(2)
+}
+
+// 判断是否有任一 v2 指标可显示
+const hasV2Metrics = (svc: ServiceInfo): boolean => {
+  return !!(
+    (svc.p99LatencyMs && svc.p99LatencyMs > 0) ||
+    (svc.errorRate && svc.errorRate > 0) ||
+    (svc.connections && svc.connections > 0) ||
+    (svc.queueLag && svc.queueLag > 0) ||
+    (svc.goroutineCount && svc.goroutineCount > 0) ||
+    (svc.gcPauseP99Ms && svc.gcPauseP99Ms > 0)
+  )
+}
+
+const dataSourceLabel = (src: string): string => {
+  switch (src) {
+    case 'prometheus': return 'Prom'
+    case 'driver': return 'Driver'
+    case 'driver+prometheus': return 'Driver+Prom'
+    case 'prometheus+driver': return 'Prom+Driver'
+    default: return src
+  }
+}
+
 const connectionStatusColor = (status: string) => {
   if (status === 'warning') return 'orange'
   if (status === 'error') return 'red'
@@ -288,6 +374,27 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .metric-value { font-size: 20px; font-weight: 600; color: var(--mxsec-text-1); }
 .metric-label { font-size: 12px; color: var(--mxsec-text-3); margin-top: 2px; }
 
+/* v2 强类型指标（p99/error_rate/connections/queueLag/goroutine/gc_pause） */
+.service-metrics-v2 {
+  margin-bottom: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--mxsec-fill-2);
+}
+.metric-item-v2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  background: var(--mxsec-fill-1);
+  font-size: 12px;
+}
+.metric-item-v2.error-warn { background: rgba(239, 68, 68, 0.08); }
+.metric-v2-label { color: var(--mxsec-text-3); }
+.metric-v2-value { font-weight: 600; color: var(--mxsec-text-1); }
+.metric-item-v2.error-warn .metric-v2-value { color: #EF4444; }
+
 .service-meta {
   display: flex;
   flex-wrap: wrap;
@@ -296,6 +403,15 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   color: var(--mxsec-text-3);
   padding-top: 12px;
   border-top: 1px solid var(--mxsec-fill-2);
+}
+
+.data-source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--mxsec-fill-2);
+  color: var(--mxsec-text-3);
+  cursor: help;
 }
 
 .service-detail {

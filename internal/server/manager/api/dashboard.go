@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
+	"github.com/imkerbos/mxsec-platform/internal/server/prometheus"
 )
 
 const (
@@ -28,20 +30,22 @@ const (
 type DashboardHandler struct {
 	db          *gorm.DB
 	logger      *zap.Logger
-	chConn      chdriver.Conn // 可为 nil（ClickHouse 未启用时降级为 0）
-	redisClient *redis.Client // 可为 nil（Redis 未启用时不缓存）
-	acRegistry  *sd.Registry  // 可为 nil（单机部署降级为始终 healthy）
+	chConn      chdriver.Conn      // 可为 nil（ClickHouse 未启用时降级为 0）
+	redisClient *redis.Client      // 可为 nil（Redis 未启用时不缓存）
+	acRegistry  *sd.Registry       // 可为 nil（单机部署降级为始终 healthy）
+	promClient  *prometheus.Client // 可为 nil；用于 Manager 自检（5xx 错误率）
 	sfGroup     singleflight.Group
 }
 
 // NewDashboardHandler 创建 Dashboard 处理器
-func NewDashboardHandler(db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, acRegistry *sd.Registry) *DashboardHandler {
+func NewDashboardHandler(db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, acRegistry *sd.Registry, promClient *prometheus.Client) *DashboardHandler {
 	return &DashboardHandler{
 		db:          db,
 		logger:      logger,
 		chConn:      chConn,
 		redisClient: redisClient,
 		acRegistry:  acRegistry,
+		promClient:  promClient,
 	}
 }
 
@@ -218,7 +222,7 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	serviceStatus := gin.H{
 		"database":    h.checkDatabaseStatus(),
 		"agentcenter": h.checkAgentCenterStatus(),
-		"manager":     "healthy",
+		"manager":     h.checkManagerSelfStatus(), // 5xx 错误率自检，不再硬编码 healthy
 	}
 	stats["serviceStatus"] = serviceStatus
 
@@ -639,6 +643,69 @@ func (h *DashboardHandler) checkDatabaseStatus() string {
 	case <-time.After(2 * time.Second):
 		return "warning"
 	}
+}
+
+// checkManagerSelfStatus Manager 自身健康自检（不再硬编码 "healthy"）。
+//
+// 自检逻辑：
+//  1. 本进程在跑 → 进程级 alive（默认前提）
+//  2. 若已注入 Prometheus 客户端，查 1 分钟 HTTP 5xx 错误率：
+//     - 错误率 > 5% → "warning"
+//     - 否则 → "healthy"
+//  3. Prom 未配置时 → "healthy"（无数据等价于无异常）
+//
+// 真正的"挂了"由外部探针检测（Prometheus blackbox / k8s liveness probe），
+// 这里只能反映"运行中但不健康"的灰色状态。
+func (h *DashboardHandler) checkManagerSelfStatus() string {
+	if h.promClient == nil {
+		return "healthy"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	totalRes, err := h.promClient.QueryInstant(ctx, `sum(rate(mxsec_http_requests_total[1m]))`, nil)
+	if err != nil || totalRes == nil || len(totalRes.Data.Result) == 0 {
+		return "healthy"
+	}
+	totalVal := parsePromScalar(totalRes.Data.Result[0].Value)
+	if totalVal <= 0 {
+		return "healthy" // 无流量
+	}
+
+	errRes, err := h.promClient.QueryInstant(ctx, `sum(rate(mxsec_http_requests_total{status_code=~"5.."}[1m]))`, nil)
+	if err != nil || errRes == nil || len(errRes.Data.Result) == 0 {
+		return "healthy"
+	}
+	errVal := parsePromScalar(errRes.Data.Result[0].Value)
+	if errVal/totalVal > 0.05 {
+		return "warning"
+	}
+	return "healthy"
+}
+
+// parsePromScalar 从 PromQL 即时查询的 Value（[timestamp, value]）解析 float。
+// 无法解析时返回 0。
+func parsePromScalar(v []interface{}) float64 {
+	if len(v) < 2 {
+		return 0
+	}
+	switch val := v[1].(type) {
+	case string:
+		var f float64
+		if _, err := fmt.Sscanf(val, "%f", &f); err != nil {
+			return 0
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0
+		}
+		return f
+	case float64:
+		if math.IsNaN(val) || math.IsInf(val, 0) {
+			return 0
+		}
+		return val
+	}
+	return 0
 }
 
 // checkAgentCenterStatus 检查 AgentCenter 服务状态
