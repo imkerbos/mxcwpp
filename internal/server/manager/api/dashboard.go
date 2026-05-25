@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"net"
 	"net/http"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -30,16 +30,18 @@ type DashboardHandler struct {
 	logger      *zap.Logger
 	chConn      chdriver.Conn // 可为 nil（ClickHouse 未启用时降级为 0）
 	redisClient *redis.Client // 可为 nil（Redis 未启用时不缓存）
+	acRegistry  *sd.Registry  // 可为 nil（单机部署降级为始终 healthy）
 	sfGroup     singleflight.Group
 }
 
 // NewDashboardHandler 创建 Dashboard 处理器
-func NewDashboardHandler(db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client) *DashboardHandler {
+func NewDashboardHandler(db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, acRegistry *sd.Registry) *DashboardHandler {
 	return &DashboardHandler{
 		db:          db,
 		logger:      logger,
 		chConn:      chConn,
 		redisClient: redisClient,
+		acRegistry:  acRegistry,
 	}
 }
 
@@ -226,9 +228,109 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	// 10. 最新告警（最近 5 条 active 告警，精简字段）
 	stats["latestAlerts"] = h.queryLatestAlerts()
 
+	// 11. 安全态势综合评分
+	// 替代 UI 端硬编码的 82 默认值；综合 critical/high 告警 + 漏洞 + 受影响主机比例 + 合规率
+	criticalAlertCount, highAlertCount := h.countAlertsBySeverity()
+	criticalVulnCount, highVulnCount := h.countVulnsBySeverity()
+	stats["criticalAlerts"] = criticalAlertCount
+	stats["highAlerts"] = highAlertCount
+	stats["securityScore"] = h.computeSecurityScore(
+		criticalAlertCount, highAlertCount,
+		criticalVulnCount, highVulnCount,
+		vulnHostCount, totalHosts,
+		baselineHardeningPercent,
+	)
+
 	stats = sanitizeDashboardValue(stats).(gin.H)
 
 	return json.Marshal(gin.H{"code": 0, "data": stats})
+}
+
+// countAlertsBySeverity 按 severity 统计活跃告警数（仅 critical/high）
+func (h *DashboardHandler) countAlertsBySeverity() (critical, high int64) {
+	var rows []struct {
+		Severity string `gorm:"column:severity"`
+		Cnt      int64  `gorm:"column:cnt"`
+	}
+	h.db.Model(&model.Alert{}).
+		Select("severity, COUNT(*) as cnt").
+		Where("status = ?", model.AlertStatusActive).
+		Group("severity").
+		Scan(&rows)
+	for _, r := range rows {
+		switch r.Severity {
+		case "critical":
+			critical = r.Cnt
+		case "high":
+			high = r.Cnt
+		}
+	}
+	return
+}
+
+// countVulnsBySeverity 按 severity 统计未修复漏洞数（仅 critical/high）
+func (h *DashboardHandler) countVulnsBySeverity() (critical, high int64) {
+	var rows []struct {
+		Severity string `gorm:"column:severity"`
+		Cnt      int64  `gorm:"column:cnt"`
+	}
+	h.db.Model(&model.Vulnerability{}).
+		Select("severity, COUNT(*) as cnt").
+		Where("status = ?", "unpatched").
+		Group("severity").
+		Scan(&rows)
+	for _, r := range rows {
+		switch r.Severity {
+		case "critical":
+			critical = r.Cnt
+		case "high":
+			high = r.Cnt
+		}
+	}
+	return
+}
+
+// computeSecurityScore 计算安全态势综合评分（0-100）
+//
+// 维度（基础 100 分，按权重扣分；最后用合规率修正 ±）：
+//
+//	告警：critical × 2（封顶 -30），high × 0.5（封顶 -20）
+//	漏洞：critical × 0.05（封顶 -20），high × 0.01（封顶 -10）
+//	影响范围：受漏洞影响主机比例 × 20（最多 -20）
+//	合规率：(baseline_hardening_percent - 80) × 0.1（范围 ±2）
+//
+// 设计目标：避免 UI 端硬编码"健康"误导；与漏洞/告警数量同向变化。
+func (h *DashboardHandler) computeSecurityScore(
+	criticalAlerts, highAlerts int64,
+	criticalVulns, highVulns int64,
+	vulnHosts, totalHosts int64,
+	baselineCompliance float64,
+) float64 {
+	score := 100.0
+
+	score -= math.Min(float64(criticalAlerts)*2.0, 30.0)
+	score -= math.Min(float64(highAlerts)*0.5, 20.0)
+
+	score -= math.Min(float64(criticalVulns)*0.05, 20.0)
+	score -= math.Min(float64(highVulns)*0.01, 10.0)
+
+	if totalHosts > 0 {
+		affectedRatio := float64(vulnHosts) / float64(totalHosts)
+		if affectedRatio > 1.0 {
+			affectedRatio = 1.0
+		}
+		score -= affectedRatio * 20.0
+	}
+
+	score += (baselineCompliance - 80.0) * 0.1
+
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+	return math.Round(score*10) / 10
 }
 
 // calculateAgentChanges 计算Agent数量变化（较昨日）
@@ -540,20 +642,22 @@ func (h *DashboardHandler) checkDatabaseStatus() string {
 }
 
 // checkAgentCenterStatus 检查 AgentCenter 服务状态
+// 通过 SD registry 查询 AC 实例心跳健康状态（取代原 TCP 端口探测，避免硬编码 hostname）
 func (h *DashboardHandler) checkAgentCenterStatus() string {
-	addresses := []string{
-		"localhost:6751",
-		"agentcenter:6751",
-		"127.0.0.1:6751",
+	if h.acRegistry == nil {
+		// 未注入 registry（理论上不会出现，兜底）
+		return "warning"
 	}
 
-	for _, addr := range addresses {
-		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
-		if err == nil {
-			conn.Close()
-			return "healthy"
-		}
+	healthy := h.acRegistry.ListHealthy()
+	if len(healthy) > 0 {
+		return "healthy"
 	}
 
+	// 区分"无任何 AC 注册"和"全部 AC 不健康"
+	all := h.acRegistry.ListAll()
+	if len(all) == 0 {
+		return "warning"
+	}
 	return "error"
 }

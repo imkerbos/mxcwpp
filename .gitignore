@@ -169,6 +169,7 @@ CODEX.md
 memory/
 PLATFORM-REVIEW.md
 TODOLIST*.md
+docs/TODO.md
 docs/roadmap.md
 .superpowers/
 docs/superpowers/
@@ -179,6 +180,7 @@ docs/superpowers/
 docs/*test*.md
 docs/*evaluation*.md
 ruletest/
+/ruletest
 
 # ======================
 # Local data
