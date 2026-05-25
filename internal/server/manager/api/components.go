@@ -879,17 +879,30 @@ func (h *ComponentsHandler) DownloadAgentPackage(c *gin.Context) {
 	}
 
 	// 检查文件是否存在
-	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(pkg.FilePath)
+	if os.IsNotExist(err) {
 		h.logger.Error("Agent 包文件不存在", zap.String("path", pkg.FilePath))
 		NotFound(c, "文件不存在")
 		return
+	}
+
+	// 大文件下载需要延长写超时，避免被 Manager 全局 WriteTimeout(30s) 切断
+	// 之前 agent 拿到截断的 RPM → sha256 不匹配 → 升级失败 → scheduler 反复重试。
+	// 按文件大小估算：1 MB/s 下限 + 60s 余量；不少于 5 分钟。
+	deadline := time.Duration(fileInfo.Size()/(1024*1024)+60) * time.Second
+	if deadline < 5*time.Minute {
+		deadline = 5 * time.Minute
+	}
+	rc := http.NewResponseController(c.Writer)
+	if err := rc.SetWriteDeadline(time.Now().Add(deadline)); err != nil {
+		h.logger.Warn("设置 Agent 包下载写超时失败，使用默认超时", zap.Error(err))
 	}
 
 	// 设置下载响应头
 	fileName := fmt.Sprintf("mxsec-agent-%s.%s", latestVersion.Version, pkgType)
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
 	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Length", strconv.FormatInt(pkg.FileSize, 10))
+	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
 	c.Header("X-Package-Version", latestVersion.Version)
 	c.Header("X-Package-SHA256", pkg.SHA256)
 
@@ -1872,16 +1885,27 @@ func (h *ComponentsHandler) DownloadDependencyPackage(c *gin.Context) {
 	}
 
 	// 检查文件是否存在
-	if _, err := os.Stat(pkg.FilePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(pkg.FilePath)
+	if os.IsNotExist(err) {
 		h.logger.Error("依赖包文件不存在", zap.String("path", pkg.FilePath))
 		NotFound(c, "文件不存在")
 		return
 	}
 
+	// 大文件下载延长写超时（同 Agent/Plugin 包）
+	deadline := time.Duration(fileInfo.Size()/(1024*1024)+60) * time.Second
+	if deadline < 5*time.Minute {
+		deadline = 5 * time.Minute
+	}
+	rc := http.NewResponseController(c.Writer)
+	if err := rc.SetWriteDeadline(time.Now().Add(deadline)); err != nil {
+		h.logger.Warn("设置依赖包下载写超时失败", zap.Error(err))
+	}
+
 	// 设置下载响应头
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", pkg.FileName))
 	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Length", strconv.FormatInt(pkg.FileSize, 10))
+	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
 	c.Header("X-Dependency-Name", name)
 	c.Header("X-Dependency-Version", latestVersion.Version)
 	c.Header("X-Dependency-SHA256", pkg.SHA256)
