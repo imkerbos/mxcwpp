@@ -63,6 +63,8 @@ type PluginsConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	// Ed25519 签名私钥文件路径（用于对插件 SHA256 签名）
 	SignPrivateKey string `mapstructure:"sign_private_key"`
+	// 插件下载并发上限：超过则返回 429。0 或负数 → 默认 50
+	DownloadConcurrency int `mapstructure:"download_concurrency"`
 }
 
 // ServerConfig 是服务器配置

@@ -44,14 +44,19 @@ func NewComponentsHandler(db *gorm.DB, logger *zap.Logger, cfg *config.Config, u
 	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
 		logger.Error("创建插件上传目录失败", zap.Error(err))
 	}
+	concurrency := 50
+	if cfg != nil && cfg.Plugins.DownloadConcurrency > 0 {
+		concurrency = cfg.Plugins.DownloadConcurrency
+	}
 	handler := &ComponentsHandler{
 		db:          db,
 		logger:      logger,
 		cfg:         cfg,
 		uploadDir:   uploadDir,
 		urlPrefix:   urlPrefix,
-		downloadSem: make(chan struct{}, 10), // 最多 10 个并发下载
+		downloadSem: make(chan struct{}, concurrency),
 	}
+	logger.Info("插件下载并发上限已加载", zap.Int("download_concurrency", concurrency))
 
 	// 初始化签名器（如果配置了私钥）
 	if cfg != nil && cfg.Plugins.SignPrivateKey != "" {
