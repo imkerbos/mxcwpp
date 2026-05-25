@@ -11,7 +11,7 @@
       <div class="banner-left">
         <div class="banner-label">安全态势评分</div>
         <div class="banner-score">
-          <span class="score-value" :style="{ color: scoreColor }">{{ stats.securityScore ?? 82 }}</span>
+          <span class="score-value" :style="{ color: scoreColor }">{{ stats.securityScore ?? '--' }}</span>
           <span class="score-max">/100</span>
         </div>
         <div class="banner-level" :style="{ color: scoreColor }">{{ scoreLevel }}</div>
@@ -351,8 +351,10 @@ const riskRadarOption = computed(() => {
 
 // ========== 安全评分分档 ==========
 // ≥80 健康(绿) / 60-79 亚健康(蓝) / 40-59 不健康(黄) / <40 危险(红)
+// 后端 dashboard.go computeSecurityScore() 必返回 securityScore；undefined 仅在 API 失败/加载中出现 → 灰色"未知"
 const scoreColor = computed(() => {
-  const s = stats.value.securityScore ?? 82
+  const s = stats.value.securityScore
+  if (s === undefined || s === null) return '#9CA3AF'
   if (s >= 80) return '#22C55E'
   if (s >= 60) return '#3B82F6'
   if (s >= 40) return '#F59E0B'
@@ -360,7 +362,8 @@ const scoreColor = computed(() => {
 })
 
 const scoreLevel = computed(() => {
-  const s = stats.value.securityScore ?? 82
+  const s = stats.value.securityScore
+  if (s === undefined || s === null) return '未知'
   if (s >= 80) return '健康'
   if (s >= 60) return '亚健康'
   if (s >= 40) return '需关注'
@@ -368,7 +371,12 @@ const scoreLevel = computed(() => {
 })
 
 const bannerGradient = computed(() => {
-  const s = stats.value.securityScore ?? 82
+  const s = stats.value.securityScore
+  if (s === undefined || s === null) {
+    return themeStore.isDark
+      ? 'linear-gradient(135deg, #374151, #1F2937)'
+      : 'linear-gradient(135deg, #6B7280, #4B5563)'
+  }
   if (themeStore.isDark) {
     if (s >= 80) return 'linear-gradient(135deg, #14532D, #0D2818)'
     if (s >= 60) return 'linear-gradient(135deg, #1E3A5F, #0D2137)'

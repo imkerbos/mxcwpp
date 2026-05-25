@@ -139,7 +139,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupTasksAPI(router, db, logger, acDispatcher)
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger, acDispatcher)
-	setupDashboardAPI(router, db, logger, chConn, redisClient)
+	setupDashboardAPI(router, db, logger, chConn, redisClient, acRegistry)
 	setupAssetsAPI(router, db, logger)
 	setupReportsAPI(router, db, logger)
 	setupBusinessLinesAPI(router, db, logger)
@@ -360,8 +360,8 @@ func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDis
 }
 
 // setupDashboardAPI 设置 Dashboard API 路由
-func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client) {
-	handler := api.NewDashboardHandler(db, logger, chConn, redisClient)
+func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, acRegistry *sd.Registry) {
+	handler := api.NewDashboardHandler(db, logger, chConn, redisClient, acRegistry)
 	router.GET("/dashboard/stats", handler.GetDashboardStats)
 }
 
