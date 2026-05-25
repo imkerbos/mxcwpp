@@ -104,7 +104,7 @@
       <a-col :span="7">
         <div class="dashboard-card">
           <div class="card-header">
-            <span class="card-title">安全风险指数</span>
+            <span class="card-title">安全健康度</span>
           </div>
           <div class="card-body">
             <v-chart :option="riskRadarOption" autoresize style="height: 260px" />
@@ -299,17 +299,23 @@ const iocPieOption = computed(() => {
   }
 })
 
-// ========== 安全风险雷达图 ==========
-const roundPercent = (v?: number): number => Math.round((v ?? 0) * 10) / 10
+// ========== 安全健康度雷达图 ==========
+// 后端字段语义都是"出问题率（百分比，越大越糟）"。前端反转为"健康度"（100 - 风险率），
+// 满六边形 = 5 维全 100% 健康，凹陷处 = 该维出问题率高。颜色绿色（健康）。
+const healthScore = (v?: number): number => {
+  const risk = Math.max(0, Math.min(100, v ?? 0))
+  return Math.round((100 - risk) * 10) / 10
+}
 
 const riskRadarOption = computed(() => {
   const ct = chartTheme.value
+  // 反转：值 = 健康度 (100 - 出问题率)
   const values = [
-    roundPercent(stats.value.baselineHostPercent),
-    roundPercent(stats.value.hostAlertPercent),
-    roundPercent(stats.value.vulnHostPercent),
-    roundPercent(stats.value.detectionAlertPercent),
-    roundPercent(stats.value.virusHostPercent),
+    healthScore(stats.value.baselineHostPercent),     // 基线合规率
+    healthScore(stats.value.hostAlertPercent),        // 主机无告警率
+    healthScore(stats.value.vulnHostPercent),         // 漏洞修复率
+    healthScore(stats.value.detectionAlertPercent),   // 检测正常率
+    healthScore(stats.value.virusHostPercent),        // 无病毒感染率
   ]
   return {
     tooltip: {
@@ -318,7 +324,7 @@ const riskRadarOption = computed(() => {
       borderColor: ct.tooltipBorder,
       textStyle: { color: ct.tooltipText, fontSize: 12 },
       formatter: (params: any) => {
-        const dims = ['基线不合规', '告警未处理', '漏洞未修复', '检测风险', '病毒感染']
+        const dims = ['基线合规', '主机无告警', '漏洞修复', '检测正常', '无病毒感染']
         return dims.map((name: string, i: number) => `${name}：<b>${params.value[i]}%</b>`).join('<br/>')
       },
     },
@@ -326,11 +332,11 @@ const riskRadarOption = computed(() => {
       center: ['50%', '54%'],
       radius: '65%',
       indicator: [
-        { name: '基线不合规', max: 100 },
-        { name: '告警未处理', max: 100 },
-        { name: '漏洞未修复', max: 100 },
-        { name: '检测风险', max: 100 },
-        { name: '病毒感染', max: 100 },
+        { name: '基线合规', max: 100 },
+        { name: '主机无告警', max: 100 },
+        { name: '漏洞修复', max: 100 },
+        { name: '检测正常', max: 100 },
+        { name: '无病毒感染', max: 100 },
       ],
       axisName: { color: ct.axisLabel, fontSize: 11 },
       splitLine: { lineStyle: { color: ct.gridLine } },
@@ -341,10 +347,10 @@ const riskRadarOption = computed(() => {
       type: 'radar',
       symbol: 'circle',
       symbolSize: 5,
-      lineStyle: { color: '#EF4444', width: 2 },
-      areaStyle: { color: 'rgba(239, 68, 68, 0.18)' },
-      itemStyle: { color: '#EF4444' },
-      data: [{ value: values, name: '主机风险占比 (%)' }],
+      lineStyle: { color: '#22C55E', width: 2 },
+      areaStyle: { color: 'rgba(34, 197, 94, 0.18)' },
+      itemStyle: { color: '#22C55E' },
+      data: [{ value: values, name: '安全健康度 (%)' }],
     }],
   }
 })
