@@ -217,6 +217,7 @@ func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
 			if err := SaveCertificatesToDir(certsDir, certs); err != nil {
 				return nil, fmt.Errorf("保存重签 server.crt 失败: %w", err)
 			}
+			fmt.Fprintln(os.Stderr, "⚠️  server.crt SAN 已更新并重签（保 CA 不变）；deploy 后 AC 重启会断开当前 agent 长连接，agent 会自动重连（CA 不变兼容）")
 		}
 	}
 
