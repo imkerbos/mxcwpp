@@ -569,23 +569,65 @@ server {
 	return os.WriteFile(dst, []byte(conf), 0o644)
 }
 
+// writePrometheusConfig 渲染 Prometheus scrape 配置。
+//
+// 抓取 4 个自研服务（network_mode: host，端口直接绑宿主）：
+//   - mxsec-manager       :8080  /metrics
+//   - mxsec-agentcenter   :8081  /metrics
+//   - mxsec-consumer      :9100  /metrics  (独立 HTTP server)
+//   - prometheus self     :9090  /metrics
+//
+// 不部署 mysql/redis/kafka/clickhouse 外部 exporter（与 mxsec driver 端检查重复）。
 func writePrometheusConfig(dst string, cfg *Config) error {
-	// 收集所有 control 节点的 IP，Prometheus 从存储节点跨网络抓取
-	var targets []string
+	// 收集所有 control 节点的 IP（manager + agentcenter + consumer 都在 control 节点）
+	var controlHosts []string
 	for _, node := range cfg.Nodes {
 		if node.HasRole(RoleControl) {
-			targets = append(targets, fmt.Sprintf("%s:%d", node.Host, cfg.App.ACHTTPPort))
+			controlHosts = append(controlHosts, node.Host)
 		}
 	}
-	if len(targets) == 0 {
+	if len(controlHosts) == 0 {
 		return fmt.Errorf("未找到 control 节点，无法生成 Prometheus 配置")
 	}
 
+	const consumerMetricsPort = 9100
+
 	var buf strings.Builder
-	buf.WriteString("global:\n  scrape_interval: 60s\n  evaluation_interval: 60s\n\nscrape_configs:\n  - job_name: mxsec-agentcenter\n    static_configs:\n      - targets:\n")
-	for _, t := range targets {
-		fmt.Fprintf(&buf, "          - %s\n", t)
+	buf.WriteString(`# 由 mxctl 自动生成 — 请勿手动修改
+# 抓取 mxsec 自研服务 + Prometheus 自身
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: mxsec-prod
+    env: prod
+
+scrape_configs:
+  - job_name: mxsec-manager
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+`)
+	for _, h := range controlHosts {
+		fmt.Fprintf(&buf, "          - %s:%d\n", h, cfg.App.ManagerHTTPPort)
 	}
+	buf.WriteString("        labels:\n          service: manager\n\n")
+
+	buf.WriteString("  - job_name: mxsec-agentcenter\n    scrape_interval: 15s\n    static_configs:\n      - targets:\n")
+	for _, h := range controlHosts {
+		fmt.Fprintf(&buf, "          - %s:%d\n", h, cfg.App.ACHTTPPort)
+	}
+	buf.WriteString("        labels:\n          service: agentcenter\n\n")
+
+	buf.WriteString("  - job_name: mxsec-consumer\n    scrape_interval: 15s\n    static_configs:\n      - targets:\n")
+	for _, h := range controlHosts {
+		fmt.Fprintf(&buf, "          - %s:%d\n", h, consumerMetricsPort)
+	}
+	buf.WriteString("        labels:\n          service: consumer\n\n")
+
+	buf.WriteString("  - job_name: prometheus\n    scrape_interval: 30s\n    static_configs:\n      - targets:\n          - localhost:9090\n        labels:\n          service: prometheus\n")
+
 	return os.WriteFile(dst, []byte(buf.String()), 0o644)
 }
 
