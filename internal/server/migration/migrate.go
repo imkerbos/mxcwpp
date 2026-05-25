@@ -452,8 +452,11 @@ func migrateAlertResultIDColumn(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// migrateScanResultsCompositeKey 将 scan_results 和 fix_results 表从单列主键(result_id)迁移为复合主键(task_id, host_id, rule_id)
-// 此函数幂等：如果 result_id 列已不存在则跳过
+// migrateScanResultsCompositeKey 将 scan_results 和 fix_results 表从单列主键(result_id)
+// 迁移为复合主键(task_id, host_id, rule_id)。
+//
+// 每一步独立 idempotent 检查（DROP PRIMARY / ADD PRIMARY / DROP COLUMN 任意一步
+// 之前部分成功也能安全续跑），避免历史"半完成"状态报 1091 / 1068 错误。
 func migrateScanResultsCompositeKey(db *gorm.DB, logger *zap.Logger) error {
 	for _, table := range []string{"scan_results", "fix_results"} {
 		var hasResultID bool
@@ -463,24 +466,55 @@ func migrateScanResultsCompositeKey(db *gorm.DB, logger *zap.Logger) error {
 		).Scan(&hasResultID).Error; err != nil {
 			return err
 		}
-
 		if !hasResultID {
-			continue // 已迁移，跳过
+			continue // 完全已迁移，跳过
 		}
 
 		logger.Info("开始迁移主键：result_id → (task_id, host_id, rule_id)", zap.String("table", table))
 
-		stmts := []string{
-			fmt.Sprintf("ALTER TABLE `%s` DROP PRIMARY KEY", table),
-			fmt.Sprintf("ALTER TABLE `%s` ADD PRIMARY KEY (`task_id`, `host_id`, `rule_id`)", table),
-			fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `result_id`", table),
+		// Step 1: 当前 PRIMARY 是单列 result_id 时才 DROP
+		// （之前部分完成的迁移可能已 DROP，再 DROP 会报 1091）
+		var pkColumns int
+		if err := db.Raw(
+			"SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = 'PRIMARY'",
+			table,
+		).Scan(&pkColumns).Error; err != nil {
+			return err
 		}
-		for _, sql := range stmts {
-			if err := db.Exec(sql).Error; err != nil {
-				logger.Error("主键迁移失败", zap.String("table", table), zap.String("sql", sql), zap.Error(err))
+		if pkColumns > 0 {
+			if err := db.Exec(fmt.Sprintf("ALTER TABLE `%s` DROP PRIMARY KEY", table)).Error; err != nil {
+				logger.Error("DROP PRIMARY KEY 失败", zap.String("table", table), zap.Error(err))
 				return err
 			}
+		} else {
+			logger.Info("PRIMARY KEY 已不存在，跳过 DROP", zap.String("table", table))
 		}
+
+		// Step 2: 新复合主键 (task_id, host_id, rule_id) 不存在时才 ADD
+		var newPKColumns int
+		if err := db.Raw(`
+			SELECT COUNT(*) FROM information_schema.statistics
+			WHERE table_schema = DATABASE() AND table_name = ?
+			  AND index_name = 'PRIMARY'
+			  AND column_name IN ('task_id', 'host_id', 'rule_id')
+		`, table).Scan(&newPKColumns).Error; err != nil {
+			return err
+		}
+		if newPKColumns < 3 {
+			if err := db.Exec(fmt.Sprintf("ALTER TABLE `%s` ADD PRIMARY KEY (`task_id`, `host_id`, `rule_id`)", table)).Error; err != nil {
+				logger.Error("ADD PRIMARY KEY 失败", zap.String("table", table), zap.Error(err))
+				return err
+			}
+		} else {
+			logger.Info("复合主键已存在，跳过 ADD", zap.String("table", table))
+		}
+
+		// Step 3: 删除旧 result_id 列
+		if err := db.Exec(fmt.Sprintf("ALTER TABLE `%s` DROP COLUMN `result_id`", table)).Error; err != nil {
+			logger.Error("DROP COLUMN result_id 失败", zap.String("table", table), zap.Error(err))
+			return err
+		}
+
 		logger.Info("主键迁移完成", zap.String("table", table))
 	}
 
