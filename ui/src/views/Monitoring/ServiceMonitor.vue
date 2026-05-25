@@ -351,9 +351,16 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   border-radius: 8px;
   padding: 20px;
   transition: border-color 0.2s;
+  /* 等高：同行卡片高度由最高者撑齐，避免 MySQL/CH 长字符串撑高单卡 */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .service-card:hover { border-color: var(--mxsec-primary); }
 .service-card.service-error { border-color: #FDCDC5; }
+.service-card .service-detail { margin-top: auto; }
+/* 主指标值 nowrap，超长省略号，防止单值换行撑高卡 */
+.metric-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .service-card-header {
   display: flex;

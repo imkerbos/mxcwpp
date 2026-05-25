@@ -1266,7 +1266,12 @@ func (h *MonitorHandler) checkMySQLStatus(ctx context.Context) serviceInfo {
 			if scanErr := rows.Scan(&name, &value); scanErr == nil {
 				if b, err := strconv.ParseUint(value, 10, 64); err == nil && b > 0 {
 					info.MemRSSBytes = b
-					info.Memory = humanizeBytes(b) + " (innodb)"
+					info.Memory = humanizeBytes(b)
+					// "innodb" 标记放 extra，避免字符串过长撑高 UI 卡片
+					if info.Extra == nil {
+						info.Extra = map[string]string{}
+					}
+					info.Extra["memSource"] = "innodb_buffer_pool"
 				}
 			}
 		}
