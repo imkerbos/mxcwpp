@@ -15,6 +15,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/metrics"
@@ -62,8 +63,9 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	cfg.LogInfo(logger)
 	logger.Info("Manager HTTP API Server 启动中...")
 
-	// 4. 初始化 Prometheus 指标
+	// 4. 初始化 Prometheus 指标 + 自暴露 mxsec_build_info（含 version + PID）
 	metrics.Init(logger)
+	metrics.SetBuildInfo(api.BuildVersion, "")
 
 	// 5. 初始化数据库
 	db, err := database.Init(cfg.Database, logger, cfg.Log)

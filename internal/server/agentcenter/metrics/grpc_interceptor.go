@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -9,6 +11,24 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
+
+// BuildInfoGauge AC 进程 build 元信息（value=1，labels 含 version/pid/commit）
+// monitor.go 用 PromQL `mxsec_build_info{job="mxsec-agentcenter"}` 拉取 version + pid
+var BuildInfoGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mxsec_build_info",
+	Help: "AC 进程 build 元信息（value=1，labels 含 version/pid/commit）",
+}, []string{"version", "pid", "commit"})
+
+// SetBuildInfo 设置 AC build 元信息（main 启动时调一次）
+func SetBuildInfo(version, commit string) {
+	if version == "" {
+		version = "dev"
+	}
+	if commit == "" {
+		commit = "unknown"
+	}
+	BuildInfoGauge.WithLabelValues(version, strconv.Itoa(os.Getpid()), commit).Set(1)
+}
 
 // gRPC server-side metrics（business RED 指标）
 //

@@ -9,6 +9,8 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,6 +21,13 @@ import (
 )
 
 var (
+	// Consumer 进程 build 元信息（value=1，labels 含 version/pid/commit）
+	// monitor.go 用 PromQL `mxsec_build_info{job="mxsec-consumer"}` 拉取 version + pid
+	BuildInfoGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mxsec_build_info",
+		Help: "Consumer 进程 build 元信息（value=1，labels 含 version/pid/commit）",
+	}, []string{"version", "pid", "commit"})
+
 	// 消息处理总数（按 topic + status 分桶，用于 rate + error_rate）
 	RecordsConsumedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mxsec_consumer_records_consumed_total",
@@ -61,6 +70,17 @@ func SetConsumerLag(topic, partition string, lag int64) {
 	ConsumerLag.WithLabelValues(topic, partition).Set(float64(lag))
 }
 
+// SetBuildInfo 设置 Consumer build 元信息（main 启动时调一次）
+func SetBuildInfo(version, commit string) {
+	if version == "" {
+		version = "dev"
+	}
+	if commit == "" {
+		commit = "unknown"
+	}
+	BuildInfoGauge.WithLabelValues(version, strconv.Itoa(os.Getpid()), commit).Set(1)
+}
+
 // SetGroupMembers 由 router 定时刷新当前消费组成员数。
 func SetGroupMembers(n int) {
 	ConsumerGroupMembers.Set(float64(n))
@@ -77,8 +97,9 @@ func init() {
 	registry.MustRegister(collectors.NewGoCollector())
 	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	// 注册业务 metric
+	// 注册业务 metric（含 build info，让 monitor.go 通过 PromQL 拉 version+pid）
 	registry.MustRegister(
+		BuildInfoGauge,
 		RecordsConsumedTotal,
 		ProcessingDurationSeconds,
 		ConsumerLag,

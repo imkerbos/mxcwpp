@@ -903,6 +903,30 @@ func (h *MonitorHandler) fillProcessMetrics(ctx context.Context, info *serviceIn
 	if gcPause > 0 {
 		info.GCPauseP99Ms = math.Round(gcPause*100000) / 100 // 秒 → 毫秒，保留 2 位小数
 	}
+
+	// PID + version 来自 mxsec_build_info（mxsec 三端自暴露）
+	h.fillBuildInfo(ctx, info, jobName)
+}
+
+// fillBuildInfo 通过 PromQL mxsec_build_info{job=X} 读取进程的 version 和 pid（写入 labels）。
+// 实现：QueryInstant 拿到 metric labels（不是 value）。
+func (h *MonitorHandler) fillBuildInfo(ctx context.Context, info *serviceInfo, jobName string) {
+	if h.prometheusClient == nil {
+		return
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	res, err := h.prometheusClient.QueryInstant(queryCtx, fmt.Sprintf(`mxsec_build_info{job=%q}`, jobName), nil)
+	if err != nil || res == nil || len(res.Data.Result) == 0 {
+		return
+	}
+	m := res.Data.Result[0].Metric
+	if v := m["version"]; v != "" {
+		info.Version = v
+	}
+	if p := m["pid"]; p != "" {
+		info.PID = p
+	}
 }
 
 // collectServiceStatus 收集所有后端服务的真实运行状态。
@@ -1206,11 +1230,12 @@ func (h *MonitorHandler) checkMySQLStatus(ctx context.Context) serviceInfo {
 		"waitCount":        strconv.FormatInt(stats.WaitCount, 10),
 	}
 
-	// MySQL 版本（driver 直查）
+	// MySQL 版本 + Uptime + InnoDB Buffer Pool RSS（driver 直查，无需 mysqld_exporter）
+	infoCtx, infoCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer infoCancel()
+
 	var version string
-	verCtx, verCancel := context.WithTimeout(ctx, 2*time.Second)
-	defer verCancel()
-	if rows, qerr := sqlDB.QueryContext(verCtx, "SELECT VERSION()"); qerr == nil {
+	if rows, qerr := sqlDB.QueryContext(infoCtx, "SELECT VERSION()"); qerr == nil {
 		if rows.Next() {
 			_ = rows.Scan(&version)
 		}
@@ -1218,6 +1243,34 @@ func (h *MonitorHandler) checkMySQLStatus(ctx context.Context) serviceInfo {
 	}
 	if version != "" {
 		info.Version = version
+	}
+
+	// Uptime — SHOW GLOBAL STATUS LIKE 'Uptime' 返回 Variable_name + Value
+	if rows, qerr := sqlDB.QueryContext(infoCtx, "SHOW GLOBAL STATUS LIKE 'Uptime'"); qerr == nil {
+		if rows.Next() {
+			var name, value string
+			if scanErr := rows.Scan(&name, &value); scanErr == nil {
+				if sec, err := strconv.ParseInt(value, 10, 64); err == nil && sec > 0 {
+					info.UptimeSec = sec
+					info.Uptime = formatUptime(time.Duration(sec) * time.Second)
+				}
+			}
+		}
+		_ = rows.Close()
+	}
+
+	// 内存 — InnoDB Buffer Pool 当前已用字节数（最贴近 MySQL 实际内存占用）
+	if rows, qerr := sqlDB.QueryContext(infoCtx, "SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_bytes_data'"); qerr == nil {
+		if rows.Next() {
+			var name, value string
+			if scanErr := rows.Scan(&name, &value); scanErr == nil {
+				if b, err := strconv.ParseUint(value, 10, 64); err == nil && b > 0 {
+					info.MemRSSBytes = b
+					info.Memory = humanizeBytes(b) + " (innodb)"
+				}
+			}
+		}
+		_ = rows.Close()
 	}
 
 	// QPS 来自 Manager 端 gorm callback 埋点（mxsec_db_query_duration_seconds_count）
@@ -1350,19 +1403,19 @@ func (h *MonitorHandler) checkClickHouseStatus(ctx context.Context) serviceInfo 
 	}
 	info.Version = version
 
-	// 当前 active query 数（瞬时，不当 QPS 用）
-	var activeQuery uint64
+	// 当前 active query 数 — system.metrics.value 是 Int64
+	var activeQuery int64
 	_ = h.chConn.QueryRow(queryCtx, "SELECT value FROM system.metrics WHERE metric = 'Query'").Scan(&activeQuery)
 
-	// 真实 RSS
-	var memoryBytes uint64
+	// 真实 RSS — system.asynchronous_metrics.value 是 Float64（不是 UInt64！）
+	var memoryBytes float64
 	if err := h.chConn.QueryRow(queryCtx, "SELECT value FROM system.asynchronous_metrics WHERE metric = 'MemoryResident'").Scan(&memoryBytes); err == nil && memoryBytes > 0 {
-		info.MemRSSBytes = memoryBytes
-		info.Memory = humanizeBytes(memoryBytes)
+		info.MemRSSBytes = uint64(memoryBytes)
+		info.Memory = humanizeBytes(uint64(memoryBytes))
 	}
 
-	// Uptime
-	var uptimeSec uint64
+	// Uptime — uptime() 返回 UInt32
+	var uptimeSec uint32
 	if err := h.chConn.QueryRow(queryCtx, "SELECT uptime()").Scan(&uptimeSec); err == nil && uptimeSec > 0 {
 		info.UptimeSec = int64(uptimeSec)
 		info.Uptime = formatUptime(time.Duration(uptimeSec) * time.Second)
@@ -1372,7 +1425,7 @@ func (h *MonitorHandler) checkClickHouseStatus(ctx context.Context) serviceInfo 
 	info.Detail = clickHouseAddress(h.cfg)
 	info.Extra = map[string]string{
 		"address":       clickHouseAddress(h.cfg),
-		"activeQueries": strconv.FormatUint(activeQuery, 10),
+		"activeQueries": strconv.FormatInt(activeQuery, 10),
 	}
 
 	// 实际 QPS 用 system.events ProfileEvent_Query 增量计算（避免外部 exporter）

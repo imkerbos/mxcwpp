@@ -244,6 +244,8 @@ func main() {
 	if cfg.Metrics.ConsumerAddr != "" {
 		metricsAddr = cfg.Metrics.ConsumerAddr
 	}
+	// 自暴露 build 元信息（version + PID），monitor.go 通过 PromQL 拉取
+	consumermetrics.SetBuildInfo(buildVersion, "")
 	go func() {
 		if err := consumermetrics.StartHTTPServer(ctx, metricsAddr, logger); err != nil {
 			logger.Error("Consumer metrics server 异常退出", zap.Error(err))
