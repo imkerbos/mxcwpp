@@ -170,8 +170,9 @@ type agentDoc struct {
 }
 
 type pluginsDoc struct {
-	Dir     string `yaml:"dir"`
-	BaseURL string `yaml:"base_url"`
+	Dir                 string `yaml:"dir"`
+	BaseURL             string `yaml:"base_url"`
+	DownloadConcurrency int    `yaml:"download_concurrency"`
 }
 
 func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
@@ -438,8 +439,9 @@ func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, mana
 			WorkDir:           "/var/lib/mxsec-agent",
 		},
 		Plugins: pluginsDoc{
-			Dir:     "/opt/mxsec-platform/plugins",
-			BaseURL: cfg.PluginsBaseURL(),
+			Dir:                 "/opt/mxsec-platform/plugins",
+			BaseURL:             cfg.PluginsBaseURL(),
+			DownloadConcurrency: cfg.App.PluginDownloadConcurrency,
 		},
 	}
 	data, err := yaml.Marshal(doc)
