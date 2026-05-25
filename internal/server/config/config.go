@@ -246,6 +246,8 @@ type MetricsConfig struct {
 	// BasicAuth 用户名/密码，用于保护 /metrics 端点（留空则不保护）
 	BasicAuthUser     string `mapstructure:"basic_auth_user"`
 	BasicAuthPassword string `mapstructure:"basic_auth_password"`
+	// ConsumerAddr Consumer 进程独立 /metrics HTTP 监听地址（默认 :9100）
+	ConsumerAddr string `mapstructure:"consumer_addr"`
 }
 
 // MySQLMetricsConfig 是 MySQL 监控指标存储配置

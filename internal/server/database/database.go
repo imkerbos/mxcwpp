@@ -106,6 +106,12 @@ func Init(cfg config.DatabaseConfig, zapLogger *zap.Logger, logCfg ...config.Log
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
+	// 注册 Prometheus 埋点 callback（gorm 每次 SQL 后记录耗时 histogram）
+	// 失败仅警告，不阻塞启动（监控埋点非关键路径）
+	if err := RegisterPromCallback(db); err != nil && zapLogger != nil {
+		zapLogger.Warn("注册 gorm Prometheus callback 失败", zap.Error(err))
+	}
+
 	// 保存全局实例
 	DB = db
 
