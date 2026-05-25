@@ -203,6 +203,21 @@ func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
 		if err := SaveCertificatesToDir(certsDir, certs); err != nil {
 			return nil, fmt.Errorf("保存证书到 deploy/certs 失败: %w", err)
 		}
+	} else {
+		// 复用已有证书：校验 server.crt SAN 是否覆盖 cluster.yaml additional_sans 与 control 节点 host
+		// 不覆盖则用现有 CA + ServerKey 重签 server.crt（保 CA 兼容已部署 agent ca.crt 信任链）
+		needsReissue, verr := ServerCertNeedsReissue(certs, cfg)
+		if verr != nil {
+			return nil, fmt.Errorf("校验 server.crt SAN 失败: %w", verr)
+		}
+		if needsReissue {
+			if err := ReissueServerCert(certs, cfg); err != nil {
+				return nil, fmt.Errorf("重签 server.crt 失败: %w", err)
+			}
+			if err := SaveCertificatesToDir(certsDir, certs); err != nil {
+				return nil, fmt.Errorf("保存重签 server.crt 失败: %w", err)
+			}
+		}
 	}
 
 	result := &RenderResult{ClusterDir: clusterDir}
