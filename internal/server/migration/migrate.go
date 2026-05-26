@@ -93,6 +93,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("edr 插件清理处理", zap.Error(err))
 	}
 
+	// 标记并软删除历史 keyword-match 产生的 fake vuln（matchByDescription 已废弃）
+	if err := migrateMarkFakeVulns(db, logger); err != nil {
+		logger.Warn("fake vuln 标记处理", zap.Error(err))
+	}
+
 	// 添加性能优化索引（幂等）
 	if err := AddPerformanceIndexes(db, logger); err != nil {
 		logger.Warn("添加性能索引失败", zap.Error(err))
@@ -161,6 +166,47 @@ func migrateSensorToEDR(db *gorm.DB, logger *zap.Logger) error {
 		logger.Info("generated_reports: runtime → edr", zap.Int64("count", r.RowsAffected))
 	}
 
+	return nil
+}
+
+// migrateMarkFakeVulns 标记并软删除历史 description-keyword-match 误产物。
+// 触发条件：source=nvd OR source IS NULL，且 osv_id=="" AND purl==""
+// 这些 vuln 是已废弃的 matchByDescription 用 substring 匹配产生（如 CVE-2026-6482
+// Rapid7 Windows 提权被错关联到 Linux openssl），数据不可信，全部 soft delete
+// 同时清理关联的 host_vulnerabilities 记录。
+// 幂等：已清理的环境（confidence='fake'）不会重复执行。
+func migrateMarkFakeVulns(db *gorm.DB, logger *zap.Logger) error {
+	// 仅清理 source=nvd 的 fake vuln（保守策略，source=null 留待人工 review）
+	// source=null 历史数据中含 CPE 匹配产物，无法靠 source 字段精确识别 fake
+	var fakeIDs []uint
+	if err := db.Table("vulnerabilities").
+		Where("source = ? AND (osv_id IS NULL OR osv_id = '') AND (purl IS NULL OR purl = '') AND (confidence IS NULL OR confidence != ?)",
+			"nvd", model.VulnConfidenceFake).
+		Pluck("id", &fakeIDs).Error; err != nil {
+		return fmt.Errorf("查询 fake vuln 失败: %w", err)
+	}
+	if len(fakeIDs) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	if err := db.Table("vulnerabilities").
+		Where("id IN ?", fakeIDs).
+		Updates(map[string]any{
+			"confidence": model.VulnConfidenceFake,
+			"deleted_at": now,
+		}).Error; err != nil {
+		return fmt.Errorf("标记 fake vuln 失败: %w", err)
+	}
+
+	hvAffected := db.Table("host_vulnerabilities").
+		Where("vuln_id IN ? AND deleted_at IS NULL", fakeIDs).
+		Update("deleted_at", now).RowsAffected
+
+	logger.Info("已软删除 keyword-match 产生的 fake vuln",
+		zap.Int("fake_vuln_count", len(fakeIDs)),
+		zap.Int64("host_vuln_affected", hvAffected),
+	)
 	return nil
 }
 

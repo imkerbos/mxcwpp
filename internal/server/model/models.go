@@ -223,6 +223,7 @@ var (
 		&MigrationJob{},
 		&ComponentPushHost{},
 		&RemediationTask{},
+		&RemediationTaskEvent{},
 		&ScanSchedule{},
 		&ScanScheduleExecution{},
 		&VulnCache{},

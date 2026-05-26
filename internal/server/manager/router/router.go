@@ -765,6 +765,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-tasks/:id/confirm", taskHandler.ConfirmTask)
 	router.POST("/remediation-tasks/:id/cancel", taskHandler.CancelTask)
 	router.POST("/remediation-tasks/:id/retry", taskHandler.RetryTask)
+	router.GET("/remediation-tasks/:id/events", taskHandler.ListEvents)         // 全量 events 列表
+	router.GET("/remediation-tasks/:id/events/stream", taskHandler.StreamEvents) // SSE 实时流
 	router.POST("/remediation-tasks/:id/verify", remHandler.VerifyTask)
 	router.POST("/remediation-tasks/batch", taskHandler.BatchCreate)
 	router.POST("/remediation-tasks/batch-confirm", taskHandler.BatchConfirm)
