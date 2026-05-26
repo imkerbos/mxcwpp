@@ -154,11 +154,14 @@ func (v *VulnScanner) SyncOnly() error {
 	for _, src := range []struct {
 		sourceName string // vuln_data_sources.name slug
 		name       string
-		fn         func() error
+		fn         func() (int64, error)
 	}{
-		{"mitre-cve", "MITRECVE", v.SyncMITRECVE},      // MITRE 官方 CVE 元数据（推荐主源）
-		{"nvd", "NVDMetadata", v.SyncNVDMetadata},      // NVD API（备用，需 NVD_API_KEY 提速）
-		{"cisa-kev", "Exploit", v.SyncExploit},         // CISA KEV 标记 in_kev / has_exploit
+		{"mitre-cve", "MITRECVE", v.SyncMITRECVECounted},   // MITRE 官方 CVE 元数据（推荐主源）
+		{"nvd", "NVDMetadata", v.SyncNVDMetadataCounted},   // NVD API（备用，需 NVD_API_KEY 提速）
+		{"cisa-kev", "CISAKev", v.SyncCISAKevCounted},      // CISA KEV 标记 in_kev
+		{"exploit-db", "ExploitDB", v.SyncExploitDBCounted}, // exploit-db CSV 标记 has_exploit
+		{"cnnvd", "CNNVD", wrapErr(v.SyncCNNVDStub)},       // 国家信息安全漏洞库（国外网络受限）
+		{"cnvd", "CNVD", wrapErr(v.SyncCNVDStub)},          // 国家信息安全漏洞共享平台（无公开 API）
 	} {
 		if !sourceSvc.IsEnabled(src.sourceName) {
 			v.logger.Debug("source disabled，跳过", zap.String("source", src.sourceName))
@@ -167,13 +170,14 @@ func (v *VulnScanner) SyncOnly() error {
 		}
 		srcStart := time.Now()
 		sourceSvc.MarkRunning(src.sourceName)
-		if err := src.fn(); err != nil {
+		count, err := src.fn()
+		if err != nil {
 			v.logger.Warn(src.name+" 同步失败，跳过", zap.Error(err))
 			results = append(results, sourceResult{Name: src.name, Status: "failed", Error: err.Error()})
 			sourceSvc.MarkFailed(src.sourceName, err)
 		} else {
 			results = append(results, sourceResult{Name: src.name, Status: "success"})
-			sourceSvc.MarkSuccess(src.sourceName, 0, time.Since(srcStart))
+			sourceSvc.MarkSuccess(src.sourceName, count, time.Since(srcStart))
 		}
 	}
 
@@ -1228,6 +1232,13 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 		zap.Int("host_count", len(hostsAdv)),
 	)
 	return nil
+}
+
+// wrapErr 把 func() error 适配成 func() (int64, error)（stub 没有 count）。
+func wrapErr(fn func() error) func() (int64, error) {
+	return func() (int64, error) {
+		return 0, fn()
+	}
 }
 
 func extractOSMajor(ver string) string {

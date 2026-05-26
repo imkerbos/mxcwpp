@@ -25,11 +25,17 @@ import (
 //
 // 增量同步：默认拉近 7 天 lastModified，初次同步可按需扩展。
 func (v *VulnScanner) SyncNVDMetadata() error {
+	_, err := v.SyncNVDMetadataCounted()
+	return err
+}
+
+// SyncNVDMetadataCounted 同 SyncNVDMetadata，返回实际 enriched vuln 数。
+func (v *VulnScanner) SyncNVDMetadataCounted() (int64, error) {
 	apiKey := getEnvOr("NVD_API_KEY", "")
 	enricher := newNVDMetadataEnricher(v.db, v.logger, apiKey)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	return enricher.Run(ctx, 7*24*time.Hour)
+	return enricher.RunCounted(ctx, 7*24*time.Hour)
 }
 
 // nvdMetadataEnricher NVD CVE 元数据增强器。
@@ -102,6 +108,12 @@ type nvdAPIRef struct {
 
 // Run 按 lookback 时窗拉取 NVD recently modified CVE，UPDATE 现有 vuln 主表。
 func (e *nvdMetadataEnricher) Run(ctx context.Context, lookback time.Duration) error {
+	_, err := e.RunCounted(ctx, lookback)
+	return err
+}
+
+// RunCounted 同 Run，返回 enriched vuln 行数。
+func (e *nvdMetadataEnricher) RunCounted(ctx context.Context, lookback time.Duration) (int64, error) {
 	end := time.Now().UTC()
 	start := end.Add(-lookback)
 
@@ -110,12 +122,12 @@ func (e *nvdMetadataEnricher) Run(ctx context.Context, lookback time.Duration) e
 
 	const pageSize = 2000
 	startIndex := 0
-	totalEnriched := 0
+	var totalEnriched int64
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return totalEnriched, ctx.Err()
 		default:
 		}
 
@@ -131,27 +143,25 @@ func (e *nvdMetadataEnricher) Run(ctx context.Context, lookback time.Duration) e
 		}
 
 		for _, item := range page.Vulnerabilities {
-			n := e.enrichOne(&item.CVE)
-			totalEnriched += int(n)
+			totalEnriched += e.enrichOne(&item.CVE)
 		}
 
 		startIndex += pageSize
 		if startIndex >= page.TotalResults {
 			break
 		}
-		// NVD rate limit: 5 req/30s 无 key, 50 req/30s 有 key
 		if e.apiKey == "" {
-			time.Sleep(6500 * time.Millisecond) // 安全间隔 >6s
+			time.Sleep(6500 * time.Millisecond)
 		} else {
 			time.Sleep(700 * time.Millisecond)
 		}
 	}
 
 	e.logger.Info("NVD 元数据增强完成",
-		zap.Int("vuln_updated", totalEnriched),
+		zap.Int64("vuln_updated", totalEnriched),
 		zap.Duration("lookback", lookback),
 	)
-	return nil
+	return totalEnriched, nil
 }
 
 // fetchPage 拉单页 NVD API 响应。

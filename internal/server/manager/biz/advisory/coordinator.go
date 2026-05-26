@@ -51,6 +51,8 @@ func NewCoordinator(db *gorm.DB, logger *zap.Logger) *Coordinator {
 			NewUbuntuSource(),
 			NewDebianSource(),
 			NewOSVSource(),
+			NewAlpineSource(),
+			NewCentOSSource(),
 		},
 		matcher: &DefaultMatcher{},
 	}

@@ -93,14 +93,26 @@ type mitreProblemType struct {
 // SyncMITRECVE 用 MITRE API 补全所有 description/cvss 字段不完整的 vuln。
 // 仅处理 ≤2000 条避免超时；下次再跑可补剩余。
 func (v *VulnScanner) SyncMITRECVE() error {
+	_, err := v.SyncMITRECVECounted()
+	return err
+}
+
+// SyncMITRECVECounted 返回实际 enriched vuln 数（供 last_count 显示）。
+func (v *VulnScanner) SyncMITRECVECounted() (int64, error) {
 	enricher := NewMITRECVEEnricher(v.db, v.logger)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	return enricher.Run(ctx, 2000)
+	return enricher.RunCounted(ctx, 2000)
 }
 
 // Run 拉取待补全的 vuln 列表，按 cve_id 批量 fetch + UPDATE。
 func (e *MITRECVEEnricher) Run(ctx context.Context, maxCount int) error {
+	_, err := e.RunCounted(ctx, maxCount)
+	return err
+}
+
+// RunCounted 同 Run，返回实际 enriched vuln 行数。
+func (e *MITRECVEEnricher) RunCounted(ctx context.Context, maxCount int) (int64, error) {
 	type row struct {
 		CveID string
 	}
@@ -111,18 +123,18 @@ func (e *MITRECVEEnricher) Run(ctx context.Context, maxCount int) error {
 		Order("RAND()").
 		Limit(maxCount).
 		Find(&rows).Error; err != nil {
-		return fmt.Errorf("查询待补全 vuln 失败: %w", err)
+		return 0, fmt.Errorf("查询待补全 vuln 失败: %w", err)
 	}
 	if len(rows) == 0 {
 		e.logger.Info("MITRE CVE 元数据：无待补全的 vuln")
-		return nil
+		return 0, nil
 	}
 
-	enriched := 0
+	var enriched int64
 	for _, r := range rows {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return enriched, ctx.Err()
 		default:
 		}
 		n, err := e.enrichOne(ctx, r.CveID)
@@ -130,15 +142,14 @@ func (e *MITRECVEEnricher) Run(ctx context.Context, maxCount int) error {
 			e.logger.Debug("MITRE 拉取失败，跳过", zap.String("cve", r.CveID), zap.Error(err))
 			continue
 		}
-		enriched += int(n)
-		// 小间隔避免压力
+		enriched += n
 		time.Sleep(50 * time.Millisecond)
 	}
 	e.logger.Info("MITRE CVE 元数据增强完成",
 		zap.Int("attempted", len(rows)),
-		zap.Int("enriched", enriched),
+		zap.Int64("enriched", enriched),
 	)
-	return nil
+	return enriched, nil
 }
 
 // enrichOne 拉单条 CVE 详情 UPDATE 现有 vuln。

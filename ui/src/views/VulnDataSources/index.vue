@@ -34,12 +34,14 @@
           </template>
           <template v-else-if="column.key === 'lastStatus'">
             <a-tag :color="statusColor(record.lastStatus)">{{ statusLabel(record.lastStatus) }}</a-tag>
-            <span v-if="record.lastCount > 0" class="status-meta">
-              {{ record.lastCount.toLocaleString() }} 条
-            </span>
-            <span v-if="record.lastDurationMs > 0" class="status-meta">
-              耗时 {{ (record.lastDurationMs / 1000).toFixed(1) }}s
-            </span>
+          </template>
+          <template v-else-if="column.key === 'lastCount'">
+            <span v-if="record.lastCount > 0">{{ record.lastCount.toLocaleString() }}</span>
+            <span v-else class="text-muted">—</span>
+          </template>
+          <template v-else-if="column.key === 'lastDuration'">
+            <span v-if="record.lastDurationMs > 0">{{ formatDuration(record.lastDurationMs) }}</span>
+            <span v-else class="text-muted">—</span>
           </template>
           <template v-else-if="column.key === 'lastSyncAt'">
             <span v-if="record.lastSyncAt">{{ formatTime(record.lastSyncAt) }}</span>
@@ -91,13 +93,15 @@ const testingId = ref<number | null>(null)
 const syncingId = ref<number | null>(null)
 
 const columns = [
-  { title: '名称', dataIndex: 'displayName', key: 'displayName', width: 280 },
-  { title: '启用', key: 'enabled', width: 110 },
-  { title: 'Base URL', key: 'baseUrl', width: 280 },
-  { title: '上次状态', key: 'lastStatus', width: 200 },
-  { title: '上次同步', key: 'lastSyncAt', width: 170 },
-  { title: '错误信息', key: 'lastError', width: 200 },
-  { title: '操作', key: 'actions', width: 200 },
+  { title: '名称', dataIndex: 'displayName', key: 'displayName', width: 260 },
+  { title: '启用', key: 'enabled', width: 90 },
+  { title: 'Base URL', key: 'baseUrl', width: 240 },
+  { title: '状态', key: 'lastStatus', width: 90 },
+  { title: '同步条数', key: 'lastCount', width: 100, align: 'right' },
+  { title: '耗时', key: 'lastDuration', width: 90, align: 'right' },
+  { title: '上次同步', key: 'lastSyncAt', width: 160 },
+  { title: '错误信息', key: 'lastError', width: 180 },
+  { title: '操作', key: 'actions', width: 180 },
 ]
 
 const groupedSources = computed(() => {
@@ -196,6 +200,12 @@ const formatTime = (iso: string) => {
 }
 
 const truncate = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n) + '…')
+
+const formatDuration = (ms: number) => {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60_000).toFixed(1)}m`
+}
 
 onMounted(loadSources)
 </script>
