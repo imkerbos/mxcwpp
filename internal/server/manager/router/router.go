@@ -771,6 +771,13 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	// 漏洞 advisory 同步（admin 手动触发）
 	vulnSyncHandler := api.NewVulnSyncHandler(db, logger)
 	router.POST("/vulnerabilities/advisory-sync", vulnSyncHandler.SyncAdvisories)
+
+	// 漏洞数据源管理（UI「漏洞源管理」页面）
+	vdsHandler := api.NewVulnDataSourcesHandler(db, logger)
+	router.GET("/vuln-data-sources", vdsHandler.List)
+	router.PUT("/vuln-data-sources/:id", vdsHandler.Update)
+	router.POST("/vuln-data-sources/:id/test", vdsHandler.TestConnection)
+	router.POST("/vuln-data-sources/:id/sync", vdsHandler.TriggerSync)
 	router.POST("/remediation-tasks/:id/verify", remHandler.VerifyTask)
 	router.POST("/remediation-tasks/batch", taskHandler.BatchCreate)
 	router.POST("/remediation-tasks/batch-confirm", taskHandler.BatchConfirm)

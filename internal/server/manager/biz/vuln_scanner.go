@@ -149,19 +149,31 @@ func (v *VulnScanner) SyncOnly() error {
 	}
 
 	// 增强数据源（失败不影响整体状态，按 cve_id 补全主表字段，不入独立 vuln）
-	// CNNVD/CNVD 已废弃：本质都是 CVE 中文 wrap，直接用 NVD CVE 主数据 + CVE ID 检索更可靠
+	// 走 vuln_data_sources 表的 enabled 配置：disabled 跳过
+	sourceSvc := NewVulnDataSourceService(v.db, v.logger)
 	for _, src := range []struct {
-		name string
-		fn   func() error
+		sourceName string // vuln_data_sources.name slug
+		name       string
+		fn         func() error
 	}{
-		{"NVDMetadata", v.SyncNVDMetadata}, // 补 description / CVSS / CWE / references
-		{"Exploit", v.SyncExploit},         // 补 in_kev (CISA) / has_exploit (exploit-db)
+		{"mitre-cve", "MITRECVE", v.SyncMITRECVE},      // MITRE 官方 CVE 元数据（推荐主源）
+		{"nvd", "NVDMetadata", v.SyncNVDMetadata},      // NVD API（备用，需 NVD_API_KEY 提速）
+		{"cisa-kev", "Exploit", v.SyncExploit},         // CISA KEV 标记 in_kev / has_exploit
 	} {
+		if !sourceSvc.IsEnabled(src.sourceName) {
+			v.logger.Debug("source disabled，跳过", zap.String("source", src.sourceName))
+			results = append(results, sourceResult{Name: src.name, Status: "skipped"})
+			continue
+		}
+		srcStart := time.Now()
+		sourceSvc.MarkRunning(src.sourceName)
 		if err := src.fn(); err != nil {
 			v.logger.Warn(src.name+" 同步失败，跳过", zap.Error(err))
 			results = append(results, sourceResult{Name: src.name, Status: "failed", Error: err.Error()})
+			sourceSvc.MarkFailed(src.sourceName, err)
 		} else {
 			results = append(results, sourceResult{Name: src.name, Status: "success"})
+			sourceSvc.MarkSuccess(src.sourceName, 0, time.Since(srcStart))
 		}
 	}
 
@@ -1202,7 +1214,8 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 		})
 	}
 
-	coord := advisory.NewCoordinator(v.db, v.logger)
+	coord := advisory.NewCoordinator(v.db, v.logger).
+		WithEnabledChecker(NewVulnDataSourceService(v.db, v.logger))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	vulnCount, hostVulnCount, err := coord.Sync(ctx, time.Time{}, hostsAdv)

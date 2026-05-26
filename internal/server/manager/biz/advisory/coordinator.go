@@ -13,6 +13,15 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
+// EnabledChecker 判断 source 是否启用 + 写回同步状态。
+// 由 biz.VulnDataSourceService 实现，coordinator 通过接口注入解耦。
+type EnabledChecker interface {
+	IsEnabled(name string) bool
+	MarkRunning(name string)
+	MarkSuccess(name string, count int64, duration time.Duration)
+	MarkFailed(name string, err error)
+}
+
 // Coordinator 协调多个 Source 与 Matcher，合并去重写入 DB。
 //
 // 优先级：相同 CVE × host 由不同 source 重复出现时，confidence 高者覆盖低者。
@@ -28,6 +37,7 @@ type Coordinator struct {
 	logger  *zap.Logger
 	sources []Source
 	matcher Matcher
+	checker EnabledChecker // 可选：注入 enabled 检查与状态回写
 }
 
 // NewCoordinator 构造默认 Coordinator，注册全部 5 个 source + DefaultMatcher。
@@ -58,6 +68,12 @@ func (c *Coordinator) WithMatcher(m Matcher) *Coordinator {
 	return c
 }
 
+// WithEnabledChecker 注入 enabled 检查器（生产用 biz.VulnDataSourceService）。
+func (c *Coordinator) WithEnabledChecker(ck EnabledChecker) *Coordinator {
+	c.checker = ck
+	return c
+}
+
 // Sync 拉取所有 source 自 since 起的 advisory，匹配 hosts 后入库。
 //
 // hosts 由调用方提供（来自 host_software 表的全量装包清单）。
@@ -66,9 +82,21 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 	allAdvisories := make([]sourcedAdvisory, 0, 4096)
 
 	for _, src := range c.sources {
+		// enabled check：disabled 直接跳过
+		if c.checker != nil && !c.checker.IsEnabled(src.Name()) {
+			c.logger.Debug("source 未启用，跳过", zap.String("source", src.Name()))
+			continue
+		}
+		srcStart := time.Now()
+		if c.checker != nil {
+			c.checker.MarkRunning(src.Name())
+		}
 		advs, err := src.Fetch(ctx, since)
 		if err != nil {
 			c.logger.Warn("source fetch 失败，跳过", zap.String("source", src.Name()), zap.Error(err))
+			if c.checker != nil {
+				c.checker.MarkFailed(src.Name(), err)
+			}
 			continue
 		}
 		for _, adv := range advs {
@@ -85,6 +113,9 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 			zap.String("source", src.Name()),
 			zap.Int("count", len(advs)),
 		)
+		if c.checker != nil {
+			c.checker.MarkSuccess(src.Name(), int64(len(advs)), time.Since(srcStart))
+		}
 	}
 
 	// 按 CVE × host 合并去重（confidence 高者覆盖）

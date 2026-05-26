@@ -227,6 +227,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '扫描记录详情' },
       },
       {
+        path: 'vuln-data-sources',
+        name: 'VulnDataSources',
+        component: () => import('@/views/VulnDataSources/index.vue'),
+        meta: { title: '漏洞源管理' },
+      },
+      {
         path: 'vuln-remediation',
         name: 'VulnRemediation',
         component: () => import('@/views/VulnRemediation/index.vue'),
