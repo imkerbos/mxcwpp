@@ -20,6 +20,8 @@
             <a-select-option value="baseline">Baseline 插件</a-select-option>
             <a-select-option value="collector">Collector 插件</a-select-option>
             <a-select-option value="fim">FIM 插件</a-select-option>
+            <a-select-option value="scanner">Scanner 插件</a-select-option>
+            <a-select-option value="remediation">Remediation 插件</a-select-option>
           </a-select>
           <a-select v-model:value="filterStatus" style="width: 120px" placeholder="状态" allow-clear @change="loadPolicies">
             <a-select-option value="enabled">启用</a-select-option>
@@ -86,6 +88,8 @@
             <a-select-option value="baseline">Baseline 插件</a-select-option>
             <a-select-option value="collector">Collector 插件</a-select-option>
             <a-select-option value="fim">FIM 插件</a-select-option>
+            <a-select-option value="scanner">Scanner 插件</a-select-option>
+            <a-select-option value="remediation">Remediation 插件</a-select-option>
           </a-select>
         </a-form-item>
         <a-form-item label="目标版本" name="targetVersion">
