@@ -478,6 +478,17 @@ func (w *MySQLWriter) WriteRemediationResult(msg *kafka.MQMessage) error {
 	return executor.HandleResult(msg.AgentID, fields)
 }
 
+// WriteRemediationProgress 处理漏洞修复阶段进度事件（DataType 9201）
+// 写入 remediation_task_events 表，UI SSE/WebSocket 订阅实时显示。
+func (w *MySQLWriter) WriteRemediationProgress(msg *kafka.MQMessage) error {
+	fields, err := ParseRecordFields(msg.Body)
+	if err != nil {
+		return fmt.Errorf("解析修复进度失败: %w", err)
+	}
+	executor := biz.NewRemediationExecutor(w.db, w.logger)
+	return executor.HandleProgress(msg.AgentID, fields)
+}
+
 // WriteScanResult 处理 Scanner 扫描结果（DataType 7001）
 func (w *MySQLWriter) WriteScanResult(msg *kafka.MQMessage) error {
 	fields, err := ParseRecordFields(msg.Body)
