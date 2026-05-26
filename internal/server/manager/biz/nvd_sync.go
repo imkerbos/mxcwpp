@@ -154,13 +154,12 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 			continue
 		}
 
-		// CPE 匹配已安装软件
+		// CPE 严格匹配已安装软件 — 唯一精确手段
+		// 历史 fallback：matchByDescription 用 substring keyword 匹配（如描述含 "openssl" 即
+		// 关联所有装 openssl 的 host），导致大量 fake vuln（如 Rapid7 Insight Agent Windows
+		// 提权 CVE 错关联到 Linux openssl）。该 fallback 已废弃，永远不再使用。
+		// 无 CPE 配置（Awaiting Analysis）的 CVE 直接跳过，保证 99.99% 数据真实性。
 		matches := v.matchCPEToSoftware(item.CVE.Configurations, softwareByName)
-
-		// 对于无 CPE 配置（Awaiting Analysis）的 CVE，使用描述关键词匹配
-		if len(matches) == 0 {
-			matches = v.matchByDescription(item.CVE, softwareByName)
-		}
 		if len(matches) == 0 {
 			continue
 		}
@@ -197,6 +196,7 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 			CurrentVersion:   firstMatch.Version,
 			FixedVersion:     fixedVersion,
 			ReferenceUrl:     referenceURL,
+			Confidence:       model.VulnConfidenceLow, // NVD CPE 匹配 → low（OS Advisory 优先级更高）
 		}
 
 		if err := v.db.Clauses(clause.OnConflict{
@@ -451,57 +451,12 @@ func cpeProductMatch(cpeProduct, softwareName string) bool {
 	return false
 }
 
-// descKeywordMap 描述关键词 → 软件包名匹配规则
-// 用于处理 NVD 中尚未完成 CPE 分析（Awaiting Analysis）的 CVE
-var descKeywordMap = []struct {
-	keyword  string   // 描述中的关键词（小写匹配）
-	packages []string // 对应的软件包名（与 software 表中的 name 匹配）
-}{
-	{"linux kernel", []string{"kernel", "kernel-core", "kernel-modules", "kernel-tools"}},
-	{"openssl", []string{"openssl", "openssl-libs"}},
-	{"glibc", []string{"glibc", "glibc-common", "glibc-minimal-langpack"}},
-	{"systemd", []string{"systemd", "systemd-libs"}},
-	{"openssh", []string{"openssh", "openssh-server", "openssh-clients"}},
-	{"curl", []string{"curl", "libcurl"}},
-	{"sudo", []string{"sudo"}},
-	{"bind", []string{"bind", "bind-libs", "bind-utils"}},
-	{"nginx", []string{"nginx"}},
-	{"apache", []string{"httpd"}},
-}
-
-// matchByDescription 通过描述关键词匹配已安装软件（处理无 CPE 的 CVE）
-func (v *VulnScanner) matchByDescription(cve nvdCVE, softwareByName map[string][]installedSoftware) []installedSoftware {
-	desc := strings.ToLower(v.extractNVDDescription(cve))
-	if desc == "" {
-		return nil
-	}
-
-	var matched []installedSoftware
-	seen := make(map[string]struct{})
-
-	for _, rule := range descKeywordMap {
-		if !strings.Contains(desc, rule.keyword) {
-			continue
-		}
-		for _, pkgName := range rule.packages {
-			swList, ok := softwareByName[pkgName]
-			if !ok {
-				continue
-			}
-			for _, sw := range swList {
-				key := sw.HostID + ":" + sw.Name
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				seen[key] = struct{}{}
-				matched = append(matched, sw)
-			}
-		}
-	}
-	return matched
-}
-
 // ========== NVD 数据提取辅助方法 ==========
+// 注：matchByDescription + descKeywordMap 已永久删除。
+// 该机制用 substring keyword 关联 CVE 与已装软件，准确性极差：
+// 如 CVE-2026-6482 描述讲 "Rapid7 Insight Agent on Windows 通过 openssl.cnf 提权"，
+// keyword 匹配会错关联到 Linux openssl pkg，导致全集群 fake vuln。
+// 商业级 CWPP 仅用 CPE 严格匹配 + OSV PURL match + OS Advisory，禁止任何 substring fallback。
 
 func (v *VulnScanner) extractNVDDescription(cve nvdCVE) string {
 	for _, d := range cve.Descriptions {
