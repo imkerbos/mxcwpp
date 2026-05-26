@@ -76,47 +76,37 @@ func (s *RemediationService) generateCommands(vuln *model.Vulnerability) []Remed
 
 	switch pkgType {
 	case "rpm":
+		// OS pkg：始终用 latest（不带 version），让 yum/dnf 自动选满足 CVE 修复的版本
+		// 原因：vuln DB 的 fixed_version 经常是 NVD 上游通用版本号（如 openssl 4.1.0.2），
+		// 与 OS 实际可用的 erratum 版本不匹配（如 RHEL 实际 errata 是 openssl-3.5.5-1.el10），
+		// 精确版本 install 会因 "No matching Packages" 失败
+		desc := fmt.Sprintf("升级 %s 到最新可用版本", component)
 		if fixedVersion != "" {
-			commands = append(commands,
-				RemediationCommand{
-					PackageType: "rpm-yum",
-					Command:     fmt.Sprintf("yum update %s-%s -y", component, fixedVersion),
-					Description: fmt.Sprintf("使用 yum 升级 %s 到修复版本 %s（CentOS 7/RHEL 7）", component, fixedVersion),
-				},
-				RemediationCommand{
-					PackageType: "rpm-dnf",
-					Command:     fmt.Sprintf("dnf upgrade %s-%s -y", component, fixedVersion),
-					Description: fmt.Sprintf("使用 dnf 升级 %s 到修复版本 %s（RHEL 8+/Rocky/Fedora）", component, fixedVersion),
-				},
-			)
-		} else {
-			commands = append(commands,
-				RemediationCommand{
-					PackageType: "rpm-yum",
-					Command:     fmt.Sprintf("yum update %s -y", component),
-					Description: fmt.Sprintf("使用 yum 升级 %s 到最新可用版本", component),
-				},
-				RemediationCommand{
-					PackageType: "rpm-dnf",
-					Command:     fmt.Sprintf("dnf upgrade %s -y", component),
-					Description: fmt.Sprintf("使用 dnf 升级 %s 到最新可用版本", component),
-				},
-			)
+			desc = fmt.Sprintf("升级 %s 到最新（目标 ≥%s 以修复 %s）", component, fixedVersion, vuln.CveID)
 		}
+		commands = append(commands,
+			RemediationCommand{
+				PackageType: "rpm-yum",
+				Command:     fmt.Sprintf("yum update %s -y", component),
+				Description: desc + "（CentOS 7/RHEL 7 yum）",
+			},
+			RemediationCommand{
+				PackageType: "rpm-dnf",
+				Command:     fmt.Sprintf("dnf upgrade %s -y", component),
+				Description: desc + "（RHEL 8+/Rocky/Fedora dnf）",
+			},
+		)
 	case "deb":
+		// 同 rpm，apt-get --only-upgrade 让 apt 自选 latest
+		desc := fmt.Sprintf("升级 %s 到最新可用版本", component)
 		if fixedVersion != "" {
-			commands = append(commands, RemediationCommand{
-				PackageType: "deb",
-				Command:     fmt.Sprintf("apt-get install --only-upgrade %s=%s -y", component, fixedVersion),
-				Description: fmt.Sprintf("使用 apt 升级 %s 到修复版本 %s", component, fixedVersion),
-			})
-		} else {
-			commands = append(commands, RemediationCommand{
-				PackageType: "deb",
-				Command:     fmt.Sprintf("apt-get install --only-upgrade %s -y", component),
-				Description: fmt.Sprintf("升级 %s 到最新可用版本", component),
-			})
+			desc = fmt.Sprintf("升级 %s 到最新（目标 ≥%s 以修复 %s）", component, fixedVersion, vuln.CveID)
 		}
+		commands = append(commands, RemediationCommand{
+			PackageType: "deb",
+			Command:     fmt.Sprintf("apt-get install --only-upgrade %s -y", component),
+			Description: desc,
+		})
 	case "golang":
 		if fixedVersion != "" {
 			commands = append(commands, RemediationCommand{
