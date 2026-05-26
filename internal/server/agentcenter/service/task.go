@@ -912,6 +912,17 @@ func (s *TaskService) dispatchFIMTask(task *model.FIMTask, transferService inter
 	}
 
 	if len(hosts) == 0 {
+		// 24h 内无在线 host 匹配 → 保持 pending（agent 可能晚上线再补跑）
+		// 超过 24h → 标 timeout，停止 scheduler 反复扫描日志噪声 + 防僵尸 task 永驻
+		const fimPendingMaxAge = 24 * time.Hour
+		if time.Since(task.CreatedAt.Time()) > fimPendingMaxAge {
+			s.db.Model(task).Update("status", "timeout")
+			s.logger.Info("FIM 任务超过 24h 仍无在线主机匹配，标记 timeout",
+				zap.String("task_id", task.TaskID),
+				zap.Time("created_at", task.CreatedAt.Time()),
+			)
+			return nil
+		}
 		s.logger.Debug("没有匹配的在线主机，FIM 任务保持 pending",
 			zap.String("task_id", task.TaskID),
 		)
