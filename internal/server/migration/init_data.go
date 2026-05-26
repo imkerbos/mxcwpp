@@ -98,6 +98,11 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 		logger.Info("初始化默认扫描计划")
 	}
 
+	// 初始化漏洞数据源 seed（13 个 source，UI 可启用/禁用）
+	if err := initVulnDataSources(db, logger); err != nil {
+		logger.Warn("初始化漏洞数据源失败", zap.Error(err))
+	}
+
 	// 检查是否已完成首次数据初始化
 	if isDataInitialized(db) {
 		logger.Info("默认数据已初始化过，跳过策略组和策略重建")

@@ -262,6 +262,10 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	case msg.DataType == 9200:
 		writeErr = r.mysql.WriteRemediationResult(&msg)
 
+	// 漏洞修复阶段进度（11 state lifecycle 实时事件）
+	case msg.DataType == 9201:
+		writeErr = r.mysql.WriteRemediationProgress(&msg)
+
 	// 命令执行回包
 	case msg.DataType == 9999:
 		writeErr = r.mysql.WriteCommandAck(&msg)

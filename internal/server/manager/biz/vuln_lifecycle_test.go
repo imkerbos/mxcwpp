@@ -69,8 +69,10 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			exploit_ref       TEXT,
 			priority_score    REAL DEFAULT 0,
 			exposure_score    REAL DEFAULT 0,
+			confidence        TEXT DEFAULT 'low',
 			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			deleted_at        DATETIME
 		)`,
 		`CREATE TABLE host_vulnerabilities (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
