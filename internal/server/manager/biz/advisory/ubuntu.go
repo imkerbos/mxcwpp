@@ -75,17 +75,20 @@ type usnBin struct {
 }
 
 // Fetch 实现 Source。
-// USN list API 支持 published_after 增量。
+// USN list API 不支持 published_after，用 order=newest + 客户端按 since 过滤。
 func (u *UbuntuSource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, error) {
 	var all []*Advisory
 	offset := 0
 	const limit = 100
+	const maxNotices = 50 // 防初次全量过载
 
-	for {
-		url := fmt.Sprintf("%s/notices.json?limit=%d&offset=%d&order=oldest", u.baseURL, limit, offset)
-		if !since.IsZero() {
-			url += "&published_after=" + since.Format("2006-01-02")
+	for collected := 0; collected < maxNotices; {
+		select {
+		case <-ctx.Done():
+			return all, ctx.Err()
+		default:
 		}
+		url := fmt.Sprintf("%s/notices.json?limit=%d&offset=%d&order=newest", u.baseURL, limit, offset)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, err
@@ -103,16 +106,24 @@ func (u *UbuntuSource) Fetch(ctx context.Context, since time.Time) ([]*Advisory,
 		}
 
 		// USN 每条 notice 对每个 ubuntu release 都生成独立 Advisory
+		stop := false
 		for _, notice := range page.Notices {
+			if !since.IsZero() {
+				pub, _ := time.Parse(time.RFC3339, notice.Published)
+				if pub.Before(since) {
+					stop = true
+					break
+				}
+			}
 			for codename, rel := range notice.Releases {
 				adv := u.parseNoticeForRelease(&notice, codename, &rel)
 				if adv != nil {
 					all = append(all, adv)
+					collected++
 				}
 			}
 		}
-
-		if len(page.Notices) < limit || offset+limit >= page.Total {
+		if stop || len(page.Notices) < limit {
 			break
 		}
 		offset += limit

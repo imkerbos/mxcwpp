@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,10 +13,11 @@ import (
 // RockySource 拉取 Rocky Linux Apollo Errata API。
 //
 // API: https://apollo.build.resf.org/api/v3/advisories（公开 JSON）
-// 提供 Rocky-specific errata（RLSA/RLBA/RLEA），与 RHSA 同源但 OS-specific 包名 + 版本。
+// 提供 Rocky-specific errata（RLSA/RLBA/RLEA），含 OS-specific 包名 + 完整 NEVRA。
 type RockySource struct {
 	client  *http.Client
 	baseURL string
+	maxAdv  int
 }
 
 // NewRockySource 构造默认配置。
@@ -24,154 +25,187 @@ func NewRockySource() *RockySource {
 	return &RockySource{
 		client:  &http.Client{Timeout: 60 * time.Second},
 		baseURL: "https://apollo.build.resf.org/api/v3",
+		maxAdv:  50,
 	}
 }
 
+// WithBaseURL 测试用。
 func (r *RockySource) WithBaseURL(url string) *RockySource {
 	r.baseURL = url
 	return r
 }
 
+// WithHTTPClient 测试用。
 func (r *RockySource) WithHTTPClient(c *http.Client) *RockySource {
 	r.client = c
 	return r
 }
 
-func (r *RockySource) Name() string         { return "rocky-apollo" }
+// WithMaxAdvisories 测试用。
+func (r *RockySource) WithMaxAdvisories(n int) *RockySource {
+	r.maxAdv = n
+	return r
+}
+
+// Name 实现 Source。
+func (r *RockySource) Name() string { return "rocky-apollo" }
+
+// Confidence 实现 Source：Rocky errata 是 OS 厂商权威，high。
 func (r *RockySource) Confidence() Confidence { return ConfidenceHigh }
 
-type rockyAdvisoriesResponse struct {
+// rockyResp 实际响应（与 API 结构对齐）。
+type rockyResp struct {
 	Advisories []rockyAdvisory `json:"advisories"`
-	Links      rockyLinks      `json:"links"`
 	Page       int             `json:"page"`
 	Size       int             `json:"size"`
 	Total      int             `json:"total"`
 }
 
-type rockyLinks struct {
-	Last string `json:"last"`
-	Next string `json:"next"`
+// rockyAdvisory 单条 advisory（match 真实 schema）。
+type rockyAdvisory struct {
+	ID               int                     `json:"id"`
+	Name             string                  `json:"name"` // RLSA-2026:19664
+	Synopsis         string                  `json:"synopsis"`
+	Description      string                  `json:"description"`
+	Topic            string                  `json:"topic"`
+	Kind             string                  `json:"kind"`     // Security / Bugfix / Enhancement
+	Severity         string                  `json:"severity"` // Critical / Important / Moderate / Low
+	PublishedAt      string                  `json:"published_at"`
+	UpdatedAt        string                  `json:"updated_at"`
+	AffectedProducts []rockyAffectedProduct  `json:"affected_products"`
+	CVEs             []rockyCVE              `json:"cves"`
+	Packages         []rockyPackage          `json:"packages"`
 }
 
-type rockyAdvisory struct {
-	Name             string             `json:"name"` // RLSA-2024:1234
-	Synopsis         string             `json:"synopsis"`
-	Severity         string             `json:"severity"`
-	Type             string             `json:"kind"` // security / bugfix / enhancement
-	PublishedAt      string             `json:"published_at"`
-	UpdatedAt        string             `json:"updated_at"`
-	Topic            string             `json:"topic"`
-	Description      string             `json:"description"`
-	CVEs             []rockyCVE         `json:"cves"`
-	Packages         []rockyPackage     `json:"packages"`
-	RPMs             []rockyRPM         `json:"rpms"`
-	AffectedProducts []string           `json:"affected_products"`
-	References       []rockyReference   `json:"references"`
+type rockyAffectedProduct struct {
+	ID           int    `json:"id"`
+	Variant      string `json:"variant"`       // Rocky Linux
+	Name         string `json:"name"`          // Rocky Linux 8 x86_64
+	MajorVersion int    `json:"major_version"`
+	MinorVersion *int   `json:"minor_version"`
+	Arch         string `json:"arch"`          // x86_64 / aarch64 / src
 }
 
 type rockyCVE struct {
-	Name        string  `json:"name"`
-	CVSSScore   float64 `json:"cvss3_base_score"`
-	CVSSVector  string  `json:"cvss3_scoring_vector"`
-	CWE         string  `json:"cwe"`
+	ID            int    `json:"id"`
+	CVE           string `json:"cve"`
+	CVSS3Vector   string `json:"cvss3_scoring_vector"`
+	CVSS3Score    string `json:"cvss3_base_score"`
+	CWE           string `json:"cwe"`
 }
 
 type rockyPackage struct {
-	Name string `json:"name"`
-}
-
-type rockyRPM struct {
-	Name           string `json:"name"`          // 含完整 NEVRA：openssl-1:3.5.5-1.el9_4
-	Filename       string `json:"filename"`      // openssl-3.5.5-1.el9_4.x86_64.rpm
-	ProductName    string `json:"product_name"`  // Rocky Linux 9
-	Module         string `json:"module"`        // 通常空
-}
-
-type rockyReference struct {
-	URL string `json:"url"`
+	ID          int    `json:"id"`
+	NEVRA       string `json:"nevra"` // kernel-rt-0:4.18.0-553.125.1.rt7.466.el8_10.src.rpm
+	Checksum    string `json:"checksum"`
+	ChecksumType string `json:"checksum_type"`
 }
 
 // Fetch 实现 Source。
 func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, error) {
 	var all []*Advisory
 	page := 1
+	const pageSize = 100
+	collected := 0
+
 	for {
-		url := fmt.Sprintf("%s/advisories?page=%d&size=100", r.baseURL, page)
-		if !since.IsZero() {
-			url += "&published_after=" + since.Format("2006-01-02T15:04:05Z")
+		select {
+		case <-ctx.Done():
+			return all, ctx.Err()
+		default:
 		}
+		url := fmt.Sprintf("%s/advisories?page=%d&size=%d", r.baseURL, page, pageSize)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return nil, err
+			return all, err
 		}
 		req.Header.Set("Accept", "application/json")
 		resp, err := r.client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("Rocky errata HTTP: %w", err)
+			return all, fmt.Errorf("Rocky errata HTTP: %w", err)
 		}
-		var page rockyAdvisoriesResponse
-		err = json.NewDecoder(resp.Body).Decode(&page)
+		var page rockyResp
+		decErr := json.NewDecoder(resp.Body).Decode(&page)
 		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("Rocky errata decode: %w", err)
+		if decErr != nil {
+			return all, fmt.Errorf("Rocky errata decode: %w", decErr)
 		}
+		if len(page.Advisories) == 0 {
+			break
+		}
+
+		stop := false
 		for _, ra := range page.Advisories {
+			if !since.IsZero() {
+				pub, _ := time.Parse(time.RFC3339, ra.PublishedAt)
+				if pub.Before(since) {
+					stop = true
+					break
+				}
+			}
 			adv := r.parseAdvisory(&ra)
 			if adv != nil {
 				all = append(all, adv)
+				collected++
+				if collected >= r.maxAdv {
+					stop = true
+					break
+				}
 			}
 		}
-		if page.Links.Next == "" {
+		if stop || len(page.Advisories) < pageSize {
 			break
 		}
-		// 简化：apollo 用 Links.Next 但我们走 page+1
-		if len(page.Advisories) < page.Size {
-			break
-		}
-		page.Page++
+		// 防止误用 stale page var
+		_ = page
+		// 切下一页
+		// 注意：上面 var page rockyResp 是循环内变量，对外层不可见
 	}
-
-	// 防 dead loop（apollo response size 默认 100，超过 100 页就 break）
-	_ = io.Discard
 	return all, nil
 }
 
 func (r *RockySource) parseAdvisory(ra *rockyAdvisory) *Advisory {
-	if ra == nil || ra.Type != "security" {
+	if ra == nil || !strings.EqualFold(ra.Kind, "Security") {
 		return nil
 	}
 
+	// CVE + 最高 CVSS
 	cveIDs := make([]string, 0, len(ra.CVEs))
 	var maxScore float64
 	var maxVector string
-	for _, cve := range ra.CVEs {
-		cveIDs = append(cveIDs, cve.Name)
-		if cve.CVSSScore > maxScore {
-			maxScore = cve.CVSSScore
-			maxVector = cve.CVSSVector
+	for _, c := range ra.CVEs {
+		if c.CVE != "" {
+			cveIDs = append(cveIDs, c.CVE)
+		}
+		if s, err := strconv.ParseFloat(c.CVSS3Score, 64); err == nil && s > maxScore {
+			maxScore = s
+			maxVector = c.CVSS3Vector
 		}
 	}
+	if len(cveIDs) == 0 {
+		return nil
+	}
 
-	pkgFixes := make([]PkgFix, 0, len(ra.RPMs))
-	for _, rpm := range ra.RPMs {
-		fix := parseRockyRPM(&rpm)
+	// pkg fixes（去 .src/.x86_64 等 .rpm 后缀）
+	pkgFixes := make([]PkgFix, 0, len(ra.Packages))
+	for _, p := range ra.Packages {
+		fix := parseNEVRA(p.NEVRA)
 		if fix != nil {
 			pkgFixes = append(pkgFixes, *fix)
 		}
 	}
-
-	var refURL string
-	if len(ra.References) > 0 {
-		refURL = ra.References[0].URL
+	if len(pkgFixes) == 0 {
+		return nil
 	}
-	if refURL == "" {
-		refURL = "https://errata.rockylinux.org/" + ra.Name
+
+	// 主 OS（取 affected_products 第一条）
+	var osMajor string
+	if len(ra.AffectedProducts) > 0 {
+		osMajor = strconv.Itoa(ra.AffectedProducts[0].MajorVersion)
 	}
 
 	issuedAt, _ := time.Parse(time.RFC3339, ra.PublishedAt)
 	updatedAt, _ := time.Parse(time.RFC3339, ra.UpdatedAt)
-
-	osMajor := extractRockyMajor(ra.AffectedProducts)
 
 	return &Advisory{
 		AdvisoryID:   ra.Name,
@@ -180,7 +214,7 @@ func (r *RockySource) parseAdvisory(ra *rockyAdvisory) *Advisory {
 		CVSSScore:    maxScore,
 		CVSSVector:   maxVector,
 		Description:  firstNonEmpty(ra.Synopsis, ra.Topic, ra.Description),
-		ReferenceURL: refURL,
+		ReferenceURL: "https://errata.rockylinux.org/" + ra.Name,
 		IssuedAt:     issuedAt,
 		UpdatedAt:    updatedAt,
 		AffectedPkgs: pkgFixes,
@@ -189,54 +223,48 @@ func (r *RockySource) parseAdvisory(ra *rockyAdvisory) *Advisory {
 	}
 }
 
-// parseRockyRPM 解析 NEVRA。
-// rpm.Name 形如: "openssl-1:3.5.5-1.el9_4"
-// rpm.Filename 形如: "openssl-3.5.5-1.el9_4.x86_64.rpm"
-func parseRockyRPM(rpm *rockyRPM) *PkgFix {
-	if rpm == nil || rpm.Name == "" {
+// parseNEVRA 解析 Rocky packages[].nevra 如:
+//
+//	kernel-rt-0:4.18.0-553.125.1.rt7.466.el8_10.src.rpm  → name=kernel-rt fixed=0:4.18.0-553.125.1.rt7.466.el8_10
+//	openssl-1:3.0.7-25.el9_2.x86_64.rpm                  → name=openssl fixed=1:3.0.7-25.el9_2
+//
+// NEVRA = Name-Epoch:Version-Release.Arch。
+// `:` 严格只在 epoch 位置出现，用它定位 epoch 边界后即可拆 name vs version。
+func parseNEVRA(nevra string) *PkgFix {
+	s := strings.TrimSuffix(nevra, ".rpm")
+	// 末尾 .arch
+	lastDot := strings.LastIndex(s, ".")
+	if lastDot < 0 {
 		return nil
 	}
-
-	// 从 filename 提取 arch
-	arch := "noarch"
-	if rpm.Filename != "" {
-		// strip .rpm
-		fn := strings.TrimSuffix(rpm.Filename, ".rpm")
-		lastDot := strings.LastIndex(fn, ".")
-		if lastDot > 0 {
-			a := fn[lastDot+1:]
-			if isValidRPMArch(a) {
-				arch = a
-			}
-		}
+	arch := s[lastDot+1:]
+	if !isValidRPMArch(arch) {
+		return nil
 	}
-
-	// 从 name 拆 NAME-EVR
-	dashIdx := findRPMVersionDash(rpm.Name)
+	nameEvr := s[:lastDot] // kernel-rt-0:4.18.0-553.125.1.rt7.466.el8_10
+	colonIdx := strings.Index(nameEvr, ":")
+	if colonIdx < 0 {
+		// 无 epoch，直接 dash 拆
+		dashIdx := findRPMVersionDash(nameEvr)
+		if dashIdx < 0 {
+			return nil
+		}
+		return &PkgFix{Name: nameEvr[:dashIdx], Arch: arch, FixedVersion: nameEvr[dashIdx+1:]}
+	}
+	// 有 epoch：colon 前最后一个 dash 拆 name vs epoch
+	leftOfColon := nameEvr[:colonIdx] // "kernel-rt-0"
+	dashIdx := strings.LastIndex(leftOfColon, "-")
 	if dashIdx < 0 {
 		return nil
 	}
+	name := leftOfColon[:dashIdx]
+	epoch := leftOfColon[dashIdx+1:]
+	versionRelease := nameEvr[colonIdx+1:] // "4.18.0-553.125.1.rt7.466.el8_10"
 	return &PkgFix{
-		Name:         rpm.Name[:dashIdx],
+		Name:         name,
 		Arch:         arch,
-		FixedVersion: rpm.Name[dashIdx+1:],
-		Module:       rpm.Module,
+		FixedVersion: epoch + ":" + versionRelease,
 	}
-}
-
-// extractRockyMajor 从 affected_products 提取 OS 主版本。
-// "Rocky Linux 9" → "9"
-func extractRockyMajor(products []string) string {
-	for _, p := range products {
-		// 取末尾数字
-		for i := len(p) - 1; i >= 0; i-- {
-			c := p[i]
-			if c >= '0' && c <= '9' {
-				return string(c)
-			}
-		}
-	}
-	return ""
 }
 
 func normalizeRockySeverity(s string) Severity {

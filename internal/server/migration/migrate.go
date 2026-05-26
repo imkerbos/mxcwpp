@@ -93,9 +93,13 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("edr 插件清理处理", zap.Error(err))
 	}
 
-	// 标记并软删除历史 keyword-match 产生的 fake vuln（matchByDescription 已废弃）
+	// 回滚之前过激 soft delete 误删的真 CVE
+	if err := migrateRestoreErroneouslyDeletedVulns(db, logger); err != nil {
+		logger.Warn("回滚误删 vuln 失败", zap.Error(err))
+	}
+	// 标记历史 nvd/osv/redhat 数据为 confidence=low（不删除，仅 UI 过滤）
 	if err := migrateMarkFakeVulns(db, logger); err != nil {
-		logger.Warn("fake vuln 标记处理", zap.Error(err))
+		logger.Warn("历史 vuln confidence 标记", zap.Error(err))
 	}
 
 	// 添加性能优化索引（幂等）
@@ -169,44 +173,69 @@ func migrateSensorToEDR(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// migrateMarkFakeVulns 标记并软删除历史 description-keyword-match 误产物。
-// 触发条件：source=nvd OR source IS NULL，且 osv_id=="" AND purl==""
-// 这些 vuln 是已废弃的 matchByDescription 用 substring 匹配产生（如 CVE-2026-6482
-// Rapid7 Windows 提权被错关联到 Linux openssl），数据不可信，全部 soft delete
-// 同时清理关联的 host_vulnerabilities 记录。
-// 幂等：已清理的环境（confidence='fake'）不会重复执行。
+// migrateMarkFakeVulns 标记历史 description-keyword-match 误产物为 confidence='low'，
+// 不再 soft delete（之前过激删除真 Linux kernel CVE，因 NVD awaiting analysis 也无 CPE）。
+//
+// 真假区分需重新 import：advisory package coordinator 走 CPE/PURL/Advisory 严格匹配，
+// 历史 source=nvd 数据视为 low confidence，UI 按 confidence 过滤显示，不破坏数据。
+// 幂等：已标记 confidence 的不重复。
 func migrateMarkFakeVulns(db *gorm.DB, logger *zap.Logger) error {
-	// 仅清理 source=nvd 的 fake vuln（保守策略，source=null 留待人工 review）
-	// source=null 历史数据中含 CPE 匹配产物，无法靠 source 字段精确识别 fake
-	var fakeIDs []uint
-	if err := db.Table("vulnerabilities").
-		Where("source = ? AND (osv_id IS NULL OR osv_id = '') AND (purl IS NULL OR purl = '') AND (confidence IS NULL OR confidence != ?)",
-			"nvd", model.VulnConfidenceFake).
-		Pluck("id", &fakeIDs).Error; err != nil {
-		return fmt.Errorf("查询 fake vuln 失败: %w", err)
+	r := db.Table("vulnerabilities").
+		Where("source = ? AND (confidence IS NULL OR confidence = '')", "nvd").
+		Update("confidence", model.VulnConfidenceLow)
+	if r.Error != nil {
+		return fmt.Errorf("标记历史 nvd vuln confidence 失败: %w", r.Error)
 	}
-	if len(fakeIDs) == 0 {
-		return nil
+	if r.RowsAffected > 0 {
+		logger.Info("历史 nvd vuln 标记为 confidence=low（仅标记，不删除）",
+			zap.Int64("count", r.RowsAffected))
 	}
+	// 历史 source=osv 也标 low（实际看到是 RHEL erratum 混入，confidence 不准）
+	r2 := db.Table("vulnerabilities").
+		Where("source = ? AND (confidence IS NULL OR confidence = '')", "osv").
+		Update("confidence", model.VulnConfidenceLow)
+	if r2.RowsAffected > 0 {
+		logger.Info("历史 osv vuln 标记为 confidence=low",
+			zap.Int64("count", r2.RowsAffected))
+	}
+	// redhat 同理（OS major filter 缺失）
+	r3 := db.Table("vulnerabilities").
+		Where("source = ? AND (confidence IS NULL OR confidence = '')", "redhat").
+		Update("confidence", model.VulnConfidenceLow)
+	if r3.RowsAffected > 0 {
+		logger.Info("历史 redhat vuln 标记为 confidence=low",
+			zap.Int64("count", r3.RowsAffected))
+	}
+	return nil
+}
 
-	now := time.Now()
-	if err := db.Table("vulnerabilities").
-		Where("id IN ?", fakeIDs).
+// migrateRestoreErroneouslyDeletedVulns 回滚之前 migrateMarkFakeVulns 误 soft delete
+// 真 Linux kernel CVE 的副作用。
+// 仅在 dev/prod 已经执行过老 migrateMarkFakeVulns 时需要。幂等。
+func migrateRestoreErroneouslyDeletedVulns(db *gorm.DB, logger *zap.Logger) error {
+	r := db.Table("vulnerabilities").
+		Where("confidence = ? AND deleted_at IS NOT NULL", model.VulnConfidenceFake).
 		Updates(map[string]any{
-			"confidence": model.VulnConfidenceFake,
-			"deleted_at": now,
-		}).Error; err != nil {
-		return fmt.Errorf("标记 fake vuln 失败: %w", err)
+			"confidence": model.VulnConfidenceLow,
+			"deleted_at": nil,
+		})
+	if r.Error != nil {
+		return fmt.Errorf("回滚误删 vuln 失败: %w", r.Error)
 	}
-
-	hvAffected := db.Table("host_vulnerabilities").
-		Where("vuln_id IN ? AND deleted_at IS NULL", fakeIDs).
-		Update("deleted_at", now).RowsAffected
-
-	logger.Info("已软删除 keyword-match 产生的 fake vuln",
-		zap.Int("fake_vuln_count", len(fakeIDs)),
-		zap.Int64("host_vuln_affected", hvAffected),
-	)
+	if r.RowsAffected > 0 {
+		// 同步回滚关联 host_vulnerabilities（按 vuln_id 反查）
+		var vulnIDs []uint
+		db.Table("vulnerabilities").
+			Where("confidence = ?", model.VulnConfidenceLow).
+			Pluck("id", &vulnIDs)
+		if len(vulnIDs) > 0 {
+			db.Table("host_vulnerabilities").
+				Where("vuln_id IN ? AND deleted_at IS NOT NULL", vulnIDs).
+				Update("deleted_at", nil)
+		}
+		logger.Info("回滚之前误 soft delete 的 vuln（标 confidence=low）",
+			zap.Int64("restored", r.RowsAffected))
+	}
 	return nil
 }
 
