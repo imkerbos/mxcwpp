@@ -783,6 +783,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-tasks/batch-confirm", taskHandler.BatchConfirm)
 	router.POST("/remediation-tasks/batch-retry", taskHandler.BatchRetry)
 	router.POST("/remediation-tasks/batch-cancel", taskHandler.BatchCancel)
+	router.POST("/remediation-tasks/host-batch", taskHandler.CreateForHost) // 单 host 批量创建（A: vulnIds 子集 / B: allUnpatched 全量）
 
 	// 扫描计划管理
 	vulnScanner := biz.NewVulnScanner(db, logger)

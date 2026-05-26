@@ -475,6 +475,128 @@ func (h *RemediationTasksHandler) BatchCreate(c *gin.Context) {
 	})
 }
 
+// CreateForHost 单 host 批量创建修复任务
+// POST /api/v1/remediation-tasks/host-batch
+// body: {hostId, vulnIds?: [], allUnpatched?: bool}
+//   - vulnIds 模式：为指定 host 的子集 vuln 创建任务
+//   - allUnpatched 模式：为指定 host 的全部 unpatched vuln 创建任务（忽略 vulnIds）
+func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
+	var req struct {
+		HostID       string `json:"hostId" binding:"required"`
+		VulnIDs      []uint `json:"vulnIds"`
+		AllUnpatched bool   `json:"allUnpatched"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "参数无效：需要 hostId")
+		return
+	}
+	if !req.AllUnpatched && len(req.VulnIDs) == 0 {
+		BadRequest(c, "需指定 vulnIds 或 allUnpatched=true")
+		return
+	}
+
+	// 校验 host 存在，并拿 OS 信息选包管理器命令
+	var host model.Host
+	if err := h.db.Select("host_id, os_family, os_version, hostname").
+		Where("host_id = ?", req.HostID).First(&host).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			NotFound(c, "host 不存在")
+			return
+		}
+		h.logger.Error("查询 host 失败", zap.Error(err))
+		InternalError(c, "查询 host 失败")
+		return
+	}
+
+	// 拉该 host unpatched host_vulnerabilities，按需 vulnIds 子集过滤
+	query := h.db.Where("host_id = ? AND status = ?", req.HostID, "unpatched")
+	if !req.AllUnpatched {
+		query = query.Where("vuln_id IN ?", req.VulnIDs)
+	}
+	var hostVulns []model.HostVulnerability
+	if err := query.Find(&hostVulns).Error; err != nil {
+		h.logger.Error("查询主机漏洞失败", zap.Error(err))
+		InternalError(c, "查询主机漏洞失败")
+		return
+	}
+	if len(hostVulns) == 0 {
+		BadRequest(c, "该主机无匹配的未修复漏洞")
+		return
+	}
+
+	vulnIDs := make([]uint, 0, len(hostVulns))
+	for _, hv := range hostVulns {
+		vulnIDs = append(vulnIDs, hv.VulnID)
+	}
+	var vulns []model.Vulnerability
+	h.db.Where("id IN ?", vulnIDs).Find(&vulns)
+	vulnMap := make(map[uint]model.Vulnerability, len(vulns))
+	for _, v := range vulns {
+		vulnMap[v.ID] = v
+	}
+
+	// 跳过已有进行中（pending/confirmed/running）的任务，避免重复
+	var existing []model.RemediationTask
+	h.db.Select("vuln_id").
+		Where("host_id = ? AND vuln_id IN ? AND status IN ?",
+			req.HostID, vulnIDs, []string{"pending", "confirmed", "running"}).
+		Find(&existing)
+	existingSet := make(map[uint]struct{}, len(existing))
+	for _, t := range existing {
+		existingSet[t.VulnID] = struct{}{}
+	}
+
+	username, _ := c.Get("username")
+	createdBy, _ := username.(string)
+
+	remSvc := biz.NewRemediationService(h.db, h.logger)
+	var tasks []model.RemediationTask
+	skipped := 0
+	for _, hv := range hostVulns {
+		if _, exists := existingSet[hv.VulnID]; exists {
+			skipped++
+			continue
+		}
+		v, ok := vulnMap[hv.VulnID]
+		if !ok {
+			skipped++
+			continue
+		}
+		advice := remSvc.GetAdvice(&v)
+		cmd := selectCommandForHost(advice.Commands, host.OSFamily, host.OSVersion)
+		tasks = append(tasks, model.RemediationTask{
+			VulnID:       v.ID,
+			CveID:        v.CveID,
+			HostID:       hv.HostID,
+			Hostname:     hv.Hostname,
+			IP:           hv.IP,
+			Component:    v.Component,
+			FixedVersion: v.FixedVersion,
+			Command:      cmd,
+			Status:       "pending",
+			CreatedBy:    createdBy,
+		})
+	}
+
+	if len(tasks) == 0 {
+		BadRequest(c, "无可创建的任务（全部已有进行中或对应漏洞元数据缺失）")
+		return
+	}
+
+	if err := h.db.Create(&tasks).Error; err != nil {
+		h.logger.Error("批量创建主机修复任务失败", zap.Error(err))
+		InternalError(c, "创建失败")
+		return
+	}
+
+	Success(c, gin.H{
+		"created":  len(tasks),
+		"skipped":  skipped,
+		"hostId":   req.HostID,
+		"hostname": host.Hostname,
+	})
+}
+
 // RetryTask 重试失败的修复任务
 // POST /api/v1/remediation-tasks/:id/retry
 func (h *RemediationTasksHandler) RetryTask(c *gin.Context) {
