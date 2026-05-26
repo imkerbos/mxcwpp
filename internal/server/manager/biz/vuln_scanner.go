@@ -148,14 +148,14 @@ func (v *VulnScanner) SyncOnly() error {
 		results = append(results, sourceResult{Name: "advisory-coordinator", Status: "success"})
 	}
 
-	// 增强数据源（失败不影响整体状态）
+	// 增强数据源（失败不影响整体状态，按 cve_id 补全主表字段，不入独立 vuln）
+	// CNNVD/CNVD 已废弃：本质都是 CVE 中文 wrap，直接用 NVD CVE 主数据 + CVE ID 检索更可靠
 	for _, src := range []struct {
 		name string
 		fn   func() error
 	}{
-		{"CNVD", v.SyncCNVD},
-		{"CNNVD", v.SyncCNNVD},
-		{"Exploit", v.SyncExploit},
+		{"NVDMetadata", v.SyncNVDMetadata}, // 补 description / CVSS / CWE / references
+		{"Exploit", v.SyncExploit},         // 补 in_kev (CISA) / has_exploit (exploit-db)
 	} {
 		if err := src.fn(); err != nil {
 			v.logger.Warn(src.name+" 同步失败，跳过", zap.Error(err))
