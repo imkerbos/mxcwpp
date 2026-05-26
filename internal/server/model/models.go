@@ -224,6 +224,7 @@ var (
 		&ComponentPushHost{},
 		&RemediationTask{},
 		&RemediationTaskEvent{},
+		&VulnDataSource{},
 		&ScanSchedule{},
 		&ScanScheduleExecution{},
 		&VulnCache{},
