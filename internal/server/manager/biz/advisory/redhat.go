@@ -73,9 +73,11 @@ type csafDocument struct {
 		CurrentReleaseDate string `json:"current_release_date"`
 	} `json:"tracking"`
 	Distribution struct {
-		TLP struct{ Label string `json:"label"` } `json:"tlp"`
+		TLP struct {
+			Label string `json:"label"`
+		} `json:"tlp"`
 	} `json:"distribution"`
-	Notes []csafNote `json:"notes"`
+	Notes             []csafNote `json:"notes"`
 	AggregateSeverity struct {
 		Text string `json:"text"` // Low / Moderate / Important / Critical
 	} `json:"aggregate_severity"`
@@ -91,15 +93,15 @@ type csafProductTree struct {
 }
 
 type csafBranch struct {
-	Branches    []csafBranch    `json:"branches,omitempty"`
-	Category    string          `json:"category"`
-	Name        string          `json:"name"`
-	Product     *csafProductRef `json:"product,omitempty"`
+	Branches []csafBranch    `json:"branches,omitempty"`
+	Category string          `json:"category"`
+	Name     string          `json:"name"`
+	Product  *csafProductRef `json:"product,omitempty"`
 }
 
 type csafProductRef struct {
-	ProductID   string `json:"product_id"`
-	Name        string `json:"name"`
+	ProductID                   string `json:"product_id"`
+	Name                        string `json:"name"`
 	ProductIdentificationHelper *struct {
 		PURL string `json:"purl,omitempty"`
 		CPE  string `json:"cpe,omitempty"`
@@ -107,11 +109,11 @@ type csafProductRef struct {
 }
 
 type csafVulnerability struct {
-	CVE             string             `json:"cve"`
-	Scores          []csafScore        `json:"scores"`
-	ProductStatus   csafProductStatus  `json:"product_status"`
-	Remediations    []csafRemediation  `json:"remediations"`
-	Notes           []csafNote         `json:"notes"`
+	CVE           string            `json:"cve"`
+	Scores        []csafScore       `json:"scores"`
+	ProductStatus csafProductStatus `json:"product_status"`
+	Remediations  []csafRemediation `json:"remediations"`
+	Notes         []csafNote        `json:"notes"`
 }
 
 type csafScore struct {
@@ -123,9 +125,9 @@ type csafScore struct {
 }
 
 type csafProductStatus struct {
-	Fixed             []string `json:"fixed,omitempty"`
-	KnownAffected     []string `json:"known_affected,omitempty"`
-	KnownNotAffected  []string `json:"known_not_affected,omitempty"`
+	Fixed            []string `json:"fixed,omitempty"`
+	KnownAffected    []string `json:"known_affected,omitempty"`
+	KnownNotAffected []string `json:"known_not_affected,omitempty"`
 }
 
 type csafRemediation struct {
@@ -355,7 +357,7 @@ func pkgFixFromProductID(prod string, productPURL map[string]string) *PkgFix {
 		return nil
 	}
 
-	nameEpoch := parts[len(parts)-2] // "ipa-0"
+	nameEpoch := parts[len(parts)-2]  // "ipa-0"
 	verRelArch := parts[len(parts)-1] // "4.11.0-9.el9_4.src"
 
 	// name vs epoch：从右往左找第一个 `-`，右侧是 epoch（纯数字）
@@ -392,7 +394,6 @@ func pkgFixFromProductID(prod string, productPURL map[string]string) *PkgFix {
 		FixedVersion: fixed,
 	}
 }
-
 
 // parseRPMPurl 解析 PURL 如 pkg:rpm/redhat/openssl@3.5.5-1.el9_4?arch=x86_64&epoch=1
 func parseRPMPurl(purl string) *PkgFix {

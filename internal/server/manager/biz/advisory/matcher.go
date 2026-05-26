@@ -62,12 +62,12 @@ func osCompatible(advFamily, advMajor, hostFamily, hostMajor string) bool {
 	hostFamily = strings.ToLower(hostFamily)
 
 	rhelCompat := map[string]bool{
-		"rhel":         true,
-		"rocky":        true,
-		"centos":       true,
+		"rhel":          true,
+		"rocky":         true,
+		"centos":        true,
 		"centos-stream": true,
-		"almalinux":    true,
-		"oraclelinux":  true,
+		"almalinux":     true,
+		"oraclelinux":   true,
 	}
 	if advFamily == "rhel" || advFamily == "rocky" {
 		return rhelCompat[hostFamily]

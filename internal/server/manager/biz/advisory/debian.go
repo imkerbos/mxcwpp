@@ -43,30 +43,31 @@ func (d *DebianSource) Confidence() Confidence { return ConfidenceHigh }
 
 // debianTrackerData：API 顶层结构。
 // 形如:
-// {
-//   "openssl": {
-//     "CVE-2024-1234": {
-//       "scope": "remote",
-//       "releases": {
-//         "bullseye": {"status": "resolved", "fixed_version": "1.1.1n-0+deb11u1"},
-//         "bookworm": {"status": "resolved", "fixed_version": "3.0.11-1~deb12u1"}
-//       },
-//       "debianbug": 1234567
-//     }
-//   }
-// }
+//
+//	{
+//	  "openssl": {
+//	    "CVE-2024-1234": {
+//	      "scope": "remote",
+//	      "releases": {
+//	        "bullseye": {"status": "resolved", "fixed_version": "1.1.1n-0+deb11u1"},
+//	        "bookworm": {"status": "resolved", "fixed_version": "3.0.11-1~deb12u1"}
+//	      },
+//	      "debianbug": 1234567
+//	    }
+//	  }
+//	}
 type debianTrackerData map[string]map[string]debianCVEEntry
 
 type debianCVEEntry struct {
-	Scope    string                          `json:"scope"`
-	Releases map[string]debianReleaseEntry   `json:"releases"`
-	DebianBug int                            `json:"debianbug,omitempty"`
+	Scope     string                        `json:"scope"`
+	Releases  map[string]debianReleaseEntry `json:"releases"`
+	DebianBug int                           `json:"debianbug,omitempty"`
 }
 
 type debianReleaseEntry struct {
-	Status       string `json:"status"`        // resolved / open / undetermined / not-affected
+	Status       string `json:"status"` // resolved / open / undetermined / not-affected
 	FixedVersion string `json:"fixed_version"`
-	Urgency      string `json:"urgency"`       // critical / high / medium / low / unimportant / not yet assigned
+	Urgency      string `json:"urgency"` // critical / high / medium / low / unimportant / not yet assigned
 }
 
 // Fetch 实现 Source。

@@ -156,12 +156,12 @@ func (v *VulnScanner) SyncOnly() error {
 		name       string
 		fn         func() (int64, error)
 	}{
-		{"mitre-cve", "MITRECVE", v.SyncMITRECVECounted},   // MITRE 官方 CVE 元数据（推荐主源）
-		{"nvd", "NVDMetadata", v.SyncNVDMetadataCounted},   // NVD API（备用，需 NVD_API_KEY 提速）
-		{"cisa-kev", "CISAKev", v.SyncCISAKevCounted},      // CISA KEV 标记 in_kev
+		{"mitre-cve", "MITRECVE", v.SyncMITRECVECounted},    // MITRE 官方 CVE 元数据（推荐主源）
+		{"nvd", "NVDMetadata", v.SyncNVDMetadataCounted},    // NVD API（备用，需 NVD_API_KEY 提速）
+		{"cisa-kev", "CISAKev", v.SyncCISAKevCounted},       // CISA KEV 标记 in_kev
 		{"exploit-db", "ExploitDB", v.SyncExploitDBCounted}, // exploit-db CSV 标记 has_exploit
-		{"cnnvd", "CNNVD", wrapErr(v.SyncCNNVDStub)},       // 国家信息安全漏洞库（国外网络受限）
-		{"cnvd", "CNVD", wrapErr(v.SyncCNVDStub)},          // 国家信息安全漏洞共享平台（无公开 API）
+		{"cnnvd", "CNNVD", wrapErr(v.SyncCNNVD)},            // 国家信息安全漏洞库（cnnvd.org.cn 官方 API，补 cnnvd_id）
+		{"cnvd", "CNVD", wrapErr(v.SyncCNVDStub)},           // 国家信息安全漏洞共享平台（无公开 API / Cloudflare 521）
 	} {
 		if !sourceSvc.IsEnabled(src.sourceName) {
 			v.logger.Debug("source disabled，跳过", zap.String("source", src.sourceName))

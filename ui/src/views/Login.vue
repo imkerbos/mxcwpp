@@ -502,6 +502,8 @@ const handleChangePassword = async () => {
   border: 1px solid var(--mxsec-border);
   flex-shrink: 0;
   transition: opacity 0.2s;
+  /* 服务端 captcha 是深色文字在透明背景上；暗黑模式必须有亮底，否则不可见 */
+  background: #ffffff;
 }
 
 .captcha-image:hover {

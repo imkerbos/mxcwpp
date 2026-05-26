@@ -40,11 +40,11 @@ func NewMITRECVEEnricher(db *gorm.DB, logger *zap.Logger) *MITRECVEEnricher {
 // mitreCVE MITRE CVE Records v5 schema (部分)。
 type mitreCVE struct {
 	CVEMetadata struct {
-		CVEID    string `json:"cveId"`
-		State    string `json:"state"`
-		AssignerOrgID   string `json:"assignerOrgId"`
-		DatePublished   string `json:"datePublished"`
-		DateUpdated     string `json:"dateUpdated"`
+		CVEID         string `json:"cveId"`
+		State         string `json:"state"`
+		AssignerOrgID string `json:"assignerOrgId"`
+		DatePublished string `json:"datePublished"`
+		DateUpdated   string `json:"dateUpdated"`
 	} `json:"cveMetadata"`
 	Containers struct {
 		CNA struct {
@@ -63,10 +63,10 @@ type mitreDescription struct {
 }
 
 type mitreMetric struct {
-	Format     string                 `json:"format"`
-	Scenarios  []map[string]string    `json:"scenarios,omitempty"`
-	CVSSv31    *mitreCVSSData         `json:"cvssV3_1,omitempty"`
-	CVSSv30    *mitreCVSSData         `json:"cvssV3_0,omitempty"`
+	Format    string              `json:"format"`
+	Scenarios []map[string]string `json:"scenarios,omitempty"`
+	CVSSv31   *mitreCVSSData      `json:"cvssV3_1,omitempty"`
+	CVSSv30   *mitreCVSSData      `json:"cvssV3_0,omitempty"`
 }
 
 type mitreCVSSData struct {

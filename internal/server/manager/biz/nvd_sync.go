@@ -434,12 +434,12 @@ func (v *VulnScanner) matchCPENode(node nvdNode, softwareByName map[string][]ins
 
 // cpeParsed CPE 2.3 解析结果。
 type cpeParsed struct {
-	part      string // a (application) / o (os) / h (hardware)
-	vendor    string
-	product   string
-	version   string
-	targetSW  string // 目标软件平台（windows/linux/*）
-	targetHW  string // 目标硬件平台
+	part     string // a (application) / o (os) / h (hardware)
+	vendor   string
+	product  string
+	version  string
+	targetSW string // 目标软件平台（windows/linux/*）
+	targetHW string // 目标硬件平台
 }
 
 // parseCPE23 解析 CPE 2.3 字符串。

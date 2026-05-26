@@ -82,7 +82,7 @@ func initVulnDataSources(db *gorm.DB, logger *zap.Logger) error {
 			Name: "nvd", DisplayName: "NVD CVE Database",
 			Region: model.VulnSourceRegionGlobal, Category: model.VulnSourceCategoryCVEMetadata,
 			Enabled: false, BaseURL: "https://services.nvd.nist.gov/rest/json/cves/2.0",
-			APIKeyEnv: "NVD_API_KEY",
+			APIKeyEnv:   "NVD_API_KEY",
 			Description: "NIST 国家漏洞库 API。建议配置 NVD_API_KEY 提速。国外服务器可能受限。",
 		},
 		{

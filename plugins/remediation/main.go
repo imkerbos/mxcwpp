@@ -40,7 +40,7 @@ const dataTypeRemediationResult int32 = 9200
 //  1. detect_os    — 确认 OS 类型，选对 pkg manager
 //  2. check_installed — 包必须已装，否则 dnf upgrade 会报 "no installed package"
 //  3. check_available — 包仓库实际可用版本（取代 vuln DB 的 fixed_version，
-//                        因 NVD 字段经常与 OS erratum 不匹配，如 openssl 4.1.0.2 假数据）
+//     因 NVD 字段经常与 OS erratum 不匹配，如 openssl 4.1.0.2 假数据）
 type taskPayload struct {
 	TaskID       uint   `json:"task_id"`
 	CveID        string `json:"cve_id"`

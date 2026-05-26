@@ -9,15 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// SyncCNNVDStub 国家信息安全漏洞库（CNNVD）同步 stub。
-//
-// CNNVD 官方 API https://www.cnnvd.org.cn 反爬严格（403 + Cloudflare），无可靠公开接口。
-// 实现策略：尝试连接 base_url 判断可达性；如可达写 success(count=0)，否则写 failed 标记网络受限。
-// 国内部署可正常拉，国外服务器通常 403 — 错误信息明确告知用户。
-func (v *VulnScanner) SyncCNNVDStub() error {
-	return checkChinaOfficialAvailable(context.Background(), "https://www.cnnvd.org.cn/", "CNNVD")
-}
-
 // SyncCNVDStub 国家信息安全漏洞共享平台（CNVD）同步 stub。
 //
 // CNVD https://www.cnvd.org.cn 无公开 API，需要第三方授权数据源。

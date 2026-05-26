@@ -25,13 +25,14 @@ type EnabledChecker interface {
 // Coordinator 协调多个 Source 与 Matcher，合并去重写入 DB。
 //
 // 优先级：相同 CVE × host 由不同 source 重复出现时，confidence 高者覆盖低者。
-//   high (OS Advisory) > medium (OSV) > low (NVD CPE)
+//
+//	high (OS Advisory) > medium (OSV) > low (NVD CPE)
 //
 // 入库前严格校验：
-//  - PkgFix.Name 非空
-//  - PkgFix.FixedVersion 非空
-//  - 至少一个 CVE ID
-//  - description 不含 "Windows" 关键字（防 OS-mismatch 漏网）
+//   - PkgFix.Name 非空
+//   - PkgFix.FixedVersion 非空
+//   - 至少一个 CVE ID
+//   - description 不含 "Windows" 关键字（防 OS-mismatch 漏网）
 type Coordinator struct {
 	db      *gorm.DB
 	logger  *zap.Logger
@@ -175,10 +176,10 @@ type sourcedAdvisory struct {
 }
 
 type mergedVuln struct {
-	advisory       *Advisory
-	confidence     Confidence
-	source         string
-	affectedHosts  []AffectedHost
+	advisory      *Advisory
+	confidence    Confidence
+	source        string
+	affectedHosts []AffectedHost
 }
 
 // mergeByConfidence 按 CVE 维度合并 advisory，confidence 高者覆盖。

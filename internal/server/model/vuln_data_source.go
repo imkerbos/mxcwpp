@@ -28,14 +28,14 @@ const (
 // Coordinator/Scanner 每次 sync 前查 enabled=true 列表，跳过 disabled。
 type VulnDataSource struct {
 	ID           uint       `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	Name         string     `gorm:"column:name;type:varchar(64);uniqueIndex;not null" json:"name"`         // slug，如 rhsa
-	DisplayName  string     `gorm:"column:display_name;type:varchar(128);not null" json:"displayName"`     // UI 展示名
-	Region       string     `gorm:"column:region;type:varchar(16);not null;index" json:"region"`           // cn / global
-	Category     string     `gorm:"column:category;type:varchar(32);not null;index" json:"category"`       // os_advisory / cve_metadata / exploit / cn_official
-	Enabled      bool       `gorm:"column:enabled;default:0;index" json:"enabled"`                         // 启用同步
-	BaseURL      string     `gorm:"column:base_url;type:varchar(500)" json:"baseUrl"`                      // 可在 UI 改（如换 CNNVD 镜像）
-	APIKeyEnv    string     `gorm:"column:api_key_env;type:varchar(64)" json:"apiKeyEnv,omitempty"`        // 引用 env 变量名（如 NVD_API_KEY）
-	Description  string     `gorm:"column:description;type:varchar(500)" json:"description"`               // UI tooltip
+	Name         string     `gorm:"column:name;type:varchar(64);uniqueIndex;not null" json:"name"`     // slug，如 rhsa
+	DisplayName  string     `gorm:"column:display_name;type:varchar(128);not null" json:"displayName"` // UI 展示名
+	Region       string     `gorm:"column:region;type:varchar(16);not null;index" json:"region"`       // cn / global
+	Category     string     `gorm:"column:category;type:varchar(32);not null;index" json:"category"`   // os_advisory / cve_metadata / exploit / cn_official
+	Enabled      bool       `gorm:"column:enabled;default:0;index" json:"enabled"`                     // 启用同步
+	BaseURL      string     `gorm:"column:base_url;type:varchar(500)" json:"baseUrl"`                  // 可在 UI 改（如换 CNNVD 镜像）
+	APIKeyEnv    string     `gorm:"column:api_key_env;type:varchar(64)" json:"apiKeyEnv,omitempty"`    // 引用 env 变量名（如 NVD_API_KEY）
+	Description  string     `gorm:"column:description;type:varchar(500)" json:"description"`           // UI tooltip
 	LastSyncAt   *LocalTime `gorm:"column:last_sync_at;type:timestamp" json:"lastSyncAt,omitempty"`
 	LastStatus   string     `gorm:"column:last_status;type:varchar(16);default:'never'" json:"lastStatus"` // never / running / success / failed
 	LastError    string     `gorm:"column:last_error;type:text" json:"lastError,omitempty"`

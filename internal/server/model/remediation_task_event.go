@@ -32,10 +32,10 @@ type RemediationTaskEvent struct {
 	ID        uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
 	TaskID    uint      `gorm:"column:task_id;not null;index:idx_rte_task_seq,priority:1" json:"taskId"`
 	Sequence  uint      `gorm:"column:sequence;not null;index:idx_rte_task_seq,priority:2" json:"sequence"`
-	Stage     string    `gorm:"column:stage;type:varchar(32);not null" json:"stage"`     // 11 state 之一
-	Message   string    `gorm:"column:message;type:varchar(500)" json:"message"`         // 简短描述
-	Detail    string    `gorm:"column:detail;type:text" json:"detail"`                   // 长输出/错误堆栈
-	Source    string    `gorm:"column:source;type:varchar(32)" json:"source"`            // manager / agent / plugin
+	Stage     string    `gorm:"column:stage;type:varchar(32);not null" json:"stage"` // 11 state 之一
+	Message   string    `gorm:"column:message;type:varchar(500)" json:"message"`     // 简短描述
+	Detail    string    `gorm:"column:detail;type:text" json:"detail"`               // 长输出/错误堆栈
+	Source    string    `gorm:"column:source;type:varchar(32)" json:"source"`        // manager / agent / plugin
 	CreatedAt LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP;index" json:"createdAt"`
 }
 

@@ -117,15 +117,15 @@ type osvAffected struct {
 }
 
 type osvRange struct {
-	Type   string      `json:"type"` // ECOSYSTEM / SEMVER / GIT
-	Events []osvEvent  `json:"events"`
+	Type   string     `json:"type"` // ECOSYSTEM / SEMVER / GIT
+	Events []osvEvent `json:"events"`
 }
 
 type osvEvent struct {
-	Introduced string `json:"introduced,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
+	Introduced   string `json:"introduced,omitempty"`
+	Fixed        string `json:"fixed,omitempty"`
 	LastAffected string `json:"last_affected,omitempty"`
-	Limit string `json:"limit,omitempty"`
+	Limit        string `json:"limit,omitempty"`
 }
 
 // QueryByPURLs 批量按 PURL 查询 osv.dev。

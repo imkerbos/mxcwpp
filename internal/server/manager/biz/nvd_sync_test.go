@@ -68,4 +68,3 @@ func TestSyncNVDOnlyMatchesByCPE(t *testing.T) {
 		t.Errorf("nvd_sync 含禁止的 keyword 匹配调用: %s", name)
 	}
 }
-

@@ -43,12 +43,12 @@ func (a *AlpineSource) Confidence() Confidence { return ConfidenceHigh }
 
 // alpineSecdb Alpine secdb JSON schema。
 type alpineSecdb struct {
-	APIVersion   string         `json:"apiversion"`
-	Archs        []string       `json:"archs"`
-	Reponame     string         `json:"reponame"`
-	Urlprefix    string         `json:"urlprefix"`
-	Distroversion string        `json:"distroversion"`
-	Packages     []alpinePkgRef `json:"packages"`
+	APIVersion    string         `json:"apiversion"`
+	Archs         []string       `json:"archs"`
+	Reponame      string         `json:"reponame"`
+	Urlprefix     string         `json:"urlprefix"`
+	Distroversion string         `json:"distroversion"`
+	Packages      []alpinePkgRef `json:"packages"`
 }
 
 type alpinePkgRef struct {

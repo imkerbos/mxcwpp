@@ -63,41 +63,41 @@ type rockyResp struct {
 
 // rockyAdvisory 单条 advisory（match 真实 schema）。
 type rockyAdvisory struct {
-	ID               int                     `json:"id"`
-	Name             string                  `json:"name"` // RLSA-2026:19664
-	Synopsis         string                  `json:"synopsis"`
-	Description      string                  `json:"description"`
-	Topic            string                  `json:"topic"`
-	Kind             string                  `json:"kind"`     // Security / Bugfix / Enhancement
-	Severity         string                  `json:"severity"` // Critical / Important / Moderate / Low
-	PublishedAt      string                  `json:"published_at"`
-	UpdatedAt        string                  `json:"updated_at"`
-	AffectedProducts []rockyAffectedProduct  `json:"affected_products"`
-	CVEs             []rockyCVE              `json:"cves"`
-	Packages         []rockyPackage          `json:"packages"`
+	ID               int                    `json:"id"`
+	Name             string                 `json:"name"` // RLSA-2026:19664
+	Synopsis         string                 `json:"synopsis"`
+	Description      string                 `json:"description"`
+	Topic            string                 `json:"topic"`
+	Kind             string                 `json:"kind"`     // Security / Bugfix / Enhancement
+	Severity         string                 `json:"severity"` // Critical / Important / Moderate / Low
+	PublishedAt      string                 `json:"published_at"`
+	UpdatedAt        string                 `json:"updated_at"`
+	AffectedProducts []rockyAffectedProduct `json:"affected_products"`
+	CVEs             []rockyCVE             `json:"cves"`
+	Packages         []rockyPackage         `json:"packages"`
 }
 
 type rockyAffectedProduct struct {
 	ID           int    `json:"id"`
-	Variant      string `json:"variant"`       // Rocky Linux
-	Name         string `json:"name"`          // Rocky Linux 8 x86_64
+	Variant      string `json:"variant"` // Rocky Linux
+	Name         string `json:"name"`    // Rocky Linux 8 x86_64
 	MajorVersion int    `json:"major_version"`
 	MinorVersion *int   `json:"minor_version"`
-	Arch         string `json:"arch"`          // x86_64 / aarch64 / src
+	Arch         string `json:"arch"` // x86_64 / aarch64 / src
 }
 
 type rockyCVE struct {
-	ID            int    `json:"id"`
-	CVE           string `json:"cve"`
-	CVSS3Vector   string `json:"cvss3_scoring_vector"`
-	CVSS3Score    string `json:"cvss3_base_score"`
-	CWE           string `json:"cwe"`
+	ID          int    `json:"id"`
+	CVE         string `json:"cve"`
+	CVSS3Vector string `json:"cvss3_scoring_vector"`
+	CVSS3Score  string `json:"cvss3_base_score"`
+	CWE         string `json:"cwe"`
 }
 
 type rockyPackage struct {
-	ID          int    `json:"id"`
-	NEVRA       string `json:"nevra"` // kernel-rt-0:4.18.0-553.125.1.rt7.466.el8_10.src.rpm
-	Checksum    string `json:"checksum"`
+	ID           int    `json:"id"`
+	NEVRA        string `json:"nevra"` // kernel-rt-0:4.18.0-553.125.1.rt7.466.el8_10.src.rpm
+	Checksum     string `json:"checksum"`
 	ChecksumType string `json:"checksum_type"`
 }
 

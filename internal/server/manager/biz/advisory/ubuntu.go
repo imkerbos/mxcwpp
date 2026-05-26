@@ -47,23 +47,23 @@ type usnListResponse struct {
 }
 
 type usnNotice struct {
-	ID          string              `json:"id"` // USN-7890-1
-	Title       string              `json:"title"`
-	Published   string              `json:"published"`
-	Summary     string              `json:"summary"`
-	Description string              `json:"description"`
-	Type        string              `json:"type"`
-	CVEs        []string            `json:"cves"` // ["CVE-2024-1234"]
-	References  []string            `json:"references"`
-	Releases    map[string]usnRel   `json:"releases"` // {"jammy": {...}, "noble": {...}}
-	Notes       string              `json:"notes"`
+	ID          string            `json:"id"` // USN-7890-1
+	Title       string            `json:"title"`
+	Published   string            `json:"published"`
+	Summary     string            `json:"summary"`
+	Description string            `json:"description"`
+	Type        string            `json:"type"`
+	CVEs        []string          `json:"cves"` // ["CVE-2024-1234"]
+	References  []string          `json:"references"`
+	Releases    map[string]usnRel `json:"releases"` // {"jammy": {...}, "noble": {...}}
+	Notes       string            `json:"notes"`
 }
 
 type usnRel struct {
-	Codename   string                       `json:"codename"`
-	Version    string                       `json:"version"`
-	Sources    map[string]usnSrc            `json:"sources"`     // 源码包修复
-	Binaries   map[string]usnBin            `json:"binaries"`    // 二进制包修复
+	Codename string            `json:"codename"`
+	Version  string            `json:"version"`
+	Sources  map[string]usnSrc `json:"sources"`  // 源码包修复
+	Binaries map[string]usnBin `json:"binaries"` // 二进制包修复
 }
 
 type usnSrc struct {

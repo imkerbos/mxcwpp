@@ -35,18 +35,18 @@ const (
 
 // Advisory 单条漏洞 advisory，承载多源统一的最小信息集。
 type Advisory struct {
-	AdvisoryID    string     // 上游 advisory ID，如 RHSA-2024:1234、USN-7890-1、DSA-5678-1
-	CVEIDs        []string   // 关联 CVE 列表（一个 advisory 可修复多个 CVE）
-	Severity      Severity   // 上游严重等级
-	CVSSScore     float64    // CVSS v3.1 score，0 表示未给出
-	CVSSVector    string     // CVSS v3.1 vector string
-	Description   string     // 上游描述（短）
-	ReferenceURL  string     // 上游详情页
-	IssuedAt      time.Time  // advisory 发布时间
-	UpdatedAt     time.Time  // advisory 最后更新时间
-	AffectedPkgs  []PkgFix   // 受影响包 + 修复版本（OS-specific）
-	OSFamily      string     // rhel / rocky / ubuntu / debian / alpine / null（OSV 通用）
-	OSMajorVer    string     // OS 主版本号，如 "9"（RHEL 9 / Rocky 9）
+	AdvisoryID   string    // 上游 advisory ID，如 RHSA-2024:1234、USN-7890-1、DSA-5678-1
+	CVEIDs       []string  // 关联 CVE 列表（一个 advisory 可修复多个 CVE）
+	Severity     Severity  // 上游严重等级
+	CVSSScore    float64   // CVSS v3.1 score，0 表示未给出
+	CVSSVector   string    // CVSS v3.1 vector string
+	Description  string    // 上游描述（短）
+	ReferenceURL string    // 上游详情页
+	IssuedAt     time.Time // advisory 发布时间
+	UpdatedAt    time.Time // advisory 最后更新时间
+	AffectedPkgs []PkgFix  // 受影响包 + 修复版本（OS-specific）
+	OSFamily     string    // rhel / rocky / ubuntu / debian / alpine / null（OSV 通用）
+	OSMajorVer   string    // OS 主版本号，如 "9"（RHEL 9 / Rocky 9）
 }
 
 // PkgFix 单个受影响 pkg 的修复版本。
@@ -77,35 +77,35 @@ type Source interface {
 
 // HostSoftware 单台主机的已装软件清单条目，供 Matcher 比对。
 type HostSoftware struct {
-	HostID    string
-	Hostname  string
-	IP        string
-	OSFamily  string // rhel / rocky / centos / ubuntu / debian / alpine / null
-	OSVer     string // 完整版本，如 "9.4"
-	OSMajor   string // 主版本，如 "9"
-	Arch      string // amd64 / arm64
-	PkgName   string // 已装 pkg 名（须与 Advisory.AffectedPkgs[].Name 精确匹配）
-	PkgArch   string // 已装 pkg arch
-	PkgVer    string // 已装版本号（含 epoch:version-release.dist，如 "1:3.5.1-3.el9"）
-	PURL      string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
+	HostID   string
+	Hostname string
+	IP       string
+	OSFamily string // rhel / rocky / centos / ubuntu / debian / alpine / null
+	OSVer    string // 完整版本，如 "9.4"
+	OSMajor  string // 主版本，如 "9"
+	Arch     string // amd64 / arm64
+	PkgName  string // 已装 pkg 名（须与 Advisory.AffectedPkgs[].Name 精确匹配）
+	PkgArch  string // 已装 pkg arch
+	PkgVer   string // 已装版本号（含 epoch:version-release.dist，如 "1:3.5.1-3.el9"）
+	PURL     string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
 }
 
 // Matcher 将 advisory 与已装软件做精确版本比对，输出受影响 host 列表。
 //
 // 比对约定：
-//  - OS 必须完全匹配：advisory.OSFamily/OSMajorVer == host.OSFamily/OSMajor
-//  - pkg 名 + arch 完全匹配
-//  - 已装版本 < advisory.FixedVersion → affected
-//  - 已装版本 ≥ advisory.FixedVersion → 已修复，跳过
+//   - OS 必须完全匹配：advisory.OSFamily/OSMajorVer == host.OSFamily/OSMajor
+//   - pkg 名 + arch 完全匹配
+//   - 已装版本 < advisory.FixedVersion → affected
+//   - 已装版本 ≥ advisory.FixedVersion → 已修复，跳过
 type Matcher interface {
 	Match(adv *Advisory, hosts []HostSoftware) []AffectedHost
 }
 
 // AffectedHost 单条 advisory × host 的受影响判定结果。
 type AffectedHost struct {
-	HostID         string
-	PkgName        string
-	InstalledVer   string
-	FixedVersion   string
-	NeedsUpdate    bool   // false 表示已修复（用于上报"已 patched"状态翻转）
+	HostID       string
+	PkgName      string
+	InstalledVer string
+	FixedVersion string
+	NeedsUpdate  bool // false 表示已修复（用于上报"已 patched"状态翻转）
 }
