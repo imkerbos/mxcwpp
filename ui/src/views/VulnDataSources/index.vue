@@ -263,7 +263,7 @@ const handleSync = async (record: VulnDataSource) => {
   syncingId.value = record.id
   try {
     const r = await vulnDataSourcesApi.triggerSync(record.id)
-    message.success(r.message || '同步已触发')
+    message.success(r?.message || '同步已触发')
     setTimeout(loadSources, 3000)
   } catch (err: any) {
     message.error('触发失败: ' + (err?.message || err))
