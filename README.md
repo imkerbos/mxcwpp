@@ -157,7 +157,7 @@ mxsec-platform/
 ├── internal/
 │   ├── server/             # Server (manager / agentcenter / consumer / common)
 │   └── agent/              # Agent (connection / transport / plugin / heartbeat)
-├── plugins/                # Plugins (baseline / collector / fim / scanner / sensor / remediation)
+├── plugins/                # Plugins (baseline / collector / fim / scanner / remediation)
 ├── api/proto/              # Protobuf definitions
 ├── ui/                     # Frontend (Vue 3 + TypeScript)
 ├── configs/                # Config files (server.yaml / agent.yaml / rule files)
