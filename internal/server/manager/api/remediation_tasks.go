@@ -163,7 +163,15 @@ func (h *RemediationTasksHandler) CreateTask(c *gin.Context) {
 	createdBy, _ := username.(string)
 
 	var tasks []model.RemediationTask
+	skippedNotApplicable := 0
+	skippedNoCommand := 0
 	for _, hv := range hostVulns {
+		os := osMap[hv.HostID]
+		// P0 fix: vuln source 必须适用于 host OS family（防 Debian 包给 CentOS）
+		if !biz.VulnApplicableToHost(vuln.Source, os.Family) {
+			skippedNotApplicable++
+			continue
+		}
 		// 检查是否已有进行中的任务
 		var existing int64
 		h.db.Model(&model.RemediationTask{}).
@@ -174,8 +182,11 @@ func (h *RemediationTasksHandler) CreateTask(c *gin.Context) {
 		}
 
 		// 根据主机 OS 选择正确的命令
-		os := osMap[hv.HostID]
 		cmd := selectCommandForHost(advice.Commands, os.Family, os.Version)
+		if cmd == "" {
+			skippedNoCommand++
+			continue
+		}
 
 		task := model.RemediationTask{
 			VulnID:       vuln.ID,
@@ -193,7 +204,7 @@ func (h *RemediationTasksHandler) CreateTask(c *gin.Context) {
 	}
 
 	if len(tasks) == 0 {
-		BadRequest(c, "所有指定主机已有进行中的修复任务")
+		BadRequest(c, fmt.Sprintf("无可创建：OS 不适用 %d，无命令 %d，其余已有进行中", skippedNotApplicable, skippedNoCommand))
 		return
 	}
 
@@ -439,7 +450,17 @@ func (h *RemediationTasksHandler) BatchCreate(c *gin.Context) {
 			}
 
 			os := osMap[hv.HostID]
+			// P0 fix: vuln source 必须适用于 host OS family（防 Debian 包给 CentOS）
+			if !biz.VulnApplicableToHost(vuln.Source, os.Family) {
+				skipped++
+				continue
+			}
+
 			cmd := selectCommandForHost(advice.Commands, os.Family, os.Version)
+			if cmd == "" {
+				skipped++
+				continue
+			}
 			allTasks = append(allTasks, model.RemediationTask{
 				VulnID:       vuln.ID,
 				CveID:        vuln.CveID,
@@ -552,6 +573,8 @@ func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
 	remSvc := biz.NewRemediationService(h.db, h.logger)
 	var tasks []model.RemediationTask
 	skipped := 0
+	skippedNotApplicable := 0 // vuln source 与 host OS family 不匹配（Debian 包给 CentOS）
+	skippedNoCommand := 0     // 无可执行命令（包管理器未识别且 fixed_version 无效）
 	for _, hv := range hostVulns {
 		if _, exists := existingSet[hv.VulnID]; exists {
 			skipped++
@@ -562,8 +585,18 @@ func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
 			skipped++
 			continue
 		}
+		// P0 fix: vuln source 必须适用于 host OS family，否则跳过（防 Debian 包给 CentOS）
+		if !biz.VulnApplicableToHost(v.Source, host.OSFamily) {
+			skippedNotApplicable++
+			continue
+		}
 		advice := remSvc.GetAdvice(&v)
 		cmd := selectCommandForHost(advice.Commands, host.OSFamily, host.OSVersion)
+		if cmd == "" {
+			// 无可执行命令（如 fixed_version 无效的 npm/golang），跳过
+			skippedNoCommand++
+			continue
+		}
 		tasks = append(tasks, model.RemediationTask{
 			VulnID:       v.ID,
 			CveID:        v.CveID,
@@ -579,7 +612,9 @@ func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
 	}
 
 	if len(tasks) == 0 {
-		BadRequest(c, "无可创建的任务（全部已有进行中或对应漏洞元数据缺失）")
+		BadRequest(c, fmt.Sprintf(
+			"无可创建的任务：已存在 %d，OS 不适用 %d，无命令 %d",
+			skipped, skippedNotApplicable, skippedNoCommand))
 		return
 	}
 
@@ -590,10 +625,12 @@ func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
 	}
 
 	Success(c, gin.H{
-		"created":  len(tasks),
-		"skipped":  skipped,
-		"hostId":   req.HostID,
-		"hostname": host.Hostname,
+		"created":              len(tasks),
+		"skipped":              skipped,
+		"skippedNotApplicable": skippedNotApplicable,
+		"skippedNoCommand":     skippedNoCommand,
+		"hostId":               req.HostID,
+		"hostname":             host.Hostname,
 	})
 }
 
