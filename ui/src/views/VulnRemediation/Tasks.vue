@@ -64,6 +64,7 @@
             <a-select-option value="cancelled">已取消</a-select-option>
           </a-select>
           <div class="filter-actions">
+            <a-button type="primary" @click="openNewTaskModal">新建修复任务</a-button>
             <a-button @click="loadTasks">刷新</a-button>
           </div>
         </div>
@@ -180,6 +181,62 @@
       />
       <p class="confirm-warning">执行后将通过 Agent 远程执行该命令，请确认命令正确。</p>
     </a-modal>
+
+    <!-- 新建修复任务弹窗 -->
+    <a-modal
+      v-model:open="newTaskModalVisible"
+      title="新建修复任务"
+      width="720px"
+      :confirm-loading="newTaskSubmitting"
+      :ok-text="newTaskAllUnpatched ? `提交（${newTaskHostUnpatchedTotal} 全部）` : `提交（${newTaskSelectedVulns.length} 选中）`"
+      :ok-button-props="{ disabled: !newTaskHostId || (!newTaskAllUnpatched && newTaskSelectedVulns.length === 0) }"
+      @ok="submitNewTask"
+      @cancel="resetNewTaskModal"
+    >
+      <div class="new-task-step">
+        <div class="new-task-label">1. 选择目标主机</div>
+        <a-select
+          v-model:value="newTaskHostId"
+          show-search
+          placeholder="按主机名 / IP / host_id 搜索"
+          :filter-option="false"
+          :options="newTaskHostOptions"
+          :loading="newTaskHostLoading"
+          style="width: 100%"
+          @search="searchHostsForNewTask"
+          @change="onNewTaskHostChange"
+        />
+      </div>
+
+      <div v-if="newTaskHostId" class="new-task-step">
+        <div class="new-task-label">2. 选择漏洞范围</div>
+        <a-radio-group v-model:value="newTaskAllUnpatched">
+          <a-radio :value="true">该主机全部 unpatched（{{ newTaskHostUnpatchedTotal }} 个）</a-radio>
+          <a-radio :value="false">手动多选</a-radio>
+        </a-radio-group>
+      </div>
+
+      <div v-if="newTaskHostId && !newTaskAllUnpatched" class="new-task-step">
+        <div class="new-task-label">3. 选择待修复漏洞</div>
+        <a-table
+          :data-source="newTaskVulnList"
+          :columns="newTaskVulnColumns"
+          :loading="newTaskVulnLoading"
+          :pagination="{ current: newTaskVulnPage, pageSize: 20, total: newTaskHostUnpatchedTotal, onChange: onNewTaskVulnPageChange, showTotal: (t: number) => `共 ${t} 条` }"
+          size="small"
+          row-key="id"
+          :row-selection="{ selectedRowKeys: newTaskSelectedVulns, onChange: (keys: number[]) => (newTaskSelectedVulns = keys), preserveSelectedRowKeys: true }"
+          :scroll="{ y: 280 }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'severity'">
+              <a-tag :color="severityColor(record.severity)">{{ record.severity }}</a-tag>
+            </template>
+          </template>
+        </a-table>
+        <p class="confirm-warning">已选 {{ newTaskSelectedVulns.length }} 个。已存在进行中的任务将自动跳过。</p>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -189,6 +246,8 @@ import { RouterLink } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { remediationTasksApi } from '@/api/remediation-tasks'
 import type { RemediationTaskItem, RemediationTaskStats } from '@/api/remediation-tasks'
+import { hostsApi } from '@/api/hosts'
+import { vulnerabilitiesApi } from '@/api/vulnerabilities'
 
 const loading = ref(false)
 const tasks = ref<RemediationTaskItem[]>([])
@@ -392,6 +451,125 @@ const handleBatchCancel = async () => {
   }
 }
 
+// === 新建修复任务 modal ===
+const newTaskModalVisible = ref(false)
+const newTaskHostId = ref<string>()
+const newTaskHostOptions = ref<{ label: string; value: string }[]>([])
+const newTaskHostLoading = ref(false)
+const newTaskAllUnpatched = ref(true)
+const newTaskVulnList = ref<any[]>([])
+const newTaskVulnLoading = ref(false)
+const newTaskVulnPage = ref(1)
+const newTaskHostUnpatchedTotal = ref(0)
+const newTaskSelectedVulns = ref<number[]>([])
+const newTaskSubmitting = ref(false)
+
+const newTaskVulnColumns = [
+  { title: 'CVE', dataIndex: 'cveId', width: 160 },
+  { title: '严重度', key: 'severity', width: 90 },
+  { title: '组件', dataIndex: 'component', width: 160 },
+  { title: '当前版本', dataIndex: 'currentVersion', width: 120 },
+  { title: '修复版本', dataIndex: 'fixedVersion', width: 120 },
+]
+
+const severityColor = (s: string) => {
+  const map: Record<string, string> = {
+    critical: 'red', high: 'orange', medium: 'gold', low: 'blue', unknown: 'default',
+  }
+  return map[(s || '').toLowerCase()] || 'default'
+}
+
+let hostSearchTimer: number | undefined
+const searchHostsForNewTask = (keyword: string) => {
+  if (hostSearchTimer) window.clearTimeout(hostSearchTimer)
+  hostSearchTimer = window.setTimeout(async () => {
+    newTaskHostLoading.value = true
+    try {
+      const res = await hostsApi.list({ page: 1, page_size: 30, search: keyword || undefined })
+      newTaskHostOptions.value = (res.items ?? []).map((h: any) => ({
+        label: `${h.hostname || h.host_id?.slice(0, 8)} | ${(h.ipv4 || []).join(',') || '-'} | ${h.business_line || '-'}`,
+        value: h.host_id,
+      }))
+    } catch {
+      newTaskHostOptions.value = []
+    } finally {
+      newTaskHostLoading.value = false
+    }
+  }, 250)
+}
+
+const loadHostUnpatchedVulns = async (page = 1) => {
+  if (!newTaskHostId.value) return
+  newTaskVulnLoading.value = true
+  newTaskVulnPage.value = page
+  try {
+    const res = await vulnerabilitiesApi.list({
+      host_id: newTaskHostId.value,
+      status: 'unpatched',
+      page,
+      page_size: 20,
+    })
+    newTaskVulnList.value = res.items ?? []
+    newTaskHostUnpatchedTotal.value = res.total ?? 0
+  } catch {
+    newTaskVulnList.value = []
+    newTaskHostUnpatchedTotal.value = 0
+  } finally {
+    newTaskVulnLoading.value = false
+  }
+}
+
+const onNewTaskHostChange = () => {
+  newTaskSelectedVulns.value = []
+  newTaskVulnPage.value = 1
+  loadHostUnpatchedVulns(1)
+}
+
+const onNewTaskVulnPageChange = (p: number) => loadHostUnpatchedVulns(p)
+
+const openNewTaskModal = () => {
+  resetNewTaskModal()
+  newTaskModalVisible.value = true
+  // 预加载一批默认主机（不带关键词）
+  searchHostsForNewTask('')
+}
+
+const resetNewTaskModal = () => {
+  newTaskModalVisible.value = false
+  newTaskHostId.value = undefined
+  newTaskHostOptions.value = []
+  newTaskAllUnpatched.value = true
+  newTaskVulnList.value = []
+  newTaskVulnPage.value = 1
+  newTaskHostUnpatchedTotal.value = 0
+  newTaskSelectedVulns.value = []
+}
+
+const submitNewTask = async () => {
+  if (!newTaskHostId.value) return
+  if (!newTaskAllUnpatched.value && newTaskSelectedVulns.value.length === 0) return
+  newTaskSubmitting.value = true
+  try {
+    const payload: { hostId: string; vulnIds?: number[]; allUnpatched?: boolean } = {
+      hostId: newTaskHostId.value,
+    }
+    if (newTaskAllUnpatched.value) {
+      payload.allUnpatched = true
+    } else {
+      payload.vulnIds = newTaskSelectedVulns.value
+    }
+    const res = await remediationTasksApi.createForHost(payload)
+    message.success(`已创建 ${res.created} 个任务（跳过 ${res.skipped} 个已存在）`)
+    resetNewTaskModal()
+    loadTasks()
+    loadStats()
+  } catch (err: any) {
+    message.error('创建失败: ' + (err?.message || err))
+  } finally {
+    newTaskSubmitting.value = false
+  }
+}
+
 onMounted(() => {
   loadTasks()
   loadStats()
@@ -443,6 +621,10 @@ onMounted(() => {
 }
 
 .text-muted { font-size: 12px; color: var(--mxsec-text-3); }
+
+.new-task-step { margin-bottom: 16px; }
+.new-task-label { margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--mxsec-text-1); }
+.confirm-warning { margin-top: 8px; font-size: 12px; color: var(--mxsec-text-3); }
 
 
 
