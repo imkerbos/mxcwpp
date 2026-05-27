@@ -478,15 +478,21 @@ func (w *MySQLWriter) WriteRemediationResult(msg *kafka.MQMessage) error {
 	return executor.HandleResult(msg.AgentID, fields)
 }
 
-// WriteRemediationProgress 处理漏洞修复阶段进度事件（DataType 9201）
-// 写入 remediation_task_events 表，UI SSE/WebSocket 订阅实时显示。
+// WriteRemediationProgress 处理 DataType 9201。
+// 该 DataType 共用于两类 agent 上报，按 fields["kind"] 分发：
+//   - "" / "progress"      : 修复阶段进度 → remediation_task_events（UI 实时显示）
+//   - "precheck_result"    : 单条 pre-check 结果 → host_vulnerabilities.precheck_*
 func (w *MySQLWriter) WriteRemediationProgress(msg *kafka.MQMessage) error {
 	fields, err := ParseRecordFields(msg.Body)
 	if err != nil {
 		return fmt.Errorf("解析修复进度失败: %w", err)
 	}
-	executor := biz.NewRemediationExecutor(w.db, w.logger)
-	return executor.HandleProgress(msg.AgentID, fields)
+	switch fields["kind"] {
+	case "precheck_result":
+		return biz.NewPreCheckResultHandler(w.db, w.logger).HandleResult(msg.AgentID, fields)
+	default:
+		return biz.NewRemediationExecutor(w.db, w.logger).HandleProgress(msg.AgentID, fields)
+	}
 }
 
 // WriteScanResult 处理 Scanner 扫描结果（DataType 7001）

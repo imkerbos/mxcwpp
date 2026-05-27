@@ -167,7 +167,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
 	setupMonitorAPI(router, db, logger, cfg, acRegistry, chConn, redisClient, promClient)
-	setupVulnerabilitiesAPI(router, db, logger)
+	setupVulnerabilitiesAPI(router, db, logger, acDispatcher)
 	setupVulnBulletinsAPI(router, db, logger)
 	setupAntivirusAPI(router, db, logger, virusDBUpdater, acDispatcher)
 	setupQuarantineAPI(router, db, logger)
@@ -734,7 +734,7 @@ func setupQuarantineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupVulnerabilitiesAPI 设置漏洞管理 API 路由
-func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) {
 	handler := api.NewVulnerabilitiesHandler(db, logger)
 	router.GET("/vulnerabilities", handler.ListVulnerabilities)
 	router.POST("/vulnerabilities/:id/ignore", handler.IgnoreVulnerability)
@@ -784,6 +784,11 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.POST("/remediation-tasks/batch-retry", taskHandler.BatchRetry)
 	router.POST("/remediation-tasks/batch-cancel", taskHandler.BatchCancel)
 	router.POST("/remediation-tasks/host-batch", taskHandler.CreateForHost) // 单 host 批量创建（A: vulnIds 子集 / B: allUnpatched 全量）
+
+	// 主机漏洞预检（agent 在本机查仓库 + 已装包，避免 server vuln DB 错命令）
+	preCheckHandler := api.NewHostVulnPreCheckHandler(db, logger, acDispatcher)
+	router.POST("/host-vulnerabilities/:id/precheck", preCheckHandler.CreateForHostVuln)
+	router.POST("/hosts/:host_id/precheck-all", preCheckHandler.CreateForHostAll)
 
 	// 扫描计划管理
 	vulnScanner := biz.NewVulnScanner(db, logger)
