@@ -108,8 +108,16 @@ func main() {
 			if !ok {
 				return
 			}
-			if err := handleTask(ctx, task, client, logger); err != nil {
-				logger.Error("handle task failed", zap.Error(err))
+			// 按 DataType 分发：9100 = 修复执行；9101 = 单独 pre-check（只查不动）
+			switch task.DataType {
+			case dataTypePreCheckPush:
+				if err := handlePreCheck(ctx, task, client, logger); err != nil {
+					logger.Error("handle precheck failed", zap.Error(err))
+				}
+			default:
+				if err := handleTask(ctx, task, client, logger); err != nil {
+					logger.Error("handle task failed", zap.Error(err))
+				}
 			}
 		}
 	}

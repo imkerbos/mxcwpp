@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -100,6 +101,61 @@ func selectCommandForHost(commands []biz.RemediationCommand, osFamily, osVersion
 	return commands[0].Command
 }
 
+// precheckPackage agent 上报的 precheck_packages JSON 元素
+type precheckPackage struct {
+	Name             string `json:"name"`
+	InstalledVersion string `json:"installed_version"`
+	AvailableVersion string `json:"available_version"`
+	Repo             string `json:"repo"`
+	Action           string `json:"action"`
+}
+
+// buildCommandFromPreCheck 优先用 agent pre-check 已确认的真实包名生成命令。
+// 返回 "" 表示 precheck 不可用 / 无 upgradable 包，应 fallback 老逻辑。
+//
+// 例：vuln.component="openssl"，主机实际装了 openssl + openssl-libs，
+// pre-check 命中 → cmd = "dnf upgrade openssl openssl-libs -y"
+// 而非以前的 "dnf upgrade openssl-1.1.1g-15 -y"（fixed_version 拼错）。
+func buildCommandFromPreCheck(hv *model.HostVulnerability, osFamily, osVersion string) string {
+	if hv.PreCheckStatus != model.PreCheckStatusAvailable &&
+		hv.PreCheckStatus != model.PreCheckStatusAvailableEPEL {
+		return ""
+	}
+	if hv.PreCheckPackages == "" {
+		return ""
+	}
+	var pkgs []precheckPackage
+	if err := json.Unmarshal([]byte(hv.PreCheckPackages), &pkgs); err != nil {
+		return ""
+	}
+	var names []string
+	for _, p := range pkgs {
+		if p.Action == "upgrade" && p.Name != "" {
+			names = append(names, p.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	pkgMgr := detectPackageManager(osFamily, osVersion)
+	pkgList := strings.Join(names, " ")
+	switch pkgMgr {
+	case "rpm-dnf":
+		if hv.PreCheckStatus == model.PreCheckStatusAvailableEPEL {
+			return fmt.Sprintf("dnf upgrade --enablerepo=epel %s -y", pkgList)
+		}
+		return fmt.Sprintf("dnf upgrade %s -y", pkgList)
+	case "rpm-yum":
+		if hv.PreCheckStatus == model.PreCheckStatusAvailableEPEL {
+			return fmt.Sprintf("yum update --enablerepo=epel %s -y", pkgList)
+		}
+		return fmt.Sprintf("yum update %s -y", pkgList)
+	case "deb":
+		return fmt.Sprintf("apt-get install --only-upgrade %s -y", pkgList)
+	}
+	return ""
+}
+
 // RemediationTasksHandler 修复任务 API 处理器
 type RemediationTasksHandler struct {
 	db     *gorm.DB
@@ -181,8 +237,11 @@ func (h *RemediationTasksHandler) CreateTask(c *gin.Context) {
 			continue
 		}
 
-		// 根据主机 OS 选择正确的命令
-		cmd := selectCommandForHost(advice.Commands, os.Family, os.Version)
+		// P1.4: 优先用 agent pre-check 已确认的真实包名生成命令（精确）；否则 fallback
+		cmd := buildCommandFromPreCheck(&hv, os.Family, os.Version)
+		if cmd == "" {
+			cmd = selectCommandForHost(advice.Commands, os.Family, os.Version)
+		}
 		if cmd == "" {
 			skippedNoCommand++
 			continue
@@ -456,7 +515,11 @@ func (h *RemediationTasksHandler) BatchCreate(c *gin.Context) {
 				continue
 			}
 
-			cmd := selectCommandForHost(advice.Commands, os.Family, os.Version)
+			// P1.4: 优先用 agent pre-check 已确认的真实包名
+			cmd := buildCommandFromPreCheck(&hv, os.Family, os.Version)
+			if cmd == "" {
+				cmd = selectCommandForHost(advice.Commands, os.Family, os.Version)
+			}
 			if cmd == "" {
 				skipped++
 				continue
@@ -590,10 +653,13 @@ func (h *RemediationTasksHandler) CreateForHost(c *gin.Context) {
 			skippedNotApplicable++
 			continue
 		}
-		advice := remSvc.GetAdvice(&v)
-		cmd := selectCommandForHost(advice.Commands, host.OSFamily, host.OSVersion)
+		// P1.4: 优先用 agent pre-check 真实包名
+		cmd := buildCommandFromPreCheck(&hv, host.OSFamily, host.OSVersion)
 		if cmd == "" {
-			// 无可执行命令（如 fixed_version 无效的 npm/golang），跳过
+			advice := remSvc.GetAdvice(&v)
+			cmd = selectCommandForHost(advice.Commands, host.OSFamily, host.OSVersion)
+		}
+		if cmd == "" {
 			skippedNoCommand++
 			continue
 		}

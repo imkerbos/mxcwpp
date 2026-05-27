@@ -379,6 +379,22 @@ func (e *RemediationExecutor) HandleResult(agentID string, data map[string]strin
 		}
 	}
 
+	// P4: 修复成功后清 precheck cache，下轮 6h cron 会重检确认 already_latest，
+	// UI 显示"未 pre-check"提示用户主动触发，或等 cron 自动覆盖
+	if status == "success" {
+		if err := e.db.Model(&model.HostVulnerability{}).
+			Where("vuln_id = ? AND host_id = ?", task.VulnID, task.HostID).
+			Updates(map[string]any{
+				"precheck_status":     model.PreCheckStatusUnchecked,
+				"precheck_message":    "修复任务执行后已重置，等待复扫验证",
+				"precheck_packages":   "",
+				"precheck_checked_at": nil,
+			}).Error; err != nil {
+			e.logger.Warn("清 precheck cache 失败",
+				zap.Uint("task_id", taskID), zap.Error(err))
+		}
+	}
+
 	e.logger.Info("修复任务结果已处理",
 		zap.Uint("task_id", taskID),
 		zap.String("agent_id", agentID),
