@@ -1,6 +1,8 @@
 package api
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -53,7 +55,11 @@ func (h *StorylineHandler) ListStorylines(c *gin.Context) {
 	SuccessPaginated(c, total, stories)
 }
 
-// GetStoryline 获取故事线详情（含事件时间线）
+// GetStoryline 获取故事线详情（含事件时间线，分页）
+//
+// 单 storyline 的 events 可达数万级（EDR ebpf 全量关联），全量返回 JSON
+// 体积过大导致浏览器解析+渲染卡死。改用分页：默认 page=1 page_size=100，
+// 上限 500；UI 增量加载。
 func (h *StorylineHandler) GetStoryline(c *gin.Context) {
 	storyID := c.Param("story_id")
 
@@ -63,12 +69,34 @@ func (h *StorylineHandler) GetStoryline(c *gin.Context) {
 		return
 	}
 
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "100"))
+	if pageSize < 1 {
+		pageSize = 100
+	}
+	if pageSize > 500 {
+		pageSize = 500
+	}
+
+	var eventsTotal int64
+	h.db.Model(&model.StorylineEvent{}).Where("story_id = ?", storyID).Count(&eventsTotal)
+
 	var events []model.StorylineEvent
-	h.db.Where("story_id = ?", storyID).Order("timestamp ASC").Find(&events)
+	h.db.Where("story_id = ?", storyID).
+		Order("timestamp ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&events)
 
 	Success(c, gin.H{
-		"storyline": story,
-		"events":    events,
+		"storyline":        story,
+		"events":           events,
+		"events_total":     eventsTotal,
+		"events_page":      page,
+		"events_page_size": pageSize,
 	})
 }
 
