@@ -39,27 +39,59 @@ type alertWhitelistRule struct {
 //
 // 维护原则：只放"高置信度业务模式"，宁可漏抑制也不要错抑制（漏抑制只是告警多，
 // 错抑制可能错过真攻击）。
+//
+// 匹配策略说明：
+//   - **优先按 RuleCategoryPattern 匹配**（agent yaml 与 server DetectionRule
+//     的 name 字段有时不一致：yaml `name: c2_high_risk_port`，server 端 DB
+//     name 可能是中文显示名如"高危端口外连"，但 category 相对稳定）。
+//   - RuleNamePattern 作为兜底/精确匹配补充，子串匹配兼容中英文混排。
+//
+// 当前覆盖 prod 高频误报：
+//   - c2_communication 类全部规则（高危端口/Cobalt Strike 端口/Tor/IRC 等）
+//   - 反代进程 / 内网 IP
+//   - cryptomining 类 + 内网 IP
 var defaultAlertWhitelist = []alertWhitelistRule{
 	{
-		// MXEDR-0080 c2_high_risk_port + 反代进程：99% 是 backend 上游连接
+		// 任意 C2 通信类规则 + 反代进程：99% 是 backend 上游连接
+		RuleCategoryPattern: "c2_communication",
+		ExeBasenameIn:       []string{"nginx", "httpd", "apache2", "envoy", "haproxy", "caddy", "traefik", "kube-proxy", "kubelet"},
+		Reason:              "reverse_proxy_upstream",
+	},
+	{
+		// 任意 C2 通信类规则 + 内网 IP：跨节点业务通信
+		RuleCategoryPattern: "c2_communication",
+		DstIPInPrivate:      true,
+		Reason:              "internal_network_connection",
+	},
+	{
+		// 矿池/cryptomining 类 + 内网 IP：业务用 3333/7777/9999 等端口很常见
+		RuleCategoryPattern: "cryptomining",
+		DstIPInPrivate:      true,
+		Reason:              "internal_network_connection",
+	},
+	{
+		// impact 类（含 cryptominer impact tactic）+ 内网 IP
+		RuleCategoryPattern: "impact",
+		DstIPInPrivate:      true,
+		Reason:              "internal_network_connection",
+	},
+	// 兼容 agent yaml 原始 rule name 匹配（如果 server 端直接透传）
+	{
 		RuleNamePattern: "c2_high_risk_port",
 		ExeBasenameIn:   []string{"nginx", "httpd", "apache2", "envoy", "haproxy", "caddy", "traefik"},
 		Reason:          "reverse_proxy_upstream",
 	},
 	{
-		// MXEDR-0080 c2_high_risk_port + 内网 IP：跨节点业务通信
 		RuleNamePattern: "c2_high_risk_port",
 		DstIPInPrivate:  true,
 		Reason:          "internal_network_connection",
 	},
 	{
-		// MXEDR-0012 cryptominer_pool_port + 内网 IP：业务用 3333/7777/9999 等端口很常见
 		RuleNamePattern: "cryptominer_pool_port",
 		DstIPInPrivate:  true,
 		Reason:          "internal_network_connection",
 	},
 	{
-		// MXEDR-0082 c2_irc_connect + 内网 IP：IRC 端口 6667 也是常见自定义业务端口
 		RuleNamePattern: "c2_irc_connect",
 		DstIPInPrivate:  true,
 		Reason:          "internal_network_connection",
