@@ -107,7 +107,75 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("添加性能索引失败", zap.Error(err))
 	}
 
+	// 回填历史 vuln 的 vuln_category / restart_action（P5）
+	if err := migrateCategorizeExistingVulns(db, logger); err != nil {
+		logger.Warn("漏洞分类回填失败", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
+	return nil
+}
+
+// migrateCategorizeExistingVulns 给历史 vulnerabilities 回填 vuln_category + restart_action
+// 分批 1000 行 UPDATE，每批 sleep 50ms 避免长事务锁表。
+// 幂等：只处理 vuln_category='other' AND restart_action='unknown' 的（默认值）
+func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
+	const batchSize = 1000
+	var total int64
+	db.Model(&model.Vulnerability{}).
+		Where("(vuln_category = ? OR vuln_category = '' OR vuln_category IS NULL)", model.VulnCategoryOther).
+		Count(&total)
+	if total == 0 {
+		return nil
+	}
+	logger.Info("开始回填 vuln 分类", zap.Int64("total", total))
+
+	processed := 0
+	categoryStats := map[string]int{}
+	// 按 id 分页避免死循环：cat 仍返回 'other' 时行不会从过滤集移出，
+	// 不加 id > lastID 会被反复 fetch 同一批
+	var lastID uint = 0
+	for {
+		var batch []model.Vulnerability
+		if err := db.Select("id, component, purl").
+			Where("(vuln_category = ? OR vuln_category = '' OR vuln_category IS NULL) AND id > ?",
+				model.VulnCategoryOther, lastID).
+			Order("id ASC").
+			Limit(batchSize).
+			Find(&batch).Error; err != nil {
+			return fmt.Errorf("拉批次失败: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, v := range batch {
+			cat, act := model.CategorizeVuln(v.Component, v.PURL)
+			// 用 Model+Updates 跳过 BeforeSave hook 避免再算一次
+			if err := db.Model(&model.Vulnerability{}).
+				Where("id = ?", v.ID).
+				UpdateColumns(map[string]any{
+					"vuln_category":  cat,
+					"restart_action": act,
+				}).Error; err != nil {
+				logger.Warn("vuln 分类回填失败",
+					zap.Uint("id", v.ID), zap.Error(err))
+				continue
+			}
+			categoryStats[cat]++
+			processed++
+			lastID = v.ID
+		}
+		logger.Info("vuln 分类回填进度",
+			zap.Int("processed", processed), zap.Int64("total", total))
+		time.Sleep(50 * time.Millisecond)
+		if len(batch) < batchSize {
+			break
+		}
+	}
+
+	logger.Info("vuln 分类回填完成",
+		zap.Int("processed", processed),
+		zap.Any("by_category", categoryStats))
 	return nil
 }
 

@@ -70,6 +70,10 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			priority_score    REAL DEFAULT 0,
 			exposure_score    REAL DEFAULT 0,
 			confidence        TEXT DEFAULT 'low',
+			vuln_category     TEXT DEFAULT 'other',
+			restart_action    TEXT DEFAULT 'unknown',
+			vuln_category_override   TEXT,
+			restart_action_override  TEXT,
 			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			deleted_at        DATETIME

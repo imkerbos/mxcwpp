@@ -237,6 +237,21 @@
               </a-tag>
             </template>
 
+            <template v-else-if="column.key === 'category'">
+              <a-tag :color="vulnCategoryConfig[effectiveCategory(record)].color" :bordered="false">
+                {{ vulnCategoryConfig[effectiveCategory(record)].text }}
+              </a-tag>
+              <span v-if="record.vulnCategoryOverride" style="margin-left:4px;font-size:11px;color:#86909C">(manual)</span>
+            </template>
+
+            <template v-else-if="column.key === 'restart'">
+              <a-tooltip :title="`修复影响：${restartActionConfig[effectiveRestartAction(record)].text}`">
+                <a-tag :color="restartActionConfig[effectiveRestartAction(record)].color" :bordered="false">
+                  {{ restartActionConfig[effectiveRestartAction(record)].text }}
+                </a-tag>
+              </a-tooltip>
+            </template>
+
             <template v-else-if="column.key === 'hosts'">
               <span>{{ hostSummary(record) }}</span>
             </template>
@@ -396,11 +411,40 @@ const columns = [
   { title: '优先级', key: 'priority', width: 130 },
   { title: '利用状态', key: 'exploit', width: 100 },
   { title: '影响组件', dataIndex: 'component', key: 'component', width: 160 },
+  { title: '类别', key: 'category', width: 110 },
+  { title: '重启影响', key: 'restart', width: 130 },
   { title: '受影响主机', key: 'hosts', width: 140 },
   { title: '状态', key: 'status', width: 90 },
   { title: '发现时间', dataIndex: 'discoveredAt', key: 'discoveredAt', width: 160 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' },
 ]
+
+// 9 类 vuln_category 显示
+const vulnCategoryConfig: Record<string, { color: string; text: string }> = {
+  kernel:              { color: 'red',     text: '内核' },
+  critical_shared_lib: { color: 'volcano', text: '关键共享库' },
+  shared_lib:          { color: 'orange',  text: '共享库' },
+  system_daemon:       { color: 'gold',    text: '系统服务' },
+  cli_tool:            { color: 'green',   text: 'CLI 工具' },
+  web_service:         { color: 'cyan',    text: 'Web 服务' },
+  db_service:          { color: 'geekblue',text: '数据库' },
+  container_runtime:   { color: 'purple',  text: '容器运行时' },
+  language_dep:        { color: 'blue',    text: '语言依赖' },
+  other:               { color: 'default', text: '其他' },
+}
+
+// 5 动作 restart_action 显示
+const restartActionConfig: Record<string, { color: string; text: string }> = {
+  reboot_host:                { color: 'red',     text: '🔴 需重启主机' },
+  restart_dependent_services: { color: 'orange',  text: '🟠 需重启依赖' },
+  restart_specific_service:   { color: 'gold',    text: '🟡 需重启服务' },
+  no_action:                  { color: 'green',   text: '🟢 无需重启' },
+  rebuild_app:                { color: 'blue',    text: '🔵 需重 build' },
+  unknown:                    { color: 'default', text: '⚪ 影响未知' },
+}
+
+const effectiveCategory = (v: Vulnerability) => v.vulnCategoryOverride || v.vulnCategory || 'other'
+const effectiveRestartAction = (v: Vulnerability) => v.restartActionOverride || v.restartAction || 'unknown'
 
 // === 扫描状态 ===
 const scanStatus = ref<SecurityDBSyncRecord | null>(null)
