@@ -512,6 +512,12 @@ const router = createRouter({
 let authInitialized = false
 
 router.beforeEach(async (to, _from, next) => {
+  // 打印路由 (Gotenberg 拉取): 把 query token 提前写 localStorage 让 axios
+  // interceptor 立即拾取，避免 site-config / reports API 因无 token 401 跳登录
+  if (to.path.startsWith('/print/') && to.query.token) {
+    localStorage.setItem('mxcsec_token', String(to.query.token))
+  }
+
   const authStore = useAuthStore()
   const { useSiteConfigStore } = await import('@/stores/site-config')
   const siteConfigStore = useSiteConfigStore()
