@@ -1,0 +1,91 @@
+// 报告打印 / PDF 导出统一样式
+//
+// 用法:
+//   1. 报告页面 html 加 `report-print-ready` class 启用打印优化
+//   2. 通过 ReportHeader / ReportFooter / ReportSection 组件自动 page-break
+
+@import './tokens.scss';
+
+@page {
+  size: A4;
+  margin: 18mm 14mm 22mm 14mm;
+
+  @bottom-center {
+    content: counter(page) ' / ' counter(pages);
+    font-size: 10px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media print {
+  // 全局: 强制白底 + 黑字（避免暗色主题颜色被截图丢色）
+  body, .report-print-ready {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: $font-sans !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  // 隐藏不应印的元素
+  .no-print,
+  .ant-back-top,
+  .ant-modal-mask,
+  .ant-modal-wrap,
+  .ant-pagination-options-quick-jumper,
+  .ant-pagination-options-size-changer {
+    display: none !important;
+  }
+
+  // 表格分页：行不被切断
+  tr, .ant-table-row {
+    page-break-inside: avoid;
+  }
+
+  // 标题不孤悬（避免标题在页底，正文翻到下页）
+  h1, h2, h3, h4, h5,
+  .report-section__header {
+    page-break-after: avoid;
+  }
+
+  // 图表 / 卡片 / Section 整体不切割
+  .ant-card,
+  .report-section,
+  .stat-grid__item,
+  .ant-statistic,
+  .echarts {
+    page-break-inside: avoid;
+  }
+
+  // 强制分页（在需要的元素上加 class）
+  .page-break-before {
+    page-break-before: always;
+  }
+  .page-break-after {
+    page-break-after: always;
+  }
+
+  // 链接打印时显示 URL（合规可追溯）
+  a[href^="http"]::after {
+    content: ' (' attr(href) ')';
+    font-size: 0.8em;
+    color: rgba(0, 0, 0, 0.45);
+  }
+
+  // 移除 hover / box-shadow 等屏幕态样式
+  *:hover {
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  // ant-statistic 数字颜色保留
+  .ant-statistic-content {
+    color: inherit;
+  }
+}
+
+// 屏幕预览态下也提供"打印预览"按钮样式
+.report-print-ready {
+  // 留给屏幕预览：可加 max-width 模拟 A4 比例
+  // max-width: 794px; // A4 @96dpi
+}

@@ -398,6 +398,26 @@ export interface EDRReport {
     topExe: Array<{ exe: string; count: number }>
     available: boolean
   }
+  autoResponseStats: {
+    networkBlocks: number
+    hostIsolations: number
+    processKills: number
+    total: number
+  }
+  iocStats: {
+    iocSnapshots: number
+    memoryThreats: number
+    topIOCTypes: Array<{ technique: string; count: number }>
+  }
+  ruleEfficacy: {
+    totalRules: number
+    enabledRules: number
+    hitRules: number
+    zeroHitRules: number
+    hitRate: number
+    topZeroHit: Array<{ id: number; name: string; category: string }>
+  }
+  improvements: string[]
 }
 
 // EDR 高管摘要报告

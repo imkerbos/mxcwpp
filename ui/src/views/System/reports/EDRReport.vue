@@ -1,5 +1,12 @@
 <template>
-  <div class="category-report">
+  <div class="category-report report-print-ready">
+    <ReportHeader
+      title="EDR 检测专项报告"
+      :subtitle="`${report.meta.onlineHosts} 台主机 · ${report.meta.enabledRules} 条规则启用`"
+      :period="report.meta.period"
+      :report-id="report.meta.reportID"
+      :generated-at="report.meta.generatedAt"
+    />
     <a-spin :spinning="loading">
       <!-- 元数据 -->
       <a-row :gutter="[16, 16]" class="stats-overview">
@@ -181,6 +188,91 @@
         </a-col>
       </a-row>
 
+      <!-- 自动响应 + IOC + 规则有效性 -->
+      <a-row :gutter="[16, 16]" style="margin-top: 16px">
+        <a-col :xs="24" :lg="8">
+          <a-card title="自动响应执行" :bordered="false">
+            <a-row :gutter="[12, 12]">
+              <a-col :span="24">
+                <a-statistic title="累计动作" :value="report.autoResponseStats?.total || 0" :value-style="{ color: '#722ed1' }" />
+              </a-col>
+              <a-col :span="8">
+                <a-statistic title="网络封禁" :value="report.autoResponseStats?.networkBlocks || 0" :value-style="{ fontSize: '18px' }" />
+              </a-col>
+              <a-col :span="8">
+                <a-statistic title="主机隔离" :value="report.autoResponseStats?.hostIsolations || 0" :value-style="{ fontSize: '18px' }" />
+              </a-col>
+              <a-col :span="8">
+                <a-statistic title="进程查杀" :value="report.autoResponseStats?.processKills || 0" :value-style="{ fontSize: '18px' }" />
+              </a-col>
+            </a-row>
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :lg="8">
+          <a-card title="IOC / 内存威胁" :bordered="false">
+            <a-row :gutter="[12, 12]">
+              <a-col :span="12">
+                <a-statistic title="IOC 快照" :value="report.iocStats?.iocSnapshots || 0" :value-style="{ color: '#0891b2' }" />
+              </a-col>
+              <a-col :span="12">
+                <a-statistic title="内存威胁" :value="report.iocStats?.memoryThreats || 0" :value-style="{ color: '#EF4444' }" />
+              </a-col>
+            </a-row>
+            <div v-if="report.iocStats?.topIOCTypes?.length" style="margin-top: 12px">
+              <div style="font-size: 12px; color: rgba(0,0,0,0.45); margin-bottom: 6px">Top 技术</div>
+              <a-tag v-for="t in report.iocStats.topIOCTypes" :key="t.technique" color="red" style="margin-bottom: 4px">
+                {{ t.technique }} ({{ t.count }})
+              </a-tag>
+            </div>
+          </a-card>
+        </a-col>
+        <a-col :xs="24" :lg="8">
+          <a-card title="规则有效性" :bordered="false">
+            <a-statistic title="命中率" :value="report.ruleEfficacy?.hitRate || 0" :precision="1" suffix="%" :value-style="{ color: '#22C55E' }" />
+            <a-progress
+              :percent="Math.round(report.ruleEfficacy?.hitRate || 0)"
+              :stroke-color="(report.ruleEfficacy?.hitRate || 0) > 50 ? '#22C55E' : '#F59E0B'"
+              style="margin-top: 8px"
+            />
+            <div style="font-size: 12px; color: rgba(0,0,0,0.45); margin-top: 8px">
+              {{ report.ruleEfficacy?.hitRules || 0 }} / {{ report.ruleEfficacy?.enabledRules || 0 }} 启用规则有命中
+              · {{ report.ruleEfficacy?.zeroHitRules || 0 }} 条零命中
+            </div>
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <!-- 0 命中规则建议下线列表 -->
+      <a-row v-if="report.ruleEfficacy?.topZeroHit?.length" :gutter="[16, 16]" style="margin-top: 16px">
+        <a-col :span="24">
+          <a-card title="零命中规则（建议复核或下线）" :bordered="false">
+            <a-table
+              :columns="zeroHitColumns"
+              :data-source="report.ruleEfficacy.topZeroHit"
+              :pagination="false"
+              size="small"
+              row-key="id"
+            />
+          </a-card>
+        </a-col>
+      </a-row>
+
+      <!-- 改进建议 -->
+      <a-row v-if="report.improvements?.length" :gutter="[16, 16]" style="margin-top: 16px">
+        <a-col :span="24">
+          <a-card title="改进建议" :bordered="false">
+            <a-list :data-source="report.improvements" size="small">
+              <template #renderItem="{ item, index }">
+                <a-list-item>
+                  <span style="color: #722ed1; margin-right: 8px">{{ index + 1 }}.</span>
+                  {{ item }}
+                </a-list-item>
+              </template>
+            </a-list>
+          </a-card>
+        </a-col>
+      </a-row>
+
       <!-- Top 高危故事线 + 误报抑制 -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :lg="14">
@@ -223,6 +315,11 @@
         </a-col>
       </a-row>
     </a-spin>
+    <ReportFooter
+      :report-id="report.meta.reportID"
+      :generated-at="report.meta.generatedAt"
+      watermark="MXSEC CONFIDENTIAL"
+    />
   </div>
 </template>
 
@@ -239,6 +336,8 @@ import {
 import type { EChartsOption } from 'echarts'
 import type { Dayjs } from 'dayjs'
 import { reportsApi, type EDRReport } from '@/api/reports'
+import ReportHeader from '@/components/report/ReportHeader.vue'
+import ReportFooter from '@/components/report/ReportFooter.vue'
 
 import { LineChart } from 'echarts/charts'
 use([CanvasRenderer, PieChart, BarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
@@ -258,7 +357,17 @@ const report = ref<EDRReport>({
   suppressionStats: [],
   trend: { prevPeriodAlerts: 0, growthPercent: 0, direction: 'stable' },
   rawEventStats: { totalEvents: 0, uniqueHosts: 0, eventsByType: [], eventsByHour: [], topHostsByEvent: [], topExe: [], available: false },
+  autoResponseStats: { networkBlocks: 0, hostIsolations: 0, processKills: 0, total: 0 },
+  iocStats: { iocSnapshots: 0, memoryThreats: 0, topIOCTypes: [] },
+  ruleEfficacy: { totalRules: 0, enabledRules: 0, hitRules: 0, zeroHitRules: 0, hitRate: 0, topZeroHit: [] },
+  improvements: [],
 })
+
+const zeroHitColumns = [
+  { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
+  { title: '规则名', dataIndex: 'name', key: 'name', ellipsis: true },
+  { title: '类别', dataIndex: 'category', key: 'category', width: 180 },
+]
 
 const alertConversionRate = computed(() => {
   const ev = report.value.rawEventStats?.totalEvents || 0
