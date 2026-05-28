@@ -326,12 +326,15 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 				if err := proto.Unmarshal(record.Data, &bridgeRecord); err == nil {
 					if bridgeRecord.Data != nil && bridgeRecord.Data.Fields != nil {
 						fields := bridgeRecord.Data.Fields
-						// OS信息
+						// OS信息（含 P5.3 livepatch 能力）
 						osInfo = map[string]string{
-							"os_family":      fields["os_family"],
-							"os_version":     fields["os_version"],
-							"kernel_version": fields["kernel"],
-							"arch":           fields["arch"],
+							"os_family":          fields["os_family"],
+							"os_version":         fields["os_version"],
+							"kernel_version":     fields["kernel"],
+							"arch":               fields["arch"],
+							"livepatch_enabled":  fields["livepatch_enabled"],
+							"livepatch_provider": fields["livepatch_provider"],
+							"active_livepatches": fields["active_livepatches"],
 						}
 						// 硬件信息
 						hardwareInfo = map[string]string{
@@ -549,6 +552,10 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 		OSVersion:     osInfo["os_version"],
 		KernelVersion: osInfo["kernel_version"],
 		Arch:          osInfo["arch"],
+		// P5.3 kernel livepatch
+		KernelLivepatchEnabled:  osInfo["livepatch_enabled"] == "true",
+		KernelLivepatchProvider: osInfo["livepatch_provider"],
+		ActiveLivepatches:       osInfo["active_livepatches"],
 		// 硬件信息
 		DeviceModel:  hardwareInfo["device_model"],
 		Manufacturer: hardwareInfo["manufacturer"],
@@ -612,6 +619,10 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 			updates["os_version"] = osInfo["os_version"]
 			updates["kernel_version"] = osInfo["kernel_version"]
 			updates["arch"] = osInfo["arch"]
+			// P5.3 kernel livepatch
+			updates["kernel_livepatch_enabled"] = osInfo["livepatch_enabled"] == "true"
+			updates["kernel_livepatch_provider"] = osInfo["livepatch_provider"]
+			updates["active_livepatches"] = osInfo["active_livepatches"]
 			updates["device_model"] = hardwareInfo["device_model"]
 			updates["manufacturer"] = hardwareInfo["manufacturer"]
 			updates["device_serial"] = hardwareInfo["device_serial"]

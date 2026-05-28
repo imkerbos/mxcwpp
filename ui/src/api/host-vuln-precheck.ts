@@ -8,6 +8,9 @@ export interface PreCheckPackage {
   action: 'upgrade' | 'already_latest' | 'not_available' | 'upgrade_but_below_fixed'
 }
 
+// P5.2 affected process（lsof 找到的依赖该 lib 的运行进程，shared_lib 类才会有）
+// 字符串格式："nginx (PID 1234)"
+
 export const hostVulnPreCheckApi = {
   /** 单条 host_vulnerability pre-check（异步，agent 回报后写 DB） */
   triggerOne: (hostVulnId: number) => {
