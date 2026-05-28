@@ -1044,13 +1044,23 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
 .page-header h2 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #2563eb 0%, #722ed1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.3px;
 }
 
 .header-actions {
@@ -1060,7 +1070,37 @@ onUnmounted(() => {
 }
 
 .reports-tabs {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  background: #ffffff;
+  padding: 4px 16px 0 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+
+  :deep(.ant-tabs-nav) {
+    margin-bottom: 0 !important;
+  }
+
+  :deep(.ant-tabs-tab) {
+    font-size: 14px !important;
+    padding: 12px 8px !important;
+    transition: all 0.2s ease;
+
+    &:hover {
+      color: #2563eb !important;
+    }
+  }
+
+  :deep(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+    color: #2563eb !important;
+    font-weight: 600 !important;
+  }
+
+  :deep(.ant-tabs-ink-bar) {
+    background: linear-gradient(90deg, #2563eb 0%, #722ed1 100%) !important;
+    height: 3px !important;
+    border-radius: 3px 3px 0 0 !important;
+  }
 }
 
 .stats-overview {
