@@ -778,6 +778,15 @@ export const reportsApi = {
     return apiClient.get('/reports/edr/executive', { params })
   },
 
+  // 服务端 PDF 导出（Gotenberg + Chromium）
+  exportEDRPDF: async (params: { start_time: string; end_time: string; landscape?: boolean }) => {
+    const res = await apiClient.get('/reports/edr/pdf', {
+      params,
+      responseType: 'blob',
+    }) as unknown as Blob
+    return res
+  },
+
   // Executive 报告（可导出 PDF）
   getAntivirusExecutiveReport: async (taskId: number): Promise<AntivirusExecutiveReport> => {
     return apiClient.get(`/reports/antivirus/${taskId}/executive`)

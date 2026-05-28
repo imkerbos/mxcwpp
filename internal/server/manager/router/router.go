@@ -158,7 +158,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupFixAPI(router, db, logger, acDispatcher)
 	setupDashboardAPI(router, db, logger, chConn, redisClient, acRegistry, promClient)
 	setupAssetsAPI(router, db, logger)
-	setupReportsAPI(router, db, logger, chConn)
+	setupReportsAPI(router, db, logger, chConn, cfg)
 	setupBusinessLinesAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
@@ -428,9 +428,18 @@ func setupAssetsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupReportsAPI 设置报表 API 路由
-func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
+func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, cfg *config.Config) {
 	handler := api.NewReportsHandler(db, logger)
 	handler.SetClickHouse(chConn)
+
+	// PDF 导出（Gotenberg sidecar）
+	pdfHandler := api.NewReportPDFHandler(
+		cfg.PDF.GotenbergURL,
+		cfg.PDF.InternalURL,
+		[]byte(cfg.Server.JWTSecret),
+		logger,
+	)
+	router.GET("/reports/edr/pdf", pdfHandler.ExportEDRReportPDF)
 	router.GET("/reports/stats", handler.GetStats)
 	router.GET("/reports/baseline-score-trend", handler.GetBaselineScoreTrend)
 	router.GET("/reports/check-result-trend", handler.GetCheckResultTrend)
