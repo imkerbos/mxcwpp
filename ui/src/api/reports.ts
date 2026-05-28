@@ -389,6 +389,15 @@ export interface EDRReport {
     growthPercent: number
     direction: 'up' | 'down' | 'stable'
   }
+  rawEventStats: {
+    totalEvents: number
+    uniqueHosts: number
+    eventsByType: Array<{ event_type: string; count: number }>
+    eventsByHour: Array<{ hour: string; count: number }>
+    topHostsByEvent: Array<{ host_id: string; hostname?: string; count: number }>
+    topExe: Array<{ exe: string; count: number }>
+    available: boolean
+  }
 }
 
 // EDR 高管摘要报告

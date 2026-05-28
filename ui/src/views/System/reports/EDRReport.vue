@@ -111,6 +111,76 @@
         </a-col>
       </a-row>
 
+      <!-- 原始事件量（ClickHouse） -->
+      <a-row v-if="report.rawEventStats?.available" :gutter="[16, 16]" style="margin-top: 16px">
+        <a-col :span="24">
+          <a-card :bordered="false">
+            <template #title>
+              <span>原始事件量统计</span>
+              <a-tag color="cyan" style="margin-left: 8px">ClickHouse 真实数据</a-tag>
+            </template>
+            <a-row :gutter="[16, 16]">
+              <a-col :xs="12" :md="6">
+                <a-statistic title="总事件数" :value="report.rawEventStats.totalEvents" :value-style="{ color: '#3B82F6' }" />
+              </a-col>
+              <a-col :xs="12" :md="6">
+                <a-statistic title="活跃主机" :value="report.rawEventStats.uniqueHosts" :value-style="{ color: '#22C55E' }" />
+              </a-col>
+              <a-col :xs="12" :md="6">
+                <a-statistic
+                  title="平均/主机"
+                  :value="report.rawEventStats.uniqueHosts > 0
+                    ? Math.round(report.rawEventStats.totalEvents / report.rawEventStats.uniqueHosts)
+                    : 0"
+                  :value-style="{ color: '#F59E0B' }"
+                />
+              </a-col>
+              <a-col :xs="12" :md="6">
+                <a-statistic
+                  title="告警转化率"
+                  :value="alertConversionRate"
+                  :precision="2"
+                  suffix="%"
+                  :value-style="{ color: '#722ed1' }"
+                />
+              </a-col>
+            </a-row>
+            <a-row :gutter="[16, 16]" style="margin-top: 16px">
+              <a-col :xs="24" :lg="12">
+                <div style="font-weight: 500; margin-bottom: 8px">事件类型分布</div>
+                <VChart :option="eventTypeOption" style="height: 280px" autoresize />
+              </a-col>
+              <a-col :xs="24" :lg="12">
+                <div style="font-weight: 500; margin-bottom: 8px">事件量趋势（小时）</div>
+                <VChart :option="eventTrendOption" style="height: 280px" autoresize />
+              </a-col>
+            </a-row>
+            <a-row :gutter="[16, 16]" style="margin-top: 16px">
+              <a-col :xs="24" :lg="12">
+                <div style="font-weight: 500; margin-bottom: 8px">Top 10 主机（按事件量）</div>
+                <a-table
+                  :columns="rawHostColumns"
+                  :data-source="report.rawEventStats.topHostsByEvent"
+                  :pagination="false"
+                  size="small"
+                  row-key="host_id"
+                />
+              </a-col>
+              <a-col :xs="24" :lg="12">
+                <div style="font-weight: 500; margin-bottom: 8px">Top 10 进程</div>
+                <a-table
+                  :columns="exeColumns"
+                  :data-source="report.rawEventStats.topExe"
+                  :pagination="false"
+                  size="small"
+                  row-key="exe"
+                />
+              </a-col>
+            </a-row>
+          </a-card>
+        </a-col>
+      </a-row>
+
       <!-- Top 高危故事线 + 误报抑制 -->
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :lg="14">
@@ -170,7 +240,8 @@ import type { EChartsOption } from 'echarts'
 import type { Dayjs } from 'dayjs'
 import { reportsApi, type EDRReport } from '@/api/reports'
 
-use([CanvasRenderer, PieChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
+import { LineChart } from 'echarts/charts'
+use([CanvasRenderer, PieChart, BarChart, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent])
 
 const props = defineProps<{ dateRange: [Dayjs, Dayjs] }>()
 
@@ -186,7 +257,57 @@ const report = ref<EDRReport>({
   topStories: [],
   suppressionStats: [],
   trend: { prevPeriodAlerts: 0, growthPercent: 0, direction: 'stable' },
+  rawEventStats: { totalEvents: 0, uniqueHosts: 0, eventsByType: [], eventsByHour: [], topHostsByEvent: [], topExe: [], available: false },
 })
+
+const alertConversionRate = computed(() => {
+  const ev = report.value.rawEventStats?.totalEvents || 0
+  const al = report.value.summary?.totalAlerts || 0
+  return ev > 0 ? (al / ev) * 100 : 0
+})
+
+const eventTypeOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+  legend: { orient: 'vertical', left: 'left', textStyle: { fontSize: 11 } },
+  series: [{
+    name: '事件类型', type: 'pie', radius: ['40%', '70%'],
+    itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+    label: { show: false }, labelLine: { show: false },
+    data: (report.value.rawEventStats?.eventsByType || []).map(e => ({
+      value: Number(e.count), name: e.event_type,
+    })),
+  }],
+}))
+
+const eventTrendOption = computed<EChartsOption>(() => {
+  const data = report.value.rawEventStats?.eventsByHour || []
+  return {
+    tooltip: { trigger: 'axis' },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d.hour.slice(5)),
+      axisLabel: { rotate: 45, fontSize: 10, interval: Math.max(0, Math.floor(data.length / 12)) },
+    },
+    yAxis: { type: 'value' },
+    series: [{
+      name: '事件量', type: 'line', smooth: true,
+      areaStyle: { opacity: 0.3 },
+      data: data.map(d => Number(d.count)),
+      itemStyle: { color: '#3B82F6' },
+    }],
+  }
+})
+
+const rawHostColumns = [
+  { title: '主机', key: 'hostname', dataIndex: 'hostname', ellipsis: true },
+  { title: '事件量', key: 'count', dataIndex: 'count', width: 110, align: 'right' as const },
+]
+
+const exeColumns = [
+  { title: '进程路径', key: 'exe', dataIndex: 'exe', ellipsis: true },
+  { title: '事件量', key: 'count', dataIndex: 'count', width: 110, align: 'right' as const },
+]
 
 const severityColors: Record<string, string> = {
   critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#0891b2',

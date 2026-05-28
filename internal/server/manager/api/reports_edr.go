@@ -10,10 +10,12 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
@@ -254,6 +256,10 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 	var onlineHosts int64
 	h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&onlineHosts)
 
+	// === 11. ClickHouse ebpf_events 原始事件统计 ===
+	// 报告周期内 agent 上报的全部 EDR 事件（含未命中规则的）
+	chStats := h.queryEDREventStatsCH(startTime, endTime)
+
 	// === 组装 ===
 	reportID := fmt.Sprintf("edr-%d", time.Now().Unix())
 	periodStr := fmt.Sprintf("%s ~ %s",
@@ -289,10 +295,151 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 			"growthPercent":    growthPct,
 			"direction":        directionLabel(growthPct),
 		},
+		"rawEventStats": chStats,
 	}
 
 	h.saveGeneratedReport(model.ReportTypeEDR, "EDR 检测专项报告", reportID, periodStr, reportData)
 	Success(c, reportData)
+}
+
+// edrEventStats 是 CH 端 ebpf_events 维度聚合结果。
+type edrEventStats struct {
+	TotalEvents     uint64  `json:"totalEvents"`
+	UniqueHosts     uint64  `json:"uniqueHosts"`
+	EventsByType    []gin.H `json:"eventsByType"`    // [{event_type, count}]
+	EventsByHour    []gin.H `json:"eventsByHour"`    // [{hour, count}] 时序
+	TopHostsByEvent []gin.H `json:"topHostsByEvent"` // [{host_id, count}]
+	TopExe          []gin.H `json:"topExe"`          // [{exe, count}]
+	Available       bool    `json:"available"`       // CH 不可用时返回 false
+}
+
+// queryEDREventStatsCH 从 ClickHouse 聚合报告周期内的原始 EDR 事件。
+//
+// 这是真"事件量"维度，与 alerts 表的"规则命中数"互补：
+//   - alerts 反映"检出能力"（规则覆盖 + 命中频率）
+//   - ebpf_events 反映"数据采集量"（agent 上报基线 + 主机活跃度）
+//
+// 用 CH 主键命中 + bloom filter，单次查询通常 < 200ms 即使 1B 行。
+func (h *ReportsHandler) queryEDREventStatsCH(startTime, endTime time.Time) edrEventStats {
+	stats := edrEventStats{
+		EventsByType:    []gin.H{},
+		EventsByHour:    []gin.H{},
+		TopHostsByEvent: []gin.H{},
+		TopExe:          []gin.H{},
+	}
+	if h.chConn == nil {
+		return stats
+	}
+	stats.Available = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. 总事件 + 唯一主机数
+	if err := h.chConn.QueryRow(ctx, `
+		SELECT count(), uniq(host_id) FROM ebpf_events WHERE timestamp >= ? AND timestamp <= ?
+	`, startTime, endTime).Scan(&stats.TotalEvents, &stats.UniqueHosts); err != nil {
+		h.logger.Warn("CH ebpf_events 总量查询失败", zap.Error(err))
+	}
+
+	// 2. 按 event_type 分布
+	if rows, err := h.chConn.Query(ctx, `
+		SELECT event_type, count() AS c FROM ebpf_events
+		WHERE timestamp >= ? AND timestamp <= ?
+		GROUP BY event_type ORDER BY c DESC
+	`, startTime, endTime); err == nil {
+		for rows.Next() {
+			var et string
+			var c uint64
+			if err := rows.Scan(&et, &c); err == nil {
+				stats.EventsByType = append(stats.EventsByType, gin.H{"event_type": et, "count": c})
+			}
+		}
+		rows.Close()
+	}
+
+	// 3. 按小时分布（趋势图）
+	if rows, err := h.chConn.Query(ctx, `
+		SELECT toStartOfHour(timestamp) AS h, count() AS c FROM ebpf_events
+		WHERE timestamp >= ? AND timestamp <= ?
+		GROUP BY h ORDER BY h
+	`, startTime, endTime); err == nil {
+		for rows.Next() {
+			var hour time.Time
+			var c uint64
+			if err := rows.Scan(&hour, &c); err == nil {
+				stats.EventsByHour = append(stats.EventsByHour, gin.H{
+					"hour":  hour.Format("2006-01-02 15:00"),
+					"count": c,
+				})
+			}
+		}
+		rows.Close()
+	}
+
+	// 4. Top 10 主机 by 原始事件量
+	if rows, err := h.chConn.Query(ctx, `
+		SELECT host_id, count() AS c FROM ebpf_events
+		WHERE timestamp >= ? AND timestamp <= ?
+		GROUP BY host_id ORDER BY c DESC LIMIT 10
+	`, startTime, endTime); err == nil {
+		for rows.Next() {
+			var hostID string
+			var c uint64
+			if err := rows.Scan(&hostID, &c); err == nil {
+				stats.TopHostsByEvent = append(stats.TopHostsByEvent, gin.H{
+					"host_id": hostID, "count": c,
+				})
+			}
+		}
+		rows.Close()
+		h.attachHostnames(stats.TopHostsByEvent)
+	}
+
+	// 5. Top 10 exe（最活跃进程）
+	if rows, err := h.chConn.Query(ctx, `
+		SELECT exe, count() AS c FROM ebpf_events
+		WHERE timestamp >= ? AND timestamp <= ? AND exe != ''
+		GROUP BY exe ORDER BY c DESC LIMIT 10
+	`, startTime, endTime); err == nil {
+		for rows.Next() {
+			var exe string
+			var c uint64
+			if err := rows.Scan(&exe, &c); err == nil {
+				stats.TopExe = append(stats.TopExe, gin.H{"exe": exe, "count": c})
+			}
+		}
+		rows.Close()
+	}
+
+	return stats
+}
+
+// attachHostnames 给 [{host_id, count}] 列表附加 hostname (从 MySQL hosts 表查)。
+func (h *ReportsHandler) attachHostnames(rows []gin.H) {
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if id, ok := r["host_id"].(string); ok {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	type hostRow struct {
+		HostID   string
+		Hostname string
+	}
+	var hosts []hostRow
+	h.db.Model(&model.Host{}).Select("host_id, hostname").Where("host_id IN ?", ids).Scan(&hosts)
+	nameByID := make(map[string]string, len(hosts))
+	for _, h := range hosts {
+		nameByID[h.HostID] = h.Hostname
+	}
+	for _, r := range rows {
+		if id, ok := r["host_id"].(string); ok {
+			r["hostname"] = nameByID[id]
+		}
+	}
 }
 
 // GetEDRExecutiveReport 生成 EDR 高管摘要（精简 1 页）

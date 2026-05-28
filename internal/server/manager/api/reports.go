@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -16,6 +17,7 @@ import (
 // ReportsHandler 是报表 API 处理器
 type ReportsHandler struct {
 	db     *gorm.DB
+	chConn chdriver.Conn // 可为 nil（CH 未启用降级 MySQL）
 	logger *zap.Logger
 }
 
@@ -25,6 +27,11 @@ func NewReportsHandler(db *gorm.DB, logger *zap.Logger) *ReportsHandler {
 		db:     db,
 		logger: logger,
 	}
+}
+
+// SetClickHouse 启动时注入 CH 连接，启用各 *Report 的 CH 查询路径。
+func (h *ReportsHandler) SetClickHouse(conn chdriver.Conn) {
+	h.chConn = conn
 }
 
 // GetStats 获取报表统计数据
