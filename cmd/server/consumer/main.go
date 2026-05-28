@@ -149,6 +149,7 @@ func main() {
 	}
 
 	// 6.3 初始化端口扫描检测器（依赖 Redis，可选）
+	// 白名单后台 reload 在 ctx 创建后启动（见 ctx 定义点）
 	scanDetector := celengine.NewScanDetector(redisClient, db, logger)
 	if scanDetector != nil {
 		logger.Info("端口扫描检测器已启动")
@@ -186,6 +187,11 @@ func main() {
 	// 6.6 上下文（后续多个组件需要 ctx 控制生命周期）
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// ScanDetector 后台 reload 白名单（依赖 ctx）
+	if scanDetector != nil {
+		scanDetector.StartWhitelistReload(ctx)
+	}
 
 	// 6.7 初始化 BDE 基线引擎（行为检测，支持持久化和冷启动）
 	bdeEngine := baseline.NewEngine(db, logger.Named("bde"))
