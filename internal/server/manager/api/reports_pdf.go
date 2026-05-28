@@ -79,7 +79,8 @@ func (h *ReportPDFHandler) ExportEDRReportPDF(c *gin.Context) {
 	}
 
 	// 2. 构造打印页 URL（含 token 与时间范围）
-	printURL := fmt.Sprintf("%s/reports/print/edr?token=%s&start_time=%s&end_time=%s",
+	// SPA 路由: /print/report/:type，由 PrintReport.vue 渲染
+	printURL := fmt.Sprintf("%s/print/report/edr?token=%s&start_time=%s&end_time=%s",
 		h.internalURL, token, startTime, endTime)
 	opts := biz.DefaultPDFOptions(printURL)
 	opts.Landscape = landscape

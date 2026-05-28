@@ -11,6 +11,14 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '登录', public: true },
   },
   {
+    // 服务端 PDF 打印专用路由 (无 layout / 无 sidebar / 用 print token 免登录)
+    // 供 Gotenberg 拉取渲染，配合 PDF 导出场景
+    path: '/print/report/:type',
+    name: 'PrintReport',
+    component: () => import('@/views/PrintReport.vue'),
+    meta: { title: '报告打印', public: true },
+  },
+  {
     path: '/',
     component: Layout,
     redirect: '/dashboard',
