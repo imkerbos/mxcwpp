@@ -1,5 +1,5 @@
 <template>
-  <div class="category-report">
+  <div class="category-report report-print-ready">
     <a-spin :spinning="loading">
       <!-- 统计卡片 -->
       <a-row :gutter="[16, 16]" class="stats-overview">
@@ -105,7 +105,7 @@
       <a-row :gutter="[16, 16]" class="charts-row">
         <a-col :xs="24" :md="12">
           <a-card title="不合规项严重级别分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasBaselineSeverityData"
               :option="baselineSeverityChartOption"
               style="height: 320px"
@@ -116,7 +116,7 @@
         </a-col>
         <a-col :xs="24" :md="12">
           <a-card title="不合规项分类分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasBaselineCategoryData"
               :option="baselineCategoryChartOption"
               style="height: 320px"
@@ -131,7 +131,7 @@
       <a-row :gutter="[16, 16]" class="charts-row" v-if="hasSeverityData || hasAlarmTypeData">
         <a-col :xs="24" :md="12">
           <a-card title="运行时告警严重级别" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasSeverityData"
               :option="severityChartOption"
               style="height: 320px"
@@ -142,7 +142,7 @@
         </a-col>
         <a-col :xs="24" :md="12">
           <a-card title="运行时告警类型" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasAlarmTypeData"
               :option="alarmTypeChartOption"
               style="height: 320px"
@@ -157,7 +157,7 @@
       <a-row :gutter="[16, 16]" class="charts-row" v-if="report.clusterDistribution.length > 0">
         <a-col :span="24">
           <a-card title="集群告警分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               :option="clusterChartOption"
               style="height: 320px"
               autoresize

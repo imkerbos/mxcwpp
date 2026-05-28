@@ -1,6 +1,6 @@
 <template>
-  <div class="reports-page">
-    <div class="page-header">
+  <div class="reports-page report-print-ready">
+    <div class="page-header no-print">
       <h2>统计报表</h2>
       <div class="header-actions">
         <a-range-picker
@@ -10,21 +10,29 @@
           @change="handleDateRangeChange"
         />
         <a-button type="primary" @click="handleRefresh" :loading="loading">
-          <template #icon>
-            <ReloadOutlined />
-          </template>
+          <template #icon><ReloadOutlined /></template>
           刷新数据
         </a-button>
       </div>
     </div>
 
-    <a-tabs v-model:activeKey="activeTab" class="reports-tabs">
+    <a-tabs v-model:activeKey="activeTab" class="reports-tabs no-print">
       <a-tab-pane key="overview" tab="安全总览" />
       <a-tab-pane key="antivirus" tab="病毒查杀" />
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="kube" tab="容器安全" />
       <a-tab-pane key="edr" tab="EDR 检测" />
     </a-tabs>
+
+    <!-- 统一品牌封面 (各 tab 共享) -->
+    <ReportHeader
+      v-if="activeTab !== 'edr'"
+      :title="tabTitle"
+      :subtitle="tabSubtitle"
+      :period="dateRangeLabel"
+      :report-id="`mxsec-${activeTab}-${dateRange[1]?.format('YYYYMMDD')}`"
+      :generated-at="generatedAtLabel"
+    />
 
     <template v-if="activeTab === 'overview'">
     <!-- 统计概览卡片 -->
@@ -340,6 +348,7 @@ import AntivirusReport from './reports/AntivirusReport.vue'
 import VulnerabilityReport from './reports/VulnerabilityReport.vue'
 import KubeReport from './reports/KubeReport.vue'
 import EDRReport from './reports/EDRReport.vue'
+import ReportHeader from '@/components/report/ReportHeader.vue'
 
 // 报表专用风险分布接口
 interface ReportRiskDistribution {
@@ -366,6 +375,30 @@ const dateRange = ref<[Dayjs, Dayjs]>([
   dayjs().subtract(7, 'day'),
   dayjs()
 ])
+
+// 报告封面动态标题
+const tabTitleMap: Record<string, string> = {
+  overview: '安全总览专项报告',
+  antivirus: '病毒查杀专项报告',
+  vulnerability: '漏洞管理专项报告',
+  kube: '容器安全专项报告',
+  edr: 'EDR 检测专项报告',
+}
+const tabSubtitleMap: Record<string, string> = {
+  overview: '主机风险 / 告警 / 趋势综合视图',
+  antivirus: '威胁检出 · 隔离 · 处置动作',
+  vulnerability: 'CVE / 主机 / 组件多维度分析',
+  kube: '集群基线 / Pod / 工作负载合规',
+  edr: '攻击故事线 / MITRE 战术 / 规则有效性',
+}
+const tabTitle = computed(() => tabTitleMap[activeTab.value] || '统计报表')
+const tabSubtitle = computed(() => tabSubtitleMap[activeTab.value] || '')
+const dateRangeLabel = computed(() => {
+  const [s, e] = dateRange.value || []
+  if (!s || !e) return ''
+  return `${s.format('YYYY-MM-DD')} ~ ${e.format('YYYY-MM-DD')}`
+})
+const generatedAtLabel = computed(() => dayjs().format('YYYY-MM-DD HH:mm:ss'))
 
 // 子组件 ref
 const antivirusRef = ref<InstanceType<typeof AntivirusReport> | null>(null)

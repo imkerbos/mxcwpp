@@ -1,5 +1,5 @@
 <template>
-  <div class="category-report">
+  <div class="category-report report-print-ready">
     <a-spin :spinning="loading">
       <!-- 统计卡片 -->
       <a-row :gutter="[16, 16]" class="stats-overview">
@@ -54,7 +54,7 @@
       <a-row :gutter="[16, 16]" class="charts-row">
         <a-col :xs="24" :md="12">
           <a-card title="威胁严重级别分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasSeverityData"
               :option="severityChartOption"
               style="height: 300px"
@@ -65,7 +65,7 @@
         </a-col>
         <a-col :xs="24" :md="12">
           <a-card title="威胁类型分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasThreatTypeData"
               :option="threatTypeChartOption"
               style="height: 300px"
@@ -80,7 +80,7 @@
       <a-row :gutter="[16, 16]" class="charts-row">
         <a-col :span="24">
           <a-card title="处置动作分布" :bordered="false" class="chart-card">
-            <v-chart
+            <v-chart theme="mxsec"
               v-if="hasActionData"
               :option="actionChartOption"
               style="height: 300px"

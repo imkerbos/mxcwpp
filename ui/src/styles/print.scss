@@ -88,4 +88,68 @@
 .report-print-ready {
   // 留给屏幕预览：可加 max-width 模拟 A4 比例
   // max-width: 794px; // A4 @96dpi
+
+  // 统一各 Report tab 的 a-card stat-card 视觉
+  // (Antivirus/Vuln/Kube 旧代码各自用默认 a-card 无边框 + 默认 a-statistic)
+  .stat-card {
+    border-radius: $radius-md !important;
+    border: 1px solid $border-default !important;
+    background: $bg-primary !important;
+    box-shadow: $shadow-sm;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+      box-shadow: $shadow-md;
+      transform: translateY(-1px);
+    }
+
+    :deep(.ant-card-body) {
+      padding: $space-md $space-lg !important;
+    }
+
+    :deep(.ant-statistic-title) {
+      font-size: $text-xs !important;
+      color: $text-tertiary !important;
+      font-weight: $weight-medium !important;
+      margin-bottom: $space-2xs !important;
+    }
+
+    :deep(.ant-statistic-content) {
+      font-size: $text-xl !important;
+      font-weight: $weight-semibold !important;
+      line-height: $leading-tight !important;
+      font-feature-settings: 'tnum';
+    }
+  }
+
+  // 统一 chart-card 容器
+  .chart-card {
+    border-radius: $radius-md !important;
+    border: 1px solid $border-default !important;
+    background: $bg-primary !important;
+    box-shadow: $shadow-sm;
+
+    :deep(.ant-card-head) {
+      border-bottom: 1px solid $border-default !important;
+      padding: 0 $space-lg !important;
+      min-height: 40px !important;
+    }
+
+    :deep(.ant-card-head-title) {
+      font-size: $text-sm !important;
+      font-weight: $weight-semibold !important;
+      padding: $space-sm 0 !important;
+      color: $text-primary !important;
+    }
+
+    :deep(.ant-card-body) {
+      padding: $space-lg !important;
+    }
+  }
+
+  // 统一区块间距
+  .stats-overview,
+  .charts-row {
+    margin-bottom: $space-md !important;
+  }
 }

@@ -81,12 +81,12 @@
       <a-row :gutter="[16, 16]" style="margin-top: 16px">
         <a-col :xs="24" :lg="12">
           <a-card title="严重程度分布" :bordered="false">
-            <VChart :option="severityOption" style="height: 320px" autoresize />
+            <VChart theme="mxsec" :option="severityOption" style="height: 320px" autoresize />
           </a-card>
         </a-col>
         <a-col :xs="24" :lg="12">
           <a-card title="MITRE ATT&CK 战术分布" :bordered="false">
-            <VChart :option="tacticOption" style="height: 320px" autoresize />
+            <VChart theme="mxsec" :option="tacticOption" style="height: 320px" autoresize />
           </a-card>
         </a-col>
       </a-row>
@@ -162,11 +162,11 @@
             <a-row :gutter="[16, 16]" style="margin-top: 16px">
               <a-col :xs="24" :lg="12">
                 <div style="font-weight: 500; margin-bottom: 8px">事件类型分布</div>
-                <VChart :option="eventTypeOption" style="height: 280px" autoresize />
+                <VChart theme="mxsec" :option="eventTypeOption" style="height: 280px" autoresize />
               </a-col>
               <a-col :xs="24" :lg="12">
                 <div style="font-weight: 500; margin-bottom: 8px">事件量趋势（小时）</div>
-                <VChart :option="eventTrendOption" style="height: 280px" autoresize />
+                <VChart theme="mxsec" :option="eventTrendOption" style="height: 280px" autoresize />
               </a-col>
             </a-row>
             <a-row :gutter="[16, 16]" style="margin-top: 16px">
