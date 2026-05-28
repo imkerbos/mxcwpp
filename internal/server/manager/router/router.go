@@ -131,7 +131,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 需要认证的路由
 	apiV1Auth := apiV1.Group("")
 	apiV1Auth.Use(authHandler.AuthMiddleware())
-	apiV1Auth.Use(middleware.AuditLog(db, logger))
+	apiV1Auth.Use(middleware.AuditLogWithCH(db, chConn, logger))
 
 	// 服务发现查询（需要认证，运维 / 前端监控页面调用）
 	apiV1Auth.GET("/discovery/agentcenter", discoveryHandler.ListACInstances)
