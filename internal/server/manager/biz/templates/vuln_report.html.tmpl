@@ -694,7 +694,7 @@
   <h3 class="subsec">附录 A　报告说明</h3>
   <table class="t">
     <tbody>
-      <tr><td style="width:30%">数据来源</td><td>MySQL（vulnerabilities / host_vulnerabilities / remediation_tasks / vuln_data_sources / hosts）</td></tr>
+      <tr><td style="width:30%">数据来源</td><td>ClickHouse 集群（vulnerabilities / host_vulnerabilities 漏洞库 + 主机关联）+ MySQL（remediation_tasks / vuln_data_sources / hosts 元配置）</td></tr>
       <tr><td>生成方式</td><td>矩阵云安全平台服务端 Go html/template 渲染，自动生成无人工调整</td></tr>
       <tr><td>图表渲染</td><td>服务端 SVG 手绘，矢量化、可缩放、PDF 中保持清晰</td></tr>
       <tr><td>PDF 引擎</td><td>Chromium Headless（Gotenberg HTML→PDF），文本可搜索、可复制、可粘贴</td></tr>

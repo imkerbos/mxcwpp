@@ -139,6 +139,117 @@ func (w *ClickHouseWriter) ensureSchemas() {
 			TTL toDateTime(timestamp) + INTERVAL 90 DAY
 			SETTINGS index_granularity = 8192`,
 		},
+		{
+			"alerts",
+			`CREATE TABLE IF NOT EXISTS alerts (
+				id              UInt64,
+				result_id       String,
+				host_id         String,
+				rule_id         String,
+				policy_id       String,
+				source          LowCardinality(String),
+				severity        LowCardinality(String),
+				category        LowCardinality(String),
+				title           String,
+				description     String,
+				actual          String,
+				expected        String,
+				fix_suggestion  String,
+				status          LowCardinality(String),
+				first_seen_at   DateTime64(3),
+				last_seen_at    DateTime64(3),
+				hit_count       UInt32,
+				last_notified_at DateTime64(3),
+				notify_count    UInt32,
+				resolved_at     DateTime64(3),
+				resolved_by     String,
+				resolve_reason  String,
+				created_at      DateTime64(3),
+				updated_at      DateTime64(3),
+				version         UInt64,
+				INDEX idx_host host_id TYPE bloom_filter GRANULARITY 4,
+				INDEX idx_title title TYPE tokenbf_v1(8192, 3, 0) GRANULARITY 4,
+				INDEX idx_result result_id TYPE bloom_filter GRANULARITY 4
+			) ENGINE = ReplacingMergeTree(version)
+			PARTITION BY toYYYYMM(created_at)
+			ORDER BY (result_id)
+			TTL toDateTime(created_at) + INTERVAL 365 DAY
+			SETTINGS index_granularity = 8192`,
+		},
+		{
+			"vulnerabilities",
+			`CREATE TABLE IF NOT EXISTS vulnerabilities (
+				id                       UInt64,
+				cve_id                   String,
+				osv_id                   String,
+				purl                     String,
+				severity                 LowCardinality(String),
+				cvss_score               Float32,
+				component                String,
+				description              String,
+				affected_hosts           UInt32,
+				patched_hosts            UInt32,
+				status                   LowCardinality(String),
+				discovered_at            DateTime64(3),
+				patched_at               DateTime64(3),
+				current_version          String,
+				fixed_version            String,
+				reference_url            String,
+				cvss_vector              String,
+				attack_vector            LowCardinality(String),
+				vuln_type                LowCardinality(String),
+				affected_versions        String,
+				source                   LowCardinality(String),
+				patch_available          UInt8,
+				epss_score               Float32,
+				cwe_id                   String,
+				confidence               LowCardinality(String),
+				vuln_category            LowCardinality(String),
+				restart_action           LowCardinality(String),
+				vuln_category_override   String,
+				restart_action_override  String,
+				cnvd_id                  String,
+				cnnvd_id                 String,
+				has_exploit              UInt8,
+				in_kev                   UInt8,
+				created_at               DateTime64(3),
+				updated_at               DateTime64(3),
+				version                  UInt64,
+				INDEX idx_cve cve_id TYPE bloom_filter GRANULARITY 4,
+				INDEX idx_purl purl TYPE bloom_filter GRANULARITY 4
+			) ENGINE = ReplacingMergeTree(version)
+			PARTITION BY toYYYYMM(discovered_at)
+			ORDER BY (cve_id)
+			TTL toDateTime(discovered_at) + INTERVAL 730 DAY
+			SETTINGS index_granularity = 8192`,
+		},
+		{
+			"host_vulnerabilities",
+			`CREATE TABLE IF NOT EXISTS host_vulnerabilities (
+				id                            UInt64,
+				vuln_id                       UInt64,
+				host_id                       String,
+				hostname                      String,
+				ip                            String,
+				current_version               String,
+				status                        LowCardinality(String),
+				patched_at                    DateTime64(3),
+				precheck_status               LowCardinality(String),
+				precheck_message              String,
+				precheck_packages             String,
+				precheck_affected_processes   String,
+				precheck_checked_at           DateTime64(3),
+				created_at                    DateTime64(3),
+				updated_at                    DateTime64(3),
+				version                       UInt64,
+				INDEX idx_host host_id TYPE bloom_filter GRANULARITY 4,
+				INDEX idx_vuln vuln_id TYPE bloom_filter GRANULARITY 4
+			) ENGINE = ReplacingMergeTree(version)
+			PARTITION BY toYYYYMM(created_at)
+			ORDER BY (host_id, vuln_id)
+			TTL toDateTime(created_at) + INTERVAL 365 DAY
+			SETTINGS index_granularity = 8192`,
+		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
