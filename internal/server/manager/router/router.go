@@ -764,6 +764,9 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.GET("/remediation-tasks/stats", taskHandler.GetTaskStats)
 	router.GET("/remediation-tasks/:id", taskHandler.GetTask)
 	router.POST("/remediation-tasks/:id/confirm", taskHandler.ConfirmTask)
+	// P5.6: 修复任务执行后 user 手动确认 + 触发 pre-check 复测
+	verifyHandler := api.NewRemediationTaskVerifyHandler(db, logger, acDispatcher)
+	router.POST("/remediation-tasks/:id/confirm-executed", verifyHandler.ConfirmExecuted)
 	router.POST("/remediation-tasks/:id/cancel", taskHandler.CancelTask)
 	router.POST("/remediation-tasks/:id/retry", taskHandler.RetryTask)
 	router.GET("/remediation-tasks/:id/events", taskHandler.ListEvents)          // 全量 events 列表
