@@ -6,7 +6,9 @@ package celengine
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -29,6 +31,37 @@ const (
 	// scanCooldownPrefix Redis 冷却 key 前缀
 	scanCooldownPrefix = "scan:cd:"
 )
+
+// scanSourceWhitelistCIDRs 端口扫描源 IP 白名单。
+//
+// k8s/GKE 集群的 kube-proxy / health checker 会大量 probe 不同端口，
+// 是合法的集群管理流量但会触发"60s 内 10+ 不同端口"扫描阈值。
+//
+// 2026-05-28 prod 实测：GKE node 10.170.2.16 单日触发 224 条告警。
+// 此处加内网 GKE node 段白名单；后续应该提到 config 文件 + UI 可配。
+var scanSourceWhitelistCIDRs = mustParseCIDRs([]string{
+	"10.170.2.0/24", // prod GKE node pool (含 10.170.2.16)
+})
+
+// isScanSourceWhitelisted 判断扫描源 IP 是否在白名单内。
+func isScanSourceWhitelisted(remoteAddr string) bool {
+	return matchAnyCIDR(remoteAddr, scanSourceWhitelistCIDRs)
+}
+
+// matchAnyCIDR 通用 IP CIDR 匹配（whitelist.go 的 ipIsPrivate 仅匹配 RFC1918，
+// 这里复用解析逻辑做任意网段判断）。
+func matchAnyCIDR(ipStr string, cidrs []*net.IPNet) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return false
+	}
+	for _, c := range cidrs {
+		if c.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
 
 // ScanDetector 端口扫描检测器
 type ScanDetector struct {
@@ -57,6 +90,10 @@ func NewScanDetector(rdb *redis.Client, db *gorm.DB, logger *zap.Logger) *ScanDe
 // fields: 事件原始字段（用于告警详情）
 func (d *ScanDetector) CheckIncomingConnection(hostID, remoteAddr, localPort string, fields map[string]string) {
 	if d == nil || remoteAddr == "" || localPort == "" {
+		return
+	}
+	// 跳过已知合法扫描源（k8s/GKE 集群管理流量）
+	if isScanSourceWhitelisted(remoteAddr) {
 		return
 	}
 
