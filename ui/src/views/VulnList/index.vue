@@ -429,6 +429,7 @@ const vulnCategoryConfig: Record<string, { color: string; text: string }> = {
   web_service:         { color: 'cyan',    text: 'Web 服务' },
   db_service:          { color: 'geekblue',text: '数据库' },
   container_runtime:   { color: 'purple',  text: '容器运行时' },
+  virtualization:      { color: 'magenta', text: '虚拟化' },
   language_dep:        { color: 'blue',    text: '语言依赖' },
   other:               { color: 'default', text: '其他' },
 }
