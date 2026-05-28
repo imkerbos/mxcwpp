@@ -89,18 +89,38 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	grpcProto.RegisterTransferServer(grpcServer, transferService)
 
 	// 6.1 初始化 Kafka 生产者（可选）
+	// Kafka 启动顺序可能晚于 AgentCenter，首次连接失败时启动后台 goroutine 持续重试，
+	// 避免 AgentCenter 永久降级为 MySQL 直写导致 EDR/FIM 事件无法进入下游消费链路。
 	var kafkaProducer kafka.Producer
 	if cfg.Kafka.Enabled {
 		kp, err := kafka.NewAsyncProducer(cfg.Kafka, logger)
-		if err != nil {
-			logger.Warn("Kafka 生产者初始化失败，降级为直写 MySQL", zap.Error(err))
-		} else {
+		if err == nil {
 			kafkaProducer = kp
 			transferService.SetKafkaProducer(kp)
 			logger.Info("Kafka 生产者已启用",
 				zap.Strings("brokers", cfg.Kafka.Brokers),
 				zap.String("topic_prefix", cfg.Kafka.TopicPrefix),
 			)
+		} else {
+			logger.Warn("Kafka 生产者初始化失败，启动后台重试", zap.Error(err))
+			go func() {
+				const retryInterval = 5 * time.Second
+				attempt := 1
+				for {
+					time.Sleep(retryInterval)
+					kp, err := kafka.NewAsyncProducer(cfg.Kafka, logger)
+					if err == nil {
+						transferService.SetKafkaProducer(kp)
+						logger.Info("Kafka 生产者后台重试成功",
+							zap.Int("attempt", attempt),
+							zap.Strings("brokers", cfg.Kafka.Brokers),
+						)
+						return
+					}
+					logger.Warn("Kafka 生产者重试失败", zap.Int("attempt", attempt), zap.Error(err))
+					attempt++
+				}
+			}()
 		}
 	}
 

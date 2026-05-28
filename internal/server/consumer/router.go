@@ -119,6 +119,9 @@ func (r *Router) SetStorylineEngine(eng *storyline.Engine) {
 }
 
 // Run 阻塞式消费，直到 ctx 取消
+//
+// 所有 sarama 错误均退避重试，不返回错误退出进程。避免单次 broker 抖动 / rebalance / 网络
+// 中断导致 Consumer 永久死亡（main 会 os.Exit(1)），需依赖容器编排器重启。
 func (r *Router) Run(ctx context.Context) error {
 	// 后台消费 sarama 错误
 	go func() {
@@ -127,24 +130,66 @@ func (r *Router) Run(ctx context.Context) error {
 		}
 	}()
 
+	const (
+		minBackoff = 1 * time.Second
+		maxBackoff = 30 * time.Second
+	)
+	backoff := minBackoff
+
 	for {
-		if err := r.group.Consume(ctx, r.topics, r); err != nil {
-			// ErrNotCoordinatorForConsumer / ErrRebalanceInProgress 是瞬态错误，等待后重试
-			if err == sarama.ErrNotCoordinatorForConsumer || err == sarama.ErrRebalanceInProgress {
-				r.logger.Warn("ConsumerGroup 协调者变更，等待重试", zap.Error(err))
-				select {
-				case <-ctx.Done():
-					return nil
-				case <-time.After(3 * time.Second):
-				}
-				continue
-			}
-			return fmt.Errorf("消费循环退出: %w", err)
-		}
 		if ctx.Err() != nil {
 			return nil
 		}
+		err := r.group.Consume(ctx, r.topics, r)
+		if err == nil {
+			backoff = minBackoff
+			continue
+		}
+		// ctx 已取消，正常退出
+		if ctx.Err() != nil {
+			return nil
+		}
+		r.logger.Warn("ConsumerGroup Consume 出错，退避后重试",
+			zap.Duration("backoff", backoff),
+			zap.Error(err),
+		)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(backoff):
+		}
+		// 指数退避，最大 30s
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
 	}
+}
+
+// Setup 实现 sarama.ConsumerGroupHandler.Setup，记录当前消费组成员数指标。
+// sarama 在每次 rebalance 完成后调用一次，session.Claims() 返回该实例分到的 topic→partitions。
+func (r *Router) Setup(session sarama.ConsumerGroupSession) error {
+	partitions := 0
+	for _, ps := range session.Claims() {
+		partitions += len(ps)
+	}
+	// 成员数无法直接获取，至少表达"本实例已加入组并分到 partition"
+	consumermetrics.SetGroupMembers(1)
+	r.logger.Info("ConsumerGroup Session 建立",
+		zap.String("member_id", session.MemberID()),
+		zap.Int32("generation_id", session.GenerationID()),
+		zap.Int("assigned_partitions", partitions),
+	)
+	return nil
+}
+
+// Cleanup 实现 sarama.ConsumerGroupHandler.Cleanup，rebalance 触发时清零成员指标。
+func (r *Router) Cleanup(session sarama.ConsumerGroupSession) error {
+	consumermetrics.SetGroupMembers(0)
+	r.logger.Info("ConsumerGroup Session 结束", zap.String("member_id", session.MemberID()))
+	return nil
 }
 
 // Close 关闭 ConsumerGroup
