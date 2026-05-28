@@ -119,6 +119,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '通知管理', adminOnly: true },
       },
       {
+        path: 'system/data-retention',
+        name: 'SystemDataRetention',
+        component: () => import('@/views/System/DataRetention.vue'),
+        meta: { title: '数据保留策略', adminOnly: true },
+      },
+      {
+        path: 'system/feature-flags',
+        name: 'SystemFeatureFlags',
+        component: () => import('@/views/System/FeatureFlags.vue'),
+        meta: { title: '功能开关', adminOnly: true },
+      },
+      {
         path: 'system/reports',
         name: 'SystemReports',
         component: () => import('@/views/System/Reports.vue'),
