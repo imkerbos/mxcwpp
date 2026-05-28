@@ -161,7 +161,14 @@ func IsAlertWhitelisted(rule *model.DetectionRule, fields map[string]string) (bo
 	if rule == nil {
 		return false, ""
 	}
+	// 兼容字段名差异：
+	//   - server CEL 引擎填充 fields 时常用 exe
+	//   - agent ebpf 上报 EDR 事件用 comm（短进程名，如 "nginx"）
+	//   - dst_ip 与 remote_addr 同义（agent 用 remote_addr）
 	exe := fields["exe"]
+	if exe == "" {
+		exe = fields["comm"]
+	}
 	dstIP := fields["dst_ip"]
 	if dstIP == "" {
 		dstIP = fields["remote_addr"]

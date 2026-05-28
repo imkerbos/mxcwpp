@@ -108,6 +108,15 @@ func TestIsAlertWhitelisted(t *testing.T) {
 			wantWL:     false,
 			wantReason: "",
 		},
+		{
+			name:         "agent ebpf 用 comm 字段（无 exe）也能命中反代白名单",
+			ruleName:     "高危端口外连",
+			ruleCategory: "c2_communication",
+			fields:       map[string]string{"comm": "nginx", "remote_addr": "10.170.96.209"},
+			wantWL:       true,
+			// 反代规则 + 内网 IP 都满足，匹配第一条 c2_communication+exe
+			wantReason: "reverse_proxy_upstream",
+		},
 	}
 
 	for _, tc := range cases {
