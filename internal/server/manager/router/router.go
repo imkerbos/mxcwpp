@@ -738,6 +738,7 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	handler := api.NewVulnerabilitiesHandler(db, logger)
 	router.GET("/vulnerabilities", handler.ListVulnerabilities)
 	router.POST("/vulnerabilities/:id/ignore", handler.IgnoreVulnerability)
+	router.PUT("/vulnerabilities/:id/category", handler.UpdateCategoryOverride) // admin override 分类/重启动作
 	router.POST("/vulnerabilities/:id/unignore", handler.UnignoreVulnerability)
 	router.POST("/vulnerabilities/sync", handler.TriggerSync)
 	router.POST("/vulnerabilities/scan", handler.TriggerScan)
