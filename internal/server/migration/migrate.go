@@ -130,8 +130,9 @@ func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
 	}
 	logger.Info("开始回填 vuln 分类", zap.Int64("total", total))
 
-	processed := 0
-	categoryStats := map[string]int{}
+	scanned := 0
+	changed := 0
+	changedStats := map[string]int{}
 	// 按 id 分页避免死循环：cat 仍返回 'other' 时行不会从过滤集移出，
 	// 不加 id > lastID 会被反复 fetch 同一批
 	var lastID uint = 0
@@ -149,8 +150,13 @@ func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
 			break
 		}
 		for _, v := range batch {
+			scanned++
+			lastID = v.ID
 			cat, act := model.CategorizeVuln(v.Component, v.PURL)
-			// 用 Model+Updates 跳过 BeforeSave hook 避免再算一次
+			// 规则未命中（仍 other）→ 不写 DB，下次 migration 同样跳过避免无效 IO
+			if cat == model.VulnCategoryOther {
+				continue
+			}
 			if err := db.Model(&model.Vulnerability{}).
 				Where("id = ?", v.ID).
 				UpdateColumns(map[string]any{
@@ -161,21 +167,37 @@ func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
 					zap.Uint("id", v.ID), zap.Error(err))
 				continue
 			}
-			categoryStats[cat]++
-			processed++
-			lastID = v.ID
+			changedStats[cat]++
+			changed++
 		}
 		logger.Info("vuln 分类回填进度",
-			zap.Int("processed", processed), zap.Int64("total", total))
+			zap.Int("scanned", scanned), zap.Int("changed", changed), zap.Int64("total", total))
 		time.Sleep(50 * time.Millisecond)
 		if len(batch) < batchSize {
 			break
 		}
 	}
 
+	// 完成后查整库分布给运维一个全局视角（不只是本次 changed 的那部分）
+	type catRow struct {
+		Category string `gorm:"column:vuln_category"`
+		N        int64  `gorm:"column:n"`
+	}
+	var overall []catRow
+	db.Model(&model.Vulnerability{}).
+		Select("vuln_category, COUNT(*) as n").
+		Group("vuln_category").
+		Scan(&overall)
+	overallStats := map[string]int64{}
+	for _, r := range overall {
+		overallStats[r.Category] = r.N
+	}
+
 	logger.Info("vuln 分类回填完成",
-		zap.Int("processed", processed),
-		zap.Any("by_category", categoryStats))
+		zap.Int("scanned", scanned),
+		zap.Int("changed", changed),
+		zap.Any("changed_by_category", changedStats),
+		zap.Any("overall_distribution", overallStats))
 	return nil
 }
 
