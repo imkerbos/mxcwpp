@@ -787,6 +787,38 @@ export const reportsApi = {
     return res
   },
 
+  exportAntivirusPDF: async (params: { start_time: string; end_time: string; landscape?: boolean }) => {
+    const res = await apiClient.get('/reports/antivirus/pdf', {
+      params,
+      responseType: 'blob',
+    }) as unknown as Blob
+    return res
+  },
+
+  exportVulnPDF: async (params: { start_time: string; end_time: string; landscape?: boolean }) => {
+    const res = await apiClient.get('/reports/vulnerability/pdf', {
+      params,
+      responseType: 'blob',
+    }) as unknown as Blob
+    return res
+  },
+
+  exportKubePDF: async (params: { start_time: string; end_time: string; landscape?: boolean }) => {
+    const res = await apiClient.get('/reports/kube/pdf', {
+      params,
+      responseType: 'blob',
+    }) as unknown as Blob
+    return res
+  },
+
+  exportTaskPDF: async (taskId: string, params?: { landscape?: boolean }) => {
+    const res = await apiClient.get(`/reports/task/${taskId}/pdf`, {
+      params,
+      responseType: 'blob',
+    }) as unknown as Blob
+    return res
+  },
+
   // Executive 报告（可导出 PDF）
   getAntivirusExecutiveReport: async (taskId: number): Promise<AntivirusExecutiveReport> => {
     return apiClient.get(`/reports/antivirus/${taskId}/executive`)

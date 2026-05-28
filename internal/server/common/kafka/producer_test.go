@@ -25,16 +25,16 @@ func newFakeAsyncProducer() *fakeAsyncProducer {
 	}
 }
 
-func (f *fakeAsyncProducer) AsyncClose()                              { close(f.input); close(f.successes); close(f.errors) }
-func (f *fakeAsyncProducer) Close() error                             { return nil }
-func (f *fakeAsyncProducer) Input() chan<- *sarama.ProducerMessage    { return f.input }
+func (f *fakeAsyncProducer) AsyncClose()                               { close(f.input); close(f.successes); close(f.errors) }
+func (f *fakeAsyncProducer) Close() error                              { return nil }
+func (f *fakeAsyncProducer) Input() chan<- *sarama.ProducerMessage     { return f.input }
 func (f *fakeAsyncProducer) Successes() <-chan *sarama.ProducerMessage { return f.successes }
-func (f *fakeAsyncProducer) Errors() <-chan *sarama.ProducerError     { return f.errors }
-func (f *fakeAsyncProducer) IsTransactional() bool                    { return false }
-func (f *fakeAsyncProducer) TxnStatus() sarama.ProducerTxnStatusFlag  { return 0 }
-func (f *fakeAsyncProducer) BeginTxn() error                          { return nil }
-func (f *fakeAsyncProducer) CommitTxn() error                         { return nil }
-func (f *fakeAsyncProducer) AbortTxn() error                          { return nil }
+func (f *fakeAsyncProducer) Errors() <-chan *sarama.ProducerError      { return f.errors }
+func (f *fakeAsyncProducer) IsTransactional() bool                     { return false }
+func (f *fakeAsyncProducer) TxnStatus() sarama.ProducerTxnStatusFlag   { return 0 }
+func (f *fakeAsyncProducer) BeginTxn() error                           { return nil }
+func (f *fakeAsyncProducer) CommitTxn() error                          { return nil }
+func (f *fakeAsyncProducer) AbortTxn() error                           { return nil }
 func (f *fakeAsyncProducer) AddOffsetsToTxn(map[string][]*sarama.PartitionOffsetMetadata, string) error {
 	return nil
 }

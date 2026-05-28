@@ -158,3 +158,121 @@ func (s *PDFService) RenderURL(ctx context.Context, opts PDFOptions) ([]byte, er
 		zap.Duration("elapsed", time.Since(start)))
 	return pdf, nil
 }
+
+// HTMLOptions 描述 HTML→PDF 生成参数。
+//
+// 与 RenderURL 的区别：HTML 字符串直接 POST 给 Gotenberg
+// (`/forms/chromium/convert/html`)，不走 URL 拉取，所以：
+//   - 无 SPA 登录态依赖（不会 401 跳登录）
+//   - 无网络往返到前端容器
+//   - 适合服务端模板渲染场景（拉数据 → 渲模板 → PDF）
+type HTMLOptions struct {
+	HTML            string  // 完整 <!DOCTYPE html>... 字符串
+	PaperWidth      float64 // 英寸，A4 = 8.27
+	PaperHeight     float64 // A4 = 11.69
+	MarginTop       float64
+	MarginBottom    float64
+	MarginLeft      float64
+	MarginRight     float64
+	PrintBackground bool
+	Landscape       bool
+	WaitDelaySec    int
+}
+
+// DefaultHTMLOptions A4 默认参数。
+func DefaultHTMLOptions(html string) HTMLOptions {
+	return HTMLOptions{
+		HTML:            html,
+		PaperWidth:      8.27,
+		PaperHeight:     11.69,
+		MarginTop:       0.4,
+		MarginBottom:    0.5,
+		MarginLeft:      0.4,
+		MarginRight:     0.4,
+		PrintBackground: true,
+		WaitDelaySec:    1,
+	}
+}
+
+// RenderHTML 把 HTML 字符串直接喂给 Gotenberg 渲染 PDF。
+//
+// Gotenberg 8 API: POST /forms/chromium/convert/html
+// 必填 multipart field: `files` 一个名为 index.html 的 HTML 文件。
+func (s *PDFService) RenderHTML(ctx context.Context, opts HTMLOptions) ([]byte, error) {
+	if !s.HasGotenberg() {
+		return nil, fmt.Errorf("PDF 服务未配置 (gotenbergURL 为空)")
+	}
+	if opts.HTML == "" {
+		return nil, fmt.Errorf("HTML 不能为空")
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+
+	// 必填: files (index.html)
+	fw, err := w.CreateFormFile("files", "index.html")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fw.Write([]byte(opts.HTML)); err != nil {
+		return nil, err
+	}
+
+	writeFloat := func(name string, v float64) {
+		if v > 0 {
+			_ = w.WriteField(name, fmt.Sprintf("%.2f", v))
+		}
+	}
+	writeFloat("paperWidth", opts.PaperWidth)
+	writeFloat("paperHeight", opts.PaperHeight)
+	writeFloat("marginTop", opts.MarginTop)
+	writeFloat("marginBottom", opts.MarginBottom)
+	writeFloat("marginLeft", opts.MarginLeft)
+	writeFloat("marginRight", opts.MarginRight)
+	if opts.PrintBackground {
+		_ = w.WriteField("printBackground", "true")
+	}
+	if opts.Landscape {
+		_ = w.WriteField("landscape", "true")
+	}
+	if opts.WaitDelaySec > 0 {
+		_ = w.WriteField("waitDelay", fmt.Sprintf("%ds", opts.WaitDelaySec))
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		s.gotenbergURL+"/forms/chromium/convert/html", &body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	start := time.Now()
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		s.logger.Error("Gotenberg HTML 请求失败", zap.Error(err))
+		return nil, fmt.Errorf("gotenberg 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		s.logger.Error("Gotenberg HTML 返回错误",
+			zap.Int("status", resp.StatusCode),
+			zap.String("body", string(respBody)))
+		return nil, fmt.Errorf("gotenberg %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	pdf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("PDF HTML→PDF 生成完成",
+		zap.Int("html_bytes", len(opts.HTML)),
+		zap.Int("pdf_bytes", len(pdf)),
+		zap.Duration("elapsed", time.Since(start)))
+	return pdf, nil
+}

@@ -45,8 +45,9 @@ onMounted(async () => {
   tokenReady.value = true
 
   // 动态加载对应报告组件
+  // 打印路由优先用文档式 PrintTemplate（A4 印刷品风格），无则回退 dashboard 组件
   const loaders: Record<string, () => Promise<any>> = {
-    edr: () => import('@/views/System/reports/EDRReport.vue'),
+    edr: () => import('@/views/System/reports/EDRPrintTemplate.vue'),
     antivirus: () => import('@/views/System/reports/AntivirusReport.vue'),
     vulnerability: () => import('@/views/System/reports/VulnerabilityReport.vue'),
     kube: () => import('@/views/System/reports/KubeReport.vue'),

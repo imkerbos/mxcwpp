@@ -1,5 +1,12 @@
 <template>
   <div class="category-report report-print-ready">
+    <div class="export-bar no-print">
+      <a-button type="primary" :loading="exporting" @click="exportPDF">
+        <template #icon><FilePdfOutlined /></template>
+        导出 PDF
+      </a-button>
+      <span class="export-bar__hint">服务端 Chromium 渲染 · 矢量可搜索</span>
+    </div>
     <a-spin :spinning="loading">
       <!-- 统计卡片 -->
       <a-row :gutter="[16, 16]" class="stats-overview">
@@ -150,12 +157,36 @@ import { message } from 'ant-design-vue'
 import type { Dayjs } from 'dayjs'
 import type { EChartsOption } from 'echarts'
 import { reportsApi, type AntivirusReport } from '@/api/reports'
+import { FilePdfOutlined } from '@ant-design/icons-vue'
 
 interface Props {
   dateRange: [Dayjs, Dayjs]
 }
 
 const props = defineProps<Props>()
+
+const exporting = ref(false)
+const exportPDF = async () => {
+  exporting.value = true
+  try {
+    const blob = await reportsApi.exportAntivirusPDF({
+      start_time: props.dateRange[0].format('YYYY-MM-DD'),
+      end_time: props.dateRange[1].format('YYYY-MM-DD'),
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `Antivirus-Report-${props.dateRange[1].format('YYYYMMDD')}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+    message.success('PDF 已生成')
+  } catch (e: any) {
+    console.error('PDF 导出失败', e)
+    message.error(`PDF 导出失败: ${e?.response?.data?.message || e?.message || e}`)
+  } finally {
+    exporting.value = false
+  }
+}
 
 const loading = ref(false)
 const report = ref<AntivirusReport>({
@@ -332,6 +363,22 @@ onMounted(loadData)
 <style scoped>
 .category-report {
   width: 100%;
+}
+
+.export-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 8px 16px;
+  background: rgba(34, 197, 94, 0.06);
+  border-left: 3px solid #22c55e;
+  border-radius: 6px;
+
+  &__hint {
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 12px;
+  }
 }
 
 .stats-overview {

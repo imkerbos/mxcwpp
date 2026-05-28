@@ -69,6 +69,20 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	})
 }
 
+// Version GET /api/v1/system/version
+// 返回 manager 构建版本（外部健康检查 / 监控轮询用）
+func (h *HealthHandler) Version(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "success",
+		"data": gin.H{
+			"version":   BuildVersion,
+			"timestamp": time.Now().Format(model.TimeFormat),
+			"component": "mxsec-manager",
+		},
+	})
+}
+
 // checkDatabase 检查数据库连接状态
 func (h *HealthHandler) checkDatabase() string {
 	if h.db == nil {

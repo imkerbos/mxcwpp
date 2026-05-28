@@ -51,7 +51,16 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 	if !ok {
 		return
 	}
+	reportData := h.BuildEDRReportData(startTime, endTime)
+	reportID, _ := reportData["meta"].(gin.H)["reportID"].(string)
+	period, _ := reportData["meta"].(gin.H)["period"].(string)
+	h.saveGeneratedReport(model.ReportTypeEDR, "EDR 检测专项报告", reportID, period, reportData)
+	Success(c, reportData)
+}
 
+// BuildEDRReportData 装配 EDR 报告原始数据。
+// PDF 渲染路径与 JSON API 共享同一份装配函数，避免数据漂移。
+func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H {
 	// === 1. 总览 ===
 	type summary struct {
 		TotalAlerts     int64
@@ -307,15 +316,38 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 			"growthPercent":    growthPct,
 			"direction":        directionLabel(growthPct),
 		},
-		"rawEventStats":     chStats,
-		"autoResponseStats": autoResponseStats,
-		"iocStats":          iocStats,
-		"ruleEfficacy":      ruleEfficacy,
-		"improvements":      improvements,
+		"rawEventStats": gin.H{
+			"available":       chStats.Available,
+			"totalEvents":     chStats.TotalEvents,
+			"uniqueHosts":     chStats.UniqueHosts,
+			"eventsByType":    chStats.EventsByType,
+			"eventsByHour":    chStats.EventsByHour,
+			"topHostsByEvent": chStats.TopHostsByEvent,
+			"topExe":          chStats.TopExe,
+		},
+		"autoResponseStats": gin.H{
+			"networkBlocks":  autoResponseStats.NetworkBlocks,
+			"hostIsolations": autoResponseStats.HostIsolations,
+			"processKills":   autoResponseStats.ProcessKills,
+			"total":          autoResponseStats.Total,
+		},
+		"iocStats": gin.H{
+			"iocSnapshots":  iocStats.IOCSnapshots,
+			"memoryThreats": iocStats.MemoryThreats,
+			"topIOCTypes":   iocStats.TopIOCTypes,
+		},
+		"ruleEfficacy": gin.H{
+			"totalRules":   ruleEfficacy.TotalRules,
+			"enabledRules": ruleEfficacy.EnabledRules,
+			"hitRules":     ruleEfficacy.HitRules,
+			"zeroHitRules": ruleEfficacy.ZeroHitRules,
+			"hitRate":      ruleEfficacy.HitRate,
+			"topZeroHit":   ruleEfficacy.TopZeroHit,
+		},
+		"improvements": improvements,
 	}
 
-	h.saveGeneratedReport(model.ReportTypeEDR, "EDR 检测专项报告", reportID, periodStr, reportData)
-	Success(c, reportData)
+	return reportData
 }
 
 // edrEventStats 是 CH 端 ebpf_events 维度聚合结果。
@@ -618,9 +650,9 @@ func (h *ReportsHandler) queryAutoResponseStats(startTime, endTime time.Time) ed
 
 // edrIOCStats IOC / 内存威胁 / 情报命中统计。
 type edrIOCStats struct {
-	IOCSnapshots   int64   `json:"iocSnapshots"`   // ioc_snapshots 数（情报快照次数）
-	MemoryThreats  int64   `json:"memoryThreats"`  // memory_threats 检测条数
-	TopIOCTypes    []gin.H `json:"topIOCTypes"`    // memory_threats by technique
+	IOCSnapshots  int64   `json:"iocSnapshots"`  // ioc_snapshots 数（情报快照次数）
+	MemoryThreats int64   `json:"memoryThreats"` // memory_threats 检测条数
+	TopIOCTypes   []gin.H `json:"topIOCTypes"`   // memory_threats by technique
 }
 
 // queryIOCStats 报告周期内 IOC / memory threat 维度。
@@ -650,12 +682,12 @@ func (h *ReportsHandler) queryIOCStats(startTime, endTime time.Time) edrIOCStats
 
 // edrRuleEfficacy 规则有效性指标。
 type edrRuleEfficacy struct {
-	TotalRules    int64   `json:"totalRules"`
-	EnabledRules  int64   `json:"enabledRules"`
-	HitRules      int64   `json:"hitRules"`      // 周期内有命中的规则数
-	ZeroHitRules  int64   `json:"zeroHitRules"`  // 启用但零命中（建议下线）
-	HitRate       float64 `json:"hitRate"`       // hit/enabled 百分比
-	TopZeroHit    []gin.H `json:"topZeroHit"`    // 列举部分 0 命中规则 (id, name)
+	TotalRules   int64   `json:"totalRules"`
+	EnabledRules int64   `json:"enabledRules"`
+	HitRules     int64   `json:"hitRules"`     // 周期内有命中的规则数
+	ZeroHitRules int64   `json:"zeroHitRules"` // 启用但零命中（建议下线）
+	HitRate      float64 `json:"hitRate"`      // hit/enabled 百分比
+	TopZeroHit   []gin.H `json:"topZeroHit"`   // 列举部分 0 命中规则 (id, name)
 }
 
 // queryRuleEfficacy 周期内规则命中分布 + 0 命中规则列表。

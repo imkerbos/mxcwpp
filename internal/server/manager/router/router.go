@@ -111,6 +111,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// API 健康检查（用于前端获取版本信息）
 	apiV1.GET("/health", healthHandler.Health)
+	apiV1.GET("/system/version", healthHandler.Version)
 
 	// 认证相关路由（不需要认证）
 	jwtSecret := cfg.Server.JWTSecret
@@ -432,14 +433,24 @@ func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, c
 	handler := api.NewReportsHandler(db, logger)
 	handler.SetClickHouse(chConn)
 
-	// PDF 导出（Gotenberg sidecar）
+	// PDF 导出（Gotenberg sidecar，HTML→PDF 模式）
+	httpPrefix := ""
+	if cfg.PDF.InternalURL != "" {
+		httpPrefix = cfg.PDF.InternalURL
+	}
 	pdfHandler := api.NewReportPDFHandler(
 		cfg.PDF.GotenbergURL,
-		cfg.PDF.InternalURL,
-		[]byte(cfg.Server.JWTSecret),
+		handler,
+		"/uploads",
+		"./uploads",
+		httpPrefix,
 		logger,
 	)
 	router.GET("/reports/edr/pdf", pdfHandler.ExportEDRReportPDF)
+	router.GET("/reports/antivirus/pdf", pdfHandler.ExportAntivirusReportPDF)
+	router.GET("/reports/vulnerability/pdf", pdfHandler.ExportVulnReportPDF)
+	router.GET("/reports/kube/pdf", pdfHandler.ExportKubeReportPDF)
+	router.GET("/reports/task/:task_id/pdf", pdfHandler.ExportTaskReportPDF)
 	router.GET("/reports/stats", handler.GetStats)
 	router.GET("/reports/baseline-score-trend", handler.GetBaselineScoreTrend)
 	router.GET("/reports/check-result-trend", handler.GetCheckResultTrend)

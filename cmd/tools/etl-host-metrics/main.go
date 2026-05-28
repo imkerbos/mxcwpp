@@ -30,7 +30,7 @@ func main() {
 	flag.Parse()
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {

@@ -1,13 +1,19 @@
 // Package api 提供 HTTP API 处理器。
 //
 // reports_pdf.go 提供报告 PDF 导出 endpoint。
-// 流程: client 触发 → manager 签 token → Gotenberg 拉 /reports/print/:type?token=...
 //
-//	→ Chromium 渲染 → 返回 PDF stream → client 下载。
+// 渲染流程 (v2 — server-side template)：
 //
-// 优势:
-//   - 矢量文本可搜索可复制 (合规)
-//   - 大数据集渲染不卡 (浏览器 jsPDF 万行级会崩)
+//	client → manager
+//	  ├── BuildEDRReportData (复用 JSON API 同一数据装配函数)
+//	  ├── biz.RenderEDRReportHTML (Go html/template + 内嵌 SVG 图表)
+//	  └── biz.PDFService.RenderHTML (POST Gotenberg /forms/chromium/convert/html)
+//	         → 返回矢量 PDF 字节流
+//
+// 优势 vs 旧 SPA 拉取方式：
+//   - 无 SPA 登录态依赖（不会被 401 重定向到登录页）
+//   - 数据装配函数共享，JSON / PDF 数据一致不漂移
+//   - 报告模板独立维护，不耦合前端 dashboard UI
 //   - 可被 cron / scheduler 后台调用
 package api
 
@@ -18,7 +24,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
@@ -26,77 +31,71 @@ import (
 
 // ReportPDFHandler 处理报告 PDF 导出。
 type ReportPDFHandler struct {
-	pdfService  *biz.PDFService
-	internalURL string // manager 内部 URL 给 Gotenberg 拉，如 http://manager:8080
-	jwtSecret   []byte
-	logger      *zap.Logger
+	pdfService     *biz.PDFService
+	reportsHandler *ReportsHandler // 复用数据装配函数
+	uploadStatic   string          // /uploads（HTTP 路径）
+	uploadDir      string          // ./uploads（本地目录）
+	httpPrefix     string          // manager HTTP 前缀，回退拉 logo
+	logger         *zap.Logger
 }
 
 // NewReportPDFHandler 创建处理器。
 //
-// gotenbergURL: 如 http://gotenberg:3000 (sidecar)
-// internalURL:  Gotenberg 容器访问 manager 的内部地址 (如 http://manager:8080)
-// jwtSecret:    用于签短期 token 让打印页面免登录
-func NewReportPDFHandler(gotenbergURL, internalURL string, jwtSecret []byte, logger *zap.Logger) *ReportPDFHandler {
+// gotenbergURL 为空时 HasGotenberg 返回 false，导出接口直接报错。
+// uploadStatic/uploadDir 用于把 site_config.site_logo URL 解析为本地文件。
+func NewReportPDFHandler(gotenbergURL string, rh *ReportsHandler, uploadStatic, uploadDir, httpPrefix string, logger *zap.Logger) *ReportPDFHandler {
 	return &ReportPDFHandler{
-		pdfService:  biz.NewPDFService(gotenbergURL, logger),
-		internalURL: internalURL,
-		jwtSecret:   jwtSecret,
-		logger:      logger,
+		pdfService:     biz.NewPDFService(gotenbergURL, logger),
+		reportsHandler: rh,
+		uploadStatic:   uploadStatic,
+		uploadDir:      uploadDir,
+		httpPrefix:     httpPrefix,
+		logger:         logger,
 	}
 }
 
-// ExportEDRReportPDF GET /api/v1/reports/edr/pdf?start_time=&end_time=&landscape=
-//
-// 流程:
-//  1. 当前 user 的 username/role 签一个 60s short-lived token
-//  2. 调 Gotenberg POST /forms/chromium/convert/url
-//     url = ${internalURL}/reports/print/edr?token=${token}&start_time=...&end_time=...
-//  3. 把 PDF stream 转发给 client，并设 Content-Disposition 触发下载
-func (h *ReportPDFHandler) ExportEDRReportPDF(c *gin.Context) {
+// renderPDF 渲染 + 流式返回的公共流程，复用给所有报告类型。
+// htmlRenderer: 把 data + branding 转为 HTML 的函数（biz.RenderXxxReportHTML）
+// dataFn:       拉取业务数据的函数（h.reportsHandler.BuildXxxReportData）
+// filePrefix:   导出文件名前缀（如 "EDR-Report"）
+func (h *ReportPDFHandler) renderPDF(
+	c *gin.Context,
+	data gin.H,
+	htmlRenderer func(gin.H, biz.ReportRenderOptions) (string, error),
+	filePrefix string,
+) {
 	if !h.pdfService.HasGotenberg() {
 		BadRequest(c, "PDF 服务未配置 (Gotenberg sidecar 未部署)")
 		return
 	}
-	startTime := c.Query("start_time")
-	endTime := c.Query("end_time")
+	if data == nil {
+		NotFound(c, "报告数据不存在")
+		return
+	}
 	landscape := c.Query("landscape") == "true"
 
-	username := c.GetString("username")
-	if username == "" {
-		username = "admin"
-	}
-	role := c.GetString("role")
-	if role == "" {
-		role = "admin"
-	}
+	branding := biz.LoadSiteBranding(h.reportsHandler.db, h.uploadStatic, h.uploadDir, h.httpPrefix)
 
-	// 1. 签 60s token 给打印页用
-	token, err := h.signPrintToken(username, role, 60*time.Second)
+	html, err := htmlRenderer(data, branding)
 	if err != nil {
-		InternalError(c, "签 PDF token 失败")
+		h.logger.Error("HTML 渲染失败", zap.String("prefix", filePrefix), zap.Error(err))
+		InternalError(c, fmt.Sprintf("报告 HTML 渲染失败: %s", err.Error()))
 		return
 	}
 
-	// 2. 构造打印页 URL（含 token 与时间范围）
-	// SPA 路由: /print/report/:type，由 PrintReport.vue 渲染
-	printURL := fmt.Sprintf("%s/print/report/edr?token=%s&start_time=%s&end_time=%s",
-		h.internalURL, token, startTime, endTime)
-	opts := biz.DefaultPDFOptions(printURL)
+	opts := biz.DefaultHTMLOptions(html)
 	opts.Landscape = landscape
 
-	// 3. 调 Gotenberg 渲染
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
-	pdf, err := h.pdfService.RenderURL(ctx, opts)
+	pdf, err := h.pdfService.RenderHTML(ctx, opts)
 	if err != nil {
-		h.logger.Error("EDR 报告 PDF 渲染失败", zap.Error(err))
+		h.logger.Error("PDF 渲染失败", zap.String("prefix", filePrefix), zap.Error(err))
 		InternalError(c, fmt.Sprintf("PDF 渲染失败: %s", err.Error()))
 		return
 	}
 
-	// 4. 流式返回
-	filename := fmt.Sprintf("EDR-Report-%s.pdf", time.Now().Format("20060102-150405"))
+	filename := fmt.Sprintf("%s-%s.pdf", filePrefix, time.Now().Format("20060102-150405"))
 	c.Header("Content-Type", "application/pdf")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	c.Header("Content-Length", fmt.Sprintf("%d", len(pdf)))
@@ -105,17 +104,53 @@ func (h *ReportPDFHandler) ExportEDRReportPDF(c *gin.Context) {
 	_, _ = c.Writer.Write(pdf)
 }
 
-// signPrintToken 签短期 JWT 给打印页面免认证使用。
-// 与 manager 主 JWT 同 secret 但 claim 不一样，方便审计区分。
-func (h *ReportPDFHandler) signPrintToken(username, role string, ttl time.Duration) (string, error) {
-	claims := jwt.MapClaims{
-		"username": username,
-		"role":     role,
-		"iss":      "mxsec-platform",
-		"sub":      "print",
-		"exp":      time.Now().Add(ttl).Unix(),
-		"iat":      time.Now().Unix(),
+// ExportEDRReportPDF GET /api/v1/reports/edr/pdf?start_time=&end_time=&landscape=
+func (h *ReportPDFHandler) ExportEDRReportPDF(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
 	}
-	tk := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tk.SignedString(h.jwtSecret)
+	data := h.reportsHandler.BuildEDRReportData(startTime, endTime)
+	h.renderPDF(c, data, biz.RenderEDRReportHTML, "EDR-Report")
+}
+
+// ExportAntivirusReportPDF GET /api/v1/reports/antivirus/pdf?start_time=&end_time=
+func (h *ReportPDFHandler) ExportAntivirusReportPDF(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+	data := h.reportsHandler.BuildAntivirusReportData(startTime, endTime)
+	h.renderPDF(c, data, biz.RenderAntivirusReportHTML, "Antivirus-Report")
+}
+
+// ExportVulnReportPDF GET /api/v1/reports/vulnerability/pdf?start_time=&end_time=
+func (h *ReportPDFHandler) ExportVulnReportPDF(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+	data := h.reportsHandler.BuildVulnReportData(startTime, endTime)
+	h.renderPDF(c, data, biz.RenderVulnReportHTML, "Vulnerability-Report")
+}
+
+// ExportKubeReportPDF GET /api/v1/reports/kube/pdf?start_time=&end_time=
+func (h *ReportPDFHandler) ExportKubeReportPDF(c *gin.Context) {
+	startTime, endTime, ok := parseReportTimeRange(c)
+	if !ok {
+		return
+	}
+	data := h.reportsHandler.BuildKubeReportData(startTime, endTime)
+	h.renderPDF(c, data, biz.RenderKubeReportHTML, "Kube-Report")
+}
+
+// ExportTaskReportPDF GET /api/v1/reports/task/:task_id/pdf
+func (h *ReportPDFHandler) ExportTaskReportPDF(c *gin.Context) {
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		BadRequest(c, "task_id 参数缺失")
+		return
+	}
+	data := h.reportsHandler.BuildTaskReportData(taskID)
+	h.renderPDF(c, data, biz.RenderTaskReportHTML, fmt.Sprintf("Task-Report-%s", taskID))
 }

@@ -1,10 +1,12 @@
 // Command etl-audit-log 一次性把 MySQL audit_logs 历史数据迁到 ClickHouse mxsec.audit_log。
 //
 // MySQL schema (model.AuditLog):
-//   id / username / action / resource_type / resource_id / path / ip / detail / status_code / created_at
+//
+//	id / username / action / resource_type / resource_id / path / ip / detail / status_code / created_at
 //
 // CH schema (deploy/init-clickhouse.sql audit_log):
-//   timestamp / user_id / action / resource / detail / ip
+//
+//	timestamp / user_id / action / resource / detail / ip
 //
 // 字段映射:
 //   - timestamp ← created_at
@@ -15,8 +17,9 @@
 //   - ip        ← ip
 //
 // 用法:
-//   go run ./cmd/tools/etl-audit-log -config /etc/mxsec-platform/server.yaml
-//   # 可选: -batch 1000 -from-id 0 -dry-run
+//
+//	go run ./cmd/tools/etl-audit-log -config /etc/mxsec-platform/server.yaml
+//	# 可选: -batch 1000 -from-id 0 -dry-run
 package main
 
 import (
@@ -44,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
