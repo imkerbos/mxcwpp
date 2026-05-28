@@ -45,10 +45,11 @@ func NewHostVulnPreCheckHandler(db *gorm.DB, logger *zap.Logger, dispatcher *sd.
 
 // preCheckTaskPayload 下发给 agent 的 pre-check 任务
 type preCheckTaskPayload struct {
-	RequestID    string `json:"request_id"`
-	HostVulnID   uint   `json:"host_vuln_id"`
-	Component    string `json:"component"`
-	FixedVersion string `json:"fixed_version"`
+	RequestID              string `json:"request_id"`
+	HostVulnID             uint   `json:"host_vuln_id"`
+	Component              string `json:"component"`
+	FixedVersion           string `json:"fixed_version"`
+	CheckAffectedProcesses bool   `json:"check_affected_processes,omitempty"` // P5.2: shared_lib 才打开
 }
 
 // CreateForHostVuln 单条 host_vulnerability pre-check
@@ -141,9 +142,10 @@ func (h *HostVulnPreCheckHandler) CreateForHostAll(c *gin.Context) {
 
 // dispatchPreCheck 向 agent 推一条 pre-check 任务
 func (h *HostVulnPreCheckHandler) dispatchPreCheck(hv *model.HostVulnerability) error {
-	// 查 vuln.component / vuln.fixed_version
+	// 查 vuln.component / vuln.fixed_version / vuln.vuln_category（决定是否跑 lsof）
 	var vuln model.Vulnerability
-	if err := h.db.Select("id, component, fixed_version").First(&vuln, hv.VulnID).Error; err != nil {
+	if err := h.db.Select("id, component, fixed_version, vuln_category, vuln_category_override").
+		First(&vuln, hv.VulnID).Error; err != nil {
 		return fmt.Errorf("查询 vuln 失败: %w", err)
 	}
 	if vuln.Component == "" {
@@ -157,11 +159,13 @@ func (h *HostVulnPreCheckHandler) dispatchPreCheck(hv *model.HostVulnerability) 
 	}
 
 	requestID := fmt.Sprintf("pc-%d-%d", hv.ID, time.Now().Unix())
+	// P5.2: shared_lib 类漏洞要求 agent 跑 lsof 找受影响进程
 	payload := preCheckTaskPayload{
-		RequestID:    requestID,
-		HostVulnID:   hv.ID,
-		Component:    vuln.Component,
-		FixedVersion: vuln.FixedVersion,
+		RequestID:              requestID,
+		HostVulnID:             hv.ID,
+		Component:              vuln.Component,
+		FixedVersion:           vuln.FixedVersion,
+		CheckAffectedProcesses: vuln.EffectiveCategory() == model.VulnCategorySharedLib,
 	}
 	body, _ := json.Marshal(payload)
 

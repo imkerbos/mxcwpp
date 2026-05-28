@@ -59,10 +59,11 @@ func (h *PreCheckResultHandler) HandleResult(agentID string, fields map[string]s
 	}
 
 	updates := map[string]any{
-		"precheck_status":     status,
-		"precheck_message":    truncate(fields["message"], 500),
-		"precheck_packages":   fields["packages"],
-		"precheck_checked_at": model.LocalTime(time.Now()),
+		"precheck_status":             status,
+		"precheck_message":            truncate(fields["message"], 500),
+		"precheck_packages":           fields["packages"],
+		"precheck_affected_processes": fields["affected_processes"],
+		"precheck_checked_at":         model.LocalTime(time.Now()),
 	}
 	if err := h.db.Model(&model.HostVulnerability{}).Where("id = ?", hvID).
 		Updates(updates).Error; err != nil {
