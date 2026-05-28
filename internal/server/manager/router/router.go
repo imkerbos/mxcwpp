@@ -433,11 +433,13 @@ func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/reports/antivirus", handler.GetAntivirusReport)
 	router.GET("/reports/vulnerability", handler.GetVulnerabilityReport)
 	router.GET("/reports/kube", handler.GetKubeReport)
+	router.GET("/reports/edr", handler.GetEDRReport)
 	// Executive 报告（可导出 PDF）
 	router.GET("/reports/antivirus/:task_id/executive", handler.GetAntivirusExecutiveReport)
 	router.GET("/reports/vulnerability/executive", handler.GetVulnerabilityExecutiveReport)
 	router.GET("/reports/remediation/executive", handler.GetRemediationExecutiveReport)
 	router.GET("/reports/kube/executive", handler.GetKubeExecutiveReport)
+	router.GET("/reports/edr/executive", handler.GetEDRExecutiveReport)
 	// 已保存的报告
 	router.GET("/reports/generated", handler.ListGeneratedReports)
 	router.GET("/reports/generated/:id", handler.GetGeneratedReport)

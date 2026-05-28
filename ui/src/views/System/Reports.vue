@@ -23,6 +23,7 @@
       <a-tab-pane key="antivirus" tab="病毒查杀" />
       <a-tab-pane key="vulnerability" tab="漏洞管理" />
       <a-tab-pane key="kube" tab="容器安全" />
+      <a-tab-pane key="edr" tab="EDR 检测" />
     </a-tabs>
 
     <template v-if="activeTab === 'overview'">
@@ -304,6 +305,11 @@
       ref="kubeRef"
       :date-range="dateRange"
     />
+    <EDRReport
+      v-else-if="activeTab === 'edr'"
+      ref="edrRef"
+      :date-range="dateRange"
+    />
   </div>
 </template>
 
@@ -333,6 +339,7 @@ import type { EChartsOption } from 'echarts'
 import AntivirusReport from './reports/AntivirusReport.vue'
 import VulnerabilityReport from './reports/VulnerabilityReport.vue'
 import KubeReport from './reports/KubeReport.vue'
+import EDRReport from './reports/EDRReport.vue'
 
 // 报表专用风险分布接口
 interface ReportRiskDistribution {
@@ -348,7 +355,7 @@ const router = useRouter()
 const loading = ref(false)
 const loadingTopLists = ref(false)
 
-const validTabs = ['overview', 'antivirus', 'vulnerability', 'kube']
+const validTabs = ['overview', 'antivirus', 'vulnerability', 'kube', 'edr']
 const initialTab = validTabs.includes(route.query.tab as string) ? (route.query.tab as string) : 'overview'
 const activeTab = ref<string>(initialTab)
 
@@ -364,6 +371,7 @@ const dateRange = ref<[Dayjs, Dayjs]>([
 const antivirusRef = ref<InstanceType<typeof AntivirusReport> | null>(null)
 const vulnerabilityRef = ref<InstanceType<typeof VulnerabilityReport> | null>(null)
 const kubeRef = ref<InstanceType<typeof KubeReport> | null>(null)
+const edrRef = ref<InstanceType<typeof EDRReport> | null>(null)
 
 const datePresets = [
   { label: '最近7天', value: [dayjs().subtract(7, 'day'), dayjs()] },
@@ -827,6 +835,8 @@ const handleRefresh = () => {
     vulnerabilityRef.value?.refresh()
   } else if (activeTab.value === 'kube') {
     kubeRef.value?.refresh()
+  } else if (activeTab.value === 'edr') {
+    edrRef.value?.loadData()
   }
 }
 
