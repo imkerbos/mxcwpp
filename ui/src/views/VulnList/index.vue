@@ -158,6 +158,41 @@
           </a-select>
 
           <a-select
+            v-model:value="filterVulnCategory"
+            style="width: 150px"
+            placeholder="类别"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="kernel">内核</a-select-option>
+            <a-select-option value="critical_shared_lib">关键共享库</a-select-option>
+            <a-select-option value="shared_lib">共享库</a-select-option>
+            <a-select-option value="system_daemon">系统服务</a-select-option>
+            <a-select-option value="cli_tool">CLI 工具</a-select-option>
+            <a-select-option value="web_service">Web 服务</a-select-option>
+            <a-select-option value="db_service">数据库</a-select-option>
+            <a-select-option value="container_runtime">容器运行时</a-select-option>
+            <a-select-option value="virtualization">虚拟化</a-select-option>
+            <a-select-option value="language_dep">语言依赖</a-select-option>
+            <a-select-option value="other">其他</a-select-option>
+          </a-select>
+
+          <a-select
+            v-model:value="filterRestartAction"
+            style="width: 170px"
+            placeholder="重启影响"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="reboot_host">🔴 需重启主机</a-select-option>
+            <a-select-option value="restart_dependent_services">🟠 需重启依赖</a-select-option>
+            <a-select-option value="restart_specific_service">🟡 需重启服务</a-select-option>
+            <a-select-option value="no_action">🟢 无需重启</a-select-option>
+            <a-select-option value="rebuild_app">🔵 需重 build</a-select-option>
+            <a-select-option value="unknown">⚪ 影响未知</a-select-option>
+          </a-select>
+
+          <a-select
             v-model:value="filterSort"
             style="width: 160px"
             placeholder="排序方式"
@@ -357,6 +392,8 @@ const router = useRouter()
 const searchText = ref('')
 const filterSeverity = ref<string>()
 const filterStatus = ref<string>()
+const filterVulnCategory = ref<string>()
+const filterRestartAction = ref<string>()
 const filterComponent = ref('')
 const filterExploitStatus = ref<string>()
 const filterPriority = ref<string>()
@@ -578,6 +615,8 @@ const loadVulns = async () => {
       component: filterComponent.value || undefined,
       exploit_status: filterExploitStatus.value || undefined,
       priority: filterPriority.value || undefined,
+      vuln_category: filterVulnCategory.value || undefined,
+      restart_action: filterRestartAction.value || undefined,
       sort: filterSort.value || undefined,
     })
     vulns.value = res.items ?? []
@@ -715,6 +754,8 @@ const handleReset = () => {
   filterComponent.value = ''
   filterExploitStatus.value = undefined
   filterPriority.value = undefined
+  filterVulnCategory.value = undefined
+  filterRestartAction.value = undefined
   filterSort.value = undefined
   filterHostId.value = undefined
   pagination.value.current = 1
