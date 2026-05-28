@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/httptrans"
 	acmetrics "github.com/imkerbos/mxsec-platform/internal/server/agentcenter/metrics"
@@ -77,6 +78,16 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		return nil, err
 	}
 
+	// 4.1 初始化 ClickHouse（可选；host_metrics 等表已迁 CH 时使用）
+	var chConn chdriver.Conn
+	if cfg.ClickHouse.Enabled {
+		if conn, err := database.InitClickHouse(cfg.ClickHouse, logger); err != nil {
+			logger.Warn("ClickHouse 初始化失败，host_metrics 等表将降级 MySQL 写入", zap.Error(err))
+		} else {
+			chConn = conn
+		}
+	}
+
 	// 5. 创建 gRPC Server
 	grpcServer, err := server.CreateGRPCServer(cfg, logger)
 	if err != nil {
@@ -86,6 +97,7 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 
 	// 6. 注册 Transfer 服务
 	transferService := transfer.NewService(db, logger, cfg)
+	transferService.SetClickHouse(chConn)
 	grpcProto.RegisterTransferServer(grpcServer, transferService)
 
 	// 6.1 初始化 Kafka 生产者（可选）
