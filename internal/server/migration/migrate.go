@@ -132,10 +132,15 @@ func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
 
 	processed := 0
 	categoryStats := map[string]int{}
+	// 按 id 分页避免死循环：cat 仍返回 'other' 时行不会从过滤集移出，
+	// 不加 id > lastID 会被反复 fetch 同一批
+	var lastID uint = 0
 	for {
 		var batch []model.Vulnerability
 		if err := db.Select("id, component, purl").
-			Where("(vuln_category = ? OR vuln_category = '' OR vuln_category IS NULL)", model.VulnCategoryOther).
+			Where("(vuln_category = ? OR vuln_category = '' OR vuln_category IS NULL) AND id > ?",
+				model.VulnCategoryOther, lastID).
+			Order("id ASC").
 			Limit(batchSize).
 			Find(&batch).Error; err != nil {
 			return fmt.Errorf("拉批次失败: %w", err)
@@ -158,6 +163,7 @@ func migrateCategorizeExistingVulns(db *gorm.DB, logger *zap.Logger) error {
 			}
 			categoryStats[cat]++
 			processed++
+			lastID = v.ID
 		}
 		logger.Info("vuln 分类回填进度",
 			zap.Int("processed", processed), zap.Int64("total", total))
