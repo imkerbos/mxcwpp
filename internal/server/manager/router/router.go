@@ -142,7 +142,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// 注册 API 路由
 	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater, consumerManager)
-	setupAdminAPIRoutes(apiV1Admin, db, logger, cfg)
+	setupAdminAPIRoutes(apiV1Admin, db, logger, cfg, chConn)
 
 	return router
 }
@@ -178,7 +178,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupDependencyAPI(router, db, logger, acDispatcher)
 	setupEDREventsAPI(router, logger, chConn)
 	setupBDEBaselineAPI(router, db, logger)
-	setupStorylineAPI(router, db, logger)
+	setupStorylineAPI(router, db, logger, chConn)
 	setupMemoryThreatAPI(router, db, logger)
 	setupHuntingAPI(router, db, logger, chConn)
 	setupHostIsolationAPI(router, db, logger, acDispatcher)
@@ -186,7 +186,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 }
 
 // setupAdminAPIRoutes 注册需要管理员权限的 API 路由
-func setupAdminAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config) {
+func setupAdminAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, chConn chdriver.Conn) {
 	setupUsersAPI(router, db, logger)
 	setupSystemConfigAPI(router, db, logger)
 	setupNotificationsAPI(router, db, logger)
@@ -195,6 +195,16 @@ func setupAdminAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logge
 	setupMigrationAPI(router, db, logger)
 	setupAuditLogAPI(router, db, logger)
 	setupRBACAPI(router, db, logger)
+	setupDataConfigAPI(router, db, logger, chConn)
+}
+
+// setupDataConfigAPI 注册数据存储配置（feature flag + retention policy）。
+func setupDataConfigAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
+	handler := api.NewAdminDataConfigHandler(db, chConn, logger)
+	router.GET("/feature-flags", handler.ListFeatureFlags)
+	router.PUT("/feature-flags/:key", handler.UpdateFeatureFlag)
+	router.GET("/retention-policies", handler.ListRetentionPolicies)
+	router.PUT("/retention-policies/:ch_table", handler.UpdateRetentionPolicy)
 }
 
 // setupRBACAPI 设置 RBAC 权限管理 API 路由
@@ -226,8 +236,9 @@ func setupNetworkBlockAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logg
 }
 
 // setupStorylineAPI 设置攻击故事线 API 路由
-func setupStorylineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+func setupStorylineAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
 	handler := api.NewStorylineHandler(db, logger)
+	handler.SetClickHouse(chConn)
 	router.GET("/storylines", handler.ListStorylines)
 	router.GET("/storylines/stats", handler.GetStorylineStats)
 	router.GET("/storylines/:story_id", handler.GetStoryline)

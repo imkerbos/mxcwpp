@@ -142,6 +142,43 @@ func InitDefaultData(db *gorm.DB, logger *zap.Logger, policyDir string, pluginsC
 	return nil
 }
 
+// SeedFeatureFlags 启动时插入内置 feature flag 默认值；已存在不覆盖。
+func SeedFeatureFlags(db *gorm.DB, logger *zap.Logger) {
+	for _, s := range model.DefaultFeatureFlags {
+		ff := model.FeatureFlag{
+			Key:         s.Key,
+			Value:       s.Default,
+			DefaultVal:  s.Default,
+			Description: s.Description,
+		}
+		// 仅插入新 key，不覆盖已有运行时值
+		if err := db.Where("flag_key = ?", s.Key).
+			Attrs(ff).
+			FirstOrCreate(&model.FeatureFlag{}).Error; err != nil {
+			logger.Warn("seed feature_flag 失败", zap.String("key", s.Key), zap.Error(err))
+		}
+	}
+	logger.Info("feature_flags 默认值已 seed", zap.Int("count", len(model.DefaultFeatureFlags)))
+}
+
+// SeedRetentionPolicies 启动时插入内置 retention policy 默认值。
+func SeedRetentionPolicies(db *gorm.DB, logger *zap.Logger) {
+	for _, s := range model.DefaultRetentionPolicies {
+		rp := model.RetentionPolicy{
+			CHTable:       s.CHTable,
+			DisplayName:   s.DisplayName,
+			Description:   s.Description,
+			RetentionDays: s.Days,
+		}
+		if err := db.Where("ch_table = ?", s.CHTable).
+			Attrs(rp).
+			FirstOrCreate(&model.RetentionPolicy{}).Error; err != nil {
+			logger.Warn("seed retention_policy 失败", zap.String("ch_table", s.CHTable), zap.Error(err))
+		}
+	}
+	logger.Info("retention_policies 默认值已 seed", zap.Int("count", len(model.DefaultRetentionPolicies)))
+}
+
 // isDataInitialized 检查默认数据是否已完成首次初始化
 func isDataInitialized(db *gorm.DB) bool {
 	var cfg model.SystemConfig

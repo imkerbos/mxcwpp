@@ -150,3 +150,47 @@ PARTITION BY toYYYYMM(timestamp)
 ORDER BY (timestamp)
 TTL toDateTime(timestamp) + INTERVAL 365 DAY
 SETTINGS index_granularity = 8192;
+
+-- ==================== 攻击故事线事件 ====================
+-- MySQL → CH 迁移试点 (2026-05-28)
+-- 原 storyline_events MySQL 表 660w 行 / 1.8GB，错配。
+-- 查询场景: 单 story_id + 时间范围 (详情页) / 按时间窗聚合 (报告)
+-- ORDER BY (story_id, timestamp) 保证主键命中毫秒级
+-- detail 列加 bloom_filter 索引加速全文搜索
+
+CREATE TABLE IF NOT EXISTS storyline_events (
+    id            UInt64,
+    story_id      String,
+    host_id       String,
+    data_type     Int32,
+    event_type    LowCardinality(String),
+    pid           String,
+    exe           String,
+    detail        String,
+    rule_name     LowCardinality(String),
+    severity      LowCardinality(String),
+    timestamp     DateTime64(3),
+    created_at    DateTime64(3),
+    INDEX idx_detail detail TYPE tokenbf_v1(1024, 3, 0) GRANULARITY 4
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (story_id, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+
+-- 按 story_id 聚合的物化视图（详情页快速 count / 跨度统计）
+CREATE MATERIALIZED VIEW IF NOT EXISTS storyline_events_by_story
+ENGINE = AggregatingMergeTree()
+PARTITION BY toYYYYMM(first_seen)
+ORDER BY (story_id)
+TTL toDateTime(first_seen) + INTERVAL 180 DAY
+AS SELECT
+    story_id,
+    toStartOfDay(min(timestamp))    AS first_seen,
+    max(timestamp)                   AS last_seen,
+    countState()                     AS event_count,
+    uniqState(host_id)               AS unique_hosts,
+    uniqState(event_type)            AS unique_event_types,
+    uniqIfState(rule_name, rule_name != '') AS unique_rules
+FROM storyline_events
+GROUP BY story_id;

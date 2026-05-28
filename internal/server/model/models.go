@@ -220,6 +220,8 @@ var (
 		&NetworkBlockRule{},
 		&SecurityDBSyncRecord{},
 		&GeneratedReport{},
+		&FeatureFlag{},
+		&RetentionPolicy{},
 		&MigrationJob{},
 		&ComponentPushHost{},
 		&RemediationTask{},

@@ -102,9 +102,53 @@ func NewClickHouseWriter(conn chdriver.Conn, batchSize int, flushTimeout time.Du
 		done:         make(chan struct{}),
 	}
 	if conn != nil {
+		// 启动时确保新增 schema 已建（init.sql 只在首次跑，存量 prod CH 需 runtime ensure）
+		w.ensureSchemas()
 		go w.flusher()
 	}
 	return w
+}
+
+// ensureSchemas 启动时 CREATE TABLE IF NOT EXISTS 保证新增 CH 表存在。
+// 仅添加 init-clickhouse.sql 后新增的表，避免与原 init 重复。
+// 失败仅 warn，不阻塞启动（已存在的表 IF NOT EXISTS 是 no-op）。
+func (w *ClickHouseWriter) ensureSchemas() {
+	ddls := []struct {
+		name string
+		ddl  string
+	}{
+		{
+			"storyline_events",
+			`CREATE TABLE IF NOT EXISTS storyline_events (
+				id            UInt64,
+				story_id      String,
+				host_id       String,
+				data_type     Int32,
+				event_type    LowCardinality(String),
+				pid           String,
+				exe           String,
+				detail        String,
+				rule_name     LowCardinality(String),
+				severity      LowCardinality(String),
+				timestamp     DateTime64(3),
+				created_at    DateTime64(3),
+				INDEX idx_detail detail TYPE tokenbf_v1(1024, 3, 0) GRANULARITY 4
+			) ENGINE = MergeTree()
+			PARTITION BY toYYYYMM(timestamp)
+			ORDER BY (story_id, timestamp)
+			TTL toDateTime(timestamp) + INTERVAL 90 DAY
+			SETTINGS index_granularity = 8192`,
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, t := range ddls {
+		if err := w.conn.Exec(ctx, t.ddl); err != nil {
+			w.logger.Warn("ClickHouse ensure schema 失败", zap.String("table", t.name), zap.Error(err))
+			continue
+		}
+		w.logger.Info("ClickHouse schema 就绪", zap.String("table", t.name))
+	}
 }
 
 // Close 触发最终刷新并关闭后台 goroutine
