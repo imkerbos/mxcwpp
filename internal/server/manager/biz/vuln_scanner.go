@@ -1196,10 +1196,10 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 	// 否则 advisory matcher.Match 因 host.PkgName="" 永远不匹配 → host_vuln 全部为空。
 	// 历史 bug：原实现只查 hosts 表 OSFamily/OSMajor，advisory matcher 因 PkgName 空跳过所有 advisory，
 	// 但旧版本通过别的路径误写入 host_vuln，导致 prod 出现 690k+ debian/alpine 错关联 RHEL 主机。
+	// hosts 表无 ip 列（IP 在 network_interfaces JSON 内），advisory matcher 不依赖 IP，省略。
 	type hostPkgRow struct {
 		HostID    string
 		Hostname  string
-		IP        string
 		OSFamily  string
 		OSVersion string
 		Arch      string
@@ -1210,9 +1210,9 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 	}
 	var rows []hostPkgRow
 	if err := v.db.Table("hosts h").
-		Select("h.host_id, h.hostname, h.ip, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.architecture as pkg_arch, s.purl").
+		Select("h.host_id, h.hostname, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.architecture as pkg_arch, s.purl").
 		Joins("JOIN software s ON s.host_id = h.host_id").
-		Where("h.status = ? AND s.ecosystem IN (?,?)", "online", "OS", "").
+		Where("h.status = ? AND (s.ecosystem = ? OR s.ecosystem = ?)", "online", "OS", "").
 		Find(&rows).Error; err != nil {
 		return fmt.Errorf("加载 host+software 清单失败: %w", err)
 	}
@@ -1221,7 +1221,6 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 		hostsAdv = append(hostsAdv, advisory.HostSoftware{
 			HostID:   r.HostID,
 			Hostname: r.Hostname,
-			IP:       r.IP,
 			OSFamily: r.OSFamily,
 			OSVer:    r.OSVersion,
 			OSMajor:  extractOSMajor(r.OSVersion),
