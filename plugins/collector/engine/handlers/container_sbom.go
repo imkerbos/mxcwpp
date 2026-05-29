@@ -148,10 +148,8 @@ func (h *ContainerSBOMHandler) scanContainersConcurrent(ctx context.Context, ref
 	sem := make(chan struct{}, containerSBOMConcurrency)
 
 	for _, ref := range refs {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			break
-		default:
 		}
 
 		wg.Add(1)
@@ -349,6 +347,7 @@ func buildContainerPkg(ref containerRef, pkgType, distro, name, version, arch st
 		"name":         name,
 		"version":      version,
 		"architecture": arch,
+		"collected_at": time.Now().Format(time.RFC3339),
 		"package_type": pkgType,
 		"purl":         purl,
 		"source_file":  fmt.Sprintf("container:%s:%s", ref.ID, ref.Image),

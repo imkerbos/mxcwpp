@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -206,6 +207,7 @@ func (h *PythonPackagesHandler) parseDistInfo(distDir string) (map[string]interf
 	return map[string]interface{}{
 		"name":         lowerName,
 		"version":      version,
+		"collected_at": time.Now().Format(time.RFC3339),
 		"package_type": "pip",
 		"ecosystem":    "PyPI",
 		"purl":         fmt.Sprintf("pkg:pypi/%s@%s", url.PathEscape(lowerName), url.PathEscape(version)),

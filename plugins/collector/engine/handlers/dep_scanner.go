@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"time"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -130,11 +131,13 @@ func (h *DepScannerHandler) scanDir(ctx context.Context, root string) ([]interfa
 
 		for _, dep := range deps {
 			results = append(results, map[string]interface{}{
-				"name":        dep.Name,
-				"version":     dep.Version,
-				"purl":        dep.PURL,
-				"ecosystem":   dep.Ecosystem,
-				"source_file": path,
+				"name":         dep.Name,
+				"version":      dep.Version,
+				"collected_at": time.Now().Format(time.RFC3339),
+				"package_type": dep.Ecosystem,
+				"purl":         dep.PURL,
+				"ecosystem":    dep.Ecosystem,
+				"source_file":  path,
 			})
 		}
 

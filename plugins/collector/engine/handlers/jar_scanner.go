@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -255,6 +256,7 @@ func readPomProperties(f *zip.File, jarPath string) (map[string]interface{}, boo
 	return map[string]interface{}{
 		"name":         name,
 		"version":      version,
+		"collected_at": time.Now().Format(time.RFC3339),
 		"package_type": "jar",
 		"ecosystem":    "Maven",
 		"purl":         purl,
@@ -303,6 +305,7 @@ func readManifest(f *zip.File, jarPath string) (map[string]interface{}, bool) {
 	return map[string]interface{}{
 		"name":         name,
 		"version":      version,
+		"collected_at": time.Now().Format(time.RFC3339),
 		"package_type": "jar",
 		"ecosystem":    "Maven",
 		"purl":         fmt.Sprintf("pkg:generic/%s@%s", url.PathEscape(name), url.PathEscape(version)),

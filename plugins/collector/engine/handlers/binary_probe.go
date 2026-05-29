@@ -243,10 +243,8 @@ func (h *BinaryProbeHandler) Collect(ctx context.Context) ([]interface{}, error)
 	var wg sync.WaitGroup
 
 	for _, job := range jobs {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			break
-		default:
 		}
 
 		wg.Add(1)

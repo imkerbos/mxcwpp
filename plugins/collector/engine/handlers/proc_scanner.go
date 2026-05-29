@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -108,6 +109,7 @@ func (h *ProcScannerHandler) Collect(ctx context.Context) ([]interface{}, error)
 		results = append(results, map[string]interface{}{
 			"name":         basename,
 			"version":      "",
+			"collected_at": time.Now().Format(time.RFC3339),
 			"package_type": "running-binary",
 			"purl":         fmt.Sprintf("pkg:generic/%s?probe=procfs", url.PathEscape(basename)),
 			"source_file":  realPath,

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -202,6 +203,7 @@ func (h *GoBuildInfoHandler) readBuildInfo(path string) ([]map[string]interface{
 		out = append(out, map[string]interface{}{
 			"name":         "go-binary:" + binaryName,
 			"version":      mainVer,
+			"collected_at": time.Now().Format(time.RFC3339),
 			"package_type": "go-module",
 			"ecosystem":    "Go",
 			"purl":         fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(mainPath), url.PathEscape(mainVer)),
@@ -229,6 +231,7 @@ func (h *GoBuildInfoHandler) readBuildInfo(path string) ([]map[string]interface{
 		out = append(out, map[string]interface{}{
 			"name":         depPath,
 			"version":      depVer,
+			"collected_at": time.Now().Format(time.RFC3339),
 			"package_type": "go-module",
 			"ecosystem":    "Go",
 			"purl":         fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(depPath), url.PathEscape(depVer)),

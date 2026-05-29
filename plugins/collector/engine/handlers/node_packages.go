@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -235,6 +236,7 @@ func (h *NodePackagesHandler) parsePackageJSON(pkgDir string, seen map[string]st
 	return map[string]interface{}{
 		"name":         meta.Name,
 		"version":      meta.Version,
+		"collected_at": time.Now().Format(time.RFC3339),
 		"package_type": "npm",
 		"ecosystem":    "npm",
 		"purl":         buildNPMPURL(meta.Name, meta.Version),
