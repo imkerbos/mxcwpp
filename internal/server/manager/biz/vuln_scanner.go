@@ -772,14 +772,62 @@ type hostVulnEntry struct {
 }
 
 // upsertHostVulns 更新漏洞的主机关联和受影响主机数
+//
+// OS family 二次过滤：
+//   - 漏洞 source 是 OS-specific (debian-tracker/alpine/rhsa/rocky-apollo/usn/centos) 时，
+//     只关联到 OS family 兼容的主机（RHEL 系互兼容；debian↔ubuntu；alpine 独立）
+//   - 漏洞 source 是 osv/nvd (通用 PURL/CPE) 时，PURL 包路径已隐含生态系统，无需 OS 校验
+//
+// 历史 bug：OSV.dev API 用 PURL 查询返回所有相关 CVE（不分 distro），
+// 主机包名匹配但 OS 不兼容时会写出 92w+ 误关联（debian-tracker advisory → Rocky 主机）。
 func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, hostnameMap, ipMap map[string]string) {
+	// 查漏洞 source；OS-specific 时拿 OSFamily 白名单
+	var vuln model.Vulnerability
+	if err := v.db.Select("source").First(&vuln, vulnID).Error; err != nil {
+		return
+	}
+	allowedOSFamilies := osFamilyAllowlistBySource(vuln.Source)
+
 	entries := make([]hostVulnEntry, 0)
 	hostSeen := make(map[string]struct{})
+
+	// OS-specific source：批量查主机 OS family，过滤不兼容
+	var hostOSFamily map[string]string
+	if allowedOSFamilies != nil {
+		hostIDs := make([]string, 0)
+		for _, hostID := range purlHosts[purl] {
+			if _, ok := hostSeen[hostID]; ok {
+				continue
+			}
+			hostIDs = append(hostIDs, hostID)
+		}
+		hostOSFamily = make(map[string]string, len(hostIDs))
+		if len(hostIDs) > 0 {
+			type row struct {
+				HostID   string
+				OSFamily string
+			}
+			var rows []row
+			v.db.Table("hosts").Select("host_id, os_family").Where("host_id IN ?", hostIDs).Find(&rows)
+			for _, r := range rows {
+				hostOSFamily[r.HostID] = strings.ToLower(r.OSFamily)
+			}
+		}
+	}
+
 	for _, hostID := range purlHosts[purl] {
 		if _, exists := hostSeen[hostID]; exists {
 			continue
 		}
 		hostSeen[hostID] = struct{}{}
+
+		if allowedOSFamilies != nil {
+			fam, ok := hostOSFamily[hostID]
+			if !ok || !allowedOSFamilies[fam] {
+				continue // OS 不兼容，跳过
+			}
+		}
+
 		entries = append(entries, hostVulnEntry{
 			HostID:   hostID,
 			Hostname: hostnameMap[hostID],
@@ -788,6 +836,23 @@ func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHos
 		})
 	}
 	v.upsertHostVulnsBatch(vulnID, entries)
+}
+
+// osFamilyAllowlistBySource 返回 source 对应的兼容主机 OS family 白名单。
+// 返回 nil 表示该 source 通用（不做 OS 过滤）。
+func osFamilyAllowlistBySource(source string) map[string]bool {
+	switch source {
+	case "debian-tracker", "usn":
+		return map[string]bool{"debian": true, "ubuntu": true}
+	case "alpine":
+		return map[string]bool{"alpine": true}
+	case "rhsa", "rocky-apollo", "centos":
+		return map[string]bool{
+			"rhel": true, "centos": true, "centos-stream": true,
+			"rocky": true, "almalinux": true, "oraclelinux": true, "ol": true,
+		}
+	}
+	return nil // osv / nvd / 其他通用
 }
 
 // upsertHostVulnsBatch 批量更新主机-漏洞关联
