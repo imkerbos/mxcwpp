@@ -157,7 +157,9 @@ func GetDataType(collectType string) int32 {
 		return 5051
 	case "user":
 		return 5052
-	case "software":
+	case "software", "dep_scan", "binary_probe", "python_packages", "node_packages", "jar_scanner", "go_buildinfo", "proc_scanner", "container_sbom":
+		// 全部 SBOM 类 handler 复用 5053 (软件资产)。
+		// server 端按 source_file / package_type / purl 区分来源，避免 DataType 爆炸。
 		return 5053
 	case "container":
 		return 5054
