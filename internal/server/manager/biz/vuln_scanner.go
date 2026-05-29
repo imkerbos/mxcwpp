@@ -1192,31 +1192,47 @@ func (v *VulnScanner) extractReferenceURL(vuln osvVuln) string {
 // hosts 取自 hosts 表（host_packages 软件清单后续 collector 上报后再 join 入参，
 // 当前仅按 OS family + major 兼容性 match）。
 func (v *VulnScanner) syncCoreAdvisories() error {
-	type hostRow struct {
+	// 必须 JOIN software 表带上每条主机的真实包清单，
+	// 否则 advisory matcher.Match 因 host.PkgName="" 永远不匹配 → host_vuln 全部为空。
+	// 历史 bug：原实现只查 hosts 表 OSFamily/OSMajor，advisory matcher 因 PkgName 空跳过所有 advisory，
+	// 但旧版本通过别的路径误写入 host_vuln，导致 prod 出现 690k+ debian/alpine 错关联 RHEL 主机。
+	type hostPkgRow struct {
 		HostID    string
 		Hostname  string
+		IP        string
 		OSFamily  string
 		OSVersion string
 		Arch      string
+		PkgName   string
+		PkgVer    string
+		PkgArch   string
+		PURL      string
 	}
-	var rows []hostRow
-	if err := v.db.Table("hosts").
-		Select("host_id, hostname, os_family, os_version, arch").
-		Where("status = ?", "online").
+	var rows []hostPkgRow
+	if err := v.db.Table("hosts h").
+		Select("h.host_id, h.hostname, h.ip, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.architecture as pkg_arch, s.purl").
+		Joins("JOIN software s ON s.host_id = h.host_id").
+		Where("h.status = ? AND s.ecosystem IN (?,?)", "online", "OS", "").
 		Find(&rows).Error; err != nil {
-		return fmt.Errorf("加载 host 清单失败: %w", err)
+		return fmt.Errorf("加载 host+software 清单失败: %w", err)
 	}
 	hostsAdv := make([]advisory.HostSoftware, 0, len(rows))
 	for _, r := range rows {
 		hostsAdv = append(hostsAdv, advisory.HostSoftware{
 			HostID:   r.HostID,
 			Hostname: r.Hostname,
+			IP:       r.IP,
 			OSFamily: r.OSFamily,
 			OSVer:    r.OSVersion,
 			OSMajor:  extractOSMajor(r.OSVersion),
 			Arch:     r.Arch,
+			PkgName:  r.PkgName,
+			PkgVer:   r.PkgVer,
+			PkgArch:  r.PkgArch,
+			PURL:     r.PURL,
 		})
 	}
+	v.logger.Info("advisory coordinator 输入清单", zap.Int("host_pkg_rows", len(hostsAdv)))
 
 	coord := advisory.NewCoordinator(v.db, v.logger).
 		WithEnabledChecker(NewVulnDataSourceService(v.db, v.logger))
