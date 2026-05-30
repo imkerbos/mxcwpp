@@ -112,6 +112,9 @@ type purlInfo struct {
 	HostID   string `gorm:"column:host_id"`
 	Hostname string `gorm:"column:hostname"`
 	IP       string `gorm:"column:ip"`
+	// Scope 来源标记：system | embedded | container
+	// embedded 仅参与 PURL 维度匹配，不参与 CPE daemon 维度匹配（防 Go binary 内嵌依赖触发 daemon 误报）
+	Scope string `gorm:"column:scope"`
 }
 
 // SyncOnly 仅同步漏洞数据库（NVD + Red Hat），不执行 OSV 主机扫描
@@ -260,7 +263,7 @@ func (v *VulnScanner) ScanIncremental() error {
 	// 查询自 since 以来新增/变更的软件包
 	var packages []purlInfo
 	if err := v.db.Table("software AS s").
-		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(NULLIF(s.scope, ''), 'system') AS scope, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
 		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
 		Where("s.purl != '' AND s.purl IS NOT NULL AND s.collected_at > ?", since).
 		Scan(&packages).Error; err != nil {
@@ -419,7 +422,7 @@ func (v *VulnScanner) doScanAll() error {
 	// 1. 查询所有有 PURL 的软件包（JOIN hosts 带上 hostname / ip 用于填充 host_vulnerabilities）
 	var packages []purlInfo
 	if err := v.db.Table("software AS s").
-		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(NULLIF(s.scope, ''), 'system') AS scope, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
 		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
 		Where("s.purl != '' AND s.purl IS NOT NULL").
 		Scan(&packages).Error; err != nil {
@@ -705,7 +708,7 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 						continue
 					}
 
-					v.upsertHostVulns(vulnRecord.ID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+					v.upsertHostVulns(vulnRecord.ID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 
 					// 异步创建漏洞通报 + 发送通知
 					go func(vuln *model.Vulnerability) {
@@ -728,7 +731,7 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 			// 路径 2：已知漏洞，仅更新主机关联（不调 OSV API）
 			if vulnIDs, ok := existingRecordsByID[minVuln.ID]; ok {
 				for _, vulnID := range vulnIDs {
-					v.upsertHostVulns(vulnID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+					v.upsertHostVulns(vulnID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 				}
 				vulnCount++
 			}
@@ -754,7 +757,7 @@ func (v *VulnScanner) queryBatchFromDB(purls []string, purlHosts map[string][]st
 			if vuln.FixedVersion != "" && compareVersionStrings(pkgInfo.Version, vuln.FixedVersion) >= 0 {
 				continue
 			}
-			v.upsertHostVulns(vuln.ID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+			v.upsertHostVulns(vuln.ID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 			vulnCount++
 		}
 	}
@@ -773,14 +776,29 @@ type hostVulnEntry struct {
 
 // upsertHostVulns 更新漏洞的主机关联和受影响主机数
 //
-// OS family 二次过滤：
-//   - 漏洞 source 是 OS-specific (debian-tracker/alpine/rhsa/rocky-apollo/usn/centos) 时，
-//     只关联到 OS family 兼容的主机（RHEL 系互兼容；debian↔ubuntu；alpine 独立）
-//   - 漏洞 source 是 osv/nvd (通用 PURL/CPE) 时，PURL 包路径已隐含生态系统，无需 OS 校验
+// 两层过滤（防误报）：
 //
-// 历史 bug：OSV.dev API 用 PURL 查询返回所有相关 CVE（不分 distro），
-// 主机包名匹配但 OS 不兼容时会写出 92w+ 误关联（debian-tracker advisory → Rocky 主机）。
-func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, hostnameMap, ipMap map[string]string) {
+//  1. Scope 维度过滤（P0-3 加入）：
+//     - 来源软件 scope=embedded（Go binary 静态链接的依赖库）时跳过整条 vuln 关联。
+//     - 根因：mxsec-agent.bin 内嵌 github.com/docker/docker SDK 触发 docker daemon CVE，
+//     但主机没装 docker daemon，写入即为误报。embedded 暴露面不为零但严重度建模错位
+//     （CVE 描述是"升级 docker engine"，实际修复路径是升级宿主 binary）。
+//     - 后续可演进为 status='informational' 单独分类展示，此处先彻底跳过。
+//
+//  2. OS family 二次过滤（v2.4.2 加入）：
+//     - 漏洞 source 是 OS-specific (debian-tracker/alpine/rhsa/rocky-apollo/usn/centos) 时，
+//     只关联到 OS family 兼容的主机（RHEL 系互兼容；debian↔ubuntu；alpine 独立）。
+//     - 漏洞 source 是 osv/nvd (通用 PURL/CPE) 时，PURL 包路径已隐含生态系统，无需 OS 校验。
+//     - 历史 bug：OSV.dev API 用 PURL 查询返回所有相关 CVE（不分 distro），
+//     主机包名匹配但 OS 不兼容时会写出 92w+ 误关联（debian-tracker advisory → Rocky 主机）。
+func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, purlPkgInfo map[string]purlInfo, hostnameMap, ipMap map[string]string) {
+	// Scope 维度过滤：embedded 来源整条跳过
+	if info, ok := purlPkgInfo[purl]; ok && info.Scope == "embedded" {
+		v.logger.Debug("vuln 跳过：来源 software scope=embedded（Go binary 内嵌依赖，非 daemon 本体）",
+			zap.Uint("vuln_id", vulnID),
+			zap.String("purl", purl))
+		return
+	}
 	// 查漏洞 source；OS-specific 时拿 OSFamily 白名单
 	var vuln model.Vulnerability
 	if err := v.db.Select("source").First(&vuln, vulnID).Error; err != nil {

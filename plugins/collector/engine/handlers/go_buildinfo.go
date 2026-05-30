@@ -195,23 +195,39 @@ func (h *GoBuildInfoHandler) readBuildInfo(path string) ([]map[string]interface{
 
 	var out []map[string]interface{}
 
-	// 主模块
+	// 主模块 = 实际部署的 Go 服务本体
+	//
+	// scope=system 表示 "this is the daemon/service running on disk"，
+	// package_type=go-binary 与依赖的 go-module 区分。
+	// 漏洞匹配引擎按 (scope, package_type) 决定是否参与 CPE daemon 维度匹配。
 	mainPath := info.Main.Path
 	mainVer := info.Main.Version
 	if mainPath != "" && mainVer != "" && mainVer != "(devel)" {
 		binaryName := filepath.Base(path)
 		out = append(out, map[string]interface{}{
-			"name":         "go-binary:" + binaryName,
-			"version":      mainVer,
-			"collected_at": time.Now().Format(time.RFC3339),
-			"package_type": "go-module",
-			"ecosystem":    "Go",
-			"purl":         fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(mainPath), url.PathEscape(mainVer)),
-			"source_file":  path,
+			"name":             "go-binary:" + binaryName,
+			"version":          mainVer,
+			"collected_at":     time.Now().Format(time.RFC3339),
+			"package_type":     "go-binary",
+			"scope":            "system",
+			"source_handler":   "go_buildinfo",
+			"host_binary_path": path,
+			"ecosystem":        "Go",
+			"purl":             fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(mainPath), url.PathEscape(mainVer)),
+			"source_file":      path,
 		})
 	}
 
-	// 依赖模块
+	// 依赖模块 = 被主模块静态链接进 binary 的库
+	//
+	// scope=embedded 表示"library code linked into main binary"，
+	// **必须**在漏洞匹配时与 NVD daemon CPE（如 cpe:2.3:a:docker:docker）
+	// 隔离 — 否则任何 Go 服务嵌入 github.com/docker/docker SDK 都会被
+	// 误报为 docker daemon CVE（实测 G02-UAT 3 台无 docker 仍报 docker
+	// 3 条 CVE 即此根因）。
+	//
+	// embedded 依赖仅参与 PURL 维度匹配（OSV pkg:golang/<path>@<ver>），
+	// 不参与 CPE 应用本体匹配。
 	for _, dep := range info.Deps {
 		if dep == nil {
 			continue
@@ -229,13 +245,16 @@ func (h *GoBuildInfoHandler) readBuildInfo(path string) ([]map[string]interface{
 			continue
 		}
 		out = append(out, map[string]interface{}{
-			"name":         depPath,
-			"version":      depVer,
-			"collected_at": time.Now().Format(time.RFC3339),
-			"package_type": "go-module",
-			"ecosystem":    "Go",
-			"purl":         fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(depPath), url.PathEscape(depVer)),
-			"source_file":  path,
+			"name":             depPath,
+			"version":          depVer,
+			"collected_at":     time.Now().Format(time.RFC3339),
+			"package_type":     "go-module",
+			"scope":            "embedded",
+			"source_handler":   "go_buildinfo",
+			"host_binary_path": path,
+			"ecosystem":        "Go",
+			"purl":             fmt.Sprintf("pkg:golang/%s@%s", url.PathEscape(depPath), url.PathEscape(depVer)),
+			"source_file":      path,
 		})
 	}
 
