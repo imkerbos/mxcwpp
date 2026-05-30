@@ -222,19 +222,43 @@ type probeJob struct {
 }
 
 // Collect 执行二进制探测采集
+//
+// 三重确认（防误报）：
+//  1. 二进制文件存在于探针配置路径（discoverBinaries 已确认）
+//  2. 进程在跑 — readlink /proc/*/exe 命中此路径，或同名 basename 在跑
+//  3. 探针 -V/--version 出版本号
+//
+// 任一不满足即跳过，避免将"装了但不跑"或"残留死文件"上报为运行资产。
+// 同时合并旧 proc_scanner 职责：CWPP 仅关心"运行的二进制"，不维护磁盘清单。
 func (h *BinaryProbeHandler) Collect(ctx context.Context) ([]interface{}, error) {
 	probes := defaultProbes()
 
-	// 1. 解析所有候选二进制路径（含 glob 展开 + 浅层 walk）
-	jobs := h.discoverBinaries(ctx, probes)
-	if len(jobs) == 0 {
-		h.Logger.Debug("binary probe: no candidate binaries found")
+	// 1. 扫 /proc/*/exe 拿主机当前运行的二进制集合（real path + basename）
+	runningPaths, runningBasenames := collectRunningBinaries(h.Logger)
+	h.Logger.Debug("binary probe: running binaries collected",
+		zap.Int("paths", len(runningPaths)),
+		zap.Int("basenames", len(runningBasenames)))
+
+	// 2. 解析所有候选二进制路径（含 glob 展开）
+	allJobs := h.discoverBinaries(ctx, probes)
+	if len(allJobs) == 0 {
+		h.Logger.Debug("binary probe: no candidate binaries found on disk")
 		return nil, nil
 	}
 
-	h.Logger.Debug("binary probe: candidates discovered", zap.Int("count", len(jobs)))
+	// 3. gate 1：仅保留"在跑"的候选（路径直接命中 或 basename 命中）
+	jobs := filterRunningJobs(allJobs, runningPaths, runningBasenames)
+	if len(jobs) == 0 {
+		h.Logger.Debug("binary probe: 0 candidates are actually running, skip",
+			zap.Int("discovered", len(allJobs)))
+		return nil, nil
+	}
 
-	// 2. 并发探测（chan 收集结果，最多 binaryProbeConcurrency 个 goroutine）
+	h.Logger.Debug("binary probe: candidates after running gate",
+		zap.Int("discovered", len(allJobs)),
+		zap.Int("running", len(jobs)))
+
+	// 4. 并发探测（chan 收集结果，最多 binaryProbeConcurrency 个 goroutine）
 	resultCh := make(chan *engine.SoftwareAsset, len(jobs))
 	sem := make(chan struct{}, binaryProbeConcurrency)
 	var wg sync.WaitGroup
@@ -273,10 +297,143 @@ func (h *BinaryProbeHandler) Collect(ctx context.Context) ([]interface{}, error)
 	}
 
 	h.Logger.Info("binary probe completed",
-		zap.Int("candidates", len(jobs)),
+		zap.Int("candidates_on_disk", len(allJobs)),
+		zap.Int("candidates_running", len(jobs)),
 		zap.Int("identified", len(out)))
 
 	return out, nil
+}
+
+// collectRunningBinaries 扫描 /proc/*/exe，返回主机当前运行的二进制路径集合 + basename 集合
+//
+// 主路径集（key=real path）：用于直接路径命中（探针路径 == 进程 exe 实际指向）
+// basename 集（key=basename）：用于跨路径软命中（探针扫 /opt/openresty/bin/nginx，
+// 实际进程 exe 是 /usr/local/openresty/nginx/sbin/nginx —— 路径不同但 basename 相同）
+//
+// 权限不足或非 Linux 平台失败时返回空集，让上层判定为"无运行二进制"自然跳过整个探测。
+func collectRunningBinaries(logger *zap.Logger) (map[string]struct{}, map[string]struct{}) {
+	paths := make(map[string]struct{})
+	basenames := make(map[string]struct{})
+
+	if _, err := os.Stat("/proc"); err != nil {
+		// 非 Linux 环境，无 /proc，返回空集
+		return paths, basenames
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		logger.Debug("collectRunningBinaries: read /proc failed", zap.Error(err))
+		return paths, basenames
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		// PID 目录名必为数字
+		name := e.Name()
+		if !isAllDigits(name) {
+			continue
+		}
+
+		exeLink := "/proc/" + name + "/exe"
+		realPath, err := os.Readlink(exeLink)
+		if err != nil {
+			// 权限不足 / 内核线程 / 已退出：跳过
+			continue
+		}
+
+		// 跳过被删除二进制（"/usr/bin/foo (deleted)"）
+		if strings.HasSuffix(realPath, " (deleted)") {
+			continue
+		}
+
+		// 去掉 /proc/{pid}/root/ 前缀（容器内进程的宿主视角）
+		realPath = stripProcRootPrefix(realPath)
+		if realPath == "" || !filepath.IsAbs(realPath) {
+			continue
+		}
+
+		paths[realPath] = struct{}{}
+		basenames[filepath.Base(realPath)] = struct{}{}
+	}
+
+	return paths, basenames
+}
+
+// filterRunningJobs 三重确认 gate 1：仅保留 binary 在跑的探测任务
+//
+// 命中规则（任一即可）：
+//  1. 探针 binary 路径直接出现在 /proc/*/exe 集合中（最强证据）
+//  2. 探针 binary 的 basename 出现在运行 basename 集合中（容忍探针配置路径与实际安装路径不一致）
+//
+// Kafka 特判：kafka-server-start.sh 启动 JVM，/proc/*/exe 指向 java 而不是脚本本身，
+// 故对 Kafka 不强求路径/basename 命中，靠 detectKafkaVersion 解析 jar 文件名。
+func filterRunningJobs(jobs []probeJob, runningPaths, runningBasenames map[string]struct{}) []probeJob {
+	if len(runningPaths) == 0 && len(runningBasenames) == 0 {
+		return nil
+	}
+
+	filtered := make([]probeJob, 0, len(jobs))
+	for _, j := range jobs {
+		if j.probe.Name == "kafka" {
+			// 启动脚本拉起 JVM，无独立运行进程，靠 jar 名取版本
+			filtered = append(filtered, j)
+			continue
+		}
+
+		if _, ok := runningPaths[j.binaryPath]; ok {
+			filtered = append(filtered, j)
+			continue
+		}
+
+		base := filepath.Base(j.binaryPath)
+		if _, ok := runningBasenames[base]; ok {
+			filtered = append(filtered, j)
+			continue
+		}
+	}
+	return filtered
+}
+
+// isAllDigits 全为 0-9 字符则返回 true（用于判定 /proc/{pid} 目录名）
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// stripProcRootPrefix 去掉 /proc/{pid}/root/ 前缀（容器内进程的宿主视角）
+// 例："/proc/1234/root/usr/bin/nginx" -> "/usr/bin/nginx"
+// 非该前缀直接返回原值。
+func stripProcRootPrefix(p string) string {
+	if !strings.HasPrefix(p, "/proc/") {
+		return p
+	}
+	rest := p[len("/proc/"):]
+	slash := strings.IndexByte(rest, '/')
+	if slash <= 0 {
+		return p
+	}
+	pidPart := rest[:slash]
+	if !isAllDigits(pidPart) {
+		return p
+	}
+	tail := rest[slash+1:]
+	if !strings.HasPrefix(tail, "root/") && tail != "root" {
+		return p
+	}
+	stripped := strings.TrimPrefix(tail, "root")
+	if stripped == "" {
+		return p
+	}
+	return stripped
 }
 
 // discoverBinaries 解析配置中的 InstallPaths，找出实际存在的可执行候选

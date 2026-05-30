@@ -71,7 +71,6 @@ func main() {
 	collectEngine.RegisterHandler("node_packages", 12*time.Hour, &handlers.NodePackagesHandler{Logger: logger})
 	collectEngine.RegisterHandler("jar_scanner", 12*time.Hour, &handlers.JarScannerHandler{Logger: logger})
 	collectEngine.RegisterHandler("go_buildinfo", 12*time.Hour, &handlers.GoBuildInfoHandler{Logger: logger})
-	collectEngine.RegisterHandler("proc_scanner", 30*time.Minute, &handlers.ProcScannerHandler{Logger: logger})
 	collectEngine.RegisterHandler("container_sbom", 2*time.Hour, &handlers.ContainerSBOMHandler{Logger: logger})
 
 	// 5. 创建上下文
