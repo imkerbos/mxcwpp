@@ -49,10 +49,10 @@ import (
 )
 
 const (
-	tableAlerts        = "alerts"
-	tableVulns         = "vulnerabilities"
-	tableHostVulns     = "host_vulnerabilities"
-	tableAll           = "all"
+	tableAlerts    = "alerts"
+	tableVulns     = "vulnerabilities"
+	tableHostVulns = "host_vulnerabilities"
+	tableAll       = "all"
 )
 
 func main() {

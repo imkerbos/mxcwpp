@@ -66,7 +66,6 @@ func main() {
 	collectEngine.RegisterHandler("kmod", 12*time.Hour, &handlers.KmodHandler{Logger: logger})
 	collectEngine.RegisterHandler("service", 6*time.Hour, &handlers.ServiceHandler{Logger: logger})
 	collectEngine.RegisterHandler("cron", 12*time.Hour, &handlers.CronHandler{Logger: logger})
-	collectEngine.RegisterHandler("dep_scan", 12*time.Hour, &handlers.DepScannerHandler{Logger: logger})
 	collectEngine.RegisterHandler("binary_probe", 12*time.Hour, &handlers.BinaryProbeHandler{Logger: logger})
 	collectEngine.RegisterHandler("python_packages", 12*time.Hour, &handlers.PythonPackagesHandler{Logger: logger})
 	collectEngine.RegisterHandler("node_packages", 12*time.Hour, &handlers.NodePackagesHandler{Logger: logger})

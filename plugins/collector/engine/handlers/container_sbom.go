@@ -330,7 +330,7 @@ func (h *ContainerSBOMHandler) execInContainer(ctx context.Context, ref containe
 	return stdout.Bytes(), nil
 }
 
-// buildContainerPkg 构造统一格式（与 software.go / dep_scanner.go 一致的 map 输出）
+// buildContainerPkg 构造统一格式（与 software.go 一致的 map 输出）
 func buildContainerPkg(ref containerRef, pkgType, distro, name, version, arch string) map[string]interface{} {
 	purl := fmt.Sprintf("pkg:%s/%s/%s@%s",
 		pkgType,
@@ -344,16 +344,16 @@ func buildContainerPkg(ref containerRef, pkgType, distro, name, version, arch st
 	purl += "?" + q
 
 	return map[string]interface{}{
-		"name":         name,
-		"version":      version,
-		"architecture": arch,
-		"collected_at": time.Now().Format(time.RFC3339),
-		"package_type": pkgType,
-		"purl":         purl,
-		"source_file":  fmt.Sprintf("container:%s:%s", ref.ID, ref.Image),
-		"container_id": ref.ID,
+		"name":            name,
+		"version":         version,
+		"architecture":    arch,
+		"collected_at":    time.Now().Format(time.RFC3339),
+		"package_type":    pkgType,
+		"purl":            purl,
+		"source_file":     fmt.Sprintf("container:%s:%s", ref.ID, ref.Image),
+		"container_id":    ref.ID,
 		"container_image": ref.Image,
-		"runtime":      ref.Runtime,
+		"runtime":         ref.Runtime,
 	}
 }
 

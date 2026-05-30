@@ -104,7 +104,7 @@ func (h *ProcScannerHandler) Collect(ctx context.Context) ([]interface{}, error)
 
 		basename := filepath.Base(realPath)
 
-		// 输出格式与 dep_scanner / python_packages 保持一致（map[string]interface{}）
+		// 输出格式与 python_packages 保持一致（map[string]interface{}）
 		// Version 留空，由 binary_probe / go_buildinfo 后续补
 		results = append(results, map[string]interface{}{
 			"name":         basename,

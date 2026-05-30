@@ -41,9 +41,6 @@ type BinaryProbe struct {
 	UseGlob         bool     // InstallPaths 是否含 glob 通配符（如 /opt/jdk*/bin/java）
 }
 
-// 扫描深度（防止 walk 太深拖慢采集）
-const binaryProbeMaxDepth = 3
-
 // 单次二进制执行超时
 const binaryProbeExecTimeout = 3 * time.Second
 
