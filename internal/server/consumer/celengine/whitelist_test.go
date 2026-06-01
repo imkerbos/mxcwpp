@@ -8,12 +8,29 @@ import (
 
 func TestIsAlertWhitelisted(t *testing.T) {
 	cases := []struct {
-		name       string
-		ruleName   string
-		fields     map[string]string
-		wantWL     bool
-		wantReason string
+		name         string
+		ruleName     string
+		ruleCategory string
+		fields       map[string]string
+		wantWL       bool
+		wantReason   string
 	}{
+		{
+			name:         "中文 rule name + c2_communication category + nginx 被抑制",
+			ruleName:     "高危端口外连",
+			ruleCategory: "c2_communication",
+			fields:       map[string]string{"exe": "/usr/sbin/nginx", "dst_ip": "8.8.8.8"},
+			wantWL:       true,
+			wantReason:   "reverse_proxy_upstream",
+		},
+		{
+			name:         "中文 rule name + c2_communication category + 内网 IP 被抑制",
+			ruleName:     "Cobalt Strike 默认端口",
+			ruleCategory: "c2_communication",
+			fields:       map[string]string{"exe": "/opt/app/bin/srv", "dst_ip": "10.170.96.209"},
+			wantWL:       true,
+			wantReason:   "internal_network_connection",
+		},
 		{
 			name:       "nginx 反代到 8888 高危端口规则被抑制",
 			ruleName:   "c2_high_risk_port",
@@ -91,13 +108,22 @@ func TestIsAlertWhitelisted(t *testing.T) {
 			wantWL:     false,
 			wantReason: "",
 		},
+		{
+			name:         "agent ebpf 用 comm 字段（无 exe）也能命中反代白名单",
+			ruleName:     "高危端口外连",
+			ruleCategory: "c2_communication",
+			fields:       map[string]string{"comm": "nginx", "remote_addr": "10.170.96.209"},
+			wantWL:       true,
+			// 反代规则 + 内网 IP 都满足，匹配第一条 c2_communication+exe
+			wantReason: "reverse_proxy_upstream",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var rule *model.DetectionRule
-			if tc.ruleName != "" {
-				rule = &model.DetectionRule{Name: tc.ruleName}
+			if tc.ruleName != "" || tc.ruleCategory != "" {
+				rule = &model.DetectionRule{Name: tc.ruleName, Category: tc.ruleCategory}
 			}
 			got, reason := IsAlertWhitelisted(rule, tc.fields)
 			if got != tc.wantWL {

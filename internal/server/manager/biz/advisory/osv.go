@@ -265,6 +265,11 @@ func (o *OSVSource) parseDetail(d *osvVulnDetail, purl string) *Advisory {
 		fixes = []PkgFix{*pkgFix}
 	}
 
+	// Ecosystem 从 PURL 推导，作为 matcher ecosystem gate 依据。
+	// 仅语言包生态（npm/PyPI/Maven/...）才会被 isOSVLanguagePURL 放行进入此处，
+	// OS pkg PURL 在 vuln_scanner 上游已过滤，不会进入 OSV 路径。
+	ecosystem := purlEcosystem(purl)
+
 	return &Advisory{
 		AdvisoryID:   d.ID,
 		CVEIDs:       cveIDs,
@@ -276,6 +281,7 @@ func (o *OSVSource) parseDetail(d *osvVulnDetail, purl string) *Advisory {
 		IssuedAt:     issuedAt,
 		UpdatedAt:    updatedAt,
 		AffectedPkgs: fixes,
+		Ecosystem:    ecosystem,
 	}
 }
 

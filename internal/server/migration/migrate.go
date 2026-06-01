@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -112,7 +113,58 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("漏洞分类回填失败", zap.Error(err))
 	}
 
+	// 清理 v2.5.0 之前 ScanAll 留下的跨 OS host_vuln 误报 + OSS-Fuzz 噪音
+	if err := migrateCleanupLegacyHostVuln(db, logger); err != nil {
+		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
+	return nil
+}
+
+// migrateCleanupLegacyHostVuln 启动时清 OSS-Fuzz 垃圾 + 通用 host_vuln FP。
+//
+// 主要 host_vuln FP 清理逻辑下沉到 advisory.CleanupHostVulnFP（同时被 Coordinator.Sync 末尾调用），
+// 这里仅处理 OSS-Fuzz vulnerabilities 表层垃圾（同样导致 host_vuln 误报），
+// 然后委托 advisory 包做 host_vuln 清理。
+//
+// 幂等：基于 SQL 条件删除，多次运行无副作用。
+func migrateCleanupLegacyHostVuln(db *gorm.DB, logger *zap.Logger) error {
+	// OSS-Fuzz crash ID（OSV-YYYY-NNN）当 CVE 入库的 vulnerabilities + 级联 host_vulnerabilities
+	// 上游 osv.dev 把 OSS-Fuzz crash 记录与 CVE 同 namespace，旧 extractCVEs fallback 误把
+	// OSV-YYYY-NNN 写到 cve_id 字段，实测 G02-UAT 主机占 49% FP。
+	var ossFuzzIDs []uint
+	if err := db.Table("vulnerabilities").
+		Where("cve_id REGEXP '^OSV-[0-9]{4}-[0-9]+$'").
+		Pluck("id", &ossFuzzIDs).Error; err != nil {
+		return fmt.Errorf("查询 OSS-Fuzz vuln id 失败: %w", err)
+	}
+	if len(ossFuzzIDs) > 0 {
+		r1 := db.Exec("DELETE FROM host_vulnerabilities WHERE vuln_id IN ?", ossFuzzIDs)
+		r2 := db.Exec("DELETE FROM vulnerabilities WHERE id IN ?", ossFuzzIDs)
+		logger.Info("清理 OSS-Fuzz 垃圾",
+			zap.Int64("host_vuln_deleted", r1.RowsAffected),
+			zap.Int64("vuln_deleted", r2.RowsAffected))
+	}
+
+	// NVD description 含 OS/arch qualifier 限定的 host_vuln（仅 migration 跑，
+	// 因 description 字段不在 sync 路径上动）
+	nvdQualifierRegex := `(on 32-bit|32-bit builds?|microsoft windows|windows-only|freebsd only|macos only|macos x|iphone|ios only|android only)`
+	r7 := db.Exec(`
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source = 'nvd'
+  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux','ubuntu','debian','alpine','sles','opensuse')
+  AND LOWER(v.description) REGEXP ?`, nvdQualifierRegex)
+	if r7.Error == nil && r7.RowsAffected > 0 {
+		logger.Info("NVD OS/arch qualifier host_vuln 已清理",
+			zap.Int64("deleted", r7.RowsAffected))
+	}
+
+	// 委托 advisory 包做通用 host_vuln FP 清理(同一份逻辑被 Coordinator.Sync 复用)
+	advisory.CleanupHostVulnFP(db, logger)
+	advisory.CleanupAlreadyPatched(db, logger)
 	return nil
 }
 

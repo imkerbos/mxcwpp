@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -112,6 +113,9 @@ type purlInfo struct {
 	HostID   string `gorm:"column:host_id"`
 	Hostname string `gorm:"column:hostname"`
 	IP       string `gorm:"column:ip"`
+	// Scope 来源标记：system | embedded | container
+	// embedded 仅参与 PURL 维度匹配，不参与 CPE daemon 维度匹配（防 Go binary 内嵌依赖触发 daemon 误报）
+	Scope string `gorm:"column:scope"`
 }
 
 // SyncOnly 仅同步漏洞数据库（NVD + Red Hat），不执行 OSV 主机扫描
@@ -260,7 +264,7 @@ func (v *VulnScanner) ScanIncremental() error {
 	// 查询自 since 以来新增/变更的软件包
 	var packages []purlInfo
 	if err := v.db.Table("software AS s").
-		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(NULLIF(s.scope, ''), 'system') AS scope, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
 		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
 		Where("s.purl != '' AND s.purl IS NOT NULL AND s.collected_at > ?", since).
 		Scan(&packages).Error; err != nil {
@@ -305,6 +309,14 @@ func (v *VulnScanner) ScanIncremental() error {
 	for purl := range purlHosts {
 		uniquePURLs = append(uniquePURLs, purl)
 	}
+
+	// 过滤：仅向 OSV 发送语言包生态 PURL（npm/pypi/maven/golang/...）。
+	// OS 包（rpm/deb/apk）走对应 vendor advisory（RHSA/USN/...）。
+	beforeFilter := len(uniquePURLs)
+	uniquePURLs = filterOSVPURLs(uniquePURLs)
+	v.logger.Info("增量 OSV 路径仅查询语言包生态 PURL",
+		zap.Int("before_filter", beforeFilter),
+		zap.Int("after_filter", len(uniquePURLs)))
 
 	v.logger.Info("增量去重后 PURL 数", zap.Int("count", len(uniquePURLs)))
 
@@ -419,7 +431,7 @@ func (v *VulnScanner) doScanAll() error {
 	// 1. 查询所有有 PURL 的软件包（JOIN hosts 带上 hostname / ip 用于填充 host_vulnerabilities）
 	var packages []purlInfo
 	if err := v.db.Table("software AS s").
-		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
+		Select("s.purl AS purl, s.name AS name, s.version AS version, s.host_id AS host_id, COALESCE(NULLIF(s.scope, ''), 'system') AS scope, COALESCE(h.hostname, '') AS hostname, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), '') AS ip").
 		Joins("LEFT JOIN hosts h ON h.host_id = s.host_id").
 		Where("s.purl != '' AND s.purl IS NOT NULL").
 		Scan(&packages).Error; err != nil {
@@ -456,6 +468,14 @@ func (v *VulnScanner) doScanAll() error {
 	for purl := range purlHosts {
 		uniquePURLs = append(uniquePURLs, purl)
 	}
+
+	// 过滤：仅向 OSV 发送语言包生态 PURL（npm/pypi/maven/golang/...）。
+	// OS 包（rpm/deb/apk）走对应 vendor advisory（RHSA/USN/...）。
+	beforeFilter := len(uniquePURLs)
+	uniquePURLs = filterOSVPURLs(uniquePURLs)
+	v.logger.Info("OSV 路径仅查询语言包生态 PURL",
+		zap.Int("before_filter", beforeFilter),
+		zap.Int("after_filter", len(uniquePURLs)))
 
 	v.logger.Info("去重后 PURL 数", zap.Int("count", len(uniquePURLs)))
 
@@ -591,9 +611,14 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 	}
 
 	// 收集所有唯一漏洞 ID（querybatch 仅返回 id + modified）
+	// 跳过 OSS-Fuzz crash ID（OSV-YYYY-NNN）：这些是模糊测试崩溃记录，不是 CVE，
+	// 上游 systemd 等项目从未将其分级为安全漏洞，入库会污染漏洞表。
 	vulnIDSet := make(map[string]struct{})
 	for _, qr := range result.Results {
 		for _, item := range qr.Vulns {
+			if isOSSFuzzID(item.ID) {
+				continue
+			}
 			vulnIDSet[item.ID] = struct{}{}
 		}
 	}
@@ -705,7 +730,7 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 						continue
 					}
 
-					v.upsertHostVulns(vulnRecord.ID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+					v.upsertHostVulns(vulnRecord.ID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 
 					// 异步创建漏洞通报 + 发送通知
 					go func(vuln *model.Vulnerability) {
@@ -728,7 +753,7 @@ func (v *VulnScanner) queryBatch(purls []string, purlHosts map[string][]string, 
 			// 路径 2：已知漏洞，仅更新主机关联（不调 OSV API）
 			if vulnIDs, ok := existingRecordsByID[minVuln.ID]; ok {
 				for _, vulnID := range vulnIDs {
-					v.upsertHostVulns(vulnID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+					v.upsertHostVulns(vulnID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 				}
 				vulnCount++
 			}
@@ -754,7 +779,7 @@ func (v *VulnScanner) queryBatchFromDB(purls []string, purlHosts map[string][]st
 			if vuln.FixedVersion != "" && compareVersionStrings(pkgInfo.Version, vuln.FixedVersion) >= 0 {
 				continue
 			}
-			v.upsertHostVulns(vuln.ID, purl, pkgInfo.Version, purlHosts, hostnameMap, ipMap)
+			v.upsertHostVulns(vuln.ID, purl, pkgInfo.Version, purlHosts, purlPkgInfo, hostnameMap, ipMap)
 			vulnCount++
 		}
 	}
@@ -772,14 +797,77 @@ type hostVulnEntry struct {
 }
 
 // upsertHostVulns 更新漏洞的主机关联和受影响主机数
-func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, hostnameMap, ipMap map[string]string) {
+//
+// 两层过滤（防误报）：
+//
+//  1. Scope 维度过滤（P0-3 加入）：
+//     - 来源软件 scope=embedded（Go binary 静态链接的依赖库）时跳过整条 vuln 关联。
+//     - 根因：mxsec-agent.bin 内嵌 github.com/docker/docker SDK 触发 docker daemon CVE，
+//     但主机没装 docker daemon，写入即为误报。embedded 暴露面不为零但严重度建模错位
+//     （CVE 描述是"升级 docker engine"，实际修复路径是升级宿主 binary）。
+//     - 后续可演进为 status='informational' 单独分类展示，此处先彻底跳过。
+//
+//  2. OS family 二次过滤（v2.4.2 加入）：
+//     - 漏洞 source 是 OS-specific (debian-tracker/alpine/rhsa/rocky-apollo/usn/centos) 时，
+//     只关联到 OS family 兼容的主机（RHEL 系互兼容；debian↔ubuntu；alpine 独立）。
+//     - 漏洞 source 是 osv/nvd (通用 PURL/CPE) 时，PURL 包路径已隐含生态系统，无需 OS 校验。
+//     - 历史 bug：OSV.dev API 用 PURL 查询返回所有相关 CVE（不分 distro），
+//     主机包名匹配但 OS 不兼容时会写出 92w+ 误关联（debian-tracker advisory → Rocky 主机）。
+func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHosts map[string][]string, purlPkgInfo map[string]purlInfo, hostnameMap, ipMap map[string]string) {
+	// Scope 维度过滤：embedded 来源整条跳过
+	if info, ok := purlPkgInfo[purl]; ok && info.Scope == "embedded" {
+		v.logger.Debug("vuln 跳过：来源 software scope=embedded（Go binary 内嵌依赖，非 daemon 本体）",
+			zap.Uint("vuln_id", vulnID),
+			zap.String("purl", purl))
+		return
+	}
+	// 查漏洞 source；OS-specific 时拿 OSFamily 白名单
+	var vuln model.Vulnerability
+	if err := v.db.Select("source").First(&vuln, vulnID).Error; err != nil {
+		return
+	}
+	allowedOSFamilies := osFamilyAllowlistBySource(vuln.Source)
+
 	entries := make([]hostVulnEntry, 0)
 	hostSeen := make(map[string]struct{})
+
+	// OS-specific source：批量查主机 OS family，过滤不兼容
+	var hostOSFamily map[string]string
+	if allowedOSFamilies != nil {
+		hostIDs := make([]string, 0)
+		for _, hostID := range purlHosts[purl] {
+			if _, ok := hostSeen[hostID]; ok {
+				continue
+			}
+			hostIDs = append(hostIDs, hostID)
+		}
+		hostOSFamily = make(map[string]string, len(hostIDs))
+		if len(hostIDs) > 0 {
+			type row struct {
+				HostID   string
+				OSFamily string
+			}
+			var rows []row
+			v.db.Table("hosts").Select("host_id, os_family").Where("host_id IN ?", hostIDs).Find(&rows)
+			for _, r := range rows {
+				hostOSFamily[r.HostID] = strings.ToLower(r.OSFamily)
+			}
+		}
+	}
+
 	for _, hostID := range purlHosts[purl] {
 		if _, exists := hostSeen[hostID]; exists {
 			continue
 		}
 		hostSeen[hostID] = struct{}{}
+
+		if allowedOSFamilies != nil {
+			fam, ok := hostOSFamily[hostID]
+			if !ok || !allowedOSFamilies[fam] {
+				continue // OS 不兼容，跳过
+			}
+		}
+
 		entries = append(entries, hostVulnEntry{
 			HostID:   hostID,
 			Hostname: hostnameMap[hostID],
@@ -788,6 +876,23 @@ func (v *VulnScanner) upsertHostVulns(vulnID uint, purl, version string, purlHos
 		})
 	}
 	v.upsertHostVulnsBatch(vulnID, entries)
+}
+
+// osFamilyAllowlistBySource 返回 source 对应的兼容主机 OS family 白名单。
+// 返回 nil 表示该 source 通用（不做 OS 过滤）。
+func osFamilyAllowlistBySource(source string) map[string]bool {
+	switch source {
+	case "debian-tracker", "usn":
+		return map[string]bool{"debian": true, "ubuntu": true}
+	case "alpine":
+		return map[string]bool{"alpine": true}
+	case "rhsa", "rocky-apollo", "centos":
+		return map[string]bool{
+			"rhel": true, "centos": true, "centos-stream": true,
+			"rocky": true, "almalinux": true, "oraclelinux": true, "ol": true,
+		}
+	}
+	return nil // osv / nvd / 其他通用
 }
 
 // upsertHostVulnsBatch 批量更新主机-漏洞关联
@@ -990,11 +1095,114 @@ func (v *VulnScanner) extractCVEs(vuln osvVuln) []string {
 		}
 	}
 
-	if len(cves) > 0 {
-		return cves
+	// 无 CVE alias → 返回 nil。OSS-Fuzz 的 OSV-YYYY-NNN 不是 CVE，不应入 cve_id。
+	// 上游 osv.dev 把 OSS-Fuzz crash 记录与真实 CVE 同 namespace，
+	// 用 OSV-YYYY-NNN 当 cve_id 入库会污染 vulnerabilities 表（实测占 ~49% FP）。
+	return cves
+}
+
+// isOSSFuzzID 识别 osv.dev 的 OSS-Fuzz 崩溃 ID（OSV-YYYY-NNN）。
+// 这些不是 CVE，是模糊测试崩溃记录。
+var ossFuzzIDPattern = regexp.MustCompile(`^OSV-\d{4}-\d+$`)
+
+func isOSSFuzzID(id string) bool {
+	return ossFuzzIDPattern.MatchString(id)
+}
+
+// osvLanguageEcosystems 列出 OSV.dev 适合查询的 PURL 类型（语言包生态）。
+// OS 包（rpm/deb/apk）走对应 vendor advisory（RHSA/USN/Debian-tracker/Alpine secdb），
+// OSV 的 OS 数据是上游转载，覆盖不全且无 backport 语义，不应走 OSV 路径。
+var osvLanguageEcosystems = map[string]bool{
+	"npm":      true,
+	"pypi":     true,
+	"golang":   true,
+	"maven":    true,
+	"gem":      true,
+	"cargo":    true,
+	"composer": true,
+	"nuget":    true,
+	"pub":      true,
+	"hex":      true,
+	"swift":    true,
+	"conan":    true,
+	"cran":     true,
+	"hackage":  true,
+}
+
+// isOSVLanguagePURL 判断 PURL 是否属于 OSV 应当查询的语言包生态。
+// pkg:npm/braces@1.8.5 → true
+// pkg:rpm/redhat/openssl@3.5.1 → false（走 RHSA）
+func isOSVLanguagePURL(purl string) bool {
+	if !strings.HasPrefix(purl, "pkg:") {
+		return false
 	}
-	// 没有 CVE ID，使用 OSV ID 作为回退
-	return []string{vuln.ID}
+	rest := strings.TrimPrefix(purl, "pkg:")
+	slash := strings.Index(rest, "/")
+	if slash < 0 {
+		return false
+	}
+	return osvLanguageEcosystems[rest[:slash]]
+}
+
+// filterOSVPURLs 过滤出适合 OSV 查询的 PURL 列表（仅语言包生态）。
+func filterOSVPURLs(purls []string) []string {
+	out := make([]string, 0, len(purls))
+	for _, p := range purls {
+		if isOSVLanguagePURL(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// pkgManagerFromType 由 software.package_type + host OS family 推 pkg manager 名。
+// 用途：matcher 选 RPM vs dpkg 版本比较算法。
+func pkgManagerFromType(pkgType, osFamily string) string {
+	switch strings.ToLower(pkgType) {
+	case "rpm":
+		return "rpm"
+	case "deb":
+		return "dpkg"
+	case "apk":
+		return "apk"
+	}
+	// 退回按 OS family 推断
+	switch strings.ToLower(osFamily) {
+	case "ubuntu", "debian":
+		return "dpkg"
+	case "alpine":
+		return "apk"
+	}
+	return "rpm" // 默认 RPM(覆盖 RHEL 家族)
+}
+
+// pkgTypeToEcosystem 将 software.package_type 映射到 advisory.Ecosystem 字符串。
+// OS pkg 返回空字符串 → matcher 走 OS gate；语言包返回对应 OSV/GHSA 生态名 → 走 ecosystem gate。
+func pkgTypeToEcosystem(pkgType string) string {
+	switch strings.ToLower(pkgType) {
+	case "npm":
+		return "npm"
+	case "pypi", "python":
+		return "PyPI"
+	case "jar", "maven":
+		return "Maven"
+	case "go-module", "go-binary", "golang":
+		return "Go"
+	case "gem", "rubygems":
+		return "RubyGems"
+	case "cargo", "crates":
+		return "crates.io"
+	case "composer":
+		return "Packagist"
+	case "nuget":
+		return "NuGet"
+	case "pub":
+		return "Pub"
+	case "hex":
+		return "Hex"
+	}
+	// rpm / deb / apk / binary / 空 → OS pkg，留空走 OS gate
+	return ""
 }
 
 // mapSeverity 映射严重级别
@@ -1192,35 +1400,77 @@ func (v *VulnScanner) extractReferenceURL(vuln osvVuln) string {
 // hosts 取自 hosts 表（host_packages 软件清单后续 collector 上报后再 join 入参，
 // 当前仅按 OS family + major 兼容性 match）。
 func (v *VulnScanner) syncCoreAdvisories() error {
-	type hostRow struct {
-		HostID    string
-		Hostname  string
-		OSFamily  string
-		OSVersion string
-		Arch      string
+	// 必须 JOIN software 表带上每条主机的真实包清单，
+	// 否则 advisory matcher.Match 因 host.PkgName="" 永远不匹配 → host_vuln 全部为空。
+	// 历史 bug：原实现只查 hosts 表 OSFamily/OSMajor，advisory matcher 因 PkgName 空跳过所有 advisory，
+	// 但旧版本通过别的路径误写入 host_vuln，导致 prod 出现 690k+ debian/alpine 错关联 RHEL 主机。
+	// hosts 表无 ip 列（IP 在 network_interfaces JSON 内），advisory matcher 不依赖 IP，省略。
+	type hostPkgRow struct {
+		HostID      string
+		Hostname    string
+		OSFamily    string
+		OSVersion   string
+		Arch        string
+		PkgName     string
+		PkgVer      string
+		PkgEpoch    string
+		PkgRelease  string
+		PkgArch     string
+		PURL        string
+		PackageType string
 	}
-	var rows []hostRow
-	if err := v.db.Table("hosts").
-		Select("host_id, hostname, os_family, os_version, arch").
-		Where("status = ?", "online").
+	var rows []hostPkgRow
+	if err := v.db.Table("hosts h").
+		Select("h.host_id, h.hostname, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.epoch as pkg_epoch, s.release as pkg_release, s.architecture as pkg_arch, s.purl, s.package_type").
+		Joins("JOIN software s ON s.host_id = h.host_id").
+		Where("h.status = ?", "online").
 		Find(&rows).Error; err != nil {
-		return fmt.Errorf("加载 host 清单失败: %w", err)
+		return fmt.Errorf("加载 host+software 清单失败: %w", err)
 	}
 	hostsAdv := make([]advisory.HostSoftware, 0, len(rows))
 	for _, r := range rows {
 		hostsAdv = append(hostsAdv, advisory.HostSoftware{
-			HostID:   r.HostID,
-			Hostname: r.Hostname,
-			OSFamily: r.OSFamily,
-			OSVer:    r.OSVersion,
-			OSMajor:  extractOSMajor(r.OSVersion),
-			Arch:     r.Arch,
+			HostID:       r.HostID,
+			Hostname:     r.Hostname,
+			OSFamily:     r.OSFamily,
+			OSVer:        r.OSVersion,
+			OSMajor:      extractOSMajor(r.OSVersion),
+			Arch:         r.Arch,
+			PkgName:      r.PkgName,
+			PkgVer:       r.PkgVer,
+			PkgEpoch:     r.PkgEpoch,
+			PkgVerRaw:    r.PkgVer, // 旧字段含完整 version，新数据下与 PkgVer 一致
+			PkgRelease:   r.PkgRelease,
+			PkgArch:      r.PkgArch,
+			PURL:         r.PURL,
+			PkgEcosystem: pkgTypeToEcosystem(r.PackageType),
+			PkgManager:   pkgManagerFromType(r.PackageType, r.OSFamily),
 		})
+	}
+	v.logger.Info("advisory coordinator 输入清单", zap.Int("host_pkg_rows", len(hostsAdv)))
+
+	// 预查已入库 RHSA advisory ID，注入 RedHatSource skip 集合，
+	// 避免每次 sync 重复拉取已知 advisory 的 CSAF detail（5w 条全量 HTTP 不可接受）。
+	skipRHSA := v.loadKnownRHSAAdvisoryIDs()
+	v.logger.Info("已入库 RHSA advisory 集合", zap.Int("count", len(skipRHSA)))
+
+	rhsaSource := advisory.NewRedHatSource().
+		WithSkipAdvisoryIDs(skipRHSA)
+	sources := []advisory.Source{
+		rhsaSource,
+		advisory.NewRockySource(),
+		advisory.NewUbuntuSource(),
+		advisory.NewDebianSource(),
+		advisory.NewOSVSource(),
+		advisory.NewAlpineSource(),
+		advisory.NewCentOSSource(),
 	}
 
 	coord := advisory.NewCoordinator(v.db, v.logger).
+		WithSources(sources).
 		WithEnabledChecker(NewVulnDataSourceService(v.db, v.logger))
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// 全量首跑 RHSA ~5w 条，并发 8 大约 30 min；为承载初次全量 + 富化耗时，timeout 2h。
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	vulnCount, hostVulnCount, err := coord.Sync(ctx, time.Time{}, hostsAdv)
 	if err != nil {
@@ -1232,6 +1482,28 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 		zap.Int("host_count", len(hostsAdv)),
 	)
 	return nil
+}
+
+// loadKnownRHSAAdvisoryIDs 从 vulnerabilities 表 source='rhsa' 记录的 reference_url
+// 反向解析出 advisory ID 集合，用于 RedHatSource 跳过已入库 advisory 的 detail HTTP。
+//
+// reference_url 形如 "https://access.redhat.com/errata/RHSA-2024:1234"，
+// 末段即 advisory ID。
+func (v *VulnScanner) loadKnownRHSAAdvisoryIDs() map[string]struct{} {
+	var urls []string
+	v.db.Model(&model.Vulnerability{}).
+		Where("source = ? AND reference_url != ''", "rhsa").
+		Pluck("DISTINCT reference_url", &urls)
+	out := make(map[string]struct{}, len(urls))
+	for _, u := range urls {
+		if slash := strings.LastIndex(u, "/"); slash >= 0 && slash < len(u)-1 {
+			id := u[slash+1:]
+			if strings.HasPrefix(strings.ToUpper(id), "RHSA-") {
+				out[id] = struct{}{}
+			}
+		}
+	}
+	return out
 }
 
 // wrapErr 把 func() error 适配成 func() (int64, error)（stub 没有 count）。

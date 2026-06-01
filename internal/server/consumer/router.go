@@ -28,6 +28,7 @@ const agentACTTL = 180 * time.Second
 
 // Router 订阅所有业务 Topic，根据 DataType 路由到对应写入器
 type Router struct {
+	//nolint:unused // 嵌入 sarama.ConsumerGroupHandler 空实现，避免每次重写 Setup/Cleanup
 	saramaConsumerGroupHandler
 	group           sarama.ConsumerGroup
 	mysql           *writer.MySQLWriter
