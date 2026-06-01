@@ -270,6 +270,41 @@ WHERE LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux'
 		logger.Warn("已修复版本 host_vuln 清理失败", zap.Error(err))
 	}
 
+	// (9) OSV 源 host_vuln 落在 RHEL 家族 + fixed_version 含 .elN (RPM format)。
+	// 这类条目实为 OS pkg backport 问题，OSV 不区分 RHEL backport，
+	// 应由 RHSA/rocky-apollo 主导，OSV 不该出现在 RHEL 家族 host_vuln 中。
+	cleanupOSVOnRHELRPMSQL := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source = 'osv'
+  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux')
+  AND v.fixed_version REGEXP '[.+]el[0-9]+'`
+	r9 := db.Exec(cleanupOSVOnRHELRPMSQL)
+	if r9.Error != nil {
+		logger.Warn("RHEL 家族上 OSV RPM-format host_vuln 清理失败", zap.Error(r9.Error))
+	} else if r9.RowsAffected > 0 {
+		logger.Info("RHEL 家族上 OSV RPM-format host_vuln 已清理(RHSA 应主导)",
+			zap.Int64("deleted", r9.RowsAffected))
+	}
+
+	// (8) NVD 源 host_vuln 落在 vendor-covered OS 家族(RHEL/Ubuntu/Debian/Alpine)。
+	// NVD 报告上游 fixed_version，不识别 RHEL/Debian backport，对 vendor-covered 主机永远 FP。
+	// 此类主机的 host_vuln 应只由 vendor advisory（RHSA/USN/DSA/Alpine secdb）生成。
+	cleanupNVDOnVendorOSSQL := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source = 'nvd'
+  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux','ubuntu','debian','alpine','sles','opensuse')`
+	r8 := db.Exec(cleanupNVDOnVendorOSSQL)
+	if r8.Error != nil {
+		logger.Warn("vendor-covered OS 上 NVD host_vuln 清理失败", zap.Error(r8.Error))
+	} else if r8.RowsAffected > 0 {
+		logger.Info("vendor-covered OS 上 NVD host_vuln 已清理(NVD backport-blind)",
+			zap.Int64("deleted", r8.RowsAffected))
+	}
+
 	// (7) NVD description 含 OS/arch qualifier 限定但落到不匹配 host 的 host_vuln
 	// NVD advisory 描述中常见 "on 32-bit builds" / "Microsoft Windows" / "FreeBSD only" /
 	// "macOS only" / "iOS" 等限定，这些 advisory 不适用 Linux x86_64 主机。
