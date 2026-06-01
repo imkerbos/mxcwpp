@@ -34,6 +34,12 @@ const (
 )
 
 // Advisory 单条漏洞 advisory，承载多源统一的最小信息集。
+//
+// 匹配 gate 二选一（互斥）：
+//   - OS pkg advisory（RHSA/USN/DSA/Alpine secdb 等）：OSFamily + OSMajorVer 必填，Ecosystem 留空
+//   - 语言包 advisory（OSV GHSA/PyPA/govulndb 等）：Ecosystem 必填（npm/PyPI/Maven/Go/...），OSFamily 留空
+//
+// 两个字段全空的 advisory 无法做主机过滤，会被 validateAdvisory 拒绝。
 type Advisory struct {
 	AdvisoryID   string    // 上游 advisory ID，如 RHSA-2024:1234、USN-7890-1、DSA-5678-1
 	CVEIDs       []string  // 关联 CVE 列表（一个 advisory 可修复多个 CVE）
@@ -44,9 +50,10 @@ type Advisory struct {
 	ReferenceURL string    // 上游详情页
 	IssuedAt     time.Time // advisory 发布时间
 	UpdatedAt    time.Time // advisory 最后更新时间
-	AffectedPkgs []PkgFix  // 受影响包 + 修复版本（OS-specific）
-	OSFamily     string    // rhel / rocky / ubuntu / debian / alpine / null（OSV 通用）
-	OSMajorVer   string    // OS 主版本号，如 "9"（RHEL 9 / Rocky 9）
+	AffectedPkgs []PkgFix  // 受影响包 + 修复版本（OS-specific 或语言生态版本）
+	OSFamily     string    // OS pkg advisory: rhel / rocky / ubuntu / debian / alpine；语言包 advisory 留空
+	OSMajorVer   string    // OS 主版本号，如 "9"（RHEL 9 / Rocky 9）；语言包 advisory 留空
+	Ecosystem    string    // 语言包 advisory: npm / PyPI / Maven / Go / RubyGems / crates.io / Packagist / NuGet / Pub / Hex；OS pkg advisory 留空
 }
 
 // PkgFix 单个受影响 pkg 的修复版本。
@@ -76,18 +83,23 @@ type Source interface {
 }
 
 // HostSoftware 单台主机的已装软件清单条目，供 Matcher 比对。
+//
+// PkgEcosystem 决定走哪个 advisory gate：
+//   - OS pkg（rpm/deb/apk）：PkgEcosystem 留空，走 OSFamily/OSMajor gate
+//   - 语言包（npm/PyPI/Maven/Go/...）：PkgEcosystem 必填，走 ecosystem gate
 type HostSoftware struct {
-	HostID   string
-	Hostname string
-	IP       string
-	OSFamily string // rhel / rocky / centos / ubuntu / debian / alpine / null
-	OSVer    string // 完整版本，如 "9.4"
-	OSMajor  string // 主版本，如 "9"
-	Arch     string // amd64 / arm64
-	PkgName  string // 已装 pkg 名（须与 Advisory.AffectedPkgs[].Name 精确匹配）
-	PkgArch  string // 已装 pkg arch
-	PkgVer   string // 已装版本号（含 epoch:version-release.dist，如 "1:3.5.1-3.el9"）
-	PURL     string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
+	HostID       string
+	Hostname     string
+	IP           string
+	OSFamily     string // rhel / rocky / centos / ubuntu / debian / alpine / null
+	OSVer        string // 完整版本，如 "9.4"
+	OSMajor      string // 主版本，如 "9"
+	Arch         string // amd64 / arm64
+	PkgName      string // 已装 pkg 名（须与 Advisory.AffectedPkgs[].Name 精确匹配）
+	PkgArch      string // 已装 pkg arch
+	PkgVer       string // 已装版本号（含 epoch:version-release.dist，如 "1:3.5.1-3.el9"）
+	PURL         string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
+	PkgEcosystem string // 语言包 ecosystem（npm/PyPI/Maven/Go/...）；OS pkg 留空
 }
 
 // Matcher 将 advisory 与已装软件做精确版本比对，输出受影响 host 列表。

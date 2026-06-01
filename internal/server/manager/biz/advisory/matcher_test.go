@@ -135,6 +135,67 @@ func TestOSCompatible(t *testing.T) {
 	}
 }
 
+func TestDefaultMatcher_EcosystemGate(t *testing.T) {
+	// 语言包 advisory（如 OSV/GHSA 报 npm braces）只允许匹配同 ecosystem 主机软件，
+	// 不允许匹配 OS pkg 或其他生态包。
+	adv := &Advisory{
+		Ecosystem: "npm",
+		AffectedPkgs: []PkgFix{
+			{Name: "braces", FixedVersion: "3.0.3"},
+		},
+	}
+	hosts := []HostSoftware{
+		{HostID: "h1", PkgEcosystem: "npm", PkgName: "braces", PkgVer: "1.8.5"},  // 受影响
+		{HostID: "h2", PkgEcosystem: "PyPI", PkgName: "braces", PkgVer: "1.0.0"}, // 跨生态，必拒
+		{HostID: "h3", PkgEcosystem: "", OSFamily: "centos", OSMajor: "9",
+			PkgName: "braces", PkgVer: "1.8.5"}, // OS pkg 同名，必拒
+	}
+	m := &DefaultMatcher{}
+	out := m.Match(adv, hosts)
+	if len(out) != 1 || out[0].HostID != "h1" {
+		t.Fatalf("ecosystem gate fail: expected only h1, got %+v", out)
+	}
+}
+
+func TestDefaultMatcher_RejectDoubleEmptyGate(t *testing.T) {
+	// advisory 既无 OSFamily 也无 Ecosystem → 无法 gate，全部拒绝。
+	adv := &Advisory{
+		AffectedPkgs: []PkgFix{
+			{Name: "openssl", FixedVersion: "3.5.5"},
+		},
+	}
+	hosts := []HostSoftware{
+		{HostID: "h1", OSFamily: "centos", OSMajor: "9", PkgName: "openssl", PkgVer: "3.0.0"},
+		{HostID: "h2", PkgEcosystem: "npm", PkgName: "openssl", PkgVer: "3.0.0"},
+	}
+	m := &DefaultMatcher{}
+	out := m.Match(adv, hosts)
+	if len(out) != 0 {
+		t.Fatalf("双空 gate advisory 应全拒，got %+v", out)
+	}
+}
+
+func TestDefaultMatcher_RejectMixedGate(t *testing.T) {
+	// advisory 同时声明 Ecosystem 与 OSFamily（数据异常）→ 全部拒绝。
+	adv := &Advisory{
+		OSFamily:   "rhel",
+		OSMajorVer: "9",
+		Ecosystem:  "npm",
+		AffectedPkgs: []PkgFix{
+			{Name: "x", FixedVersion: "1"},
+		},
+	}
+	hosts := []HostSoftware{
+		{HostID: "h1", OSFamily: "centos", OSMajor: "9", PkgName: "x", PkgVer: "0"},
+		{HostID: "h2", PkgEcosystem: "npm", PkgName: "x", PkgVer: "0"},
+	}
+	m := &DefaultMatcher{}
+	out := m.Match(adv, hosts)
+	if len(out) != 0 {
+		t.Fatalf("混合 gate advisory 应全拒，got %+v", out)
+	}
+}
+
 func TestArchMatch(t *testing.T) {
 	cases := []struct {
 		advArch, hostArch string

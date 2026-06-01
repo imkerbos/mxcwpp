@@ -6,14 +6,17 @@ import (
 	"unicode"
 )
 
-// DefaultMatcher 实现严格 OS + pkg + arch + version 比对。
+// DefaultMatcher 实现严格 OS / ecosystem + pkg + arch + version 比对。
 //
 // 比对规则（必须全部满足）：
-//  1. advisory.OSFamily 与 host.OSFamily 兼容（rhel ↔ rocky/centos/almalinux 视为兼容）
-//  2. advisory.OSMajorVer == host.OSMajor
-//  3. advisory pkg 名 == host pkg 名
-//  4. arch 匹配（advisory 为 "noarch" 或 "src" 时跳过 arch 匹配）
-//  5. host 版本 < advisory.FixedVersion → 受影响
+//  1. advisory.Ecosystem 非空 → 走 ecosystem gate：host.PkgEcosystem 必须严格相等
+//     advisory.Ecosystem 空 → 走 OS gate：advisory.OSFamily 与 host.OSFamily 兼容（rhel ↔ rocky/centos/almalinux 视为兼容）且 OSMajor 相等
+//  2. advisory pkg 名 == host pkg 名
+//  3. arch 匹配（advisory 为 "noarch" 或 "src" 时跳过 arch 匹配）
+//  4. host 版本 < advisory.FixedVersion → 受影响
+//
+// 双 gate 互斥确保：OS pkg advisory 不会误匹配语言包，语言包 advisory 不会误匹配 OS pkg，
+// 跨 OS / 跨生态串台风险归零。
 type DefaultMatcher struct{}
 
 // Match 实现 Matcher。
@@ -23,7 +26,7 @@ func (m *DefaultMatcher) Match(adv *Advisory, hosts []HostSoftware) []AffectedHo
 	}
 	var out []AffectedHost
 	for _, host := range hosts {
-		if !osCompatible(adv.OSFamily, adv.OSMajorVer, host.OSFamily, host.OSMajor) {
+		if !gatePassed(adv, host) {
 			continue
 		}
 		for _, fix := range adv.AffectedPkgs {
@@ -48,6 +51,28 @@ func (m *DefaultMatcher) Match(adv *Advisory, hosts []HostSoftware) []AffectedHo
 		}
 	}
 	return out
+}
+
+// gatePassed 双 gate 互斥校验：advisory 须经 ecosystem 或 OS 路径其一精确匹配 host。
+//
+// 拒绝匹配的情况：
+//   - advisory 同时声明 Ecosystem 与 OSFamily（数据异常）
+//   - advisory 双空（无可识别归属）
+//   - Ecosystem 路径下 ecosystem 不严格相等
+//   - OS 路径下 OS family/major 不兼容
+func gatePassed(adv *Advisory, host HostSoftware) bool {
+	switch {
+	case adv.Ecosystem != "" && adv.OSFamily != "":
+		// 异常 advisory：两个 gate 同时声明，拒绝匹配避免误判
+		return false
+	case adv.Ecosystem != "":
+		return adv.Ecosystem == host.PkgEcosystem
+	case adv.OSFamily != "":
+		return osCompatible(adv.OSFamily, adv.OSMajorVer, host.OSFamily, host.OSMajor)
+	default:
+		// 双空 advisory 无法 gate，拒绝匹配
+		return false
+	}
 }
 
 // osCompatible 判断 host OS 是否在 advisory OS 覆盖范围。
