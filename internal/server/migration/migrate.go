@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
@@ -195,13 +196,14 @@ WHERE v.source = ?
 		// 找出 fixed_version 含 .el{other_major} 的 advisory 对应 host_vuln，
 		// 其中 host.os_version 主版本不等于 other_major。
 		// 包含 source=osv：旧 OSV 扫描把 OS-format .elN 写入 osv 源，属遗留误攻入
-		// regex `[.]elN([^0-9]|$)` — 数字 N 后跟非数字(覆盖 .el8/.el8_4/.el8ap/.el8sat)或字符串末
+		// regex `[.+]elN([^0-9]|$)` — el 前缀可 . 或 +(覆盖 .el8/+el8/.module+el8.X)，
+		// N 后跟非数字(覆盖 .el8_4/.el8ap/.el8sat)或字符串末
 		sql := `
 DELETE hv FROM host_vulnerabilities hv
 JOIN vulnerabilities v ON hv.vuln_id = v.id
 JOIN hosts h ON h.host_id = hv.host_id
 WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
-  AND v.fixed_version REGEXP CONCAT('[.]el', ?, '([^0-9]|$)')
+  AND v.fixed_version REGEXP CONCAT('[.+]el', ?, '([^0-9]|$)')
   AND SUBSTRING_INDEX(h.os_version, '.', 1) <> ?`
 		r := db.Exec(sql, major, major)
 		if r.Error != nil {
@@ -218,6 +220,138 @@ WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
 	}
 	if totalCrossMajor > 0 {
 		logger.Info("跨 OS major 清理总计", zap.Int64("deleted", totalCrossMajor))
+	}
+
+	// (4) component 未装在 host 上的 host_vuln（legacy ScanAll 误关联）。
+	//
+	// 旧路径不校验 advisory 的 affected_pkg 是否真在该 host 安装，
+	// 导致 host_vuln 上挂着 host 根本没装的 pkg 的 CVE。
+	//
+	// 仅清 vendor advisory + osv 源（这些必带具体 component 名）；
+	// nvd 因可能含通用 CPE 不带 RPM 名，不清。
+	cleanupNotInstalledSQL := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+LEFT JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
+WHERE v.source IN ('rhsa','rocky-apollo','centos','debian-tracker','usn','alpine','osv')
+  AND v.component <> ''
+  AND s.id IS NULL`
+	r4 := db.Exec(cleanupNotInstalledSQL)
+	if r4.Error != nil {
+		logger.Warn("legacy 未装 component host_vuln 清理失败", zap.Error(r4.Error))
+	} else if r4.RowsAffected > 0 {
+		logger.Info("legacy 未装 component host_vuln 已清理",
+			zap.Int64("deleted", r4.RowsAffected))
+	}
+
+	// (5) 非 RHEL distro 后缀但落在 RHEL 家族 host 的 host_vuln
+	// 例如 fixed_version `.hum1`(华为 EulerOS)/`.ky10`(麒麟)/`.uos`/`.oe2403`(openEuler)/
+	// `.amzn2`(Amazon Linux)/`.an8`(龙蜥 Anolis)/`.tl3`(Tencent OS) 等
+	// 这些 advisory 来自不同发行版，rocky/rhel/centos 主机不适用。
+	nonRHELDistroRegex := `[.+](hum[0-9]*|ky10|uos[0-9]*|oe[0-9]+|amzn[0-9]*|al[0-9]+|an[789]|anolis|tl[0-9]+|tlinux)([^a-zA-Z0-9]|$)`
+	cleanupNonRHELDistroSQL := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux')
+  AND v.fixed_version REGEXP ?`
+	r5 := db.Exec(cleanupNonRHELDistroSQL, nonRHELDistroRegex)
+	if r5.Error != nil {
+		logger.Warn("非 RHEL distro 后缀 host_vuln 清理失败", zap.Error(r5.Error))
+	} else if r5.RowsAffected > 0 {
+		logger.Info("非 RHEL distro 后缀 host_vuln 已清理",
+			zap.Int64("deleted", r5.RowsAffected))
+	}
+
+	// (6) installed_version >= fixed_version：host 实际已修复版本但仍报漏洞
+	// 旧 ScanAll 不做版本比对，新 matcher 已严格但旧记录残留。
+	// 按 host_vuln + software join，loop Go RPM 比较，installed >= fixed 删除。
+	if err := cleanupAlreadyPatched(db, logger); err != nil {
+		logger.Warn("已修复版本 host_vuln 清理失败", zap.Error(err))
+	}
+
+	// (7) NVD description 含 OS/arch qualifier 限定但落到不匹配 host 的 host_vuln
+	// NVD advisory 描述中常见 "on 32-bit builds" / "Microsoft Windows" / "FreeBSD only" /
+	// "macOS only" / "iOS" 等限定，这些 advisory 不适用 Linux x86_64 主机。
+	// 仅作用于 Linux host + source=nvd。
+	nvdQualifierRegex := `(on 32-bit|32-bit builds?|microsoft windows|windows-only|freebsd only|macos only|macos x|iphone|ios only|android only)`
+	cleanupNVDQualifierSQL := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source = 'nvd'
+  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux','ubuntu','debian','alpine','sles','opensuse')
+  AND LOWER(v.description) REGEXP ?`
+	r7 := db.Exec(cleanupNVDQualifierSQL, nvdQualifierRegex)
+	if r7.Error != nil {
+		logger.Warn("NVD qualifier host_vuln 清理失败", zap.Error(r7.Error))
+	} else if r7.RowsAffected > 0 {
+		logger.Info("NVD OS/arch qualifier host_vuln 已清理",
+			zap.Int64("deleted", r7.RowsAffected))
+	}
+	return nil
+}
+
+// cleanupAlreadyPatched 用 RPM 版本比对清掉 host 实际已修复版本但仍报漏洞的条目。
+//
+// 仅作用于 rhsa/rocky-apollo/centos/osv 源（这些用 RPM 版本格式）。
+// debian/usn 用 dpkg 比对（后续 P1 再加）。
+// 分批 5000 处理避免长事务。
+func cleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) error {
+	type row struct {
+		HostVulnID   uint   `gorm:"column:hv_id"`
+		Installed    string `gorm:"column:installed"`
+		FixedVersion string `gorm:"column:fixed_version"`
+	}
+	const batchSize = 5000
+	var lastID uint = 0
+	var totalDeleted int64
+	for {
+		var batch []row
+		err := db.Raw(`
+SELECT hv.id AS hv_id, s.version AS installed, v.fixed_version
+FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
+WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
+  AND v.fixed_version <> ''
+  AND s.version <> ''
+  AND hv.id > ?
+ORDER BY hv.id ASC
+LIMIT ?`, lastID, batchSize).Scan(&batch).Error
+		if err != nil {
+			return fmt.Errorf("拉 host_vuln 批失败: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		var toDelete []uint
+		for _, r := range batch {
+			lastID = r.HostVulnID
+			cmp, err := advisory.CompareRPMVersion(r.Installed, r.FixedVersion)
+			if err != nil {
+				// 解析失败保守保留
+				continue
+			}
+			if cmp >= 0 {
+				toDelete = append(toDelete, r.HostVulnID)
+			}
+		}
+		if len(toDelete) > 0 {
+			r := db.Exec("DELETE FROM host_vulnerabilities WHERE id IN ?", toDelete)
+			if r.Error != nil {
+				logger.Warn("已修复 host_vuln 批删除失败",
+					zap.Int("batch_size", len(toDelete)), zap.Error(r.Error))
+				continue
+			}
+			totalDeleted += r.RowsAffected
+		}
+		if len(batch) < batchSize {
+			break
+		}
+	}
+	if totalDeleted > 0 {
+		logger.Info("已修复版本 host_vuln 清理完成", zap.Int64("deleted", totalDeleted))
 	}
 	return nil
 }
