@@ -1392,13 +1392,15 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 		Arch        string
 		PkgName     string
 		PkgVer      string
+		PkgEpoch    string
+		PkgRelease  string
 		PkgArch     string
 		PURL        string
 		PackageType string
 	}
 	var rows []hostPkgRow
 	if err := v.db.Table("hosts h").
-		Select("h.host_id, h.hostname, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.architecture as pkg_arch, s.purl, s.package_type").
+		Select("h.host_id, h.hostname, h.os_family, h.os_version, h.arch, s.name as pkg_name, s.version as pkg_ver, s.epoch as pkg_epoch, s.release as pkg_release, s.architecture as pkg_arch, s.purl, s.package_type").
 		Joins("JOIN software s ON s.host_id = h.host_id").
 		Where("h.status = ?", "online").
 		Find(&rows).Error; err != nil {
@@ -1415,6 +1417,9 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 			Arch:         r.Arch,
 			PkgName:      r.PkgName,
 			PkgVer:       r.PkgVer,
+			PkgEpoch:     r.PkgEpoch,
+			PkgVerRaw:    r.PkgVer, // 旧字段含完整 version，新数据下与 PkgVer 一致
+			PkgRelease:   r.PkgRelease,
 			PkgArch:      r.PkgArch,
 			PURL:         r.PURL,
 			PkgEcosystem: pkgTypeToEcosystem(r.PackageType),

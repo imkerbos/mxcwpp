@@ -196,6 +196,55 @@ func TestDefaultMatcher_RejectMixedGate(t *testing.T) {
 	}
 }
 
+func TestDefaultMatcher_NEVRAEpochOverridesVersion(t *testing.T) {
+	// 回归 prod 残留:libpng 1.6.37 vs fix 2:1.0.14-11
+	// 不带 epoch 字符串比对会被 epoch 翻转：installed 1.6.37 > 1.0.14 但 epoch 0 < 2，
+	// NEVRA 严格比较会认 fix > installed → host needs update。
+	// 这是 RHEL/Rocky 实际语义。
+	adv := &Advisory{
+		OSFamily:   "rhel",
+		OSMajorVer: "9",
+		AffectedPkgs: []PkgFix{
+			{Name: "libpng", Arch: "x86_64", FixedVersion: "2:1.0.14-11"},
+		},
+	}
+	hosts := []HostSoftware{
+		// host pkg epoch=0 但 version 1.6.37 大于 fix epoch=2 的 version 1.0.14。
+		// 旧字符串比对(PkgVer="1.6.37") 错认 host 已超新；NEVRA 比对认 epoch 主导。
+		{HostID: "h1", OSFamily: "rocky", OSMajor: "9", PkgName: "libpng",
+			PkgArch: "x86_64", PkgEpoch: "0", PkgVerRaw: "1.6.37", PkgRelease: "1.el9"},
+	}
+	m := &DefaultMatcher{}
+	out := m.Match(adv, hosts)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(out))
+	}
+	if !out[0].NeedsUpdate {
+		t.Errorf("NEVRA epoch 0<2 应判 needs update，实测 %+v", out[0])
+	}
+}
+
+func TestDefaultMatcher_NEVRAFallback(t *testing.T) {
+	// 缺 NEVRA 字段时退回 PkgVer 字符串。
+	adv := &Advisory{
+		OSFamily:   "rhel",
+		OSMajorVer: "9",
+		AffectedPkgs: []PkgFix{
+			{Name: "openssl", Arch: "x86_64", FixedVersion: "1:3.5.5-1.el9_4"},
+		},
+	}
+	hosts := []HostSoftware{
+		// 旧 collector 数据：PkgVer="3.5.1-3.el9"，无 PkgEpoch/PkgVerRaw/PkgRelease
+		{HostID: "h1", OSFamily: "rocky", OSMajor: "9", PkgName: "openssl",
+			PkgArch: "x86_64", PkgVer: "3.5.1-3.el9"},
+	}
+	m := &DefaultMatcher{}
+	out := m.Match(adv, hosts)
+	if len(out) != 1 || !out[0].NeedsUpdate {
+		t.Errorf("fallback 应判 needs update，实测 %+v", out)
+	}
+}
+
 func TestArchMatch(t *testing.T) {
 	cases := []struct {
 		advArch, hostArch string

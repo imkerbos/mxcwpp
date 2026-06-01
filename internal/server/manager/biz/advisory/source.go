@@ -87,6 +87,10 @@ type Source interface {
 // PkgEcosystem 决定走哪个 advisory gate：
 //   - OS pkg（rpm/deb/apk）：PkgEcosystem 留空，走 OSFamily/OSMajor gate
 //   - 语言包（npm/PyPI/Maven/Go/...）：PkgEcosystem 必填，走 ecosystem gate
+//
+// NEVRA(Name/Epoch/Version/Release/Arch) 比较优先级（matcher 优先级降序）：
+//  1. PkgEpoch / PkgVerRaw / PkgRelease 都非空 → 严格 NEVRA 比较
+//  2. 任一为空 → 退回 PkgVer 字符串 RPM-vercmp（旧路径，可能漏 epoch）
 type HostSoftware struct {
 	HostID       string
 	Hostname     string
@@ -97,7 +101,10 @@ type HostSoftware struct {
 	Arch         string // amd64 / arm64
 	PkgName      string // 已装 pkg 名（须与 Advisory.AffectedPkgs[].Name 精确匹配）
 	PkgArch      string // 已装 pkg arch
-	PkgVer       string // 已装版本号（含 epoch:version-release.dist，如 "1:3.5.1-3.el9"）
+	PkgVer       string // 已装版本号（旧字段，保持向后兼容；新数据用下面 3 个 NEVRA 字段）
+	PkgEpoch     string // RPM EPOCH（不存在则空）。NEVRA 比较关键字段
+	PkgVerRaw    string // RPM VERSION（不含 epoch/release，如 "3.5.1"）
+	PkgRelease   string // RPM RELEASE（如 "3.el9_4"）
 	PURL         string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
 	PkgEcosystem string // 语言包 ecosystem（npm/PyPI/Maven/Go/...）；OS pkg 留空
 }

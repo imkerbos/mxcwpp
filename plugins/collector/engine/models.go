@@ -56,6 +56,8 @@ type SoftwareAsset struct {
 	Asset
 	Name         string `json:"name"`                   // 软件包名称
 	Version      string `json:"version"`                // 版本号
+	Epoch        string `json:"epoch,omitempty"`        // RPM EPOCH 字段（不存在则空）。NEVRA 精确比较核心
+	Release      string `json:"release,omitempty"`      // RPM RELEASE 字段（如 "284.11.1.el9_2"）。NEVRA 精确比较核心
 	Architecture string `json:"architecture"`           // 架构（x86_64、aarch64 等）
 	PackageType  string `json:"package_type"`           // 包类型（rpm、deb、pip、npm、jar、go-binary、go-module 等）
 	Vendor       string `json:"vendor,omitempty"`       // 供应商

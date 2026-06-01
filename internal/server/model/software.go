@@ -3,10 +3,14 @@ package model
 
 // Software 软件包资产模型
 type Software struct {
-	ID           string `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
-	HostID       string `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
-	Name         string `gorm:"column:name;type:varchar(255);not null" json:"name"`
-	Version      string `gorm:"column:version;type:varchar(100)" json:"version"`
+	ID      string `gorm:"primaryKey;column:id;type:varchar(128);not null" json:"id"`
+	HostID  string `gorm:"column:host_id;type:varchar(64);not null;index" json:"host_id"`
+	Name    string `gorm:"column:name;type:varchar(255);not null" json:"name"`
+	Version string `gorm:"column:version;type:varchar(100)" json:"version"`
+	// Epoch RPM 的 EPOCH 字段（不存在则为空或 "0"）。NEVRA 比较时若 epoch 不同则直接定胜负。
+	Epoch string `gorm:"column:epoch;type:varchar(16)" json:"epoch"`
+	// Release RPM 的 RELEASE 字段（如 "284.11.1.el9_2"）。NEVRA 比较 release 段。
+	Release      string `gorm:"column:release;type:varchar(100)" json:"release"`
 	Architecture string `gorm:"column:architecture;type:varchar(50)" json:"architecture"`
 	PackageType  string `gorm:"column:package_type;type:varchar(50);not null" json:"package_type"` // rpm、deb、pip、npm、jar、go-binary、go-module、binary 等
 	Vendor       string `gorm:"column:vendor;type:varchar(255)" json:"vendor"`

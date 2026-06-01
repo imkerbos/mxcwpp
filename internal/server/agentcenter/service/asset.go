@@ -262,6 +262,8 @@ func (s *AssetService) handleSoftwareData(hostID, jsonData string) error {
 			HostID:         hostID,
 			Name:           asset.Name,
 			Version:        asset.Version,
+			Epoch:          asset.Epoch,
+			Release:        asset.Release,
 			Architecture:   asset.Architecture,
 			PackageType:    asset.PackageType,
 			Vendor:         asset.Vendor,

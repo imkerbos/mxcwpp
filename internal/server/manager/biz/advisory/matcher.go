@@ -36,19 +36,53 @@ func (m *DefaultMatcher) Match(adv *Advisory, hosts []HostSoftware) []AffectedHo
 			if !archMatch(fix.Arch, host.PkgArch) {
 				continue
 			}
-			cmp, err := CompareRPMVersion(host.PkgVer, fix.FixedVersion)
+			cmp, err := compareNEVRAOrFallback(host, fix.FixedVersion)
 			if err != nil {
 				continue
 			}
 			needs := cmp < 0
+			installedDisplay := host.PkgVer
+			if installedDisplay == "" {
+				installedDisplay = composeNEVRAString(host.PkgEpoch, host.PkgVerRaw, host.PkgRelease)
+			}
 			out = append(out, AffectedHost{
 				HostID:       host.HostID,
 				PkgName:      fix.Name,
-				InstalledVer: host.PkgVer,
+				InstalledVer: installedDisplay,
 				FixedVersion: fix.FixedVersion,
 				NeedsUpdate:  needs,
 			})
 		}
+	}
+	return out
+}
+
+// compareNEVRAOrFallback 优先用 NEVRA 三元组比较，缺字段时退回 PkgVer 字符串比较。
+//
+// 返回 cmp 语义：-1 host < fix(需修)，0 相等(已修)，1 host > fix(已超新)。
+func compareNEVRAOrFallback(host HostSoftware, fixedVersion string) (int, error) {
+	if host.PkgVerRaw != "" {
+		installed := composeNEVRAString(host.PkgEpoch, host.PkgVerRaw, host.PkgRelease)
+		return CompareRPMVersion(installed, fixedVersion)
+	}
+	if host.PkgVer != "" {
+		return CompareRPMVersion(host.PkgVer, fixedVersion)
+	}
+	return 0, fmt.Errorf("no version info")
+}
+
+// composeNEVRAString 把 epoch/version/release 拼成标准 NEVRA 字符串(无 name 无 arch)。
+//
+//	epoch="" version="3.5.1" release="3.el9" → "3.5.1-3.el9"
+//	epoch="0" version="3.5.1" release="3.el9" → "0:3.5.1-3.el9"
+//	epoch="2" version="1.14.0" release="1.el9" → "2:1.14.0-1.el9"
+func composeNEVRAString(epoch, version, release string) string {
+	out := version
+	if release != "" {
+		out = out + "-" + release
+	}
+	if epoch != "" {
+		out = epoch + ":" + out
 	}
 	return out
 }
