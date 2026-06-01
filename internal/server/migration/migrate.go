@@ -112,7 +112,113 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("漏洞分类回填失败", zap.Error(err))
 	}
 
+	// 清理 v2.5.0 之前 ScanAll 留下的跨 OS host_vuln 误报 + OSS-Fuzz 噪音
+	if err := migrateCleanupLegacyHostVuln(db, logger); err != nil {
+		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
+	return nil
+}
+
+// migrateCleanupLegacyHostVuln 删除 v2.5.0 之前 ScanAll/OSV legacy 路径留下的两类垃圾:
+//
+//  1. OSS-Fuzz crash ID（OSV-YYYY-NNN）当 CVE 入库的 vulnerabilities + 关联 host_vulnerabilities
+//     上游 osv.dev 把 OSS-Fuzz crash 记录与 CVE 同 namespace，旧 extractCVEs fallback 误把
+//     OSV-YYYY-NNN 写到 cve_id 字段，实测 G02-UAT 主机占 49% FP。
+//
+//  2. 跨 OS family 的 host_vulnerabilities（debian-tracker 报到 rocky 主机等）。旧 ScanAll
+//     没做 OS family gate，所有 source 匹配同 PURL 即建立 host 关联，跨 OS 串台严重。
+//     新 advisory.Coordinator 已用 matcher.gatePassed 严格控制，仅清旧数据。
+//
+// 幂等：基于 SQL 条件删除，多次运行无副作用。
+func migrateCleanupLegacyHostVuln(db *gorm.DB, logger *zap.Logger) error {
+	// (1) OSS-Fuzz 垃圾 vulnerabilities + 级联 host_vulnerabilities
+	var ossFuzzIDs []uint
+	if err := db.Table("vulnerabilities").
+		Where("cve_id REGEXP '^OSV-[0-9]{4}-[0-9]+$'").
+		Pluck("id", &ossFuzzIDs).Error; err != nil {
+		return fmt.Errorf("查询 OSS-Fuzz vuln id 失败: %w", err)
+	}
+	if len(ossFuzzIDs) > 0 {
+		r1 := db.Exec("DELETE FROM host_vulnerabilities WHERE vuln_id IN ?", ossFuzzIDs)
+		r2 := db.Exec("DELETE FROM vulnerabilities WHERE id IN ?", ossFuzzIDs)
+		logger.Info("清理 OSS-Fuzz 垃圾",
+			zap.Int64("host_vuln_deleted", r1.RowsAffected),
+			zap.Int64("vuln_deleted", r2.RowsAffected))
+	}
+
+	// (2) 跨 OS family 的 host_vulnerabilities
+	// 每对 (vuln.source, 兼容 OS family 列表) 一条 DELETE
+	xrefRules := []struct {
+		source     string
+		compatible string // SQL IN list
+	}{
+		{"debian-tracker", "'debian','ubuntu'"},
+		{"usn", "'debian','ubuntu'"},
+		{"alpine", "'alpine'"},
+		{"rhsa", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
+		{"rocky-apollo", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
+		{"centos", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
+	}
+	var totalDeleted int64
+	for _, rule := range xrefRules {
+		sql := fmt.Sprintf(`
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source = ?
+  AND LOWER(h.os_family) NOT IN (%s)`, rule.compatible)
+		r := db.Exec(sql, rule.source)
+		if r.Error != nil {
+			logger.Warn("跨 OS host_vuln 清理失败",
+				zap.String("source", rule.source), zap.Error(r.Error))
+			continue
+		}
+		if r.RowsAffected > 0 {
+			logger.Info("跨 OS host_vuln 已清理",
+				zap.String("source", rule.source),
+				zap.Int64("deleted", r.RowsAffected))
+			totalDeleted += r.RowsAffected
+		}
+	}
+	if totalDeleted > 0 {
+		logger.Info("legacy host_vuln 清理完成", zap.Int64("total_deleted", totalDeleted))
+	}
+
+	// (3) 跨 OS major 版本（同 RHEL 系但 elN 不匹配）
+	// rhsa/rocky-apollo 的 fixed_version 形如 "1:3.5.5-1.el9_4" 含 .elN，
+	// 与 host.os_version 主版本不一致即误报。
+	rhelMajors := []string{"7", "8", "9", "10"}
+	var totalCrossMajor int64
+	for _, major := range rhelMajors {
+		// 找出 fixed_version 含 .el{other_major} 的 advisory 对应 host_vuln，
+		// 其中 host.os_version 主版本不等于 other_major。
+		// 包含 source=osv：旧 OSV 扫描把 OS-format .elN 写入 osv 源，属遗留误攻入
+		// regex `[.]elN([^0-9]|$)` — 数字 N 后跟非数字(覆盖 .el8/.el8_4/.el8ap/.el8sat)或字符串末
+		sql := `
+DELETE hv FROM host_vulnerabilities hv
+JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
+WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
+  AND v.fixed_version REGEXP CONCAT('[.]el', ?, '([^0-9]|$)')
+  AND SUBSTRING_INDEX(h.os_version, '.', 1) <> ?`
+		r := db.Exec(sql, major, major)
+		if r.Error != nil {
+			logger.Warn("跨 OS major host_vuln 清理失败",
+				zap.String("el_major", major), zap.Error(r.Error))
+			continue
+		}
+		if r.RowsAffected > 0 {
+			logger.Info("跨 OS major host_vuln 已清理",
+				zap.String("advisory_el_major", major),
+				zap.Int64("deleted", r.RowsAffected))
+			totalCrossMajor += r.RowsAffected
+		}
+	}
+	if totalCrossMajor > 0 {
+		logger.Info("跨 OS major 清理总计", zap.Int64("deleted", totalCrossMajor))
+	}
 	return nil
 }
 
