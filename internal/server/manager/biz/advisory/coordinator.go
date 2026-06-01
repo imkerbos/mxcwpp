@@ -54,6 +54,11 @@ func NewCoordinator(db *gorm.DB, logger *zap.Logger) *Coordinator {
 			NewOSVSource(),
 			NewAlpineSource(),
 			NewCentOSSource(),
+			// 信创 OS（当前 stub，待对接 P3-1a-2/P3-1b-2/P3-1c-2）
+			NewOpenEulerSource(),
+			NewAnolisSource(),
+			NewKylinSource(),
+			NewUOSSource(),
 		},
 		matcher: &DefaultMatcher{},
 	}
@@ -133,6 +138,15 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 		vulnCount++
 		hostVulnCount += len(entry.affectedHosts)
 	}
+
+	// upsertVuln 期间 mergeByConfidence 会翻新 vulnerabilities.source 字段，
+	// 历史 host_vuln 行可能从 JOIN 角度变为 cross-OS/跨 major FP。
+	// 同一份 cleanup 逻辑(advisory.CleanupHostVulnFP)既由 migration 启动时跑一次，
+	// 又在每次 sync 后跑，确保 host_vuln 与新 source 归属一致。
+	c.logger.Info("Coordinator.Sync 完成，跑 host_vuln FP 清理")
+	CleanupHostVulnFP(c.db, c.logger)
+	CleanupAlreadyPatched(c.db, c.logger)
+
 	return vulnCount, hostVulnCount, nil
 }
 
@@ -159,7 +173,9 @@ func validateAdvisory(adv *Advisory) bool {
 func isLinuxOS(family string) bool {
 	switch strings.ToLower(family) {
 	case "rhel", "rocky", "centos", "centos-stream", "almalinux",
-		"oraclelinux", "ubuntu", "debian", "alpine":
+		"oraclelinux", "ubuntu", "debian", "alpine",
+		// 信创 OS
+		"openeuler", "anolis", "openanolis", "kylin", "uos", "tencentos":
 		return true
 	}
 	return false
