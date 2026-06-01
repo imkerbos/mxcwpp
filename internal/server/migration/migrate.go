@@ -122,19 +122,17 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// migrateCleanupLegacyHostVuln 删除 v2.5.0 之前 ScanAll/OSV legacy 路径留下的两类垃圾:
+// migrateCleanupLegacyHostVuln 启动时清 OSS-Fuzz 垃圾 + 通用 host_vuln FP。
 //
-//  1. OSS-Fuzz crash ID（OSV-YYYY-NNN）当 CVE 入库的 vulnerabilities + 关联 host_vulnerabilities
-//     上游 osv.dev 把 OSS-Fuzz crash 记录与 CVE 同 namespace，旧 extractCVEs fallback 误把
-//     OSV-YYYY-NNN 写到 cve_id 字段，实测 G02-UAT 主机占 49% FP。
-//
-//  2. 跨 OS family 的 host_vulnerabilities（debian-tracker 报到 rocky 主机等）。旧 ScanAll
-//     没做 OS family gate，所有 source 匹配同 PURL 即建立 host 关联，跨 OS 串台严重。
-//     新 advisory.Coordinator 已用 matcher.gatePassed 严格控制，仅清旧数据。
+// 主要 host_vuln FP 清理逻辑下沉到 advisory.CleanupHostVulnFP（同时被 Coordinator.Sync 末尾调用），
+// 这里仅处理 OSS-Fuzz vulnerabilities 表层垃圾（同样导致 host_vuln 误报），
+// 然后委托 advisory 包做 host_vuln 清理。
 //
 // 幂等：基于 SQL 条件删除，多次运行无副作用。
 func migrateCleanupLegacyHostVuln(db *gorm.DB, logger *zap.Logger) error {
-	// (1) OSS-Fuzz 垃圾 vulnerabilities + 级联 host_vulnerabilities
+	// OSS-Fuzz crash ID（OSV-YYYY-NNN）当 CVE 入库的 vulnerabilities + 级联 host_vulnerabilities
+	// 上游 osv.dev 把 OSS-Fuzz crash 记录与 CVE 同 namespace，旧 extractCVEs fallback 误把
+	// OSV-YYYY-NNN 写到 cve_id 字段，实测 G02-UAT 主机占 49% FP。
 	var ossFuzzIDs []uint
 	if err := db.Table("vulnerabilities").
 		Where("cve_id REGEXP '^OSV-[0-9]{4}-[0-9]+$'").
@@ -149,245 +147,24 @@ func migrateCleanupLegacyHostVuln(db *gorm.DB, logger *zap.Logger) error {
 			zap.Int64("vuln_deleted", r2.RowsAffected))
 	}
 
-	// (2) 跨 OS family 的 host_vulnerabilities
-	// 每对 (vuln.source, 兼容 OS family 列表) 一条 DELETE
-	xrefRules := []struct {
-		source     string
-		compatible string // SQL IN list
-	}{
-		{"debian-tracker", "'debian','ubuntu'"},
-		{"usn", "'debian','ubuntu'"},
-		{"alpine", "'alpine'"},
-		{"rhsa", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
-		{"rocky-apollo", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
-		{"centos", "'rhel','rocky','centos','centos-stream','almalinux','oraclelinux'"},
-	}
-	var totalDeleted int64
-	for _, rule := range xrefRules {
-		sql := fmt.Sprintf(`
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN hosts h ON h.host_id = hv.host_id
-WHERE v.source = ?
-  AND LOWER(h.os_family) NOT IN (%s)`, rule.compatible)
-		r := db.Exec(sql, rule.source)
-		if r.Error != nil {
-			logger.Warn("跨 OS host_vuln 清理失败",
-				zap.String("source", rule.source), zap.Error(r.Error))
-			continue
-		}
-		if r.RowsAffected > 0 {
-			logger.Info("跨 OS host_vuln 已清理",
-				zap.String("source", rule.source),
-				zap.Int64("deleted", r.RowsAffected))
-			totalDeleted += r.RowsAffected
-		}
-	}
-	if totalDeleted > 0 {
-		logger.Info("legacy host_vuln 清理完成", zap.Int64("total_deleted", totalDeleted))
-	}
-
-	// (3) 跨 OS major 版本（同 RHEL 系但 elN 不匹配）
-	// rhsa/rocky-apollo 的 fixed_version 形如 "1:3.5.5-1.el9_4" 含 .elN，
-	// 与 host.os_version 主版本不一致即误报。
-	rhelMajors := []string{"7", "8", "9", "10"}
-	var totalCrossMajor int64
-	for _, major := range rhelMajors {
-		// 找出 fixed_version 含 .el{other_major} 的 advisory 对应 host_vuln，
-		// 其中 host.os_version 主版本不等于 other_major。
-		// 包含 source=osv：旧 OSV 扫描把 OS-format .elN 写入 osv 源，属遗留误攻入
-		// regex `[.+]elN([^0-9]|$)` — el 前缀可 . 或 +(覆盖 .el8/+el8/.module+el8.X)，
-		// N 后跟非数字(覆盖 .el8_4/.el8ap/.el8sat)或字符串末
-		sql := `
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN hosts h ON h.host_id = hv.host_id
-WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
-  AND v.fixed_version REGEXP CONCAT('[.+]el', ?, '([^0-9]|$)')
-  AND SUBSTRING_INDEX(h.os_version, '.', 1) <> ?`
-		r := db.Exec(sql, major, major)
-		if r.Error != nil {
-			logger.Warn("跨 OS major host_vuln 清理失败",
-				zap.String("el_major", major), zap.Error(r.Error))
-			continue
-		}
-		if r.RowsAffected > 0 {
-			logger.Info("跨 OS major host_vuln 已清理",
-				zap.String("advisory_el_major", major),
-				zap.Int64("deleted", r.RowsAffected))
-			totalCrossMajor += r.RowsAffected
-		}
-	}
-	if totalCrossMajor > 0 {
-		logger.Info("跨 OS major 清理总计", zap.Int64("deleted", totalCrossMajor))
-	}
-
-	// (4) component 未装在 host 上的 host_vuln（legacy ScanAll 误关联）。
-	//
-	// 旧路径不校验 advisory 的 affected_pkg 是否真在该 host 安装，
-	// 导致 host_vuln 上挂着 host 根本没装的 pkg 的 CVE。
-	//
-	// 仅清 vendor advisory + osv 源（这些必带具体 component 名）；
-	// nvd 因可能含通用 CPE 不带 RPM 名，不清。
-	cleanupNotInstalledSQL := `
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-LEFT JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
-WHERE v.source IN ('rhsa','rocky-apollo','centos','debian-tracker','usn','alpine','osv')
-  AND v.component <> ''
-  AND s.id IS NULL`
-	r4 := db.Exec(cleanupNotInstalledSQL)
-	if r4.Error != nil {
-		logger.Warn("legacy 未装 component host_vuln 清理失败", zap.Error(r4.Error))
-	} else if r4.RowsAffected > 0 {
-		logger.Info("legacy 未装 component host_vuln 已清理",
-			zap.Int64("deleted", r4.RowsAffected))
-	}
-
-	// (5) 非 RHEL distro 后缀但落在 RHEL 家族 host 的 host_vuln
-	// 例如 fixed_version `.hum1`(华为 EulerOS)/`.ky10`(麒麟)/`.uos`/`.oe2403`(openEuler)/
-	// `.amzn2`(Amazon Linux)/`.an8`(龙蜥 Anolis)/`.tl3`(Tencent OS) 等
-	// 这些 advisory 来自不同发行版，rocky/rhel/centos 主机不适用。
-	nonRHELDistroRegex := `[.+](hum[0-9]*|ky10|uos[0-9]*|oe[0-9]+|amzn[0-9]*|al[0-9]+|an[789]|anolis|tl[0-9]+|tlinux)([^a-zA-Z0-9]|$)`
-	cleanupNonRHELDistroSQL := `
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN hosts h ON h.host_id = hv.host_id
-WHERE LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux')
-  AND v.fixed_version REGEXP ?`
-	r5 := db.Exec(cleanupNonRHELDistroSQL, nonRHELDistroRegex)
-	if r5.Error != nil {
-		logger.Warn("非 RHEL distro 后缀 host_vuln 清理失败", zap.Error(r5.Error))
-	} else if r5.RowsAffected > 0 {
-		logger.Info("非 RHEL distro 后缀 host_vuln 已清理",
-			zap.Int64("deleted", r5.RowsAffected))
-	}
-
-	// (6) installed_version >= fixed_version：host 实际已修复版本但仍报漏洞
-	// 旧 ScanAll 不做版本比对，新 matcher 已严格但旧记录残留。
-	// 按 host_vuln + software join，loop Go RPM 比较，installed >= fixed 删除。
-	if err := cleanupAlreadyPatched(db, logger); err != nil {
-		logger.Warn("已修复版本 host_vuln 清理失败", zap.Error(err))
-	}
-
-	// (9) OSV 源 host_vuln 落在 RHEL 家族 + fixed_version 含 .elN (RPM format)。
-	// 这类条目实为 OS pkg backport 问题，OSV 不区分 RHEL backport，
-	// 应由 RHSA/rocky-apollo 主导，OSV 不该出现在 RHEL 家族 host_vuln 中。
-	cleanupOSVOnRHELRPMSQL := `
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN hosts h ON h.host_id = hv.host_id
-WHERE v.source = 'osv'
-  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux')
-  AND v.fixed_version REGEXP '[.+]el[0-9]+'`
-	r9 := db.Exec(cleanupOSVOnRHELRPMSQL)
-	if r9.Error != nil {
-		logger.Warn("RHEL 家族上 OSV RPM-format host_vuln 清理失败", zap.Error(r9.Error))
-	} else if r9.RowsAffected > 0 {
-		logger.Info("RHEL 家族上 OSV RPM-format host_vuln 已清理(RHSA 应主导)",
-			zap.Int64("deleted", r9.RowsAffected))
-	}
-
-	// (8) NVD 源 host_vuln 落在 vendor-covered OS 家族(RHEL/Ubuntu/Debian/Alpine)。
-	// NVD 报告上游 fixed_version，不识别 RHEL/Debian backport，对 vendor-covered 主机永远 FP。
-	// 此类主机的 host_vuln 应只由 vendor advisory（RHSA/USN/DSA/Alpine secdb）生成。
-	cleanupNVDOnVendorOSSQL := `
-DELETE hv FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN hosts h ON h.host_id = hv.host_id
-WHERE v.source = 'nvd'
-  AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux','ubuntu','debian','alpine','sles','opensuse')`
-	r8 := db.Exec(cleanupNVDOnVendorOSSQL)
-	if r8.Error != nil {
-		logger.Warn("vendor-covered OS 上 NVD host_vuln 清理失败", zap.Error(r8.Error))
-	} else if r8.RowsAffected > 0 {
-		logger.Info("vendor-covered OS 上 NVD host_vuln 已清理(NVD backport-blind)",
-			zap.Int64("deleted", r8.RowsAffected))
-	}
-
-	// (7) NVD description 含 OS/arch qualifier 限定但落到不匹配 host 的 host_vuln
-	// NVD advisory 描述中常见 "on 32-bit builds" / "Microsoft Windows" / "FreeBSD only" /
-	// "macOS only" / "iOS" 等限定，这些 advisory 不适用 Linux x86_64 主机。
-	// 仅作用于 Linux host + source=nvd。
+	// NVD description 含 OS/arch qualifier 限定的 host_vuln（仅 migration 跑，
+	// 因 description 字段不在 sync 路径上动）
 	nvdQualifierRegex := `(on 32-bit|32-bit builds?|microsoft windows|windows-only|freebsd only|macos only|macos x|iphone|ios only|android only)`
-	cleanupNVDQualifierSQL := `
+	r7 := db.Exec(`
 DELETE hv FROM host_vulnerabilities hv
 JOIN vulnerabilities v ON hv.vuln_id = v.id
 JOIN hosts h ON h.host_id = hv.host_id
 WHERE v.source = 'nvd'
   AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux','ubuntu','debian','alpine','sles','opensuse')
-  AND LOWER(v.description) REGEXP ?`
-	r7 := db.Exec(cleanupNVDQualifierSQL, nvdQualifierRegex)
-	if r7.Error != nil {
-		logger.Warn("NVD qualifier host_vuln 清理失败", zap.Error(r7.Error))
-	} else if r7.RowsAffected > 0 {
+  AND LOWER(v.description) REGEXP ?`, nvdQualifierRegex)
+	if r7.Error == nil && r7.RowsAffected > 0 {
 		logger.Info("NVD OS/arch qualifier host_vuln 已清理",
 			zap.Int64("deleted", r7.RowsAffected))
 	}
-	return nil
-}
 
-// cleanupAlreadyPatched 用 RPM 版本比对清掉 host 实际已修复版本但仍报漏洞的条目。
-//
-// 仅作用于 rhsa/rocky-apollo/centos/osv 源（这些用 RPM 版本格式）。
-// debian/usn 用 dpkg 比对（后续 P1 再加）。
-// 分批 5000 处理避免长事务。
-func cleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) error {
-	type row struct {
-		HostVulnID   uint   `gorm:"column:hv_id"`
-		Installed    string `gorm:"column:installed"`
-		FixedVersion string `gorm:"column:fixed_version"`
-	}
-	const batchSize = 5000
-	var lastID uint = 0
-	var totalDeleted int64
-	for {
-		var batch []row
-		err := db.Raw(`
-SELECT hv.id AS hv_id, s.version AS installed, v.fixed_version
-FROM host_vulnerabilities hv
-JOIN vulnerabilities v ON hv.vuln_id = v.id
-JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
-WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
-  AND v.fixed_version <> ''
-  AND s.version <> ''
-  AND hv.id > ?
-ORDER BY hv.id ASC
-LIMIT ?`, lastID, batchSize).Scan(&batch).Error
-		if err != nil {
-			return fmt.Errorf("拉 host_vuln 批失败: %w", err)
-		}
-		if len(batch) == 0 {
-			break
-		}
-		var toDelete []uint
-		for _, r := range batch {
-			lastID = r.HostVulnID
-			cmp, err := advisory.CompareRPMVersion(r.Installed, r.FixedVersion)
-			if err != nil {
-				// 解析失败保守保留
-				continue
-			}
-			if cmp >= 0 {
-				toDelete = append(toDelete, r.HostVulnID)
-			}
-		}
-		if len(toDelete) > 0 {
-			r := db.Exec("DELETE FROM host_vulnerabilities WHERE id IN ?", toDelete)
-			if r.Error != nil {
-				logger.Warn("已修复 host_vuln 批删除失败",
-					zap.Int("batch_size", len(toDelete)), zap.Error(r.Error))
-				continue
-			}
-			totalDeleted += r.RowsAffected
-		}
-		if len(batch) < batchSize {
-			break
-		}
-	}
-	if totalDeleted > 0 {
-		logger.Info("已修复版本 host_vuln 清理完成", zap.Int64("deleted", totalDeleted))
-	}
+	// 委托 advisory 包做通用 host_vuln FP 清理(同一份逻辑被 Coordinator.Sync 复用)
+	advisory.CleanupHostVulnFP(db, logger)
+	advisory.CleanupAlreadyPatched(db, logger)
 	return nil
 }
 

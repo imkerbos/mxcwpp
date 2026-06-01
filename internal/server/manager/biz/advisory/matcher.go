@@ -58,17 +58,29 @@ func (m *DefaultMatcher) Match(adv *Advisory, hosts []HostSoftware) []AffectedHo
 }
 
 // compareNEVRAOrFallback 优先用 NEVRA 三元组比较，缺字段时退回 PkgVer 字符串比较。
+// 按 host.PkgManager 选择 RPM 或 dpkg 比较算法。
 //
 // 返回 cmp 语义：-1 host < fix(需修)，0 相等(已修)，1 host > fix(已超新)。
 func compareNEVRAOrFallback(host HostSoftware, fixedVersion string) (int, error) {
+	cmp := selectVersionComparator(host.PkgManager)
 	if host.PkgVerRaw != "" {
 		installed := composeNEVRAString(host.PkgEpoch, host.PkgVerRaw, host.PkgRelease)
-		return CompareRPMVersion(installed, fixedVersion)
+		return cmp(installed, fixedVersion)
 	}
 	if host.PkgVer != "" {
-		return CompareRPMVersion(host.PkgVer, fixedVersion)
+		return cmp(host.PkgVer, fixedVersion)
 	}
 	return 0, fmt.Errorf("no version info")
+}
+
+// selectVersionComparator 按 pkg manager 选版本比较算法。
+func selectVersionComparator(pkgManager string) func(a, b string) (int, error) {
+	switch pkgManager {
+	case "dpkg":
+		return CompareDpkgVersion
+	default:
+		return CompareRPMVersion
+	}
 }
 
 // composeNEVRAString 把 epoch/version/release 拼成标准 NEVRA 字符串(无 name 无 arch)。
@@ -130,6 +142,11 @@ func osCompatible(advFamily, advMajor, hostFamily, hostMajor string) bool {
 	}
 	if advFamily == "rhel" || advFamily == "rocky" {
 		return rhelCompat[hostFamily]
+	}
+	// 信创 OS：openEuler 衍生兼容(龙蜥 Anolis 基于 openEuler)，
+	// 麒麟 V10 / 统信 UOS 视为独立家族（基于不同上游）。
+	if advFamily == "openeuler" {
+		return hostFamily == "openeuler" || hostFamily == "anolis" || hostFamily == "openanolis"
 	}
 	return advFamily == hostFamily
 }

@@ -107,6 +107,12 @@ type HostSoftware struct {
 	PkgRelease   string // RPM RELEASE（如 "3.el9_4"）
 	PURL         string // package URL，如 pkg:rpm/redhat/openssl@3.5.1-3.el9?arch=x86_64
 	PkgEcosystem string // 语言包 ecosystem（npm/PyPI/Maven/Go/...）；OS pkg 留空
+	// PkgManager 决定 matcher 用哪种版本比较算法。
+	//
+	//	"rpm"  → CompareRPMVersion（RHEL/Rocky/CentOS/AlmaLinux 等）
+	//	"dpkg" → CompareDpkgVersion（Debian/Ubuntu）
+	//	""     → 退回 RPM 算法（向后兼容）
+	PkgManager string
 }
 
 // Matcher 将 advisory 与已装软件做精确版本比对，输出受影响 host 列表。

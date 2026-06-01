@@ -1155,6 +1155,27 @@ func filterOSVPURLs(purls []string) []string {
 	return out
 }
 
+// pkgManagerFromType 由 software.package_type + host OS family 推 pkg manager 名。
+// 用途：matcher 选 RPM vs dpkg 版本比较算法。
+func pkgManagerFromType(pkgType, osFamily string) string {
+	switch strings.ToLower(pkgType) {
+	case "rpm":
+		return "rpm"
+	case "deb":
+		return "dpkg"
+	case "apk":
+		return "apk"
+	}
+	// 退回按 OS family 推断
+	switch strings.ToLower(osFamily) {
+	case "ubuntu", "debian":
+		return "dpkg"
+	case "alpine":
+		return "apk"
+	}
+	return "rpm" // 默认 RPM(覆盖 RHEL 家族)
+}
+
 // pkgTypeToEcosystem 将 software.package_type 映射到 advisory.Ecosystem 字符串。
 // OS pkg 返回空字符串 → matcher 走 OS gate；语言包返回对应 OSV/GHSA 生态名 → 走 ecosystem gate。
 func pkgTypeToEcosystem(pkgType string) string {
@@ -1423,6 +1444,7 @@ func (v *VulnScanner) syncCoreAdvisories() error {
 			PkgArch:      r.PkgArch,
 			PURL:         r.PURL,
 			PkgEcosystem: pkgTypeToEcosystem(r.PackageType),
+			PkgManager:   pkgManagerFromType(r.PackageType, r.OSFamily),
 		})
 	}
 	v.logger.Info("advisory coordinator 输入清单", zap.Int("host_pkg_rows", len(hostsAdv)))
