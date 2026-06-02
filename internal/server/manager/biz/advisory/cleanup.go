@@ -31,12 +31,18 @@ func CleanupHostVulnFP(db *gorm.DB, logger *zap.Logger) {
 }
 
 // CleanupAlreadyPatched 用 RPM 版本比对清掉 host 实际已修复版本但仍报漏洞的条目。
+//
+// NEVRA-aware：拼 s.epoch + s.version + s.release 成完整 NEVRA 字符串，
+// 与 vulnerabilities.fixed_version 比较。若 installed >= fixed → host 实际已修复，删除。
+//
 // 单独函数因实现需 Go 端 loop + RPM-vercmp。
 func CleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) {
 	type row struct {
-		HostVulnID   uint   `gorm:"column:hv_id"`
-		Installed    string `gorm:"column:installed"`
-		FixedVersion string `gorm:"column:fixed_version"`
+		HostVulnID    uint   `gorm:"column:hv_id"`
+		Epoch         string `gorm:"column:epoch"`
+		Version       string `gorm:"column:version"`
+		ReleaseString string `gorm:"column:release"`
+		FixedVersion  string `gorm:"column:fixed_version"`
 	}
 	const batchSize = 5000
 	var lastID uint = 0
@@ -44,7 +50,7 @@ func CleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) {
 	for {
 		var batch []row
 		err := db.Raw(`
-SELECT hv.id AS hv_id, s.version AS installed, v.fixed_version
+SELECT hv.id AS hv_id, s.epoch, s.version, s.` + "`release`" + `, v.fixed_version
 FROM host_vulnerabilities hv
 JOIN vulnerabilities v ON hv.vuln_id = v.id
 JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
@@ -64,7 +70,15 @@ LIMIT ?`, lastID, batchSize).Scan(&batch).Error
 		var toDelete []uint
 		for _, r := range batch {
 			lastID = r.HostVulnID
-			cmp, err := CompareRPMVersion(r.Installed, r.FixedVersion)
+			// 拼 NEVRA 字符串：epoch=空时退回 ver-rel；release 空时退回 ver
+			installed := r.Version
+			if r.ReleaseString != "" {
+				installed = installed + "-" + r.ReleaseString
+			}
+			if r.Epoch != "" {
+				installed = r.Epoch + ":" + installed
+			}
+			cmp, err := CompareRPMVersion(installed, r.FixedVersion)
 			if err != nil {
 				continue
 			}
