@@ -228,7 +228,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 120s
+      start_period: 180s
     networks:
       - mxsec-net
 
