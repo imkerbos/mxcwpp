@@ -292,7 +292,7 @@ func (r *RedHatSource) fetchIndex(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := r.client.Do(req)
+	resp, err := DoWithBackoff(ctx, r.client, req, 3)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +320,7 @@ func (r *RedHatSource) fetchDetail(ctx context.Context, relPath string) (*csafDo
 	if err != nil {
 		return nil, err
 	}
-	resp, err := r.client.Do(req)
+	resp, err := DoWithBackoff(ctx, r.client, req, 3)
 	if err != nil {
 		return nil, err
 	}
