@@ -3,7 +3,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -47,10 +46,7 @@ func (h *ReportsHandler) GetStats(c *gin.Context) {
 	if startTimeStr != "" {
 		startTime, err = time.Parse("2006-01-02", startTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 start_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 start_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.Local)
@@ -63,10 +59,7 @@ func (h *ReportsHandler) GetStats(c *gin.Context) {
 	if endTimeStr != "" {
 		endTime, err = time.Parse("2006-01-02", endTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 end_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 end_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		endTime = time.Date(endTime.Year(), endTime.Month(), endTime.Day(), 23, 59, 59, 999999999, time.Local)
@@ -189,35 +182,32 @@ func (h *ReportsHandler) GetStats(c *gin.Context) {
 	h.db.Model(&model.ScanTask{}).Where("status = ?", "running").Count(&taskStats.Running)
 	h.db.Model(&model.ScanTask{}).Where("status = ?", "failed").Count(&taskStats.Failed)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"hostStats": gin.H{
-				"total":      hostStats.Total,
-				"online":     hostStats.Online,
-				"offline":    hostStats.Offline,
-				"byOsFamily": byOsFamily,
-			},
-			"baselineStats": gin.H{
-				"totalChecks": baselineStats.TotalChecks,
-				"passed":      baselineStats.Passed,
-				"failed":      baselineStats.Failed,
-				"warning":     baselineStats.Warning,
-				"bySeverity":  bySeverity,
-				"byCategory":  byCategory,
-			},
-			"policyStats": gin.H{
-				"total":       policyStats.Total,
-				"enabled":     policyStats.Enabled,
-				"disabled":    policyStats.Disabled,
-				"avgPassRate": avgPassRate,
-			},
-			"taskStats": gin.H{
-				"total":     taskStats.Total,
-				"completed": taskStats.Completed,
-				"running":   taskStats.Running,
-				"failed":    taskStats.Failed,
-			},
+	Success(c, gin.H{
+		"hostStats": gin.H{
+			"total":      hostStats.Total,
+			"online":     hostStats.Online,
+			"offline":    hostStats.Offline,
+			"byOsFamily": byOsFamily,
+		},
+		"baselineStats": gin.H{
+			"totalChecks": baselineStats.TotalChecks,
+			"passed":      baselineStats.Passed,
+			"failed":      baselineStats.Failed,
+			"warning":     baselineStats.Warning,
+			"bySeverity":  bySeverity,
+			"byCategory":  byCategory,
+		},
+		"policyStats": gin.H{
+			"total":       policyStats.Total,
+			"enabled":     policyStats.Enabled,
+			"disabled":    policyStats.Disabled,
+			"avgPassRate": avgPassRate,
+		},
+		"taskStats": gin.H{
+			"total":     taskStats.Total,
+			"completed": taskStats.Completed,
+			"running":   taskStats.Running,
+			"failed":    taskStats.Failed,
 		},
 	})
 }
@@ -238,10 +228,7 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 	if startTimeStr != "" {
 		startTime, err = time.Parse("2006-01-02", startTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 start_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 start_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.Local)
@@ -254,10 +241,7 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 	if endTimeStr != "" {
 		endTime, err = time.Parse("2006-01-02", endTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 end_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 end_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		endTime = time.Date(endTime.Year(), endTime.Month(), endTime.Day(), 23, 59, 59, 999999999, time.Local)
@@ -277,10 +261,7 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 	case "month":
 		timeStep = 30 * 24 * time.Hour
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的 interval 参数，应为: hour, day, week, month",
-		})
+		BadRequest(c, "无效的 interval 参数，应为: hour, day, week, month")
 		return
 	}
 
@@ -341,10 +322,7 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 
 	if err := h.db.Raw(rawSQL, args...).Scan(&timeGroups).Error; err != nil {
 		h.logger.Error("查询基线得分趋势失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询基线得分趋势失败",
-		})
+		InternalError(c, "查询基线得分趋势失败")
 		return
 	}
 
@@ -436,13 +414,10 @@ func (h *ReportsHandler) GetBaselineScoreTrend(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"dates":     dates,
-			"scores":    scores,
-			"passRates": passRates,
-		},
+	Success(c, gin.H{
+		"dates":     dates,
+		"scores":    scores,
+		"passRates": passRates,
 	})
 }
 
@@ -506,10 +481,7 @@ type FailedRuleSummary struct {
 func (h *ReportsHandler) GetTaskReport(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "task_id 参数不能为空",
-		})
+		BadRequest(c, "task_id 参数不能为空")
 		return
 	}
 
@@ -517,10 +489,7 @@ func (h *ReportsHandler) GetTaskReport(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		h.logger.Error("查询任务失败", zap.String("task_id", taskID), zap.Error(err))
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "任务不存在",
-		})
+		NotFound(c, "任务不存在")
 		return
 	}
 
@@ -763,33 +732,30 @@ func (h *ReportsHandler) GetTaskReport(c *gin.Context) {
 		completedAt = &t
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"summary": TaskReportSummary{
-				TaskID:      task.TaskID,
-				TaskName:    task.Name,
-				PolicyID:    task.PolicyID,
-				PolicyName:  policyName,
-				ExecutedAt:  executedAt,
-				CompletedAt: completedAt,
-				HostCount:   int(hostCount),
-				RuleCount:   int(ruleCount),
-				Status:      string(task.Status),
-			},
-			"statistics": TaskReportStatistics{
-				TotalChecks:   stats.TotalChecks,
-				PassedChecks:  stats.PassedChecks,
-				FailedChecks:  stats.FailedChecks,
-				WarningChecks: stats.WarningChecks,
-				NAChecks:      stats.NAChecks,
-				PassRate:      passRate,
-				BySeverity:    bySeverity,
-				ByCategory:    byCategory,
-			},
-			"host_details": hostDetails,
-			"failed_rules": failedRules,
+	Success(c, gin.H{
+		"summary": TaskReportSummary{
+			TaskID:      task.TaskID,
+			TaskName:    task.Name,
+			PolicyID:    task.PolicyID,
+			PolicyName:  policyName,
+			ExecutedAt:  executedAt,
+			CompletedAt: completedAt,
+			HostCount:   int(hostCount),
+			RuleCount:   int(ruleCount),
+			Status:      string(task.Status),
 		},
+		"statistics": TaskReportStatistics{
+			TotalChecks:   stats.TotalChecks,
+			PassedChecks:  stats.PassedChecks,
+			FailedChecks:  stats.FailedChecks,
+			WarningChecks: stats.WarningChecks,
+			NAChecks:      stats.NAChecks,
+			PassRate:      passRate,
+			BySeverity:    bySeverity,
+			ByCategory:    byCategory,
+		},
+		"host_details": hostDetails,
+		"failed_rules": failedRules,
 	})
 }
 
@@ -800,20 +766,14 @@ func (h *ReportsHandler) GetTaskHostDetail(c *gin.Context) {
 	hostID := c.Param("host_id")
 
 	if taskID == "" || hostID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "task_id 和 host_id 参数不能为空",
-		})
+		BadRequest(c, "task_id 和 host_id 参数不能为空")
 		return
 	}
 
 	// 获取主机信息
 	var host model.Host
 	if err := h.db.Where("host_id = ?", hostID).First(&host).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "主机不存在",
-		})
+		NotFound(c, "主机不存在")
 		return
 	}
 
@@ -823,10 +783,7 @@ func (h *ReportsHandler) GetTaskHostDetail(c *gin.Context) {
 		Order("CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END, status DESC").
 		Find(&results).Error; err != nil {
 		h.logger.Error("查询检查结果失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询检查结果失败",
-		})
+		InternalError(c, "查询检查结果失败")
 		return
 	}
 
@@ -850,25 +807,22 @@ func (h *ReportsHandler) GetTaskHostDetail(c *gin.Context) {
 		ip = host.IPv4[0]
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"host": gin.H{
-				"host_id":    host.HostID,
-				"hostname":   host.Hostname,
-				"ip":         ip,
-				"os_family":  host.OSFamily,
-				"os_version": host.OSVersion,
-			},
-			"statistics": gin.H{
-				"total":   len(results),
-				"passed":  passed,
-				"failed":  failed,
-				"warning": warning,
-				"na":      na,
-			},
-			"results": results,
+	Success(c, gin.H{
+		"host": gin.H{
+			"host_id":    host.HostID,
+			"hostname":   host.Hostname,
+			"ip":         ip,
+			"os_family":  host.OSFamily,
+			"os_version": host.OSVersion,
 		},
+		"statistics": gin.H{
+			"total":   len(results),
+			"passed":  passed,
+			"failed":  failed,
+			"warning": warning,
+			"na":      na,
+		},
+		"results": results,
 	})
 }
 
@@ -888,10 +842,7 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 	if startTimeStr != "" {
 		startTime, err = time.Parse("2006-01-02", startTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 start_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 start_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.Local)
@@ -904,10 +855,7 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 	if endTimeStr != "" {
 		endTime, err = time.Parse("2006-01-02", endTimeStr)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    400,
-				"message": "无效的 end_time 参数，格式应为 YYYY-MM-DD",
-			})
+			BadRequest(c, "无效的 end_time 参数，格式应为 YYYY-MM-DD")
 			return
 		}
 		endTime = time.Date(endTime.Year(), endTime.Month(), endTime.Day(), 23, 59, 59, 999999999, time.Local)
@@ -932,10 +880,7 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 		dateFormat = "DATE_FORMAT(checked_at, '%Y-%m-%d')"
 		timeStep = 30 * 24 * time.Hour
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "无效的 interval 参数，应为: hour, day, week, month",
-		})
+		BadRequest(c, "无效的 interval 参数，应为: hour, day, week, month")
 		return
 	}
 
@@ -973,10 +918,7 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 
 	if err := h.db.Raw(rawSQL, args...).Scan(&timeGroups).Error; err != nil {
 		h.logger.Error("查询检查结果趋势失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "查询检查结果趋势失败",
-		})
+		InternalError(c, "查询检查结果趋势失败")
 		return
 	}
 
@@ -1025,14 +967,11 @@ func (h *ReportsHandler) GetCheckResultTrend(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"dates":   dates,
-			"passed":  passed,
-			"failed":  failed,
-			"warning": errorCount, // error 作为 warning
-		},
+	Success(c, gin.H{
+		"dates":   dates,
+		"passed":  passed,
+		"failed":  failed,
+		"warning": errorCount, // error 作为 warning
 	})
 }
 
@@ -1303,10 +1242,7 @@ func (h *ReportsHandler) GetTopFailedRules(c *gin.Context) {
 		topRules = append(topRules, TopFailedRule(rs))
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": topRules,
-	})
+	Success(c, topRules)
 }
 
 // GetTopRiskHosts 获取 Top N 风险主机
@@ -1390,10 +1326,7 @@ func (h *ReportsHandler) GetTopRiskHosts(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": topHosts,
-	})
+	Success(c, topHosts)
 }
 
 // GetExecutiveTaskReport 获取管理层任务报告（面向非技术管理者的专业报告）
@@ -1401,10 +1334,7 @@ func (h *ReportsHandler) GetTopRiskHosts(c *gin.Context) {
 func (h *ReportsHandler) GetExecutiveTaskReport(c *gin.Context) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "task_id 参数不能为空",
-		})
+		BadRequest(c, "task_id 参数不能为空")
 		return
 	}
 
@@ -1412,10 +1342,7 @@ func (h *ReportsHandler) GetExecutiveTaskReport(c *gin.Context) {
 	var task model.ScanTask
 	if err := h.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {
 		h.logger.Error("查询任务失败", zap.String("task_id", taskID), zap.Error(err))
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    404,
-			"message": "任务不存在",
-		})
+		NotFound(c, "任务不存在")
 		return
 	}
 
@@ -2002,10 +1929,7 @@ func (h *ReportsHandler) GetExecutiveTaskReport(c *gin.Context) {
 		},
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": report,
-	})
+	Success(c, report)
 }
 
 // parseReportTimeRange 解析报告接口公共的 start_time/end_time 查询参数
