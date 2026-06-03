@@ -23,6 +23,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 	"go.uber.org/zap"
@@ -224,7 +225,7 @@ func (h *HostVulnPreCheckHandler) CreateForAllOnline(c *gin.Context) {
 func (h *HostVulnPreCheckHandler) dispatchPreCheck(hv *model.HostVulnerability) error {
 	// 查 vuln.component / vuln.fixed_version / vuln.vuln_category（决定是否跑 lsof）
 	var vuln model.Vulnerability
-	if err := h.db.Select("id, component, fixed_version, vuln_category, vuln_category_override").
+	if err := h.db.Select("id, cve_id, component, fixed_version, vuln_category, vuln_category_override").
 		First(&vuln, hv.VulnID).Error; err != nil {
 		return fmt.Errorf("查询 vuln 失败: %w", err)
 	}
@@ -238,13 +239,19 @@ func (h *HostVulnPreCheckHandler) dispatchPreCheck(hv *model.HostVulnerability) 
 		return fmt.Errorf("vuln.component 为空")
 	}
 
+	// 优先 advisory_packages 按 host OS 取 fixed_version，兜底退回 vulnerabilities.fixed_version
+	fixedVer := biz.ResolveFixedVersionForHost(h.db, vuln.CveID, vuln.Component, hv.HostID)
+	if fixedVer == "" {
+		fixedVer = vuln.FixedVersion
+	}
+
 	requestID := fmt.Sprintf("pc-%d-%d", hv.ID, time.Now().Unix())
 	// P5.2: shared_lib 类漏洞要求 agent 跑 lsof 找受影响进程
 	payload := preCheckTaskPayload{
 		RequestID:              requestID,
 		HostVulnID:             hv.ID,
 		Component:              vuln.Component,
-		FixedVersion:           vuln.FixedVersion,
+		FixedVersion:           fixedVer,
 		CheckAffectedProcesses: vuln.EffectiveCategory() == model.VulnCategorySharedLib,
 	}
 	body, _ := json.Marshal(payload)

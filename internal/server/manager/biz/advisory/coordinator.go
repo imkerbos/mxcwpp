@@ -192,23 +192,36 @@ type sourcedAdvisory struct {
 }
 
 type mergedVuln struct {
-	advisory      *Advisory
-	confidence    Confidence
-	source        string
+	// CVE 元数据：来自 confidence 最高的 advisory（仅 description/severity/CVSS 等）
+	advisory   *Advisory
+	confidence Confidence
+	source     string
+
+	// 受影响主机：所有 source 的并集（去重）。
+	// 关键：同 CVE 在 RHSA(rhel,10) 和 Rocky(rocky,9) 各自 match 不同 host，
+	// 必须并集而非择一，否则 Rocky host 漏报。
 	affectedHosts []AffectedHost
+
+	// 所有产生该 CVE 的 advisory（按 source 区分），用于写 advisory_packages。
+	// 每条 advisory 含其 OS/source/pkg 信息。
+	allAdvisories []sourcedAdvisory
 }
 
-// mergeByConfidence 按 CVE 维度合并 advisory，confidence 高者覆盖。
+// mergeByConfidence 按 CVE 维度合并 advisory，affectedHosts 跨 source 并集去重。
+//
+// 与旧实现的关键差异：
+//   - 旧：同 CVE 同 confidence 时后者跳过 → Rocky/RHSA 互斥（覆盖问题）
+//   - 新：affectedHosts 总是 union；CVE 元数据按 confidence 排序后第一条胜出
+//   - 新：保留所有 advisory 供 upsertVuln 写 advisory_packages（OS-specific fix 不丢失）
 func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSoftware) map[string]*mergedVuln {
 	out := make(map[string]*mergedVuln)
-	// 先按 confidence 排序：high > medium > low
+	// 排序：confidence 高者前置，确保 metadata 由高 confidence 决定
 	sort.SliceStable(items, func(i, j int) bool {
 		return confidenceRank(items[i].confidence) > confidenceRank(items[j].confidence)
 	})
 
 	for _, item := range items {
 		affected := matcher.Match(item.advisory, hosts)
-		// 仅保留 NeedsUpdate
 		needs := make([]AffectedHost, 0, len(affected))
 		for _, a := range affected {
 			if a.NeedsUpdate {
@@ -223,18 +236,42 @@ func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSof
 					confidence:    item.confidence,
 					source:        item.src.Name(),
 					affectedHosts: needs,
+					allAdvisories: []sourcedAdvisory{item},
 				}
 				continue
 			}
-			// 已存在：低 confidence 不覆盖
-			if confidenceRank(item.confidence) <= confidenceRank(existing.confidence) {
-				continue
+			// 受影响主机并集（不论 confidence）
+			existing.affectedHosts = append(existing.affectedHosts, needs...)
+			existing.allAdvisories = append(existing.allAdvisories, item)
+			// metadata 仅在严格更高 confidence 时覆盖
+			if confidenceRank(item.confidence) > confidenceRank(existing.confidence) {
+				existing.advisory = item.advisory
+				existing.confidence = item.confidence
+				existing.source = item.src.Name()
 			}
-			existing.advisory = item.advisory
-			existing.confidence = item.confidence
-			existing.source = item.src.Name()
-			existing.affectedHosts = needs
 		}
+	}
+	// affectedHosts 去重（host_id + pkg_name 唯一）
+	for _, mv := range out {
+		mv.affectedHosts = dedupAffectedHosts(mv.affectedHosts)
+	}
+	return out
+}
+
+// dedupAffectedHosts 按 (HostID, PkgName) 去重，保留首条
+func dedupAffectedHosts(in []AffectedHost) []AffectedHost {
+	if len(in) <= 1 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]AffectedHost, 0, len(in))
+	for _, a := range in {
+		k := a.HostID + "|" + a.PkgName
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, a)
 	}
 	return out
 }
@@ -305,6 +342,13 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 		return fmt.Errorf("upsert vuln: %w", err)
 	}
 
+	// 写 advisory_packages：每个 source × 每个 pkg fix 一行
+	// 用于：matcher 按 host OS 查精准 fix；precheck 按 host OS 取期望版本
+	if err := c.upsertAdvisoryPackages(cveID, entry); err != nil {
+		c.logger.Warn("upsert advisory_packages 失败",
+			zap.String("cve", cveID), zap.Error(err))
+	}
+
 	// 关联 host
 	for _, a := range entry.affectedHosts {
 		hv := &model.HostVulnerability{
@@ -323,6 +367,66 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 				zap.Uint("vuln_id", vuln.ID),
 				zap.String("host_id", a.HostID),
 				zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// upsertAdvisoryPackages 按 (cve_id, source, OS, pkg, arch) 写 advisory_packages。
+//
+// 每个 entry.allAdvisories 元素来自一个 source 的 advisory，含 OS 信息 + 多 pkg。
+// 每个 pkg 一行。重复 sync 走 ON DUPLICATE KEY UPDATE（fixed_version 可能更新）。
+func (c *Coordinator) upsertAdvisoryPackages(cveID string, entry *mergedVuln) error {
+	if entry == nil || len(entry.allAdvisories) == 0 {
+		return nil
+	}
+	for _, sa := range entry.allAdvisories {
+		adv := sa.advisory
+		if adv == nil {
+			continue
+		}
+		for _, fix := range adv.AffectedPkgs {
+			if fix.Name == "" || fix.FixedVersion == "" {
+				continue
+			}
+			row := &model.AdvisoryPackage{
+				CveID:            cveID,
+				Source:           sa.src.Name(),
+				SourceAdvisoryID: adv.AdvisoryID,
+				OSFamily:         adv.OSFamily,
+				OSMajor:          adv.OSMajorVer,
+				Ecosystem:        adv.Ecosystem,
+				PkgName:          fix.Name,
+				Arch:             fix.Arch,
+				FixedVersion:     fix.FixedVersion,
+				Confidence:       string(sa.confidence),
+				Severity:         string(adv.Severity),
+				IssuedAt: func() *model.LocalTime {
+					if adv.IssuedAt.IsZero() {
+						return nil
+					}
+					t := model.LocalTime(adv.IssuedAt)
+					return &t
+				}(),
+			}
+			err := c.db.Where(
+				"cve_id = ? AND source = ? AND os_family = ? AND os_major = ? AND pkg_name = ? AND arch = ?",
+				cveID, row.Source, row.OSFamily, row.OSMajor, row.PkgName, row.Arch,
+			).Assign(map[string]any{
+				"source_advisory_id": row.SourceAdvisoryID,
+				"ecosystem":          row.Ecosystem,
+				"fixed_version":      row.FixedVersion,
+				"confidence":         row.Confidence,
+				"severity":           row.Severity,
+				"issued_at":          row.IssuedAt,
+			}).FirstOrCreate(row).Error
+			if err != nil {
+				c.logger.Debug("upsert advisory_package 单行失败",
+					zap.String("cve", cveID),
+					zap.String("source", row.Source),
+					zap.String("pkg", row.PkgName),
+					zap.Error(err))
+			}
 		}
 	}
 	return nil

@@ -33,7 +33,11 @@ func CleanupHostVulnFP(db *gorm.DB, logger *zap.Logger) {
 // CleanupAlreadyPatched 用 RPM 版本比对清掉 host 实际已修复版本但仍报漏洞的条目。
 //
 // NEVRA-aware：拼 s.epoch + s.version + s.release 成完整 NEVRA 字符串，
-// 与 vulnerabilities.fixed_version 比较。若 installed >= fixed → host 实际已修复，删除。
+// 与 fixed_version 比较。若 installed >= fixed → host 实际已修复，删除。
+//
+// V2 升级：fixed_version 优先取 advisory_packages 按 host OS（family+major）精准
+// 匹配的行，兜底退回 vulnerabilities.fixed_version。解决 RHSA fixed_version 仅
+// el10 编码导致 Rocky 9 host 误判的问题。
 //
 // 单独函数因实现需 Go 端 loop + RPM-vercmp。
 func CleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) {
@@ -50,12 +54,23 @@ func CleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) {
 	for {
 		var batch []row
 		err := db.Raw(`
-SELECT hv.id AS hv_id, s.epoch, s.version, s.` + "`release`" + `, v.fixed_version
+SELECT hv.id AS hv_id, s.epoch, s.version, s.` + "`release`" + `,
+       COALESCE(ap.fixed_version, v.fixed_version) AS fixed_version
 FROM host_vulnerabilities hv
 JOIN vulnerabilities v ON hv.vuln_id = v.id
+JOIN hosts h ON h.host_id = hv.host_id
 JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
+LEFT JOIN advisory_packages ap
+  ON ap.cve_id = v.cve_id
+  AND ap.pkg_name = v.component
+  AND ap.os_major = SUBSTRING_INDEX(h.os_version, '.', 1)
+  AND (
+    LOWER(ap.os_family) = LOWER(h.os_family)
+    OR (LOWER(ap.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux')
+        AND LOWER(h.os_family) IN ('rhel','rocky','centos','centos-stream','almalinux','oraclelinux'))
+  )
 WHERE v.source IN ('rhsa','rocky-apollo','centos','osv')
-  AND v.fixed_version <> ''
+  AND COALESCE(ap.fixed_version, v.fixed_version) <> ''
   AND s.version <> ''
   AND hv.id > ?
 ORDER BY hv.id ASC

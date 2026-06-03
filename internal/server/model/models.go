@@ -211,6 +211,7 @@ var (
 		&KubeBaselineAlert{},
 		&ConfigBackup{},
 		&Vulnerability{},
+		&AdvisoryPackage{},
 		&HostVulnerability{},
 		&CommandAckRecord{},
 		&AntivirusScanTask{},

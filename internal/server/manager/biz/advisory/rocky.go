@@ -21,11 +21,14 @@ type RockySource struct {
 }
 
 // NewRockySource 构造默认配置。
+//
+// maxAdv 默认 0 = 全量（Apollo API 累计 RLSA 数千条，但增量按 since 限制后实际拉数百）。
+// 早期默认 50 仅覆盖最新一段时间，导致 Rocky 9/10 累积公告大量缺失 → 漏报。
 func NewRockySource() *RockySource {
 	return &RockySource{
 		client:  &http.Client{Timeout: 60 * time.Second},
 		baseURL: "https://apollo.build.resf.org/api/v3",
-		maxAdv:  50,
+		maxAdv:  0, // 0 = unlimited
 	}
 }
 
@@ -147,7 +150,8 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 			if adv != nil {
 				all = append(all, adv)
 				collected++
-				if collected >= r.maxAdv {
+				// maxAdv=0 视为不限上限（全量拉取）
+				if r.maxAdv > 0 && collected >= r.maxAdv {
 					stop = true
 					break
 				}
