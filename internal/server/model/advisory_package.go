@@ -29,7 +29,8 @@ type AdvisoryPackage struct {
 	Source string `gorm:"column:source;type:varchar(32);not null" json:"source"`
 
 	// 上游公告 ID（RHSA-2025:1234 / RLSA-2026:5678 / DSA-... 用于 UI 引用）
-	SourceAdvisoryID string `gorm:"column:source_advisory_id;type:varchar(64);index" json:"sourceAdvisoryId"`
+	// Alpine source 拼 "Alpine-<branch>-<pkgName>-<fixedVer>" 易超 64 字符，留 255 余量
+	SourceAdvisoryID string `gorm:"column:source_advisory_id;type:varchar(255);index" json:"sourceAdvisoryId"`
 
 	// OS 归属（按 host OS 维度查找用）
 	//   OSFamily: rhel/rocky/centos/almalinux/oraclelinux/debian/ubuntu/alpine/openeuler/anolis/kylin/uos
