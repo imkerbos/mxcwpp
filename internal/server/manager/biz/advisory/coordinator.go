@@ -15,13 +15,19 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 
-// EnabledChecker 判断 source 是否启用 + 写回同步状态。
+// EnabledChecker 判断 source 是否启用 + 写回同步状态 + 管理增量 watermark。
 // 由 biz.VulnDataSourceService 实现，coordinator 通过接口注入解耦。
 type EnabledChecker interface {
 	IsEnabled(name string) bool
 	MarkRunning(name string)
 	MarkSuccess(name string, count int64, duration time.Duration)
 	MarkFailed(name string, err error)
+
+	// GetWatermark 取该 source 的上次成功 advisory.IssuedAt 最大值。
+	// 零值表示首次 sync（全量拉）。
+	GetWatermark(name string) time.Time
+	// SetWatermark 推进 watermark（仅当 t 比当前更新）。失败 sync 不动 watermark。
+	SetWatermark(name string, t time.Time)
 }
 
 // Coordinator 协调多个 Source 与 Matcher，合并去重写入 DB。
@@ -120,7 +126,14 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 			if c.checker != nil {
 				c.checker.MarkRunning(s.Name())
 			}
-			advs, ferr := s.Fetch(ctx, since)
+			// 增量 sync：优先用 source 自己的 watermark，无 watermark 才退回调用方传的 since
+			perSourceSince := since
+			if c.checker != nil {
+				if wm := c.checker.GetWatermark(s.Name()); !wm.IsZero() {
+					perSourceSince = wm
+				}
+			}
+			advs, ferr := s.Fetch(ctx, perSourceSince)
 			resultsCh <- fetchResult{src: s, advs: advs, err: ferr, cost: time.Since(srcStart)}
 		}(src)
 	}
@@ -136,9 +149,13 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 			}
 			continue
 		}
+		var maxIssued time.Time
 		for _, adv := range r.advs {
 			if !validateAdvisory(adv) {
 				continue
+			}
+			if adv.IssuedAt.After(maxIssued) {
+				maxIssued = adv.IssuedAt
 			}
 			allAdvisories = append(allAdvisories, sourcedAdvisory{
 				src:        r.src,
@@ -153,6 +170,10 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 		)
 		if c.checker != nil {
 			c.checker.MarkSuccess(r.src.Name(), int64(len(r.advs)), r.cost)
+			// 推进 watermark 给下次增量 sync 用（仅在拉到 advisory 时推进）
+			if !maxIssued.IsZero() {
+				c.checker.SetWatermark(r.src.Name(), maxIssued)
+			}
 		}
 	}
 
