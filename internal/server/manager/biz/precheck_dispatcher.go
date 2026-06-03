@@ -39,19 +39,24 @@ func DispatchPreCheckForHostVuln(
 		return "", fmt.Errorf("host_vuln %d 不存在: %w", hvID, err)
 	}
 	var vuln model.Vulnerability
-	if err := db.Select("id, component, fixed_version, vuln_category, vuln_category_override").
+	if err := db.Select("id, cve_id, component, fixed_version, vuln_category, vuln_category_override").
 		First(&vuln, hv.VulnID).Error; err != nil {
 		return "", fmt.Errorf("vuln %d 不存在: %w", hv.VulnID, err)
 	}
 	if vuln.Component == "" {
 		return "", fmt.Errorf("vuln.component 为空，无法 pre-check")
 	}
+	// 优先查 advisory_packages 拿 host OS-specific fixed_version，兜底退回 vulnerabilities.fixed_version
+	fixedVer := ResolveFixedVersionForHost(db, vuln.CveID, vuln.Component, hv.HostID)
+	if fixedVer == "" {
+		fixedVer = vuln.FixedVersion
+	}
 	requestID = fmt.Sprintf("%s-%d-%d", requestIDPrefix, hv.ID, time.Now().Unix())
 	payload := PreCheckDispatchPayload{
 		RequestID:              requestID,
 		HostVulnID:             hv.ID,
 		Component:              vuln.Component,
-		FixedVersion:           vuln.FixedVersion,
+		FixedVersion:           fixedVer,
 		CheckAffectedProcesses: vuln.EffectiveCategory() == model.VulnCategorySharedLib,
 	}
 	body, _ := json.Marshal(payload)

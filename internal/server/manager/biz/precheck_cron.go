@@ -117,6 +117,7 @@ func (c *PreCheckCron) tickOnce(ctx context.Context) {
 		type hvWithVuln struct {
 			HostVulnID           uint   `gorm:"column:id"`
 			VulnID               uint   `gorm:"column:vuln_id"`
+			CveID                string `gorm:"column:cve_id"`
 			Component            string `gorm:"column:component"`
 			FixedVersion         string `gorm:"column:fixed_version"`
 			VulnCategory         string `gorm:"column:vuln_category"`
@@ -124,7 +125,7 @@ func (c *PreCheckCron) tickOnce(ctx context.Context) {
 		}
 		var rows []hvWithVuln
 		if err := c.db.Table("host_vulnerabilities AS hv").
-			Select("hv.id, hv.vuln_id, v.component, v.fixed_version, v.vuln_category, v.vuln_category_override").
+			Select("hv.id, hv.vuln_id, v.cve_id, v.component, v.fixed_version, v.vuln_category, v.vuln_category_override").
 			Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
 			Where(
 				`hv.host_id = ? AND hv.status = 'unpatched' AND (
@@ -149,11 +150,16 @@ func (c *PreCheckCron) tickOnce(ctx context.Context) {
 			if r.VulnCategoryOverride != "" {
 				effectiveCat = r.VulnCategoryOverride
 			}
+			// 优先 advisory_packages 按 host OS 取精确 fixed_version
+			fixedVer := ResolveFixedVersionForHost(c.db, r.CveID, r.Component, b.HostID)
+			if fixedVer == "" {
+				fixedVer = r.FixedVersion
+			}
 			payload := preCheckCronPayload{
 				RequestID:              fmt.Sprintf("pc-cron-%d-%d", r.HostVulnID, time.Now().Unix()),
 				HostVulnID:             r.HostVulnID,
 				Component:              r.Component,
-				FixedVersion:           r.FixedVersion,
+				FixedVersion:           fixedVer,
 				CheckAffectedProcesses: effectiveCat == model.VulnCategorySharedLib,
 			}
 			body, _ := json.Marshal(payload)
