@@ -107,7 +107,7 @@ type rockyPackage struct {
 // Fetch 实现 Source。
 func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, error) {
 	var all []*Advisory
-	page := 1
+	pageNum := 1
 	const pageSize = 100
 	collected := 0
 
@@ -117,7 +117,7 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 			return all, ctx.Err()
 		default:
 		}
-		url := fmt.Sprintf("%s/advisories?page=%d&size=%d", r.baseURL, page, pageSize)
+		url := fmt.Sprintf("%s/advisories?page=%d&size=%d", r.baseURL, pageNum, pageSize)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return all, err
@@ -127,18 +127,18 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 		if err != nil {
 			return all, fmt.Errorf("Rocky errata HTTP: %w", err)
 		}
-		var page rockyResp
-		decErr := json.NewDecoder(resp.Body).Decode(&page)
+		var resBody rockyResp
+		decErr := json.NewDecoder(resp.Body).Decode(&resBody)
 		resp.Body.Close()
 		if decErr != nil {
 			return all, fmt.Errorf("Rocky errata decode: %w", decErr)
 		}
-		if len(page.Advisories) == 0 {
+		if len(resBody.Advisories) == 0 {
 			break
 		}
 
 		stop := false
-		for _, ra := range page.Advisories {
+		for _, ra := range resBody.Advisories {
 			if !since.IsZero() {
 				pub, _ := time.Parse(time.RFC3339, ra.PublishedAt)
 				if pub.Before(since) {
@@ -157,13 +157,12 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 				}
 			}
 		}
-		if stop || len(page.Advisories) < pageSize {
+		if stop || len(resBody.Advisories) < pageSize {
 			break
 		}
-		// 防止误用 stale page var
-		_ = page
-		// 切下一页
-		// 注意：上面 var page rockyResp 是循环内变量，对外层不可见
+		// 切下一页（修了原本 page 变量被内层 var page rockyResp 遮蔽的 bug，
+		// 当 maxAdv=0 unlimited 时旧代码会无限循环拉 page=1）
+		pageNum++
 	}
 	return all, nil
 }
