@@ -827,6 +827,10 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	preCheckHandler := api.NewHostVulnPreCheckHandler(db, logger, acDispatcher)
 	router.POST("/host-vulnerabilities/:id/precheck", preCheckHandler.CreateForHostVuln)
 	router.POST("/hosts/:host_id/precheck-all", preCheckHandler.CreateForHostAll)
+	// 全集群 pre-check 需 admin 权限，避免普通用户一键打爆集群 dnf
+	router.POST("/host-vulnerabilities/precheck-all-online",
+		api.RoleMiddleware("admin"),
+		preCheckHandler.CreateForAllOnline)
 
 	// 扫描计划管理
 	vulnScanner := biz.NewVulnScanner(db, logger)

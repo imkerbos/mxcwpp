@@ -206,6 +206,13 @@
           <div class="filter-actions">
             <a-button @click="handleReset">重置</a-button>
             <a-button @click="handleExport">导出当前结果</a-button>
+            <a-button
+              v-if="isAdmin"
+              :loading="preCheckAllOnlineLoading"
+              @click="handlePreCheckAllOnline"
+            >
+              全集群 Pre-check
+            </a-button>
             <a-dropdown>
               <a-button type="primary">立即扫描 <DownOutlined /></a-button>
               <template #overlay>
@@ -378,16 +385,45 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { DownOutlined } from '@ant-design/icons-vue'
 import { vulnerabilitiesApi } from '@/api/vulnerabilities'
 import { remediationTasksApi } from '@/api/remediation-tasks'
+import { hostVulnPreCheckApi } from '@/api/host-vuln-precheck'
+import { useAuthStore } from '@/stores/auth'
 import type { SecurityDBSyncRecord } from '@/api/antivirus'
 import type { Vulnerability, VulnerabilityStats } from '@/api/types'
 import { formatDateTime } from '@/utils/date'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+
+const preCheckAllOnlineLoading = ref(false)
+const handlePreCheckAllOnline = () => {
+  Modal.confirm({
+    title: '全集群 Pre-check',
+    content:
+      '将对所有 online 主机的未修复漏洞触发本机 dnf/apt 实测校验。集群规模大时会消耗包管理器与仓库源带宽，通常需要数十分钟到数小时。是否继续？',
+    okText: '确认下发',
+    okType: 'primary',
+    cancelText: '取消',
+    onOk: async () => {
+      preCheckAllOnlineLoading.value = true
+      try {
+        const r = await hostVulnPreCheckApi.triggerAllOnline()
+        message.success(
+          `已下发：${r.hosts_dispatched}/${r.hosts_total} 主机，共 ${r.scheduled} 条任务（失败 ${r.failed}），结果数十分钟内陆续回报`,
+        )
+      } catch (err: any) {
+        message.error('全集群 Pre-check 失败: ' + (err?.message || err))
+      } finally {
+        preCheckAllOnlineLoading.value = false
+      }
+    },
+  })
+}
 
 const searchText = ref('')
 const filterSeverity = ref<string>()
