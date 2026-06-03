@@ -25,4 +25,17 @@ export const hostVulnPreCheckApi = {
       `/hosts/${encodeURIComponent(hostId)}/precheck-all`,
     )
   },
+
+  /**
+   * 全集群所有 online 主机的 unpatched 漏洞批量 pre-check（admin 权限）
+   * 单 host 单次 dispatch 上限 200，超出部分留给 6h 周期 cron。
+   */
+  triggerAllOnline: () => {
+    return apiClient.post<{
+      hosts_total: number
+      hosts_dispatched: number
+      scheduled: number
+      failed: number
+    }>(`/host-vulnerabilities/precheck-all-online`)
+  },
 }
