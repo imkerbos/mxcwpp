@@ -54,7 +54,7 @@ func CleanupAlreadyPatched(db *gorm.DB, logger *zap.Logger) {
 	for {
 		var batch []row
 		err := db.Raw(`
-SELECT hv.id AS hv_id, s.epoch, s.version, s.` + "`release`" + `,
+SELECT hv.id AS hv_id, s.epoch, s.version, s.`+"`release`"+`,
        COALESCE(ap.fixed_version, v.fixed_version) AS fixed_version
 FROM host_vulnerabilities hv
 JOIN vulnerabilities v ON hv.vuln_id = v.id
