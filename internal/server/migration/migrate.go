@@ -118,6 +118,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
 	}
 
+	// 扩 advisory_packages.source_advisory_id varchar(64)→255（Alpine 拼接 ID 易超 64）
+	if err := migrateAdvisoryPackagesSourceAdvisoryID(db, logger); err != nil {
+		logger.Warn("advisory_packages source_advisory_id 扩列失败", zap.Error(err))
+	}
+
 	// 创建 advisory_packages 唯一组合索引（GORM AutoMigrate 不创建多列 UNIQUE）
 	if err := ensureAdvisoryPackagesIndex(db, logger); err != nil {
 		logger.Warn("advisory_packages 唯一索引创建失败", zap.Error(err))

@@ -8,6 +8,40 @@ import (
 	"gorm.io/gorm"
 )
 
+// migrateAdvisoryPackagesSourceAdvisoryID 把 source_advisory_id 从 varchar(64) 扩到 varchar(255)。
+//
+// 历史 schema varchar(64) 太短：Alpine source 拼 "Alpine-<branch>-<pkgName>-<fixedVer>" 容易超 64
+// 字符，导致 bulk upsert Error 1406 Data too long 整批 fail。
+// GORM AutoMigrate 不一定会扩展已有列长度，需显式 ALTER TABLE。
+//
+// 幂等：先查 INFORMATION_SCHEMA.CHARACTER_MAXIMUM_LENGTH，已 >=255 跳过。
+func migrateAdvisoryPackagesSourceAdvisoryID(db *gorm.DB, logger *zap.Logger) error {
+	if !db.Migrator().HasTable("advisory_packages") {
+		return nil
+	}
+	var curLen int
+	if err := db.Raw(`
+SELECT COALESCE(CHARACTER_MAXIMUM_LENGTH, 0)
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'advisory_packages'
+  AND COLUMN_NAME = 'source_advisory_id'
+`).Scan(&curLen).Error; err != nil {
+		return err
+	}
+	if curLen >= 255 {
+		return nil
+	}
+	if err := db.Exec(
+		"ALTER TABLE advisory_packages MODIFY COLUMN source_advisory_id VARCHAR(255) DEFAULT NULL",
+	).Error; err != nil {
+		return err
+	}
+	logger.Info("已扩 advisory_packages.source_advisory_id 列长度",
+		zap.Int("old", curLen), zap.Int("new", 255))
+	return nil
+}
+
 // ensureAdvisoryPackagesIndex 创建 advisory_packages 唯一组合索引，幂等。
 //
 // AutoMigrate 不创建多列 UNIQUE，需要显式 ALTER TABLE。
