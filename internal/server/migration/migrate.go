@@ -118,6 +118,16 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
 	}
 
+	// 创建 advisory_packages 唯一组合索引（GORM AutoMigrate 不创建多列 UNIQUE）
+	if err := ensureAdvisoryPackagesIndex(db, logger); err != nil {
+		logger.Warn("advisory_packages 唯一索引创建失败", zap.Error(err))
+	}
+
+	// 从 vulnerabilities.fixed_version 回填 advisory_packages（仅首次空表时跑）
+	if err := backfillAdvisoryPackages(db, logger); err != nil {
+		logger.Warn("advisory_packages 回填失败", zap.Error(err))
+	}
+
 	logger.Info("数据库迁移完成")
 	return nil
 }
