@@ -4,7 +4,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -82,7 +81,7 @@ func (h *AssetsHandler) ExportSBOM(c *gin.Context) {
 	var software []model.Software
 	if err := q.Limit(50000).Find(&software).Error; err != nil {
 		h.logger.Error("SBOM 导出查询软件失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 

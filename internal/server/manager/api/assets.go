@@ -5,7 +5,6 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1616,14 +1615,11 @@ func (h *AssetsHandler) GetStatistics(c *gin.Context) {
 	stats, _, err := h.collectStatistics(hostID, businessLine)
 	if err != nil {
 		h.logger.Error("failed to count asset statistics", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": stats,
-	})
+	Success(c, stats)
 }
 
 // GetOverview 获取资产总览信息
@@ -1635,14 +1631,11 @@ func (h *AssetsHandler) GetOverview(c *gin.Context) {
 	overview, err := h.collectOverview(hostID, businessLine)
 	if err != nil {
 		h.logger.Error("failed to query asset overview", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": overview,
-	})
+	Success(c, overview)
 }
 
 // GetHistory 获取资产历史快照
@@ -1662,14 +1655,11 @@ func (h *AssetsHandler) GetHistory(c *gin.Context) {
 	result, err := h.collectHistory(hostID, businessLine, days, limit)
 	if err != nil {
 		h.logger.Error("failed to query asset history", zap.String("host_id", hostID), zap.String("business_line", businessLine), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": result,
-	})
+	Success(c, result)
 }
 
 // GetRelations 获取资产关系视图
@@ -1681,16 +1671,16 @@ func (h *AssetsHandler) GetRelations(c *gin.Context) {
 		var hostCount int64
 		if err := h.db.Model(&model.Host{}).Count(&hostCount).Error; err != nil {
 			h.logger.Error("failed to count hosts for asset relations", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+			InternalError(c, "查询失败")
 			return
 		}
 		if hostCount == 0 {
-			c.JSON(http.StatusOK, gin.H{"code": 0, "data": AssetRelationsResult{Scope: "global"}})
+			Success(c, AssetRelationsResult{Scope: "global"})
 			return
 		}
 	}
 	if hostID == "" && businessLine == "" && c.Query("all") != "true" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "请指定 host_id、business_line，或显式传入 all=true"})
+		BadRequest(c, "请指定 host_id、business_line，或显式传入 all=true")
 		return
 	}
 
@@ -1703,14 +1693,11 @@ func (h *AssetsHandler) GetRelations(c *gin.Context) {
 	result, err := h.collectRelations(hostID, businessLine, keyword, limit)
 	if err != nil {
 		h.logger.Error("failed to query asset relations", zap.String("host_id", hostID), zap.String("business_line", businessLine), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": result,
-	})
+	Success(c, result)
 }
 
 // GetCollectionStatus 获取资产采集状态
@@ -1722,21 +1709,21 @@ func (h *AssetsHandler) GetCollectionStatus(c *gin.Context) {
 	_, total, err := h.collectStatistics(hostID, businessLine)
 	if err != nil {
 		h.logger.Error("failed to count asset status statistics", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
 	lastCollectedAt, err := h.latestCollectedAt(hostID, businessLine)
 	if err != nil {
 		h.logger.Error("failed to query latest asset timestamp", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
 	collector, err := h.resolveCollectorStatus(hostID)
 	if err != nil {
 		h.logger.Error("failed to resolve collector status", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
@@ -1755,10 +1742,7 @@ func (h *AssetsHandler) GetCollectionStatus(c *gin.Context) {
 		status.Scope = "host"
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": status,
-	})
+	Success(c, status)
 }
 
 // GetTopN 获取资产 TopN 聚合
@@ -1775,15 +1759,12 @@ func (h *AssetsHandler) GetTopN(c *gin.Context) {
 	items, err := h.queryTopN(assetType, hostID, businessLine, limit)
 	if err != nil {
 		h.logger.Warn("failed to query asset topn", zap.String("type", assetType), zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "请求参数错误"})
+		BadRequest(c, "请求参数错误")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 0,
-		"data": gin.H{
-			"items": items,
-		},
+	Success(c, gin.H{
+		"items": items,
 	})
 }
 
@@ -1807,7 +1788,7 @@ func (h *AssetsHandler) ExportAssets(c *gin.Context) {
 		c.Header("Content-Type", "text/csv; charset=utf-8")
 		h.exportCSV(c, assetType, hostID, businessLine, maxRows)
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "不支持的导出格式，请使用 csv 或 json"})
+		BadRequest(c, "不支持的导出格式，请使用 csv 或 json")
 	}
 }
 
@@ -1816,7 +1797,7 @@ func (h *AssetsHandler) exportJSON(c *gin.Context, assetType, hostID, businessLi
 	data, err := h.queryAssets(assetType, hostID, businessLine, limit)
 	if err != nil {
 		h.logger.Error("资产导出查询失败", zap.String("type", assetType), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 1, "message": "查询失败"})
+		InternalError(c, "查询失败")
 		return
 	}
 
