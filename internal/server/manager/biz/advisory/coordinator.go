@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
@@ -87,49 +89,77 @@ func (c *Coordinator) WithEnabledChecker(ck EnabledChecker) *Coordinator {
 // hosts 由调用方提供（来自 host_software 表的全量装包清单）。
 // 返回总入库 vuln 数 + 受影响 host 关联数。
 func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSoftware) (vulnCount, hostVulnCount int, err error) {
-	allAdvisories := make([]sourcedAdvisory, 0, 4096)
-
+	// 每个 source 一 goroutine 并发拉取。各 source 是独立上游（apollo.build.resf.org /
+	// access.redhat.com / security-tracker.debian.org / etc），互不抢限流。
+	// 单 source 内仍串行翻页 + DoWithBackoff 处理 429/403/5xx，避免被任一上游限流。
+	type fetchResult struct {
+		src  Source
+		advs []*Advisory
+		err  error
+		cost time.Duration
+	}
+	resultsCh := make(chan fetchResult, len(c.sources))
+	var wg sync.WaitGroup
 	for _, src := range c.sources {
-		// enabled check：disabled 直接跳过
 		if c.checker != nil && !c.checker.IsEnabled(src.Name()) {
 			c.logger.Debug("source 未启用，跳过", zap.String("source", src.Name()))
 			continue
 		}
-		srcStart := time.Now()
-		if c.checker != nil {
-			c.checker.MarkRunning(src.Name())
-		}
-		advs, err := src.Fetch(ctx, since)
-		if err != nil {
-			c.logger.Warn("source fetch 失败，跳过", zap.String("source", src.Name()), zap.Error(err))
+		wg.Add(1)
+		go func(s Source) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					c.logger.Error("source goroutine panic",
+						zap.String("source", s.Name()),
+						zap.Any("panic", r))
+					resultsCh <- fetchResult{src: s, err: fmt.Errorf("panic: %v", r)}
+				}
+			}()
+			srcStart := time.Now()
 			if c.checker != nil {
-				c.checker.MarkFailed(src.Name(), err)
+				c.checker.MarkRunning(s.Name())
+			}
+			advs, ferr := s.Fetch(ctx, since)
+			resultsCh <- fetchResult{src: s, advs: advs, err: ferr, cost: time.Since(srcStart)}
+		}(src)
+	}
+	wg.Wait()
+	close(resultsCh)
+
+	allAdvisories := make([]sourcedAdvisory, 0, 4096)
+	for r := range resultsCh {
+		if r.err != nil {
+			c.logger.Warn("source fetch 失败，跳过", zap.String("source", r.src.Name()), zap.Error(r.err))
+			if c.checker != nil {
+				c.checker.MarkFailed(r.src.Name(), r.err)
 			}
 			continue
 		}
-		for _, adv := range advs {
+		for _, adv := range r.advs {
 			if !validateAdvisory(adv) {
 				continue
 			}
 			allAdvisories = append(allAdvisories, sourcedAdvisory{
-				src:        src,
+				src:        r.src,
 				advisory:   adv,
-				confidence: src.Confidence(),
+				confidence: r.src.Confidence(),
 			})
 		}
 		c.logger.Info("source 拉取完成",
-			zap.String("source", src.Name()),
-			zap.Int("count", len(advs)),
+			zap.String("source", r.src.Name()),
+			zap.Int("count", len(r.advs)),
+			zap.Duration("cost", r.cost),
 		)
 		if c.checker != nil {
-			c.checker.MarkSuccess(src.Name(), int64(len(advs)), time.Since(srcStart))
+			c.checker.MarkSuccess(r.src.Name(), int64(len(r.advs)), r.cost)
 		}
 	}
 
 	// 按 CVE × host 合并去重（confidence 高者覆盖）
 	merged := mergeByConfidence(allAdvisories, c.matcher, hosts)
 
-	// 入库
+	// 入库 vulnerabilities + host_vulnerabilities（每 CVE 一行；按 CVE 串行，避免行级锁竞争）
 	for cveID, entry := range merged {
 		if err := c.upsertVuln(cveID, entry); err != nil {
 			c.logger.Warn("upsert vuln 失败", zap.String("cve", cveID), zap.Error(err))
@@ -137,6 +167,14 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 		}
 		vulnCount++
 		hostVulnCount += len(entry.affectedHosts)
+	}
+
+	// 批量 upsert advisory_packages（一次 sync 可有几十万行，5000+ 单行 INSERT 太慢）
+	apStart := time.Now()
+	if apRows := c.bulkUpsertAdvisoryPackages(merged); apRows > 0 {
+		c.logger.Info("advisory_packages 批量 upsert 完成",
+			zap.Int("rows", apRows),
+			zap.Duration("cost", time.Since(apStart)))
 	}
 
 	// upsertVuln 期间 mergeByConfidence 会翻新 vulnerabilities.source 字段，
@@ -342,12 +380,7 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 		return fmt.Errorf("upsert vuln: %w", err)
 	}
 
-	// 写 advisory_packages：每个 source × 每个 pkg fix 一行
-	// 用于：matcher 按 host OS 查精准 fix；precheck 按 host OS 取期望版本
-	if err := c.upsertAdvisoryPackages(cveID, entry); err != nil {
-		c.logger.Warn("upsert advisory_packages 失败",
-			zap.String("cve", cveID), zap.Error(err))
-	}
+	// 注：advisory_packages 改为 sync 末尾批量 upsert（一次 sync 可数十万行，单行 upsert 太慢）
 
 	// 关联 host
 	for _, a := range entry.affectedHosts {
@@ -372,62 +405,76 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 	return nil
 }
 
-// upsertAdvisoryPackages 按 (cve_id, source, OS, pkg, arch) 写 advisory_packages。
+// bulkUpsertAdvisoryPackages 把 merged 里所有 advisory 摊平成 (cve, source, OS, pkg, arch)
+// 行后批量 INSERT ON DUPLICATE KEY UPDATE。
 //
-// 每个 entry.allAdvisories 元素来自一个 source 的 advisory，含 OS 信息 + 多 pkg。
-// 每个 pkg 一行。重复 sync 走 ON DUPLICATE KEY UPDATE（fixed_version 可能更新）。
-func (c *Coordinator) upsertAdvisoryPackages(cveID string, entry *mergedVuln) error {
-	if entry == nil || len(entry.allAdvisories) == 0 {
-		return nil
-	}
-	for _, sa := range entry.allAdvisories {
-		adv := sa.advisory
-		if adv == nil {
+// 与原 upsertAdvisoryPackages（每行 Where+FirstOrCreate）相比：
+//   - 网络往返从 N 次 → ceil(N/batchSize) 次（batchSize=500）
+//   - 单 sync 5-30 万行场景：30+ 分钟 → ~30 秒
+//   - 走 GORM Clauses.OnConflict 等价 ON DUPLICATE KEY UPDATE（依赖 advisory_packages
+//     的 6 列 UNIQUE 索引）
+//
+// 返回成功 upsert 的逻辑行数（实际 INSERT/UPDATE 次数 = len(rows)）。
+func (c *Coordinator) bulkUpsertAdvisoryPackages(merged map[string]*mergedVuln) int {
+	rows := make([]model.AdvisoryPackage, 0, len(merged)*4)
+	seen := make(map[string]struct{}, len(merged)*4)
+	for cveID, entry := range merged {
+		if entry == nil {
 			continue
 		}
-		for _, fix := range adv.AffectedPkgs {
-			if fix.Name == "" || fix.FixedVersion == "" {
+		for _, sa := range entry.allAdvisories {
+			adv := sa.advisory
+			if adv == nil {
 				continue
 			}
-			row := &model.AdvisoryPackage{
-				CveID:            cveID,
-				Source:           sa.src.Name(),
-				SourceAdvisoryID: adv.AdvisoryID,
-				OSFamily:         adv.OSFamily,
-				OSMajor:          adv.OSMajorVer,
-				Ecosystem:        adv.Ecosystem,
-				PkgName:          fix.Name,
-				Arch:             fix.Arch,
-				FixedVersion:     fix.FixedVersion,
-				Confidence:       string(sa.confidence),
-				Severity:         string(adv.Severity),
-				IssuedAt: func() *model.LocalTime {
-					if adv.IssuedAt.IsZero() {
-						return nil
-					}
-					t := model.LocalTime(adv.IssuedAt)
-					return &t
-				}(),
+			var issuedAt *model.LocalTime
+			if !adv.IssuedAt.IsZero() {
+				t := model.LocalTime(adv.IssuedAt)
+				issuedAt = &t
 			}
-			err := c.db.Where(
-				"cve_id = ? AND source = ? AND os_family = ? AND os_major = ? AND pkg_name = ? AND arch = ?",
-				cveID, row.Source, row.OSFamily, row.OSMajor, row.PkgName, row.Arch,
-			).Assign(map[string]any{
-				"source_advisory_id": row.SourceAdvisoryID,
-				"ecosystem":          row.Ecosystem,
-				"fixed_version":      row.FixedVersion,
-				"confidence":         row.Confidence,
-				"severity":           row.Severity,
-				"issued_at":          row.IssuedAt,
-			}).FirstOrCreate(row).Error
-			if err != nil {
-				c.logger.Debug("upsert advisory_package 单行失败",
-					zap.String("cve", cveID),
-					zap.String("source", row.Source),
-					zap.String("pkg", row.PkgName),
-					zap.Error(err))
+			for _, fix := range adv.AffectedPkgs {
+				if fix.Name == "" || fix.FixedVersion == "" {
+					continue
+				}
+				// 同 sync 内 (cve,source,os,major,pkg,arch) 重复 fix 去重，避免 ON DUPLICATE 冲突
+				key := cveID + "|" + sa.src.Name() + "|" + adv.OSFamily + "|" + adv.OSMajorVer + "|" + fix.Name + "|" + fix.Arch
+				if _, dup := seen[key]; dup {
+					continue
+				}
+				seen[key] = struct{}{}
+				rows = append(rows, model.AdvisoryPackage{
+					CveID:            cveID,
+					Source:           sa.src.Name(),
+					SourceAdvisoryID: adv.AdvisoryID,
+					OSFamily:         adv.OSFamily,
+					OSMajor:          adv.OSMajorVer,
+					Ecosystem:        adv.Ecosystem,
+					PkgName:          fix.Name,
+					Arch:             fix.Arch,
+					FixedVersion:     fix.FixedVersion,
+					Confidence:       string(sa.confidence),
+					Severity:         string(adv.Severity),
+					IssuedAt:         issuedAt,
+				})
 			}
 		}
 	}
-	return nil
+	if len(rows) == 0 {
+		return 0
+	}
+	const batchSize = 500
+	if err := c.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "cve_id"}, {Name: "source"}, {Name: "os_family"},
+			{Name: "os_major"}, {Name: "pkg_name"}, {Name: "arch"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"source_advisory_id", "ecosystem", "fixed_version",
+			"confidence", "severity", "issued_at", "updated_at",
+		}),
+	}).CreateInBatches(rows, batchSize).Error; err != nil {
+		c.logger.Warn("bulk upsert advisory_packages 失败", zap.Error(err), zap.Int("rows", len(rows)))
+		return 0
+	}
+	return len(rows)
 }

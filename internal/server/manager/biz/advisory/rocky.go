@@ -123,7 +123,7 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 			return all, err
 		}
 		req.Header.Set("Accept", "application/json")
-		resp, err := r.client.Do(req)
+		resp, err := DoWithBackoff(ctx, r.client, req, 3)
 		if err != nil {
 			return all, fmt.Errorf("Rocky errata HTTP: %w", err)
 		}

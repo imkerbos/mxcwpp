@@ -169,7 +169,7 @@ func (o *OSVSource) queryBatch(ctx context.Context, purls []string) (map[string]
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(httpReq)
+	resp, err := DoWithBackoff(ctx, o.client, httpReq, 3)
 	if err != nil {
 		return nil, fmt.Errorf("OSV querybatch: %w", err)
 	}
@@ -212,7 +212,7 @@ func (o *OSVSource) fetchVulnDetail(ctx context.Context, id string) (*osvVulnDet
 	if err != nil {
 		return nil, err
 	}
-	resp, err := o.client.Do(req)
+	resp, err := DoWithBackoff(ctx, o.client, req, 3)
 	if err != nil {
 		return nil, err
 	}
