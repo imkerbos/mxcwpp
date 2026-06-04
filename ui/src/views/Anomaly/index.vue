@@ -186,6 +186,11 @@
               <a-tag :color="getStatusColor(selectedAlert.status)">{{ getStatusLabel(selectedAlert.status) }}</a-tag>
             </span>
           </div>
+          <!-- 兜底：所有可选字段都空时显示原始 JSON，便于排查 detector 写入问题 -->
+          <div v-if="!selectedAlert.top_metric && !selectedAlert.pattern_name && !selectedAlert.description" class="detail-row">
+            <span class="dl-label">原始数据</span>
+            <pre class="dl-val mono-text raw-dump">{{ JSON.stringify(selectedAlert, null, 2) }}</pre>
+          </div>
         </div>
       </template>
 
@@ -316,4 +321,5 @@ onMounted(() => { fetchAlerts(); fetchStats() })
 .detail-row:last-child { border-bottom: none; }
 .dl-label { color: var(--mxsec-text-3); min-width: 80px; }
 .dl-val { color: var(--mxsec-text-1); text-align: right; word-break: break-all; }
+.raw-dump { font-size: 12px; max-height: 240px; overflow: auto; background: var(--mxsec-card-bg); padding: 8px; border-radius: 4px; text-align: left; margin: 0; }
 </style>
