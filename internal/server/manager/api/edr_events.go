@@ -67,8 +67,18 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 	defer cancel()
 
 	// 构建 WHERE 子句
+	//
+	// 默认时间窗：date_from / date_to 都未传时，自动加 last 24h。
+	// ebpf_events 表 PARTITION BY YYYYMMDD(timestamp)，无时间过滤会全表扫 7000万+ 行 →
+	// 10s 超时空返回 + ClickHouse load 飙高。商业 CWPP 默认窗口 24h，UI 可下钻 7d / 30d (TTL 30d 上限)。
 	where := "1=1"
 	args := []interface{}{}
+
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+	if dateFrom == "" && dateTo == "" {
+		dateFrom = time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	}
 
 	if hostID := c.Query("host_id"); hostID != "" {
 		where += " AND host_id = ?"
@@ -115,11 +125,11 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 		kw := "%" + keyword + "%"
 		args = append(args, kw, kw, kw)
 	}
-	if dateFrom := c.Query("date_from"); dateFrom != "" {
+	if dateFrom != "" {
 		where += " AND timestamp >= ?"
 		args = append(args, dateFrom)
 	}
-	if dateTo := c.Query("date_to"); dateTo != "" {
+	if dateTo != "" {
 		where += " AND timestamp <= ?"
 		args = append(args, dateTo+" 23:59:59")
 	}

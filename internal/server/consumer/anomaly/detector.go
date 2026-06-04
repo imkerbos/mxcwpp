@@ -1,6 +1,7 @@
 package anomaly
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -240,6 +241,13 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		severity = "high"
 	}
 
+	// 拼描述：让 UI drawer 至少有一行有意义内容，避免 v-if 空白
+	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=0.6 触发告警）", score)
+	if topMetric != "" {
+		description = fmt.Sprintf("指标 %s 偏离主机历史均值，当前值 %.2f；Isolation Forest 异常评分 %.2f",
+			topMetric, topValue, score)
+	}
+
 	alert := model.AnomalyAlert{
 		HostID:       hostID,
 		Hostname:     hostname,
@@ -248,6 +256,7 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		AnomalyScore: score,
 		TopMetric:    topMetric,
 		TopValue:     topValue,
+		Description:  description,
 		Status:       "open",
 	}
 
