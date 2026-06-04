@@ -54,6 +54,14 @@ type Advisory struct {
 	OSFamily     string    // OS pkg advisory: rhel / rocky / ubuntu / debian / alpine；语言包 advisory 留空
 	OSMajorVer   string    // OS 主版本号，如 "9"（RHEL 9 / Rocky 9）；语言包 advisory 留空
 	Ecosystem    string    // 语言包 advisory: npm / PyPI / Maven / Go / RubyGems / crates.io / Packagist / NuGet / Pub / Hex；OS pkg advisory 留空
+
+	// PURL-source 专用字段（仅 OSV 等 PURL-based source 填写）
+	OsvID            string // 上游 OSV vuln ID（如 GHSA-xxx / CVE-xxx）；非 OSV 留空
+	PURL             string // 触发命中的 PURL（如 pkg:maven/io.netty/netty-codec@4.1.115.Final）；非 PURL source 留空
+	AttackVector     string // 攻击向量（如 "network"/"local"），由 CVSS 推导；空表示未知
+	VulnType         string // 漏洞类型（如 "buffer-overflow"/"injection"），由 CVSS 推导；空表示未知
+	AffectedVersions string // 影响版本范围（如 ">= 1.0, < 1.5"）；空表示未提供
+	CurrentVersion   string // 命中 host 当前装的版本（PURL @ 后段）；非 PURL source 留空
 }
 
 // PkgFix 单个受影响 pkg 的修复版本。
@@ -80,6 +88,24 @@ type Source interface {
 	// Fetch 拉取 since 之后的 advisory（增量）。since 为零值时全量拉取。
 	// 实现需保证返回的 advisory 按 IssuedAt 升序，调用方据此设置 watermark。
 	Fetch(ctx context.Context, since time.Time) ([]*Advisory, error)
+}
+
+// PURLSource 是 Source 的扩展接口，描述按 PURL 批量查询能力的 source。
+//
+// 与 Source.Fetch 的时间增量模式不同，PURLSource 由调用方按 host 软件清单驱动，
+// 上游 OSV/GHSA 等 PURL-based vuln DB 适合走这条路径（避免下载全量 advisory）。
+//
+// 实现者：
+//   - OSVSource：osv.dev /v1/querybatch + /v1/vulns/{id}
+//   - 未来 GHSA / Snyk / GitLab Sec 同类生态可实现该接口
+type PURLSource interface {
+	Source
+
+	// FetchByPURLs 按 PURL 批量查询 advisory。
+	//
+	// purls: 已去重的 PURL 列表（调用方负责按 ecosystem 过滤）
+	// 返回 PURL → 该 PURL 命中的 advisory 列表；advisory.PURL 字段填命中 PURL。
+	FetchByPURLs(ctx context.Context, purls []string) (map[string][]*Advisory, error)
 }
 
 // HostSoftware 单台主机的已装软件清单条目，供 Matcher 比对。
