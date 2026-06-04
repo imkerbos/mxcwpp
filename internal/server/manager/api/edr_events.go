@@ -148,6 +148,7 @@ func (h *EDREventsHandler) recordCHQuery(op, table string, start time.Time, err 
 //   - "2026-06-04 15:30:45"       -> 原样
 //   - "2026-06-04T15:30:45Z"      -> "2026-06-04 15:30:45"  (ISO 8601,兼容前端 dayjs().toISOString())
 //   - "2026-06-04T15:30:45+08:00" -> "2026-06-04 15:30:45"  (剥时区)
+//   - "2026-06-04T15:30:45 08:00" -> "2026-06-04 15:30:45"  (URL 未编码 '+' → decode 成空格)
 //
 // ClickHouse DateTime64 解析要求空格分隔无时区,严格不接受 "T" 或 "Z"/"+HH:MM"。
 func normalizeDateBound(s string, upper bool) string {
@@ -160,6 +161,15 @@ func normalizeDateBound(s string, upper bool) string {
 	}
 	// 剥末尾 Z 时区
 	s = strings.TrimSuffix(s, "Z")
+	// 剥末尾 " HH:MM" 时区(URL 未编码 '+' 时,Go 把 '+' decode 成空格 → 末尾 " HH:MM")
+	// 必须 prefix 已含完整 datetime(含 ':') 才剥,否则会误剥 "YYYY-MM-DD HH:MM"。
+	if len(s) >= 6 {
+		tail := s[len(s)-6:]
+		prefix := s[:len(s)-6]
+		if tail[0] == ' ' && tail[1] >= '0' && tail[1] <= '9' && tail[2] >= '0' && tail[2] <= '9' && tail[3] == ':' && strings.Contains(prefix, ":") {
+			s = prefix
+		}
+	}
 	// 剥 +HH:MM / -HH:MM 时区 (扫描 "10" 长度日期之后的 +/-)
 	if idx := strings.LastIndexAny(s, "+-"); idx > 10 {
 		if (len(s)-idx) >= 5 && s[idx+1] >= '0' && s[idx+1] <= '9' {
