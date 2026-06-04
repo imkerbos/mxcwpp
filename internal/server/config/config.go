@@ -28,6 +28,16 @@ type Config struct {
 	LLM        LLMConfig        `mapstructure:"llm"`
 	SIEM       SIEMConfig       `mapstructure:"siem"`
 	PDF        PDFConfig        `mapstructure:"pdf"`
+	Vuln       VulnConfig       `mapstructure:"vuln"`
+}
+
+// VulnConfig 漏洞数据相关配置。
+type VulnConfig struct {
+	// NVDAPIKey NVD JSON 2.0 API key。
+	// 留空走无 key 限速(6s 间隔,5471 vuln ≈ 9h 跑完);
+	// 配 key 后 50 req / 30s(0.6s 间隔,~1h)。
+	// 申请: https://nvd.nist.gov/developers/request-an-api-key
+	NVDAPIKey string `mapstructure:"nvd_api_key"`
 }
 
 // PDFConfig 服务端 PDF 生成（Gotenberg sidecar）配置。
