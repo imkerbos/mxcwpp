@@ -113,6 +113,17 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("漏洞分类回填失败", zap.Error(err))
 	}
 
+	// 回填 host_vulnerabilities.asset_type / fix_owner(P-vuln-classify)
+	// 全表 join software 推导,首次部署后单次跑一致即可,后续写入路径由 BeforeSave 自动维护
+	// 走异步,避免阻塞 manager 启动(prod 11k+ host_vuln × software join 耗时)
+	go func() {
+		if err := BackfillAssetTypeAndFixOwner(db, logger); err != nil {
+			logger.Warn("host_vuln asset_type 回填失败(异步)", zap.Error(err))
+		} else {
+			logger.Info("host_vuln asset_type 异步回填完成")
+		}
+	}()
+
 	// 修历史 vuln source 字段被 OS source 错误覆盖（OSV 写入后 debian-tracker 覆盖）
 	// 需放在 CleanupHostVulnFP 之前，否则 cleanup 会把 OSV 命中的 host_vuln 误删
 	if err := migrateFixOverwrittenEcosystemSource(db, logger); err != nil {

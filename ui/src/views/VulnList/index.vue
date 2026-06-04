@@ -193,6 +193,54 @@
           </a-select>
 
           <a-select
+            v-model:value="filterAssetType"
+            style="width: 150px"
+            placeholder="资产类型"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="os">🖥 OS 主机</a-select-option>
+            <a-select-option value="middleware">⚙️ 中间件</a-select-option>
+            <a-select-option value="app">📦 应用依赖</a-select-option>
+            <a-select-option value="container">🐳 容器</a-select-option>
+            <a-select-option value="image">🖼 镜像</a-select-option>
+            <a-select-option value="unknown">❓ 未分类</a-select-option>
+          </a-select>
+
+          <a-select
+            v-model:value="filterFixOwner"
+            style="width: 150px"
+            placeholder="责任方"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="ops">运维</a-select-option>
+            <a-select-option value="sre">SRE</a-select-option>
+            <a-select-option value="dba">DBA</a-select-option>
+            <a-select-option value="dev">研发</a-select-option>
+            <a-select-option value="image_maintainer">镜像维护</a-select-option>
+            <a-select-option value="unknown">未分配</a-select-option>
+          </a-select>
+
+          <a-select
+            v-model:value="filterCWECategory"
+            style="width: 160px"
+            placeholder="攻击类型 CWE"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="rce">远程代码执行</a-select-option>
+            <a-select-option value="privesc">权限提升</a-select-option>
+            <a-select-option value="sqli">SQL 注入</a-select-option>
+            <a-select-option value="xss">跨站脚本</a-select-option>
+            <a-select-option value="info_disclosure">信息泄露</a-select-option>
+            <a-select-option value="path_traversal">路径遍历</a-select-option>
+            <a-select-option value="ssrf">SSRF</a-select-option>
+            <a-select-option value="dos">拒绝服务</a-select-option>
+            <a-select-option value="other">其他</a-select-option>
+          </a-select>
+
+          <a-select
             v-model:value="filterSort"
             style="width: 160px"
             placeholder="排序方式"
@@ -284,6 +332,26 @@
                 {{ vulnCategoryConfig[effectiveCategory(record)].text }}
               </a-tag>
               <span v-if="record.vulnCategoryOverride" style="margin-left:4px;font-size:11px;color:#86909C">(manual)</span>
+            </template>
+
+            <template v-else-if="column.key === 'cwe'">
+              <a-tooltip :title="record.cweId || ''">
+                <a-tag :color="cweCategoryConfig[record.cweCategory || 'other'].color" :bordered="false">
+                  {{ cweCategoryConfig[record.cweCategory || 'other'].text }}
+                </a-tag>
+              </a-tooltip>
+            </template>
+
+            <template v-else-if="column.key === 'assetType'">
+              <a-tag :color="assetTypeConfig[firstHostAssetType(record) || 'unknown'].color" :bordered="false">
+                {{ assetTypeConfig[firstHostAssetType(record) || 'unknown'].icon }} {{ assetTypeConfig[firstHostAssetType(record) || 'unknown'].text }}
+              </a-tag>
+            </template>
+
+            <template v-else-if="column.key === 'fixOwner'">
+              <a-tag :color="fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].color" :bordered="false">
+                {{ fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].text }}
+              </a-tag>
             </template>
 
             <template v-else-if="column.key === 'restart'">
@@ -430,6 +498,9 @@ const filterSeverity = ref<string>()
 const filterStatus = ref<string>()
 const filterVulnCategory = ref<string>()
 const filterRestartAction = ref<string>()
+const filterAssetType = ref<string>()
+const filterFixOwner = ref<string>()
+const filterCWECategory = ref<string>()
 const filterComponent = ref('')
 const filterExploitStatus = ref<string>()
 const filterPriority = ref<string>()
@@ -481,6 +552,9 @@ const columns = [
   { title: '漏洞编号', key: 'cve', width: 180 },
   { title: '严重级别', key: 'severity', width: 90 },
   { title: 'CVSS', key: 'cvss', width: 70 },
+  { title: '攻击类型', key: 'cwe', width: 110 },
+  { title: '资产类型', key: 'assetType', width: 110 },
+  { title: '责任方', key: 'fixOwner', width: 100 },
   { title: '优先级', key: 'priority', width: 130 },
   { title: '利用状态', key: 'exploit', width: 100 },
   { title: '影响组件', dataIndex: 'component', key: 'component', width: 160 },
@@ -491,6 +565,39 @@ const columns = [
   { title: '发现时间', dataIndex: 'discoveredAt', key: 'discoveredAt', width: 160 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' },
 ]
+
+// 资产类型显示配置
+const assetTypeConfig: Record<string, { color: string; text: string; icon: string }> = {
+  os:         { color: 'blue',     text: 'OS 主机',   icon: '🖥' },
+  middleware: { color: 'cyan',     text: '中间件',    icon: '⚙️' },
+  app:        { color: 'purple',   text: '应用依赖',  icon: '📦' },
+  container:  { color: 'geekblue', text: '容器',      icon: '🐳' },
+  image:      { color: 'magenta',  text: '镜像',      icon: '🖼' },
+  unknown:    { color: 'default',  text: '未分类',    icon: '❓' },
+}
+
+// 修复责任方显示配置
+const fixOwnerConfig: Record<string, { color: string; text: string }> = {
+  ops:              { color: 'green',    text: '运维' },
+  sre:              { color: 'cyan',     text: 'SRE' },
+  dba:              { color: 'geekblue', text: 'DBA' },
+  dev:              { color: 'purple',   text: '研发' },
+  image_maintainer: { color: 'magenta',  text: '镜像维护' },
+  unknown:          { color: 'default',  text: '未分配' },
+}
+
+// CWE 高级分类显示配置
+const cweCategoryConfig: Record<string, { color: string; text: string }> = {
+  rce:             { color: 'red',     text: 'RCE 远程执行' },
+  privesc:         { color: 'volcano', text: '权限提升' },
+  sqli:            { color: 'orange',  text: 'SQL 注入' },
+  xss:             { color: 'gold',    text: 'XSS 跨站' },
+  info_disclosure: { color: 'cyan',    text: '信息泄露' },
+  path_traversal:  { color: 'blue',    text: '路径遍历' },
+  ssrf:            { color: 'geekblue',text: 'SSRF' },
+  dos:             { color: 'purple',  text: '拒绝服务' },
+  other:           { color: 'default', text: '其他' },
+}
 
 // 9 类 vuln_category 显示
 const vulnCategoryConfig: Record<string, { color: string; text: string }> = {
@@ -519,6 +626,12 @@ const restartActionConfig: Record<string, { color: string; text: string }> = {
 
 const effectiveCategory = (v: Vulnerability) => v.vulnCategoryOverride || v.vulnCategory || 'other'
 const effectiveRestartAction = (v: Vulnerability) => v.restartActionOverride || v.restartAction || 'unknown'
+
+// 优先用 vulnerability 顶层聚合字段(后端从 host_vulnerabilities GROUP BY 算的);
+// 没聚合字段时 fallback 到 hosts[0](host_id filter 场景);
+// 都没就 unknown
+const firstHostAssetType = (v: Vulnerability) => v.assetType || v.hosts?.[0]?.assetType || 'unknown'
+const firstHostFixOwner = (v: Vulnerability) => v.fixOwner || v.hosts?.[0]?.fixOwner || 'unknown'
 
 // === 扫描状态 ===
 const scanStatus = ref<SecurityDBSyncRecord | null>(null)
@@ -653,6 +766,9 @@ const loadVulns = async () => {
       priority: filterPriority.value || undefined,
       vuln_category: filterVulnCategory.value || undefined,
       restart_action: filterRestartAction.value || undefined,
+      asset_type: filterAssetType.value || undefined,
+      fix_owner: filterFixOwner.value || undefined,
+      cwe_category: filterCWECategory.value || undefined,
       sort: filterSort.value || undefined,
     })
     vulns.value = res.items ?? []
@@ -792,6 +908,9 @@ const handleReset = () => {
   filterPriority.value = undefined
   filterVulnCategory.value = undefined
   filterRestartAction.value = undefined
+  filterAssetType.value = undefined
+  filterFixOwner.value = undefined
+  filterCWECategory.value = undefined
   filterSort.value = undefined
   filterHostId.value = undefined
   pagination.value.current = 1

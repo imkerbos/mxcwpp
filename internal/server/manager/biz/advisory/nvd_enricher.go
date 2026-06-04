@@ -53,10 +53,10 @@ func (e *NVDEnricher) RunOnce(ctx context.Context, batchSize, maxRows int) (enri
 		if maxRows > 0 && scanned >= maxRows {
 			break
 		}
-		// 批次:cvss_score=0 + cve_id 非空 + id > cursor(顺序扫,避免重复)
+		// 批次:cvss_score=0 OR cwe_id 空 + cve_id 非空 + id > cursor(顺序扫,避免重复)
 		var rows []model.Vulnerability
 		q := e.db.Model(&model.Vulnerability{}).
-			Where("cvss_score = 0 AND cve_id <> '' AND cve_id LIKE 'CVE-%' AND id > ?", cursor).
+			Where("(cvss_score = 0 OR cwe_id = '' OR cwe_id IS NULL) AND cve_id <> '' AND cve_id LIKE 'CVE-%' AND id > ?", cursor).
 			Order("id ASC").
 			Limit(batchSize)
 		if err := q.Find(&rows).Error; err != nil {
@@ -79,18 +79,32 @@ func (e *NVDEnricher) RunOnce(ctx context.Context, batchSize, maxRows int) (enri
 
 		// update DB:逐条 update 避免一条失败影响其他
 		for cve, res := range results {
-			if res == nil || res.CVSSScore == 0 {
+			if res == nil {
+				continue
+			}
+			// CWE 数据即使 cvss=0 也值得回填(reserved CVE 有 CWE 但无 CVSS)
+			if res.CVSSScore == 0 && res.CWEIDs == "" {
 				continue
 			}
 			ids := idByCVE[cve]
-			updates := map[string]interface{}{
-				"cvss_score": res.CVSSScore,
+			updates := map[string]interface{}{}
+			if res.CVSSScore > 0 {
+				updates["cvss_score"] = res.CVSSScore
 			}
 			if res.Severity != "" {
 				updates["severity"] = res.Severity
 			}
 			if res.Description != "" {
 				updates["description"] = res.Description
+			}
+			if res.CWEIDs != "" {
+				updates["cwe_id"] = res.CWEIDs
+			}
+			if res.CWECategory != "" {
+				updates["cwe_category"] = res.CWECategory
+			}
+			if len(updates) == 0 {
+				continue
 			}
 			if err := e.db.Model(&model.Vulnerability{}).
 				Where("id IN ?", ids).
