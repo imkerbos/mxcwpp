@@ -22,33 +22,38 @@ var MetricNames = [featureCount]string{
 }
 
 // Correlation patterns: multi-metric signatures that indicate specific attack types.
+//
+// MinActive 在 2026-06-04 全面收紧:prod 7d 累积 134k correlation open alert,99.6% 主机命中
+// privilege_escalation(221/226),说明阈值过松,把正常业务服务(db/mq/zookeeper 大网络+DNS)
+// 误标为 c2_beacon / privilege_escalation。
+// 配合 correlationThreshold 2.0 → 3.0 + 24h dedup 大幅压制 false positive。
 var correlationPatterns = []correlationPattern{
 	{
 		Name:        "c2_beacon",
 		Description: "Possible C2 beaconing: high network + DNS activity with process execution",
 		Indices:     []int{0, 6, 7, 10, 11}, // proc_exec, net_connect, net_unique_ip, dns_query, dns_unique_domain
-		MinActive:   3,                      // at least 3 of 5 metrics elevated
+		MinActive:   4,                      // 5 个指标至少 4 个 elevated(原 3,误报太多)
 		Severity:    "critical",
 	},
 	{
 		Name:        "data_exfiltration",
 		Description: "Possible data exfiltration: file access + external network",
 		Indices:     []int{3, 4, 6, 9}, // file_write, file_unique_path, net_connect, net_external_ratio
-		MinActive:   3,
+		MinActive:   4,                 // 4 个全 elevated(原 3 — 4/4 严格匹配)
 		Severity:    "high",
 	},
 	{
 		Name:        "privilege_escalation",
 		Description: "Possible privilege escalation: sensitive file access + process forking",
 		Indices:     []int{0, 2, 5}, // proc_exec, proc_fork_rate, file_sensitive_hits
-		MinActive:   2,
+		MinActive:   3,              // 3 个全 elevated(原 2 — 太松,99.6% 主机中招)
 		Severity:    "high",
 	},
 	{
 		Name:        "reconnaissance",
 		Description: "Possible reconnaissance: port scanning + DNS enumeration",
 		Indices:     []int{6, 8, 10, 12}, // net_connect, net_unique_port, dns_query, dns_nx_ratio
-		MinActive:   3,
+		MinActive:   4,                   // 4 个全 elevated(原 3)
 		Severity:    "medium",
 	},
 }
@@ -71,12 +76,19 @@ const (
 	// anomalyThreshold is the score above which a sample is flagged.
 	anomalyThreshold = 0.65
 
-	// correlationThreshold is z-score threshold for a metric to be "elevated".
-	correlationThreshold = 2.0
+	// correlationThreshold is ratio threshold for a metric to be "elevated".
+	// 调整 2.0 → 3.0:prod 实际正常业务服务(db/mq)波动经常 >2x 均值,但 <3x。
+	// 配合 MinActive 收紧,大幅减少 false positive。
+	correlationThreshold = 3.0
 
 	// enrichWindow 决定回查 ebpf_events 提取 IOC 时回看多久。
 	// 5 分钟覆盖大多数攻击短链；过长会引入无关 noise。
 	enrichWindow = 5 * time.Minute
+
+	// correlationDedupWindow:同 host_id + pattern_name 24h 内只生成 1 个 open alert。
+	// prod 实测同 host 7d 内单 pattern 触发 400-2900 次,显然是 detector tuning 问题不是真威胁。
+	// dedup 让 SOC 处置量降到可控,真新告警仍能触发(24h 后窗口外新 pattern 仍写入)。
+	correlationDedupWindow = 24 * time.Hour
 
 	// enrichTopN 控制每类 IOC 最多带回 N 个，避免 trigger_context JSON 膨胀。
 	enrichTopN = 10
@@ -370,6 +382,13 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			continue
 		}
 
+		// dedup: 24h 内同 host_id + pattern 已有 open alert → 跳过,避免噪声。
+		// SOC 处置/标 false_positive 后,24h 外的新触发仍能生成。
+		// prod 实测同 host 7d 单 pattern 触发 400-2900 次,dedup 让告警量降到可控。
+		if d.hasRecentOpenAlert(hostID, pattern.Name) {
+			continue
+		}
+
 		// Correlation 路径：补充攻击链 IOC（按 pattern 类型回查 ebpf_events）。
 		// 回查失败不阻塞告警生成，只是 trigger_context 字段缺失。
 		now := time.Now()
@@ -408,6 +427,23 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			zap.Int("sensitive_files", len(trigger.SensitiveFiles)),
 		)
 	}
+}
+
+// hasRecentOpenAlert 检查 24h 内是否已有同 host + pattern 的 open correlation alert,
+// 命中则跳过本次告警生成(dedup)。SOC 处置后(status != open) 不影响新告警。
+func (d *Detector) hasRecentOpenAlert(hostID, patternName string) bool {
+	var cnt int64
+	cutoff := time.Now().Add(-correlationDedupWindow)
+	err := d.db.Model(&model.AnomalyAlert{}).
+		Where("host_id = ? AND alert_type = ? AND pattern_name = ? AND status = ? AND created_at >= ?",
+			hostID, "correlation", patternName, "open", cutoff).
+		Limit(1).
+		Count(&cnt).Error
+	if err != nil {
+		d.logger.Warn("dedup query failed,放行告警", zap.Error(err))
+		return false // 查询失败时放行(宁可多发也别漏)
+	}
+	return cnt > 0
 }
 
 // enrichTriggerContext 根据 pattern 类型回查 ebpf_events 拿 IOC。
