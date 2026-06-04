@@ -159,7 +159,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupFixAPI(router, db, logger, acDispatcher)
 	setupDashboardAPI(router, db, logger, chConn, redisClient, acRegistry, promClient)
 	setupAssetsAPI(router, db, logger)
-	setupReportsAPI(router, db, logger, chConn, cfg)
+	setupReportsAPI(router, db, logger, chConn, redisClient, cfg)
 	setupBusinessLinesAPI(router, db, logger)
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
@@ -177,7 +177,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupThreatIntelAPI(router, db, logger, redisClient)
 	setupNetworkBlockAPI(router, db, logger, acDispatcher)
 	setupDependencyAPI(router, db, logger, acDispatcher)
-	setupEDREventsAPI(router, logger, chConn)
+	setupEDREventsAPI(router, logger, chConn, redisClient)
 	setupBDEBaselineAPI(router, db, logger)
 	setupStorylineAPI(router, db, logger, chConn)
 	setupMemoryThreatAPI(router, db, logger)
@@ -429,9 +429,10 @@ func setupAssetsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 }
 
 // setupReportsAPI 设置报表 API 路由
-func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, cfg *config.Config) {
+func setupReportsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, cfg *config.Config) {
 	handler := api.NewReportsHandler(db, logger)
 	handler.SetClickHouse(chConn)
+	handler.SetRedis(redisClient)
 
 	// PDF 导出（Gotenberg sidecar，HTML→PDF 模式）
 	httpPrefix := ""
@@ -937,8 +938,9 @@ func setupDependencyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupEDREventsAPI 设置 EDR 事件查询 API 路由
-func setupEDREventsAPI(router *gin.RouterGroup, logger *zap.Logger, chConn chdriver.Conn) {
-	handler := api.NewEDREventsHandler(logger, chConn)
+func setupEDREventsAPI(router *gin.RouterGroup, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client) {
+	handler := api.NewEDREventsHandler(logger, chConn, redisClient)
 	router.GET("/edr/events", handler.ListEDREvents)
+	router.GET("/edr/events/detail", handler.GetEDREventDetail)
 	router.GET("/edr/events/stats", handler.GetEDREventStats)
 }
