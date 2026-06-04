@@ -56,8 +56,13 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 		return
 	}
 
-	// Redis cache lookup (by 时间段 unix 时间戳)
-	cacheKey := fmt.Sprintf(reportsEDRCacheKey, startTime.Unix(), endTime.Unix())
+	// Redis cache lookup。
+	// 注意:startTime/endTime 默认含 time.Now() → 每次 unix 不同,直接用会让 cache 永远 miss。
+	// 规整到分钟级精度(60s TTL 同期内同分钟落同 key),保证 cache 真命中。
+	cacheKey := fmt.Sprintf(reportsEDRCacheKey,
+		startTime.Truncate(time.Minute).Unix(),
+		endTime.Truncate(time.Minute).Unix(),
+	)
 	if h.redisClient != nil && c.Query("nocache") != "1" {
 		if cached, err := h.redisClient.Get(c.Request.Context(), cacheKey).Bytes(); err == nil {
 			c.Data(200, "application/json; charset=utf-8", cached)
