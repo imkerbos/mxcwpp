@@ -15,6 +15,7 @@ import (
 
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
 )
@@ -65,6 +66,14 @@ func main() {
 		}
 	}()
 	defer scanScheduler.Stop()
+
+	// 启动 NVD enrich cron:对 cvss_score=0 / severity=none 的 vulnerability(主要 RHSA/OSV
+	// 不提供 NVD CVSS),按 cve_id 单查 NVD JSON 2.0 API 补 score/severity/description。
+	// 每 24h 跑一次,启动立即 backfill。
+	// API key 取自 server.yaml 的 vuln.nvd_api_key(可空,空时走 6s 间隔限速)。
+	nvdEnricher := advisory.NewNVDEnricher(services.DB, services.Config.Vuln.NVDAPIKey, services.Logger.Named("nvd-enrich"))
+	nvdEnricher.StartCron(ctx.Done())
+	services.Logger.Info("NVD enrich cron 已启动")
 
 	// 启动 GCP Pub/Sub 消费者管理器（GKE 审计日志接入，per-cluster 配置）
 	alarmService := biz.NewKubeAlarmService(services.DB, services.Logger)
