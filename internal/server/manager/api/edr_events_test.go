@@ -23,8 +23,15 @@ func TestNormalizeDateBound(t *testing.T) {
 		// 仅 date：补时分秒
 		{"date only lower bound", "2026-06-04", false, "2026-06-04 00:00:00"},
 		{"date only upper bound", "2026-06-04", true, "2026-06-04 23:59:59"},
-		{"empty string lower", "", false, " 00:00:00"},
-		{"empty string upper", "", true, " 23:59:59"},
+		{"empty string lower", "", false, ""},
+		{"empty string upper", "", true, ""},
+		// ISO 8601 兼容（regression 修复）
+		{"ISO 8601 with Z", "2026-06-04T15:30:45Z", false, "2026-06-04 15:30:45"},
+		{"ISO 8601 with Z upper", "2026-06-04T15:30:45Z", true, "2026-06-04 15:30:45"},
+		{"ISO 8601 with +tz", "2026-06-04T15:30:45+08:00", false, "2026-06-04 15:30:45"},
+		{"ISO 8601 with -tz", "2026-06-04T15:30:45-05:00", false, "2026-06-04 15:30:45"},
+		{"ISO 8601 with fractional", "2026-06-04T15:30:45.123Z", false, "2026-06-04 15:30:45.123"},
+		{"datetime with T no tz", "2026-06-04T15:30:45", false, "2026-06-04 15:30:45"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

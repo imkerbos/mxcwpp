@@ -11,6 +11,7 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/metrics"
 )
@@ -64,11 +65,29 @@ type chEDREvent struct {
 	ReturnCode string    `json:"return_code"`
 }
 
-// chQueryCtx 给 ClickHouse 查询附加 max_execution_time 兜底超时。
-// 让 CH 在 Go ctx 超时前主动停止，能区分 "CH 慢查询" vs "Go ctx 取消"。
+// chQueryCtx 给 ClickHouse 查询附加 max_execution_time 兜底超时 + 强制使用 projection。
+//
+// CH 24.10 cost-based optimizer 在 SELECT 列宽 + LIMIT 较大时不一定自动选 projection,
+// 实测 prod 19 列 LIMIT 50:
+//   - 不强制 projection: 10s 超时（全 part 排序）
+//   - force_optimize_projection=1: 4.4s（走 proj_time_desc 主键反向）
+//
+// 实际差距来自 cost 估算偏保守。手工强制后查询稳定走 projection 快路径。
+// 副作用:若用户 query 无对应 projection（如 GROUP BY host_id 类）会直接报错 → 由 recordCHQuery 捕获。
 func chQueryCtx(parent context.Context) context.Context {
 	return clickhouse.Context(parent, clickhouse.WithSettings(clickhouse.Settings{
-		"max_execution_time": edrCHMaxExec,
+		"max_execution_time":       edrCHMaxExec,
+		"optimize_use_projections": uint64(1),
+	}))
+}
+
+// chQueryCtxWithProjection 仅给 list_data 这种"我知道 projection 一定能命中"的查询用,
+// 强制走 projection。stats/聚合类继续走默认 optimize_use_projections 让 CH 自决策。
+func chQueryCtxWithProjection(parent context.Context) context.Context {
+	return clickhouse.Context(parent, clickhouse.WithSettings(clickhouse.Settings{
+		"max_execution_time":        edrCHMaxExec,
+		"optimize_use_projections":  uint64(1),
+		"force_optimize_projection": uint64(1),
 	}))
 }
 
@@ -95,17 +114,40 @@ func (h *EDREventsHandler) recordCHQuery(op, table string, start time.Time, err 
 	}
 }
 
-// normalizeDateBound 把日期字符串规整为 ClickHouse 可比较的 DateTime 字符串。
-// 输入含时分秒（":"）则原样使用；否则按 upper=true 补 23:59:59，upper=false 补 00:00:00。
-// 避免前端只传日期时，下界丢失 24h（"2026-06-03" 解析为 00:00:00 没问题；上界则要补 23:59:59）。
+// normalizeDateBound 把日期/datetime 字符串规整为 ClickHouse 可比较的 DateTime 字符串。
+//
+// 兼容格式:
+//   - "2026-06-04"                -> "2026-06-04 00:00:00" (upper=false) / "2026-06-04 23:59:59" (upper=true)
+//   - "2026-06-04 15:30:45"       -> 原样
+//   - "2026-06-04T15:30:45Z"      -> "2026-06-04 15:30:45"  (ISO 8601,兼容前端 dayjs().toISOString())
+//   - "2026-06-04T15:30:45+08:00" -> "2026-06-04 15:30:45"  (剥时区)
+//
+// ClickHouse DateTime64 解析要求空格分隔无时区,严格不接受 "T" 或 "Z"/"+HH:MM"。
 func normalizeDateBound(s string, upper bool) string {
-	if strings.Contains(s, ":") {
+	if s == "" {
 		return s
 	}
-	if upper {
-		return s + " 23:59:59"
+	// ISO 8601: 把 'T' 替换为空格
+	if strings.Contains(s, "T") {
+		s = strings.Replace(s, "T", " ", 1)
 	}
-	return s + " 00:00:00"
+	// 剥末尾 Z 时区
+	s = strings.TrimSuffix(s, "Z")
+	// 剥 +HH:MM / -HH:MM 时区 (扫描 "10" 长度日期之后的 +/-)
+	if idx := strings.LastIndexAny(s, "+-"); idx > 10 {
+		if (len(s)-idx) >= 5 && s[idx+1] >= '0' && s[idx+1] <= '9' {
+			s = s[:idx]
+		}
+	}
+	s = strings.TrimSpace(s)
+	// 仅日期(无 ':')补时分秒
+	if !strings.Contains(s, ":") {
+		if upper {
+			return s + " 23:59:59"
+		}
+		return s + " 00:00:00"
+	}
+	return s
 }
 
 // ListEDREvents 获取 EDR 事件列表
@@ -127,7 +169,6 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), edrQueryCtxTimeout)
 	defer cancel()
-	chCtx := chQueryCtx(ctx)
 
 	// 构建 WHERE 子句
 	//
@@ -144,9 +185,14 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 		dateFrom = time.Now().Add(-24 * time.Hour).Format("2006-01-02 15:04:05")
 	}
 
+	// hasHostID 控制是否强制 projection:
+	// - 有 host_id: 主键 (host_id, timestamp) 反向就够快,不强制 projection(force 时会因 projection 无 host_id index 而 fail)
+	// - 无 host_id: 强制走 proj_time_desc projection 主键反向,避开 cost-based 估算偏保守
+	hasHostID := false
 	if hostID := c.Query("host_id"); hostID != "" {
 		where += " AND host_id = ?"
 		args = append(args, hostID)
+		hasHostID = true
 	}
 	if hostname := c.Query("hostname"); hostname != "" {
 		where += " AND hostname LIKE ?"
@@ -198,22 +244,19 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 		args = append(args, normalizeDateBound(dateTo, true))
 	}
 
-	// 查总数（ClickHouse MergeTree count() 是 metadata 操作，通常 < 100ms）
-	countSQL := fmt.Sprintf("SELECT count() FROM ebpf_events WHERE %s", where)
-	var total uint64
-	{
-		start := time.Now()
-		err := h.chConn.QueryRow(chCtx, countSQL, args...).Scan(&total)
-		h.recordCHQuery("list_count", "ebpf_events", start, err)
-		if err != nil {
-			h.logger.Error("ClickHouse 查询 EDR 事件总数失败", zap.Error(err))
-			InternalError(c, "查询失败：数据量过大或时间窗口过宽，请缩窄过滤条件")
-			return
-		}
+	// 根据是否有 host_id 选择 CH ctx:
+	// - 有 host_id: 主键 (host_id, timestamp) 已最优,不强制 projection
+	// - 无 host_id: 强制 proj_time_desc projection 避开 cost-based 估算偏保守
+	dataCtx := chQueryCtx(ctx)
+	if !hasHostID {
+		dataCtx = chQueryCtxWithProjection(ctx)
 	}
+	countCtx := chQueryCtx(ctx) // count() 是 metadata,不需强制 projection
 
-	// 查数据：依赖 ebpf_events.proj_time_desc projection 让 ORDER BY timestamp DESC 走主键反向。
+	// count + data 并发(errgroup)。count 通常 <100ms,data 可能 100ms-3s,
+	// 串行多花 count 时间;并发后总延迟 = max(count, data) ≈ data。
 	offset := (page - 1) * pageSize
+	countSQL := fmt.Sprintf("SELECT count() FROM ebpf_events WHERE %s", where)
 	dataSQL := fmt.Sprintf(`
 		SELECT timestamp, host_id, hostname, event_type, data_type,
 		       pid, ppid, exe, cmdline, parent_exe,
@@ -224,38 +267,57 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 		ORDER BY timestamp DESC
 		LIMIT %d OFFSET %d`, where, pageSize, offset)
 
-	start := time.Now()
-	rows, err := h.chConn.Query(chCtx, dataSQL, args...)
-	if err != nil {
-		h.recordCHQuery("list_data", "ebpf_events", start, err)
-		h.logger.Error("ClickHouse 查询 EDR 事件列表失败", zap.Error(err))
-		InternalError(c, "查询失败：数据量过大或时间窗口过宽，请缩窄过滤条件")
-		return
-	}
-	defer rows.Close()
-
+	g, _ := errgroup.WithContext(ctx)
+	var total uint64
 	events := make([]chEDREvent, 0, pageSize)
-	for rows.Next() {
-		var ev chEDREvent
-		if err := rows.Scan(
-			&ev.Timestamp, &ev.HostID, &ev.Hostname, &ev.EventType, &ev.DataType,
-			&ev.PID, &ev.PPID, &ev.Exe, &ev.Cmdline, &ev.ParentExe,
-			&ev.FilePath, &ev.RemoteAddr, &ev.RemotePort, &ev.LocalAddr, &ev.LocalPort,
-			&ev.Protocol, &ev.UID, &ev.GID, &ev.ReturnCode,
-		); err != nil {
-			h.logger.Warn("ClickHouse 单行扫描失败，跳过", zap.Error(err))
-			continue
+
+	g.Go(func() error {
+		start := time.Now()
+		err := h.chConn.QueryRow(countCtx, countSQL, args...).Scan(&total)
+		h.recordCHQuery("list_count", "ebpf_events", start, err)
+		if err != nil {
+			h.logger.Error("ClickHouse 查询 EDR 事件总数失败", zap.Error(err))
+			return err
 		}
-		events = append(events, ev)
-	}
-	// 关键：rows.Next() 在 ctx 超时 / CH 错误时静默返回 false，必须用 rows.Err() 判定真实结果。
-	if err := rows.Err(); err != nil {
-		h.recordCHQuery("list_data", "ebpf_events", start, err)
-		h.logger.Error("ClickHouse rows 迭代失败", zap.Error(err))
-		InternalError(c, "查询失败：数据量过大或时间窗口过宽，请缩窄过滤条件")
+		return nil
+	})
+
+	g.Go(func() error {
+		start := time.Now()
+		rows, err := h.chConn.Query(dataCtx, dataSQL, args...)
+		if err != nil {
+			h.recordCHQuery("list_data", "ebpf_events", start, err)
+			h.logger.Error("ClickHouse 查询 EDR 事件列表失败", zap.Error(err))
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ev chEDREvent
+			if scanErr := rows.Scan(
+				&ev.Timestamp, &ev.HostID, &ev.Hostname, &ev.EventType, &ev.DataType,
+				&ev.PID, &ev.PPID, &ev.Exe, &ev.Cmdline, &ev.ParentExe,
+				&ev.FilePath, &ev.RemoteAddr, &ev.RemotePort, &ev.LocalAddr, &ev.LocalPort,
+				&ev.Protocol, &ev.UID, &ev.GID, &ev.ReturnCode,
+			); scanErr != nil {
+				h.logger.Warn("ClickHouse 单行扫描失败,跳过", zap.Error(scanErr))
+				continue
+			}
+			events = append(events, ev)
+		}
+		// rows.Next() 在 ctx 超时 / CH 错误时静默返回 false,必须用 rows.Err() 判定真实结果
+		if err := rows.Err(); err != nil {
+			h.recordCHQuery("list_data", "ebpf_events", start, err)
+			h.logger.Error("ClickHouse rows 迭代失败", zap.Error(err))
+			return err
+		}
+		h.recordCHQuery("list_data", "ebpf_events", start, nil)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		InternalError(c, "查询失败:数据量过大或时间窗口过宽,请缩窄过滤条件")
 		return
 	}
-	h.recordCHQuery("list_data", "ebpf_events", start, nil)
 
 	SuccessPaginated(c, int64(total), events)
 }
@@ -298,6 +360,10 @@ type EDREventTrendPoint struct {
 
 // GetEDREventStats 获取 EDR 事件统计
 // GET /api/v1/edr/events/stats
+//
+// 5 个 CH 聚合查询并发执行(原串行 ~3s),总延迟 ≈ max(各 query) ≈ stats_top_hosts (~1.9s)。
+// 后续可加 Redis cache 60s TTL,首次命中后 <10ms;但 handler 不含 redis client,
+// 暂用并发达到 P0 目标,cache 留下一轮。
 func (h *EDREventsHandler) GetEDREventStats(c *gin.Context) {
 	if h.chConn == nil {
 		Success(c, EDREventStats{
@@ -320,10 +386,15 @@ func (h *EDREventsHandler) GetEDREventStats(c *gin.Context) {
 
 	stats := EDREventStats{
 		ByDataType: make(map[int32]uint64),
+		TopHosts:   []EDRHostEventCount{},
+		TopExes:    []EDRExeCount{},
+		Trend:      []EDREventTrendPoint{},
 	}
 
-	// 1. 总数 + 按事件类型统计
-	{
+	g, _ := errgroup.WithContext(ctx)
+
+	// 1. 总数 + 按事件类型统计(必返字段,失败时整体 500)
+	g.Go(func() error {
 		start := time.Now()
 		row := h.chConn.QueryRow(chCtx, `
 			SELECT
@@ -336,38 +407,43 @@ func (h *EDREventsHandler) GetEDREventStats(c *gin.Context) {
 		err := row.Scan(&stats.Total, &stats.ProcessExec, &stats.FileOpen, &stats.NetworkConnect)
 		h.recordCHQuery("stats_total", "ebpf_events", start, err)
 		if err != nil {
-			h.logger.Error("ClickHouse EDR 统计查询失败", zap.Error(err))
-			InternalError(c, "查询失败")
-			return
+			h.logger.Error("ClickHouse EDR 统计 stats_total 失败", zap.Error(err))
+			return err
 		}
-	}
+		return nil
+	})
 
-	// 2. 按 DataType 统计
-	{
+	// 2. 按 DataType 统计(非关键,失败仅记 metric,返回空 map)
+	g.Go(func() error {
 		start := time.Now()
-		dtRows, err := h.chConn.Query(chCtx, `
+		rows, err := h.chConn.Query(chCtx, `
 			SELECT data_type, count() AS cnt
 			FROM ebpf_events
 			WHERE timestamp >= subtractHours(now(), ?)
 			GROUP BY data_type`, hours)
 		if err == nil {
-			for dtRows.Next() {
+			tmp := make(map[int32]uint64)
+			for rows.Next() {
 				var dt int32
 				var cnt uint64
-				if scanErr := dtRows.Scan(&dt, &cnt); scanErr == nil {
-					stats.ByDataType[dt] = cnt
+				if scanErr := rows.Scan(&dt, &cnt); scanErr == nil {
+					tmp[dt] = cnt
 				}
 			}
-			err = dtRows.Err()
-			dtRows.Close()
+			err = rows.Err()
+			rows.Close()
+			if err == nil {
+				stats.ByDataType = tmp
+			}
 		}
 		h.recordCHQuery("stats_by_data_type", "ebpf_events", start, err)
-	}
+		return nil // 非关键,不抛错
+	})
 
-	// 3. Top 10 主机
-	{
+	// 3. Top 10 主机(非关键)
+	g.Go(func() error {
 		start := time.Now()
-		hostRows, err := h.chConn.Query(chCtx, `
+		rows, err := h.chConn.Query(chCtx, `
 			SELECT host_id, hostname, count() AS cnt
 			FROM ebpf_events
 			WHERE timestamp >= subtractHours(now(), ?)
@@ -375,25 +451,27 @@ func (h *EDREventsHandler) GetEDREventStats(c *gin.Context) {
 			ORDER BY cnt DESC
 			LIMIT 10`, hours)
 		if err == nil {
-			for hostRows.Next() {
+			tmp := make([]EDRHostEventCount, 0, 10)
+			for rows.Next() {
 				var hc EDRHostEventCount
-				if scanErr := hostRows.Scan(&hc.HostID, &hc.Hostname, &hc.Count); scanErr == nil {
-					stats.TopHosts = append(stats.TopHosts, hc)
+				if scanErr := rows.Scan(&hc.HostID, &hc.Hostname, &hc.Count); scanErr == nil {
+					tmp = append(tmp, hc)
 				}
 			}
-			err = hostRows.Err()
-			hostRows.Close()
+			err = rows.Err()
+			rows.Close()
+			if err == nil && len(tmp) > 0 {
+				stats.TopHosts = tmp
+			}
 		}
 		h.recordCHQuery("stats_top_hosts", "ebpf_events", start, err)
-	}
-	if stats.TopHosts == nil {
-		stats.TopHosts = []EDRHostEventCount{}
-	}
+		return nil
+	})
 
-	// 4. Top 10 可执行文件
-	{
+	// 4. Top 10 可执行文件(非关键)
+	g.Go(func() error {
 		start := time.Now()
-		exeRows, err := h.chConn.Query(chCtx, `
+		rows, err := h.chConn.Query(chCtx, `
 			SELECT exe, count() AS cnt
 			FROM ebpf_events
 			WHERE timestamp >= subtractHours(now(), ?) AND exe != ''
@@ -401,44 +479,53 @@ func (h *EDREventsHandler) GetEDREventStats(c *gin.Context) {
 			ORDER BY cnt DESC
 			LIMIT 10`, hours)
 		if err == nil {
-			for exeRows.Next() {
+			tmp := make([]EDRExeCount, 0, 10)
+			for rows.Next() {
 				var ec EDRExeCount
-				if scanErr := exeRows.Scan(&ec.Exe, &ec.Count); scanErr == nil {
-					stats.TopExes = append(stats.TopExes, ec)
+				if scanErr := rows.Scan(&ec.Exe, &ec.Count); scanErr == nil {
+					tmp = append(tmp, ec)
 				}
 			}
-			err = exeRows.Err()
-			exeRows.Close()
+			err = rows.Err()
+			rows.Close()
+			if err == nil && len(tmp) > 0 {
+				stats.TopExes = tmp
+			}
 		}
 		h.recordCHQuery("stats_top_exes", "ebpf_events", start, err)
-	}
-	if stats.TopExes == nil {
-		stats.TopExes = []EDRExeCount{}
-	}
+		return nil
+	})
 
-	// 5. 趋势（按小时）
-	{
+	// 5. 趋势(非关键)
+	g.Go(func() error {
 		start := time.Now()
-		trendRows, err := h.chConn.Query(chCtx, `
+		rows, err := h.chConn.Query(chCtx, `
 			SELECT toString(toStartOfHour(timestamp)) AS hour, count() AS cnt
 			FROM ebpf_events
 			WHERE timestamp >= subtractHours(now(), ?)
 			GROUP BY hour
 			ORDER BY hour ASC`, hours)
 		if err == nil {
-			for trendRows.Next() {
+			tmp := make([]EDREventTrendPoint, 0, hours)
+			for rows.Next() {
 				var tp EDREventTrendPoint
-				if scanErr := trendRows.Scan(&tp.Time, &tp.Count); scanErr == nil {
-					stats.Trend = append(stats.Trend, tp)
+				if scanErr := rows.Scan(&tp.Time, &tp.Count); scanErr == nil {
+					tmp = append(tmp, tp)
 				}
 			}
-			err = trendRows.Err()
-			trendRows.Close()
+			err = rows.Err()
+			rows.Close()
+			if err == nil && len(tmp) > 0 {
+				stats.Trend = tmp
+			}
 		}
 		h.recordCHQuery("stats_trend", "ebpf_events", start, err)
-	}
-	if stats.Trend == nil {
-		stats.Trend = []EDREventTrendPoint{}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		InternalError(c, "查询失败")
+		return
 	}
 
 	Success(c, stats)

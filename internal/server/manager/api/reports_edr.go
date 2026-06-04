@@ -12,10 +12,12 @@ package api
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
@@ -60,8 +62,11 @@ func (h *ReportsHandler) GetEDRReport(c *gin.Context) {
 
 // BuildEDRReportData 装配 EDR 报告原始数据。
 // PDF 渲染路径与 JSON API 共享同一份装配函数，避免数据漂移。
+//
+// 性能:13 个 block 串行约 11s,并发后 ~ max(各 block) ≈ 2-3s。
+// 顶层 errgroup 让 MySQL/CH 各自调度,大幅减少端到端 latency。
 func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H {
-	// === 1. 总览 ===
+	// === 1. 总览(7 个 COUNT 合 1 GROUP BY 减少 round trip)===
 	type summary struct {
 		TotalAlerts     int64
 		ActiveAlerts    int64
@@ -72,52 +77,228 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		HighRiskStories int64
 	}
 	var s summary
-	timeRange := h.db.Where("created_at >= ? AND created_at <= ?", startTime, endTime).
-		Where("source IN ?", []string{"detection", "agent"})
-	timeRange.Model(&model.Alert{}).Count(&s.TotalAlerts)
-	timeRange.Session(&gorm.Session{}).Where("status = ?", model.AlertStatusActive).Model(&model.Alert{}).Count(&s.ActiveAlerts)
-	timeRange.Session(&gorm.Session{}).Where("status = ?", model.AlertStatusResolved).Model(&model.Alert{}).Count(&s.ResolvedAlerts)
-	timeRange.Session(&gorm.Session{}).Where("status = ?", model.AlertStatusIgnored).Model(&model.Alert{}).Count(&s.IgnoredAlerts)
-	timeRange.Session(&gorm.Session{}).Model(&model.Alert{}).Distinct("host_id").Count(&s.AffectedHosts)
 
-	h.db.Model(&model.Storyline{}).
-		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
-		Count(&s.TotalStories)
-	h.db.Model(&model.Storyline{}).
-		Where("created_at >= ? AND created_at <= ? AND severity IN ?", startTime, endTime, []string{"critical", "high"}).
-		Count(&s.HighRiskStories)
+	// errgroup 顶层并发所有数据装配 block
+	g := new(errgroup.Group)
 
-	// === 2. 严重程度分布 ===
-	severityDistribution := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
-	var severityRows []struct {
-		Severity string
-		Count    int64
-	}
-	h.db.Model(&model.Alert{}).
-		Select("severity, COUNT(*) as count").
-		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
-		Where("source IN ?", []string{"detection", "agent"}).
-		Group("severity").
-		Scan(&severityRows)
-	for _, r := range severityRows {
-		if r.Severity != "" {
-			severityDistribution[r.Severity] = r.Count
+	// Block 1a: alert summary - 4 COUNT (TotalAlerts/Active/Resolved/Ignored) 合 1 个 SUM CASE GROUP BY
+	g.Go(func() error {
+		type alertCntRow struct {
+			Status string
+			Cnt    int64
 		}
-	}
+		var rows []alertCntRow
+		h.db.Model(&model.Alert{}).
+			Select("status, COUNT(*) as cnt").
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Group("status").
+			Scan(&rows)
+		for _, r := range rows {
+			s.TotalAlerts += r.Cnt
+			switch r.Status {
+			case string(model.AlertStatusActive):
+				s.ActiveAlerts = r.Cnt
+			case string(model.AlertStatusResolved):
+				s.ResolvedAlerts = r.Cnt
+			case string(model.AlertStatusIgnored):
+				s.IgnoredAlerts = r.Cnt
+			}
+		}
+		return nil
+	})
 
-	// === 3. Category 分布 ===
+	// Block 1b: 受影响主机数 (DISTINCT)
+	g.Go(func() error {
+		h.db.Model(&model.Alert{}).
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Distinct("host_id").
+			Count(&s.AffectedHosts)
+		return nil
+	})
+
+	// Block 1c: storylines COUNT(2 query 合 1 GROUP BY 也行,但 severity IN 复杂,直接 2 query 并发)
+	g.Go(func() error {
+		h.db.Model(&model.Storyline{}).
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Count(&s.TotalStories)
+		return nil
+	})
+	g.Go(func() error {
+		h.db.Model(&model.Storyline{}).
+			Where("created_at >= ? AND created_at <= ? AND severity IN ?", startTime, endTime, []string{"critical", "high"}).
+			Count(&s.HighRiskStories)
+		return nil
+	})
+
+	// === 2. 严重程度分布(并发) ===
+	severityDistribution := map[string]int64{"critical": 0, "high": 0, "medium": 0, "low": 0}
+	var severityMu sync.Mutex
+	g.Go(func() error {
+		var severityRows []struct {
+			Severity string
+			Count    int64
+		}
+		h.db.Model(&model.Alert{}).
+			Select("severity, COUNT(*) as count").
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Group("severity").
+			Scan(&severityRows)
+		severityMu.Lock()
+		for _, r := range severityRows {
+			if r.Severity != "" {
+				severityDistribution[r.Severity] = r.Count
+			}
+		}
+		severityMu.Unlock()
+		return nil
+	})
+
+	// === 3. Category 分布(并发,同时支撑 4. MITRE Tactic) ===
 	type categoryRow struct {
 		Category string
 		Count    int64
 	}
 	var categoryRows []categoryRow
-	h.db.Model(&model.Alert{}).
-		Select("category, COUNT(*) as count").
-		Where("created_at >= ? AND created_at <= ? AND category <> ''", startTime, endTime).
-		Where("source IN ?", []string{"detection", "agent"}).
-		Group("category").
-		Order("count DESC").
-		Scan(&categoryRows)
+	g.Go(func() error {
+		h.db.Model(&model.Alert{}).
+			Select("category, COUNT(*) as count").
+			Where("created_at >= ? AND created_at <= ? AND category <> ''", startTime, endTime).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Group("category").
+			Order("count DESC").
+			Scan(&categoryRows)
+		return nil
+	})
+
+	// === 5. Top 10 触发规则(并发) ===
+	type ruleRow struct {
+		Title    string
+		Category string
+		Severity string
+		Count    int64
+	}
+	var ruleRows []ruleRow
+	g.Go(func() error {
+		h.db.Model(&model.Alert{}).
+			Select("title, category, severity, SUM(hit_count) as count").
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Where("status = ?", model.AlertStatusActive).
+			Group("title, category, severity").
+			Order("count DESC").
+			Limit(10).
+			Scan(&ruleRows)
+		return nil
+	})
+
+	// === 6. Top 10 受影响主机(并发) ===
+	type hostRow struct {
+		HostID   string
+		Hostname string
+		Count    int64
+	}
+	var hostRows []hostRow
+	g.Go(func() error {
+		h.db.Raw(`
+			SELECT a.host_id, h.hostname, COUNT(*) as count
+			FROM alerts a LEFT JOIN hosts h ON a.host_id = h.host_id
+			WHERE a.created_at >= ? AND a.created_at <= ?
+			  AND a.source IN ('detection','agent')
+			  AND a.status = 'active'
+			GROUP BY a.host_id, h.hostname
+			ORDER BY count DESC LIMIT 10
+		`, startTime, endTime).Scan(&hostRows)
+		return nil
+	})
+
+	// === 7. Top 5 高风险故事线(并发) ===
+	type storyRow struct {
+		StoryID    string
+		HostID     string
+		Hostname   string
+		Phase      string
+		Severity   string
+		EventCount int
+		AlertCount int
+		// storylines.risk_score 是 decimal(5,1) → MySQL 返回字符串 "80.0",必须 float64 Scan
+		RiskScore float64
+	}
+	var storyRows []storyRow
+	g.Go(func() error {
+		h.db.Raw(`
+			SELECT s.story_id, s.host_id, h.hostname, s.phase, s.severity,
+			       s.event_count, s.alert_count, s.risk_score
+			FROM storylines s LEFT JOIN hosts h ON s.host_id = h.host_id
+			WHERE s.created_at >= ? AND s.created_at <= ?
+			ORDER BY s.risk_score DESC LIMIT 5
+		`, startTime, endTime).Scan(&storyRows)
+		return nil
+	})
+
+	// === 8. 误报抑制统计(并发) ===
+	type suppressRow struct {
+		Reason string
+		Count  int64
+	}
+	var suppressRows []suppressRow
+	g.Go(func() error {
+		h.db.Model(&model.Alert{}).
+			Select("resolve_reason as reason, COUNT(*) as count").
+			Where("created_at >= ? AND created_at <= ?", startTime, endTime).
+			Where("status = ?", model.AlertStatusIgnored).
+			Where("resolve_reason <> ''").
+			Group("resolve_reason").
+			Order("count DESC").
+			Limit(10).
+			Scan(&suppressRows)
+		return nil
+	})
+
+	// === 9. 周期趋势对比(并发) ===
+	period := endTime.Sub(startTime)
+	prevStart := startTime.Add(-period)
+	prevEnd := startTime
+	var prevTotal int64
+	g.Go(func() error {
+		h.db.Model(&model.Alert{}).
+			Where("created_at >= ? AND created_at <= ?", prevStart, prevEnd).
+			Where("source IN ?", []string{"detection", "agent"}).
+			Count(&prevTotal)
+		return nil
+	})
+
+	// === 10. Agent / 规则元数据(3 COUNT 并发) ===
+	var totalRules, enabledRules, onlineHosts int64
+	g.Go(func() error {
+		h.db.Model(&model.DetectionRule{}).Count(&totalRules)
+		return nil
+	})
+	g.Go(func() error {
+		h.db.Model(&model.DetectionRule{}).Where("enabled = ?", true).Count(&enabledRules)
+		return nil
+	})
+	g.Go(func() error {
+		h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&onlineHosts)
+		return nil
+	})
+
+	// === 11-14. CH + autoResp + IOC + ruleEfficacy(各内部已包含多 query,并发执行)===
+	var chStats edrEventStats
+	var autoResponseStats edrAutoResponseStats
+	var iocStats edrIOCStats
+	var ruleEfficacy edrRuleEfficacy
+	g.Go(func() error { chStats = h.queryEDREventStatsCH(startTime, endTime); return nil })
+	g.Go(func() error { autoResponseStats = h.queryAutoResponseStats(startTime, endTime); return nil })
+	g.Go(func() error { iocStats = h.queryIOCStats(startTime, endTime); return nil })
+	g.Go(func() error { ruleEfficacy = h.queryRuleEfficacy(startTime, endTime); return nil })
+
+	// 等所有并发完成
+	_ = g.Wait()
+
+	// === 后处理(单线程,依赖上面结果)===
 	categoryDistribution := make([]gin.H, 0, len(categoryRows))
 	for _, r := range categoryRows {
 		categoryDistribution = append(categoryDistribution, gin.H{
@@ -126,7 +307,7 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		})
 	}
 
-	// === 4. MITRE ATT&CK Tactic 分布（按 category 映射聚合） ===
+	// === 4. MITRE ATT&CK Tactic 分布(纯计算,无 query)
 	tacticDistribution := map[string]int64{}
 	for _, r := range categoryRows {
 		t, ok := mitreTacticByCategory[r.Category]
@@ -136,23 +317,6 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		tacticDistribution[t] += r.Count
 	}
 
-	// === 5. Top 10 触发规则 ===
-	type ruleRow struct {
-		Title    string
-		Category string
-		Severity string
-		Count    int64
-	}
-	var ruleRows []ruleRow
-	h.db.Model(&model.Alert{}).
-		Select("title, category, severity, SUM(hit_count) as count").
-		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
-		Where("source IN ?", []string{"detection", "agent"}).
-		Where("status = ?", model.AlertStatusActive).
-		Group("title, category, severity").
-		Order("count DESC").
-		Limit(10).
-		Scan(&ruleRows)
 	topRules := make([]gin.H, 0, len(ruleRows))
 	for _, r := range ruleRows {
 		topRules = append(topRules, gin.H{
@@ -163,22 +327,6 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		})
 	}
 
-	// === 6. Top 10 受影响主机 ===
-	type hostRow struct {
-		HostID   string
-		Hostname string
-		Count    int64
-	}
-	var hostRows []hostRow
-	h.db.Raw(`
-		SELECT a.host_id, h.hostname, COUNT(*) as count
-		FROM alerts a LEFT JOIN hosts h ON a.host_id = h.host_id
-		WHERE a.created_at >= ? AND a.created_at <= ?
-		  AND a.source IN ('detection','agent')
-		  AND a.status = 'active'
-		GROUP BY a.host_id, h.hostname
-		ORDER BY count DESC LIMIT 10
-	`, startTime, endTime).Scan(&hostRows)
 	topHosts := make([]gin.H, 0, len(hostRows))
 	for _, r := range hostRows {
 		topHosts = append(topHosts, gin.H{
@@ -188,25 +336,6 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		})
 	}
 
-	// === 7. Top 5 高风险故事线 ===
-	type storyRow struct {
-		StoryID    string
-		HostID     string
-		Hostname   string
-		Phase      string
-		Severity   string
-		EventCount int
-		AlertCount int
-		RiskScore  int
-	}
-	var storyRows []storyRow
-	h.db.Raw(`
-		SELECT s.story_id, s.host_id, h.hostname, s.phase, s.severity,
-		       s.event_count, s.alert_count, s.risk_score
-		FROM storylines s LEFT JOIN hosts h ON s.host_id = h.host_id
-		WHERE s.created_at >= ? AND s.created_at <= ?
-		ORDER BY s.risk_score DESC LIMIT 5
-	`, startTime, endTime).Scan(&storyRows)
 	topStories := make([]gin.H, 0, len(storyRows))
 	for _, r := range storyRows {
 		topStories = append(topStories, gin.H{
@@ -221,21 +350,6 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		})
 	}
 
-	// === 8. 误报抑制统计（基于 resolve_reason 字段）===
-	type suppressRow struct {
-		Reason string
-		Count  int64
-	}
-	var suppressRows []suppressRow
-	h.db.Model(&model.Alert{}).
-		Select("resolve_reason as reason, COUNT(*) as count").
-		Where("created_at >= ? AND created_at <= ?", startTime, endTime).
-		Where("status = ?", model.AlertStatusIgnored).
-		Where("resolve_reason <> ''").
-		Group("resolve_reason").
-		Order("count DESC").
-		Limit(10).
-		Scan(&suppressRows)
 	suppressionStats := make([]gin.H, 0, len(suppressRows))
 	for _, r := range suppressRows {
 		suppressionStats = append(suppressionStats, gin.H{
@@ -244,41 +358,12 @@ func (h *ReportsHandler) BuildEDRReportData(startTime, endTime time.Time) gin.H 
 		})
 	}
 
-	// === 9. 周期趋势对比（与上一同长度周期对比）===
-	period := endTime.Sub(startTime)
-	prevStart := startTime.Add(-period)
-	prevEnd := startTime
-	var prevTotal int64
-	h.db.Model(&model.Alert{}).
-		Where("created_at >= ? AND created_at <= ?", prevStart, prevEnd).
-		Where("source IN ?", []string{"detection", "agent"}).
-		Count(&prevTotal)
 	growthPct := 0.0
 	if prevTotal > 0 {
 		growthPct = float64(s.TotalAlerts-prevTotal) / float64(prevTotal) * 100
 	}
 
-	// === 10. Agent / 规则元数据 ===
-	var totalRules, enabledRules int64
-	h.db.Model(&model.DetectionRule{}).Count(&totalRules)
-	h.db.Model(&model.DetectionRule{}).Where("enabled = ?", true).Count(&enabledRules)
-	var onlineHosts int64
-	h.db.Model(&model.Host{}).Where("status = ?", "online").Count(&onlineHosts)
-
-	// === 11. ClickHouse ebpf_events 原始事件统计 ===
-	// 报告周期内 agent 上报的全部 EDR 事件（含未命中规则的）
-	chStats := h.queryEDREventStatsCH(startTime, endTime)
-
-	// === 12. 自动响应执行汇总 ===
-	autoResponseStats := h.queryAutoResponseStats(startTime, endTime)
-
-	// === 13. IOC 命中 / 内存威胁 ===
-	iocStats := h.queryIOCStats(startTime, endTime)
-
-	// === 14. 规则有效性分析 ===
-	ruleEfficacy := h.queryRuleEfficacy(startTime, endTime)
-
-	// === 15. 自动改进建议 ===
+	// === 15. 自动改进建议(纯计算,依赖前面 stats) ===
 	improvements := generateEDRImprovements(s, autoResponseStats, ruleEfficacy, chStats)
 
 	// === 组装 ===
@@ -367,7 +452,8 @@ type edrEventStats struct {
 //   - alerts 反映"检出能力"（规则覆盖 + 命中频率）
 //   - ebpf_events 反映"数据采集量"（agent 上报基线 + 主机活跃度）
 //
-// 用 CH 主键命中 + bloom filter，单次查询通常 < 200ms 即使 1B 行。
+// 5 个 CH 聚合查询并发执行(原串行最慢 stats_top_hosts 1.9s,串行总 ~3s)
+// 并发后总延迟 ≈ max ≈ 1.9s,省 1s+。
 func (h *ReportsHandler) queryEDREventStatsCH(startTime, endTime time.Time) edrEventStats {
 	stats := edrEventStats{
 		EventsByType:    []gin.H{},
@@ -382,83 +468,118 @@ func (h *ReportsHandler) queryEDREventStatsCH(startTime, endTime time.Time) edrE
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	g, _ := errgroup.WithContext(ctx)
+
 	// 1. 总事件 + 唯一主机数
-	if err := h.chConn.QueryRow(ctx, `
-		SELECT count(), uniq(host_id) FROM ebpf_events WHERE timestamp >= ? AND timestamp <= ?
-	`, startTime, endTime).Scan(&stats.TotalEvents, &stats.UniqueHosts); err != nil {
-		h.logger.Warn("CH ebpf_events 总量查询失败", zap.Error(err))
-	}
+	g.Go(func() error {
+		if err := h.chConn.QueryRow(ctx, `
+			SELECT count(), uniq(host_id) FROM ebpf_events WHERE timestamp >= ? AND timestamp <= ?
+		`, startTime, endTime).Scan(&stats.TotalEvents, &stats.UniqueHosts); err != nil {
+			h.logger.Warn("CH ebpf_events 总量查询失败", zap.Error(err))
+		}
+		return nil
+	})
 
 	// 2. 按 event_type 分布
-	if rows, err := h.chConn.Query(ctx, `
-		SELECT event_type, count() AS c FROM ebpf_events
-		WHERE timestamp >= ? AND timestamp <= ?
-		GROUP BY event_type ORDER BY c DESC
-	`, startTime, endTime); err == nil {
+	g.Go(func() error {
+		rows, err := h.chConn.Query(ctx, `
+			SELECT event_type, count() AS c FROM ebpf_events
+			WHERE timestamp >= ? AND timestamp <= ?
+			GROUP BY event_type ORDER BY c DESC
+		`, startTime, endTime)
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tmp := make([]gin.H, 0)
 		for rows.Next() {
 			var et string
 			var c uint64
 			if err := rows.Scan(&et, &c); err == nil {
-				stats.EventsByType = append(stats.EventsByType, gin.H{"event_type": et, "count": c})
+				tmp = append(tmp, gin.H{"event_type": et, "count": c})
 			}
 		}
-		rows.Close()
-	}
+		stats.EventsByType = tmp
+		return nil
+	})
 
-	// 3. 按小时分布（趋势图）
-	if rows, err := h.chConn.Query(ctx, `
-		SELECT toStartOfHour(timestamp) AS h, count() AS c FROM ebpf_events
-		WHERE timestamp >= ? AND timestamp <= ?
-		GROUP BY h ORDER BY h
-	`, startTime, endTime); err == nil {
+	// 3. 按小时分布(趋势图)
+	g.Go(func() error {
+		rows, err := h.chConn.Query(ctx, `
+			SELECT toStartOfHour(timestamp) AS h, count() AS c FROM ebpf_events
+			WHERE timestamp >= ? AND timestamp <= ?
+			GROUP BY h ORDER BY h
+		`, startTime, endTime)
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tmp := make([]gin.H, 0)
 		for rows.Next() {
 			var hour time.Time
 			var c uint64
 			if err := rows.Scan(&hour, &c); err == nil {
-				stats.EventsByHour = append(stats.EventsByHour, gin.H{
+				tmp = append(tmp, gin.H{
 					"hour":  hour.Format("2006-01-02 15:00"),
 					"count": c,
 				})
 			}
 		}
-		rows.Close()
-	}
+		stats.EventsByHour = tmp
+		return nil
+	})
 
 	// 4. Top 10 主机 by 原始事件量
-	if rows, err := h.chConn.Query(ctx, `
-		SELECT host_id, count() AS c FROM ebpf_events
-		WHERE timestamp >= ? AND timestamp <= ?
-		GROUP BY host_id ORDER BY c DESC LIMIT 10
-	`, startTime, endTime); err == nil {
+	g.Go(func() error {
+		rows, err := h.chConn.Query(ctx, `
+			SELECT host_id, count() AS c FROM ebpf_events
+			WHERE timestamp >= ? AND timestamp <= ?
+			GROUP BY host_id ORDER BY c DESC LIMIT 10
+		`, startTime, endTime)
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tmp := make([]gin.H, 0, 10)
 		for rows.Next() {
 			var hostID string
 			var c uint64
 			if err := rows.Scan(&hostID, &c); err == nil {
-				stats.TopHostsByEvent = append(stats.TopHostsByEvent, gin.H{
-					"host_id": hostID, "count": c,
-				})
+				tmp = append(tmp, gin.H{"host_id": hostID, "count": c})
 			}
 		}
-		rows.Close()
-		h.attachHostnames(stats.TopHostsByEvent)
-	}
+		stats.TopHostsByEvent = tmp
+		return nil
+	})
 
-	// 5. Top 10 exe（最活跃进程）
-	if rows, err := h.chConn.Query(ctx, `
-		SELECT exe, count() AS c FROM ebpf_events
-		WHERE timestamp >= ? AND timestamp <= ? AND exe != ''
-		GROUP BY exe ORDER BY c DESC LIMIT 10
-	`, startTime, endTime); err == nil {
+	// 5. Top 10 exe(最活跃进程)
+	g.Go(func() error {
+		rows, err := h.chConn.Query(ctx, `
+			SELECT exe, count() AS c FROM ebpf_events
+			WHERE timestamp >= ? AND timestamp <= ? AND exe != ''
+			GROUP BY exe ORDER BY c DESC LIMIT 10
+		`, startTime, endTime)
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tmp := make([]gin.H, 0, 10)
 		for rows.Next() {
 			var exe string
 			var c uint64
 			if err := rows.Scan(&exe, &c); err == nil {
-				stats.TopExe = append(stats.TopExe, gin.H{"exe": exe, "count": c})
+				tmp = append(tmp, gin.H{"exe": exe, "count": c})
 			}
 		}
-		rows.Close()
-	}
+		stats.TopExe = tmp
+		return nil
+	})
 
+	_ = g.Wait()
+	// hostname 补齐放并发外(避免与 CH 查询冲突,MySQL 调用)
+	if len(stats.TopHostsByEvent) > 0 {
+		h.attachHostnames(stats.TopHostsByEvent)
+	}
 	return stats
 }
 
@@ -669,10 +790,12 @@ func (h *ReportsHandler) queryIOCStats(startTime, endTime time.Time) edrIOCStats
 		Cnt       int64
 	}
 	var rows []rowT
+	// memory_threats 表用 threat_type (memfd_exec / deleted_exe / anonymous_exec),不存 MITRE technique
+	// 之前 SQL 写错列名 → "Unknown column 'technique' in field list" 静默吞掉,Top IOC 一直为空
 	h.db.Raw(`
-		SELECT technique, COUNT(*) AS cnt FROM memory_threats
-		WHERE created_at >= ? AND created_at <= ? AND technique <> ''
-		GROUP BY technique ORDER BY cnt DESC LIMIT 5
+		SELECT threat_type AS technique, COUNT(*) AS cnt FROM memory_threats
+		WHERE created_at >= ? AND created_at <= ? AND threat_type <> ''
+		GROUP BY threat_type ORDER BY cnt DESC LIMIT 5
 	`, startTime, endTime).Scan(&rows)
 	for _, r := range rows {
 		stats.TopIOCTypes = append(stats.TopIOCTypes, gin.H{"technique": r.Technique, "count": r.Cnt})
