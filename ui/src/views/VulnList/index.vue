@@ -90,6 +90,19 @@
 
     <div class="dashboard-card">
       <div class="card-body">
+        <!-- subscope tab 切换:业务 / 云厂商组件 / 监控探针 / 安全平台 / 系统库 / OS 包 / 全部 -->
+        <a-tabs v-model:active-key="subscopeTab" @change="handleSubscopeTabChange" style="margin-bottom: 12px">
+          <a-tab-pane key="" tab="全部" />
+          <a-tab-pane key="business_binary,business_jar" tab="🟢 业务" />
+          <a-tab-pane key="cloud_agent" tab="☁️ 云厂商组件" />
+          <a-tab-pane key="monitoring_agent" tab="📊 监控探针" />
+          <a-tab-pane key="security_agent" tab="🛡 安全平台" />
+          <a-tab-pane key="system_tool" tab="🔨 系统工具" />
+          <a-tab-pane key="os_package" tab="📦 OS 包" />
+          <a-tab-pane key="system_lib" tab="🔧 系统库" />
+          <a-tab-pane key="unknown" tab="❓ 未分类" />
+        </a-tabs>
+
         <div class="filter-bar">
           <a-input-search
             v-model:value="searchText"
@@ -327,6 +340,17 @@
               </a-tag>
             </template>
 
+            <template v-else-if="column.key === 'component'">
+              <div style="line-height: 1.4">
+                <a-tooltip :title="purlTypeFromComponent(record.component || '').tip">
+                  <a-tag :color="purlTypeFromComponent(record.component || '').color" :bordered="false" style="font-size: 10px; margin-right: 4px">
+                    {{ purlTypeFromComponent(record.component || '').type }}
+                  </a-tag>
+                </a-tooltip>
+                <span style="font-size: 12px">{{ record.component || '-' }}</span>
+              </div>
+            </template>
+
             <template v-else-if="column.key === 'category'">
               <a-tag :color="vulnCategoryConfig[effectiveCategory(record)].color" :bordered="false">
                 {{ vulnCategoryConfig[effectiveCategory(record)].text }}
@@ -352,6 +376,22 @@
               <a-tag :color="fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].color" :bordered="false">
                 {{ fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].text }}
               </a-tag>
+            </template>
+
+            <template v-else-if="column.key === 'subscope'">
+              <a-tooltip :title="subscopeConfig[firstHostSubscope(record) || 'unknown'].text">
+                <a-tag :color="subscopeConfig[firstHostSubscope(record) || 'unknown'].color" :bordered="false">
+                  {{ subscopeConfig[firstHostSubscope(record) || 'unknown'].icon }} {{ subscopeConfig[firstHostSubscope(record) || 'unknown'].text }}
+                </a-tag>
+              </a-tooltip>
+            </template>
+
+            <template v-else-if="column.key === 'source'">
+              <a-tooltip :title="record.hostBinaryPath || record.hosts?.[0]?.hostBinaryPath || '-'">
+                <span style="font-family: monospace; font-size: 12px; color: #595959">
+                  {{ shortBinary(record.hostBinaryPath || record.hosts?.[0]?.hostBinaryPath) || '—' }}
+                </span>
+              </a-tooltip>
             </template>
 
             <template v-else-if="column.key === 'restart'">
@@ -499,6 +539,7 @@ const filterStatus = ref<string>()
 const filterVulnCategory = ref<string>()
 const filterRestartAction = ref<string>()
 const filterAssetType = ref<string>()
+const filterSubscope = ref<string>()
 const filterFixOwner = ref<string>()
 const filterCWECategory = ref<string>()
 const filterComponent = ref('')
@@ -506,6 +547,14 @@ const filterExploitStatus = ref<string>()
 const filterPriority = ref<string>()
 const filterSort = ref<string>()
 const filterHostId = ref<string>()
+const subscopeTab = ref<string>('')
+
+const handleSubscopeTabChange = (key: string) => {
+  // tab key 可能含多个 subscope (业务=binary+jar) 用逗号分隔,filter 用单值时取首个
+  filterSubscope.value = key ? key.split(',')[0] : undefined
+  pagination.value.current = 1
+  loadVulns()
+}
 
 const loading = ref(false)
 const vulns = ref<Vulnerability[]>([])
@@ -554,10 +603,12 @@ const columns = [
   { title: 'CVSS', key: 'cvss', width: 70 },
   { title: '攻击类型', key: 'cwe', width: 110 },
   { title: '资产类型', key: 'assetType', width: 110 },
+  { title: '细分', key: 'subscope', width: 130 },
   { title: '责任方', key: 'fixOwner', width: 100 },
+  { title: '来源', key: 'source', width: 200 },
   { title: '优先级', key: 'priority', width: 130 },
   { title: '利用状态', key: 'exploit', width: 100 },
-  { title: '影响组件', dataIndex: 'component', key: 'component', width: 160 },
+  { title: '影响组件', dataIndex: 'component', key: 'component', width: 220 },
   { title: '类别', key: 'category', width: 110 },
   { title: '重启影响', key: 'restart', width: 130 },
   { title: '受影响主机', key: 'hosts', width: 140 },
@@ -565,6 +616,47 @@ const columns = [
   { title: '发现时间', dataIndex: 'discoveredAt', key: 'discoveredAt', width: 160 },
   { title: '操作', key: 'action', width: 120, fixed: 'right' },
 ]
+
+// Subscope 显示配置
+const subscopeConfig: Record<string, { color: string; text: string; icon: string }> = {
+  cloud_agent:      { color: 'geekblue', text: '云厂商组件',   icon: '☁️' },
+  monitoring_agent: { color: 'cyan',     text: '监控探针',     icon: '📊' },
+  security_agent:   { color: 'purple',   text: '安全平台',     icon: '🛡' },
+  system_tool:      { color: 'magenta',  text: '系统工具',     icon: '🔨' },
+  system_lib:       { color: 'orange',   text: '系统库',       icon: '🔧' },
+  os_package:       { color: 'blue',     text: 'OS 包',        icon: '📦' },
+  business_binary:  { color: 'green',    text: '业务 binary',  icon: '🟢' },
+  business_jar:     { color: 'green',    text: '业务 jar',     icon: '🟢' },
+  unknown:          { color: 'default',  text: '未分类',       icon: '❓' },
+}
+
+// PURL 前缀 → 包类型徽章
+const purlTypeFromComponent = (comp: string): { type: string; color: string; tip: string } => {
+  if (!comp) return { type: 'pkg', color: 'default', tip: '' }
+  if (comp.startsWith('pkg:')) {
+    const t = comp.split('/')[0].replace('pkg:', '')
+    return { type: t, color: 'blue', tip: 'PURL: ' + comp }
+  }
+  if (comp.includes('/')) {
+    // Go module / GitHub path
+    if (comp.startsWith('github.com/') || comp.startsWith('golang.org/') || comp.includes('go-')) {
+      return { type: 'Go 模块', color: 'cyan', tip: `Go module path: ${comp} (源码 import 路径,非主机服务)` }
+    }
+    return { type: '模块', color: 'cyan', tip: comp }
+  }
+  if (comp.includes(':') && (comp.startsWith('io.') || comp.startsWith('org.') || comp.startsWith('com.'))) {
+    return { type: 'Java jar', color: 'orange', tip: `Maven GAV: ${comp}` }
+  }
+  return { type: 'OS 包', color: 'blue', tip: comp }
+}
+
+// host_binary_path 截短显示
+const shortBinary = (path?: string): string => {
+  if (!path) return ''
+  const parts = path.split('/')
+  if (parts.length <= 3) return path
+  return '…/' + parts.slice(-2).join('/')
+}
 
 // 资产类型显示配置
 const assetTypeConfig: Record<string, { color: string; text: string; icon: string }> = {
@@ -632,6 +724,7 @@ const effectiveRestartAction = (v: Vulnerability) => v.restartActionOverride || 
 // 都没就 unknown
 const firstHostAssetType = (v: Vulnerability) => v.assetType || v.hosts?.[0]?.assetType || 'unknown'
 const firstHostFixOwner = (v: Vulnerability) => v.fixOwner || v.hosts?.[0]?.fixOwner || 'unknown'
+const firstHostSubscope = (v: Vulnerability) => v.subscope || v.hosts?.[0]?.subscope || 'unknown'
 
 // === 扫描状态 ===
 const scanStatus = ref<SecurityDBSyncRecord | null>(null)
@@ -767,6 +860,7 @@ const loadVulns = async () => {
       vuln_category: filterVulnCategory.value || undefined,
       restart_action: filterRestartAction.value || undefined,
       asset_type: filterAssetType.value || undefined,
+      subscope: filterSubscope.value || undefined,
       fix_owner: filterFixOwner.value || undefined,
       cwe_category: filterCWECategory.value || undefined,
       sort: filterSort.value || undefined,
@@ -909,10 +1003,12 @@ const handleReset = () => {
   filterVulnCategory.value = undefined
   filterRestartAction.value = undefined
   filterAssetType.value = undefined
+  filterSubscope.value = undefined
   filterFixOwner.value = undefined
   filterCWECategory.value = undefined
   filterSort.value = undefined
   filterHostId.value = undefined
+  subscopeTab.value = ''
   pagination.value.current = 1
   syncRouteQuery()
   loadVulns()

@@ -41,7 +41,10 @@ type vulnerabilityListFilter struct {
 	// AssetType 资产维度: os/middleware/app/container/image/unknown
 	// 决定 UI tab 归属和修复责任方,host_vulnerabilities 字段
 	AssetType string
-	// FixOwner 修复责任方: ops/dev/dba/sre/image_maintainer/unknown
+	// Subscope 细分: cloud_agent/monitoring_agent/security_agent/system_lib/os_package/business_binary/business_jar/unknown
+	// 区分系统组件 vs 业务漏洞,解决误报"装了 docker?"问题
+	Subscope string
+	// FixOwner 修复责任方: ops/dev/dba/sre/image_maintainer/cloud_provider/apm_vendor/platform_team/unknown
 	FixOwner string
 	// CWECategory CWE 高级分类: rce/privesc/sqli/xss/info_disclosure/dos/path_traversal/ssrf/other
 	CWECategory string
@@ -130,8 +133,8 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		query = query.Where("vulnerabilities.cwe_category = ?", filter.CWECategory)
 	}
 
-	// 资产维度 / 修复责任方筛选(P-vuln-classify):字段在 host_vulnerabilities 上,需要 join
-	if filter.AssetType != "" || filter.FixOwner != "" {
+	// 资产维度 / 修复责任方 / subscope 细分筛选(P-vuln-classify):字段在 host_vulnerabilities 上,需要 join
+	if filter.AssetType != "" || filter.FixOwner != "" || filter.Subscope != "" {
 		if filter.HostID == "" {
 			// 全局 list 时未必已 join host_vulnerabilities,补 join
 			query = query.Joins("JOIN host_vulnerabilities ahv ON ahv.vuln_id = vulnerabilities.id").
@@ -142,6 +145,9 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 			if filter.FixOwner != "" {
 				query = query.Where("ahv.fix_owner = ?", filter.FixOwner)
 			}
+			if filter.Subscope != "" {
+				query = query.Where("ahv.subscope = ?", filter.Subscope)
+			}
 		} else {
 			// 已有 hv join,直接 where
 			if filter.AssetType != "" {
@@ -149,6 +155,9 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 			}
 			if filter.FixOwner != "" {
 				query = query.Where("hv.fix_owner = ?", filter.FixOwner)
+			}
+			if filter.Subscope != "" {
+				query = query.Where("hv.subscope = ?", filter.Subscope)
 			}
 		}
 	}
@@ -260,6 +269,7 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		VulnCategory:  strings.TrimSpace(c.Query("vuln_category")),
 		RestartAction: strings.TrimSpace(c.Query("restart_action")),
 		AssetType:     strings.TrimSpace(c.Query("asset_type")),
+		Subscope:      strings.TrimSpace(c.Query("subscope")),
 		FixOwner:      strings.TrimSpace(c.Query("fix_owner")),
 		CWECategory:   strings.TrimSpace(c.Query("cwe_category")),
 		ShowAll:       c.Query("show_all") == "true",
@@ -324,17 +334,20 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 			vulnIDs[i] = v.ID
 		}
 		type aggRow struct {
-			VulnID    uint   `gorm:"column:vuln_id"`
-			AssetType string `gorm:"column:asset_type"`
-			FixOwner  string `gorm:"column:fix_owner"`
+			VulnID         uint   `gorm:"column:vuln_id"`
+			AssetType      string `gorm:"column:asset_type"`
+			Subscope       string `gorm:"column:subscope"`
+			FixOwner       string `gorm:"column:fix_owner"`
+			HostBinaryPath string `gorm:"column:host_binary_path"`
 		}
 		var aggs []aggRow
-		// 按 priority: 'app' > 'container' > 'middleware' > 'os' > 'unknown' 排序后取首条
-		// 简化:用 MAX(),'unknown' < 'os' < 'middleware' 字符串序 — 实际取任一非 unknown 即可
+		// 用 MAX() 取任一非 unknown 值,subscope/binary_path 同理(UI 提示性,非精确性要求)
 		h.db.Raw(`
 SELECT vuln_id,
   COALESCE(MAX(CASE WHEN asset_type<>'unknown' AND asset_type<>'' THEN asset_type END), 'unknown') AS asset_type,
-  COALESCE(MAX(CASE WHEN fix_owner<>'unknown' AND fix_owner<>'' THEN fix_owner END), 'unknown') AS fix_owner
+  COALESCE(MAX(CASE WHEN subscope<>'unknown' AND subscope<>'' THEN subscope END), 'unknown') AS subscope,
+  COALESCE(MAX(CASE WHEN fix_owner<>'unknown' AND fix_owner<>'' THEN fix_owner END), 'unknown') AS fix_owner,
+  COALESCE(MAX(CASE WHEN host_binary_path<>'' THEN host_binary_path END), '') AS host_binary_path
 FROM host_vulnerabilities WHERE vuln_id IN ?
 GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 		aggMap := make(map[uint]aggRow, len(aggs))
@@ -344,7 +357,9 @@ GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 		for i := range vulns {
 			if a, ok := aggMap[vulns[i].ID]; ok {
 				vulns[i].AssetType = a.AssetType
+				vulns[i].Subscope = a.Subscope
 				vulns[i].FixOwner = a.FixOwner
+				vulns[i].HostBinaryPath = a.HostBinaryPath
 			}
 		}
 	}
@@ -746,10 +761,11 @@ func (h *VulnerabilitiesHandler) GetAssetTypeStats(c *gin.Context) {
 func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 	fixOwner := strings.TrimSpace(c.Query("fix_owner"))
 	assetType := strings.TrimSpace(c.Query("asset_type"))
+	subscope := strings.TrimSpace(c.Query("subscope"))
 	businessLine := strings.TrimSpace(c.Query("business_line"))
 	severity := strings.TrimSpace(c.Query("severity"))
-	if fixOwner == "" && assetType == "" {
-		BadRequest(c, "必须指定 fix_owner 或 asset_type")
+	if fixOwner == "" && assetType == "" && subscope == "" {
+		BadRequest(c, "必须指定 fix_owner 或 asset_type 或 subscope")
 		return
 	}
 
@@ -765,7 +781,9 @@ func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 		CVSS            float64
 		CWECategory     string `gorm:"column:cwe_category"`
 		AssetType       string `gorm:"column:asset_type"`
+		Subscope        string `gorm:"column:subscope"`
 		FixOwner        string `gorm:"column:fix_owner"`
+		HostBinaryPath  string `gorm:"column:host_binary_path"`
 		VulnCategory    string `gorm:"column:vuln_category"`
 		Component       string
 		Current         string `gorm:"column:current_version"`
@@ -778,7 +796,7 @@ func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 		Select(`hv.host_id, hv.hostname, hv.ip, h.business_line,
 			bl.owner AS bl_owner, bl.contact AS bl_contact,
 			v.cve_id, v.severity, v.cvss_score AS cvss, v.cwe_category,
-			hv.asset_type, hv.fix_owner, v.vuln_category,
+			hv.asset_type, hv.subscope, hv.fix_owner, hv.host_binary_path, v.vuln_category,
 			v.component, hv.current_version, v.fixed_version,
 			v.restart_action, hv.precheck_message`).
 		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
@@ -790,6 +808,9 @@ func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 	}
 	if assetType != "" {
 		q = q.Where("hv.asset_type = ?", assetType)
+	}
+	if subscope != "" {
+		q = q.Where("hv.subscope = ?", subscope)
 	}
 	if businessLine != "" {
 		q = q.Where("h.business_line = ?", businessLine)
@@ -819,15 +840,15 @@ func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 	defer w.Flush()
 	_ = w.Write([]string{
 		"host_id", "hostname", "ip", "business_line", "business_owner", "business_contact",
-		"cve", "severity", "cvss", "cwe_category", "asset_type", "fix_owner",
-		"vuln_category", "component", "current_version", "fixed_version",
+		"cve", "severity", "cvss", "cwe_category", "asset_type", "subscope", "fix_owner",
+		"host_binary_path", "vuln_category", "component", "current_version", "fixed_version",
 		"restart_action", "precheck_message",
 	})
 	for _, r := range rows {
 		_ = w.Write([]string{
 			r.HostID, r.Hostname, r.IP, r.BusinessLine, r.BusinessOwner, r.BusinessContact,
-			r.CVE, r.Severity, fmt.Sprintf("%.1f", r.CVSS), r.CWECategory, r.AssetType, r.FixOwner,
-			r.VulnCategory, r.Component, r.Current, r.Fixed,
+			r.CVE, r.Severity, fmt.Sprintf("%.1f", r.CVSS), r.CWECategory, r.AssetType, r.Subscope, r.FixOwner,
+			r.HostBinaryPath, r.VulnCategory, r.Component, r.Current, r.Fixed,
 			r.RestartAction, r.Message,
 		})
 	}
