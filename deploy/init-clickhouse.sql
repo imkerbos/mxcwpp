@@ -129,7 +129,16 @@ CREATE TABLE IF NOT EXISTS ebpf_events (
     INDEX idx_exe exe TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4,
     INDEX idx_cmdline cmdline TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4,
     INDEX idx_remote_addr remote_addr TYPE bloom_filter(0.01) GRANULARITY 4,
-    INDEX idx_file_path file_path TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4
+    INDEX idx_file_path file_path TYPE tokenbf_v1(10240, 3, 0) GRANULARITY 4,
+
+    -- Projection: 主键 (host_id, timestamp) 导致 ORDER BY timestamp DESC LIMIT N 无法反向利用主键，
+    -- 在 1 亿+ 行规模上触发全表排序（>10s）。proj_time_desc 维护一份按 timestamp 排序的副本，
+    -- 让 ORDER BY timestamp [DESC] 走主键反向扫 → LIMIT 50 < 100ms。
+    -- 存储成本：双倍（5.78 GiB → ~12 GiB，500GB disk 完全可承受）。
+    PROJECTION proj_time_desc (
+        SELECT *
+        ORDER BY timestamp
+    )
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
 ORDER BY (host_id, timestamp)
