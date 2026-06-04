@@ -443,7 +443,33 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 		return
 	}
 
-	// Generate BDE anomaly alerts.
+	// 持久化每条偏离到 behavior_alerts 表（提供按 metric / z_score 维度的分析能力）。
+	// 与 alerts 表（通用告警，title="bde_anomaly_*"）并存：
+	//   - alerts 表 → CEL 规则引擎统一去重 + AutoResponder 联动
+	//   - behavior_alerts 表 → UI ListBehaviorAlerts API 按 BDE 维度展示 + 趋势分析
+	// 历史问题：behavior_alerts 表定义但无写入逻辑 → 0 行。
+	if r.mysql != nil {
+		if db := r.mysql.DB(); db != nil {
+			for _, dev := range result.Deviations {
+				ba := model.BehaviorAlert{
+					HostID:    msg.AgentID,
+					Hostname:  msg.Hostname,
+					RiskScore: result.RiskScore,
+					Metric:    dev.Metric,
+					Value:     dev.Value,
+					Mean:      dev.Mean,
+					Stddev:    dev.Stddev,
+					ZScore:    dev.ZScore,
+					Status:    "open",
+				}
+				if err := db.Create(&ba).Error; err != nil {
+					r.logger.Warn("写 behavior_alerts 失败", zap.Error(err))
+				}
+			}
+		}
+	}
+
+	// Generate BDE anomaly alerts (统一 alerts 表入口，参与 CEL + AutoResponder 联动).
 	if r.alertGen != nil {
 		for _, dev := range result.Deviations {
 			severity := "medium"
