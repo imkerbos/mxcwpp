@@ -196,6 +196,12 @@ export interface VulnerabilityHost {
   ip: string
   currentVersion: string
   status: string
+  // 资产维度分类: os/middleware/app/container/image/unknown (P-vuln-classify)
+  assetType?: string
+  // 修复责任方: ops/sre/dba/dev/image_maintainer/unknown
+  fixOwner?: string
+  preCheckStatus?: string
+  preCheckMessage?: string
   createdAt: string
   updatedAt: string
 }
@@ -226,6 +232,12 @@ export interface Vulnerability {
   restartAction?: string        // reboot_host/restart_dependent_services/restart_specific_service/no_action/rebuild_app/unknown
   vulnCategoryOverride?: string // admin 手动覆盖
   restartActionOverride?: string
+  // CWE 高级分类(P-vuln-classify P2): rce/privesc/sqli/xss/info_disclosure/dos/path_traversal/ssrf/other
+  cweId?: string         // 逗号分隔 e.g. "CWE-79,CWE-352"
+  cweCategory?: string
+  // 聚合自 host_vulnerabilities 的资产分类(全局列表展示用)
+  assetType?: string
+  fixOwner?: string
   createdAt?: string
   updatedAt?: string
   hosts?: VulnerabilityHost[]

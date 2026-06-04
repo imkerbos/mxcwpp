@@ -63,6 +63,11 @@ type NVDEnrichResult struct {
 	CVSSVector  string  // v3.1 vector string
 	Severity    string  // critical / high / medium / low / none(v3.1 baseSeverity 小写)
 	Description string  // 英文 description(NVD 不提供中文)
+	// CWE 弱点编号(逗号分隔),例如 "CWE-79,CWE-352"
+	// 用于产品级"漏洞类型"分类,P2 引入。
+	CWEIDs string
+	// CWECategory 高级分类(由 CWE ID 映射):rce/sqli/xss/info_disclosure/dos/privesc/path_traversal/ssrf/other
+	CWECategory string
 	Published   time.Time
 	LastMod     time.Time
 }
@@ -150,6 +155,14 @@ type nvd2Response struct {
 				CVSSMetricV30 []nvd2CVSSv3 `json:"cvssMetricV30"`
 				CVSSMetricV2  []nvd2CVSSv2 `json:"cvssMetricV2"`
 			} `json:"metrics"`
+			Weaknesses []struct {
+				Source      string `json:"source"`
+				Type        string `json:"type"`
+				Description []struct {
+					Lang  string `json:"lang"`
+					Value string `json:"value"`
+				} `json:"description"`
+			} `json:"weaknesses"`
 		} `json:"cve"`
 	} `json:"vulnerabilities"`
 }
@@ -214,5 +227,87 @@ func parseNVD2Response(cveID string, body []byte) (*NVDEnrichResult, error) {
 	if out.CVEID == "" {
 		out.CVEID = cveID
 	}
+	// CWE 解析: 收集所有英文 CWE-ID,主要类型映射到 cwe_category
+	cweSet := map[string]bool{}
+	for _, w := range v.Weaknesses {
+		for _, d := range w.Description {
+			if d.Lang == "en" && strings.HasPrefix(d.Value, "CWE-") {
+				cweSet[d.Value] = true
+			}
+		}
+	}
+	if len(cweSet) > 0 {
+		cweList := make([]string, 0, len(cweSet))
+		for k := range cweSet {
+			cweList = append(cweList, k)
+		}
+		out.CWEIDs = strings.Join(cweList, ",")
+		out.CWECategory = mapCWECategory(cweList)
+	}
 	return out, nil
+}
+
+// mapCWECategory 把 CWE-ID 列表映射到高级分类。
+// 取首个命中的高优先级分类。优先级:rce > privesc > sqli > path_traversal > ssrf > xss > info_disclosure > dos > other
+// CWE 知识来源 https://cwe.mitre.org/data/definitions/<id>.html
+func mapCWECategory(cwes []string) string {
+	rceSet := map[string]bool{
+		"CWE-94": true, "CWE-78": true, "CWE-77": true, "CWE-95": true,
+		"CWE-502": true, "CWE-434": true, "CWE-426": true, "CWE-427": true,
+		"CWE-918": true, // SSRF 也归 rce(常见 chain)
+	}
+	privescSet := map[string]bool{
+		"CWE-269": true, "CWE-250": true, "CWE-732": true, "CWE-285": true,
+		"CWE-863": true, "CWE-862": true, "CWE-271": true,
+	}
+	sqliSet := map[string]bool{
+		"CWE-89": true, "CWE-564": true,
+	}
+	pathTraversalSet := map[string]bool{
+		"CWE-22": true, "CWE-23": true, "CWE-36": true, "CWE-73": true,
+	}
+	ssrfSet := map[string]bool{
+		"CWE-918": true, "CWE-441": true,
+	}
+	xssSet := map[string]bool{
+		"CWE-79": true, "CWE-80": true, "CWE-83": true, "CWE-87": true,
+	}
+	infoDisclosureSet := map[string]bool{
+		"CWE-200": true, "CWE-209": true, "CWE-532": true, "CWE-201": true,
+		"CWE-256": true, "CWE-312": true, "CWE-522": true,
+	}
+	dosSet := map[string]bool{
+		"CWE-400": true, "CWE-405": true, "CWE-770": true, "CWE-835": true,
+		"CWE-674": true, "CWE-787": true, "CWE-125": true, // overflow/oob 多触发 dos
+		"CWE-369": true,
+	}
+
+	check := func(set map[string]bool) bool {
+		for _, c := range cwes {
+			if set[c] {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch {
+	case check(rceSet):
+		return "rce"
+	case check(privescSet):
+		return "privesc"
+	case check(sqliSet):
+		return "sqli"
+	case check(pathTraversalSet):
+		return "path_traversal"
+	case check(ssrfSet):
+		return "ssrf"
+	case check(xssSet):
+		return "xss"
+	case check(infoDisclosureSet):
+		return "info_disclosure"
+	case check(dosSet):
+		return "dos"
+	}
+	return "other"
 }

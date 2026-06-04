@@ -791,6 +791,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.GET("/vulnerabilities/stats/remediation", remHandler.GetRemediationStats)
 	router.GET("/vulnerabilities/stats/trend", remHandler.GetRemediationTrend)
 	router.GET("/vulnerabilities/stats/priority", handler.GetPriorityStats)
+	router.GET("/vulnerabilities/stats/asset-type", handler.GetAssetTypeStats)
+	router.GET("/vulnerabilities/export-by-owner", handler.ExportByOwner)
 
 	// 修复任务管理
 	taskHandler := api.NewRemediationTasksHandler(db, logger)
