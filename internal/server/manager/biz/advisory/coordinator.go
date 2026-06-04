@@ -434,6 +434,27 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 		"confidence":      vuln.Confidence,
 		"affected_hosts":  vuln.AffectedHosts,
 	}
+
+	// 防止 OS source 覆盖 ecosystem source 的 vulnerabilities.source。
+	//
+	// 历史 bug：debian-tracker (confidence=high) sync 同 cveID 时，
+	// upsertVuln Assign 把 OSV (confidence=medium) 写入的 source="osv" 覆盖为
+	// source="debian-tracker"。后续 CleanupHostVulnFP 看到 debian source 关联
+	// rocky host → 误判跨 OS → 删 host_vuln。结果 OSV 发现的 Java/npm 漏洞被错删。
+	//
+	// 修复：若 OS source advisory 的 cveID 在 DB 已有 PURL 字段（说明 OSV/语言包路径
+	// 已先入库），不覆盖 source / purl / osv_id 等 ecosystem 维度字段，仅补 metadata
+	// （description / cvss / severity 等）。
+	if entry.source != "osv" && entry.source != "nvd" && adv.Ecosystem == "" {
+		var existing model.Vulnerability
+		err := c.db.Where("cve_id = ?", cveID).Select("id, source, purl").First(&existing).Error
+		if err == nil && existing.PURL != "" && strings.HasPrefix(existing.PURL, "pkg:") {
+			// 已被 OSV/PURL 路径写过：保留 ecosystem source 字段
+			delete(assign, "source")
+			// component 也不覆盖（OSV PURL 包名更精确，OS source 的 component 是 OS pkg 名）
+			delete(assign, "component")
+		}
+	}
 	// OSV 字段仅在非空时回写（避免 OS source 覆盖 OSV 已写入的 osv_id 等）
 	if adv.OsvID != "" {
 		assign["osv_id"] = vuln.OsvID

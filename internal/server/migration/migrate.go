@@ -113,6 +113,12 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("漏洞分类回填失败", zap.Error(err))
 	}
 
+	// 修历史 vuln source 字段被 OS source 错误覆盖（OSV 写入后 debian-tracker 覆盖）
+	// 需放在 CleanupHostVulnFP 之前，否则 cleanup 会把 OSV 命中的 host_vuln 误删
+	if err := migrateFixOverwrittenEcosystemSource(db, logger); err != nil {
+		logger.Warn("vuln source 字段修复失败", zap.Error(err))
+	}
+
 	// 清理 v2.5.0 之前 ScanAll 留下的跨 OS host_vuln 误报 + OSS-Fuzz 噪音
 	if err := migrateCleanupLegacyHostVuln(db, logger); err != nil {
 		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
