@@ -194,16 +194,20 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 
 	// 创建连接对象
 	conn := &Connection{
-		AgentID:   agentID,
-		Hostname:  firstData.Hostname,
-		IPv4:      append(firstData.IntranetIpv4, firstData.ExtranetIpv4...),
-		IPv6:      append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
-		Version:   firstData.Version,
-		LastSeen:  time.Now(),
-		stream:    stream,
-		ctx:       ctx,
-		cancel:    cancel,
-		sendCh:    make(chan *grpcProto.Command, 10),
+		AgentID:  agentID,
+		Hostname: firstData.Hostname,
+		IPv4:     append(firstData.IntranetIpv4, firstData.ExtranetIpv4...),
+		IPv6:     append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
+		Version:  firstData.Version,
+		LastSeen: time.Now(),
+		stream:   stream,
+		ctx:      ctx,
+		cancel:   cancel,
+		// sendCh 容量 100: precheck cron 单 host 单 tick 可投 200 条 task,
+		// 加上 plugin update/rule sync/heartbeat ack 共用此 ch,
+		// 容量过小(原 10)会导致 agent stream 短暂卡住时 SendCommand 立即 drop,
+		// 影响 update push 等关键命令投递。
+		sendCh:    make(chan *grpcProto.Command, 100),
 		workerSem: make(chan struct{}, 10),
 	}
 
