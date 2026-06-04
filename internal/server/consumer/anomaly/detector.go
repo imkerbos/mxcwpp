@@ -319,8 +319,8 @@ func topDeviations(metrics, mean []float64, n int) []model.ElevatedMetric {
 			continue
 		}
 		ratio := v / mean[i]
-		if ratio < 1 {
-			continue // 只关注超出均值的偏离
+		if ratio <= 1 {
+			continue // 严格超出均值才算偏离；ratio=1 等于历史均值，不是异常信号
 		}
 		items = append(items, devItem{idx: i, ratio: ratio})
 	}
