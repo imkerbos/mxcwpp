@@ -46,15 +46,17 @@ WHERE (hv.asset_type IS NULL OR hv.asset_type = '' OR hv.asset_type = 'unknown')
 		return err
 	}
 
-	// Step 3: scope=system + handler=rpm/dpkg/apk/pacman → asset_type=os
+	// Step 3: scope=system + handler=rpm/dpkg/apk/pacman 或 handler 空 → asset_type=os
+	// handler 空兜底:旧 collector 1.2.0- 不写 source_handler,默认按 OS 包处理
 	if err := db.Exec(`
 UPDATE host_vulnerabilities hv
 JOIN vulnerabilities v ON v.id = hv.vuln_id
 JOIN software s ON s.host_id = hv.host_id AND s.name = v.component
 SET hv.asset_type = 'os'
 WHERE (hv.asset_type IS NULL OR hv.asset_type = '' OR hv.asset_type = 'unknown')
-  AND s.scope = 'system'
-  AND s.source_handler IN ('rpm', 'dpkg', 'apk', 'pacman', 'portage')
+  AND (s.scope = 'system' OR s.scope IS NULL OR s.scope = '')
+  AND (s.source_handler IN ('rpm', 'dpkg', 'apk', 'pacman', 'portage')
+       OR s.source_handler IS NULL OR s.source_handler = '')
 `).Error; err != nil {
 		return err
 	}

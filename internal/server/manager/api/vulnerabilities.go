@@ -45,7 +45,10 @@ type vulnerabilityListFilter struct {
 	FixOwner string
 	// CWECategory CWE 高级分类: rce/privesc/sqli/xss/info_disclosure/dos/path_traversal/ssrf/other
 	CWECategory string
-	Sort        string // priority_score / cvss_score
+	// ShowAll true 显示所有 vuln(含 advisory orphan 库存); 默认 false 只显示集群有主机命中的
+	// 解决用户疑惑:99% advisory inventory orphan 漏洞混在主列表里看着乱
+	ShowAll bool
+	Sort    string // priority_score / cvss_score
 }
 
 func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityListFilter) *gorm.DB {
@@ -55,6 +58,10 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		query = query.Joins("JOIN host_vulnerabilities hv ON hv.vuln_id = vulnerabilities.id")
 		query = query.Where("hv.host_id = ?", filter.HostID)
 		query = query.Group("vulnerabilities.id")
+	} else if !filter.ShowAll {
+		// 默认隐藏 orphan advisory:只显示集群有主机命中的 vuln
+		// (vulnerabilities.affected_hosts 字段不可信,有 stale 风险,用 EXISTS 实查)
+		query = query.Where("EXISTS (SELECT 1 FROM host_vulnerabilities WHERE host_vulnerabilities.vuln_id = vulnerabilities.id)")
 	}
 
 	if filter.Search != "" {
@@ -255,6 +262,7 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		AssetType:     strings.TrimSpace(c.Query("asset_type")),
 		FixOwner:      strings.TrimSpace(c.Query("fix_owner")),
 		CWECategory:   strings.TrimSpace(c.Query("cwe_category")),
+		ShowAll:       c.Query("show_all") == "true",
 		Sort:          strings.TrimSpace(c.Query("sort")),
 	}
 	if page <= 0 {
@@ -305,6 +313,39 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 	for i := range vulns {
 		if filter.HostID != "" {
 			vulns[i].AffectedHosts = len(vulns[i].Hosts)
+		}
+	}
+
+	// 聚合 asset_type / fix_owner 到 vulnerability 顶层(全局列表 hosts 数组为空时用)
+	// 取 GROUP BY vuln_id 的 MAX(asset_type)/MAX(fix_owner): 同 vuln 在多 host 一般同 asset_type
+	if len(vulns) > 0 {
+		vulnIDs := make([]uint, len(vulns))
+		for i, v := range vulns {
+			vulnIDs[i] = v.ID
+		}
+		type aggRow struct {
+			VulnID    uint   `gorm:"column:vuln_id"`
+			AssetType string `gorm:"column:asset_type"`
+			FixOwner  string `gorm:"column:fix_owner"`
+		}
+		var aggs []aggRow
+		// 按 priority: 'app' > 'container' > 'middleware' > 'os' > 'unknown' 排序后取首条
+		// 简化:用 MAX(),'unknown' < 'os' < 'middleware' 字符串序 — 实际取任一非 unknown 即可
+		h.db.Raw(`
+SELECT vuln_id,
+  COALESCE(MAX(CASE WHEN asset_type<>'unknown' AND asset_type<>'' THEN asset_type END), 'unknown') AS asset_type,
+  COALESCE(MAX(CASE WHEN fix_owner<>'unknown' AND fix_owner<>'' THEN fix_owner END), 'unknown') AS fix_owner
+FROM host_vulnerabilities WHERE vuln_id IN ?
+GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
+		aggMap := make(map[uint]aggRow, len(aggs))
+		for _, a := range aggs {
+			aggMap[a.VulnID] = a
+		}
+		for i := range vulns {
+			if a, ok := aggMap[vulns[i].ID]; ok {
+				vulns[i].AssetType = a.AssetType
+				vulns[i].FixOwner = a.FixOwner
+			}
 		}
 	}
 
