@@ -214,13 +214,15 @@ import { ref, reactive, onMounted } from 'vue'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { edrApi } from '@/api/edr'
 import type { EDREvent, EDREventStats } from '@/api/types'
+import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 
 const loading = ref(false)
 const events = ref<EDREvent[]>([])
 const detailVisible = ref(false)
 const selectedEvent = ref<EDREvent | null>(null)
-const dateRange = ref<[Dayjs, Dayjs] | null>(null)
+// 默认查最近 24h（ebpf_events 表 7000万+ 行，无时间窗会全表扫超时）
+const dateRange = ref<[Dayjs, Dayjs] | null>([dayjs().subtract(1, 'day'), dayjs()])
 const statsHours = ref(24)
 
 const stats = reactive<EDREventStats>({
@@ -241,8 +243,9 @@ const filters = reactive({
   data_type: undefined as number | undefined,
   remote_addr: '',
   pid: '',
-  date_from: undefined as string | undefined,
-  date_to: undefined as string | undefined,
+  // 与 dateRange 同步：默认最近 24h，避免全表扫超时
+  date_from: dayjs().subtract(1, 'day').format('YYYY-MM-DD') as string | undefined,
+  date_to: dayjs().format('YYYY-MM-DD') as string | undefined,
 })
 
 const pagination = reactive({
