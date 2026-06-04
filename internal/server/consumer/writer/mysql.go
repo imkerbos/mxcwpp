@@ -624,6 +624,13 @@ func (w *MySQLWriter) WriteQuarantineResult(msg *kafka.MQMessage) error {
 }
 
 // WriteMemoryThreat persists a memory threat detection event (DataType 3004).
+//
+// Server-side dedup:同 host + exe + threat_type 24h 内已存在 open alert 则跳过。
+// agent 端已有 (exe, threat_type) 24h dedup,server 端再加一层防止 agent 重启 / 多 agent
+// 实例情况下的重复写入。
+//
+// memfd_exec 严重度从 critical 降到 high — prod 实测 dbus/runc 类 memfd_exec 极常见,
+// critical 级别误导 SOC 关注。真 fileless malware 由 anonymous_exec(3+ rwx region) 标 critical。
 func (w *MySQLWriter) WriteMemoryThreat(msg *kafka.MQMessage) error {
 	fields, err := ParseRecordFields(msg.Body)
 	if err != nil {
@@ -632,21 +639,43 @@ func (w *MySQLWriter) WriteMemoryThreat(msg *kafka.MQMessage) error {
 
 	severity := "high"
 	switch fields["threat_type"] {
+	case "anonymous_exec":
+		severity = "critical" // 多个 rwx region,fileless shellcode 典型特征
 	case "memfd_exec":
-		severity = "critical"
-	case "deleted_exe", "anonymous_exec":
+		severity = "medium" // prod 大量正常进程触发,降级
+	case "deleted_exe":
 		severity = "high"
 	}
 
+	hostID := msg.AgentID
+	exe := fields["exe"]
+	threatType := fields["threat_type"]
+
+	// 24h dedup:同 host + exe + threat_type 已 open 则跳过(走 created_at + host_id index)
+	if hostID != "" && exe != "" && threatType != "" {
+		var cnt int64
+		cutoff := time.Now().Add(-24 * time.Hour)
+		err := w.db.Model(&model.MemoryThreat{}).
+			Where("host_id = ? AND exe = ? AND threat_type = ? AND status = ? AND created_at >= ?",
+				hostID, exe, threatType, "open", cutoff).
+			Limit(1).
+			Count(&cnt).Error
+		if err != nil {
+			w.logger.Warn("memory_threat dedup query failed,放行写入", zap.Error(err))
+		} else if cnt > 0 {
+			return nil // dedup 命中,丢弃此事件
+		}
+	}
+
 	record := &model.MemoryThreat{
-		HostID:     msg.AgentID,
+		HostID:     hostID,
 		Hostname:   msg.Hostname,
-		ThreatType: fields["threat_type"],
+		ThreatType: threatType,
 		Severity:   severity,
 		PID:        fields["pid"],
 		PPID:       fields["ppid"],
 		UID:        fields["uid"],
-		Exe:        fields["exe"],
+		Exe:        exe,
 		Cmdline:    fields["cmdline"],
 		Detail:     fields["detail"],
 		StoryID:    fields["story_id"],
