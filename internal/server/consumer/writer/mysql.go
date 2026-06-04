@@ -651,13 +651,16 @@ func (w *MySQLWriter) WriteMemoryThreat(msg *kafka.MQMessage) error {
 	exe := fields["exe"]
 	threatType := fields["threat_type"]
 
-	// 24h dedup:同 host + exe + threat_type 已 open 则跳过(走 created_at + host_id index)
+	// 24h dedup:同 host + exe + threat_type 24h 内任何 status 已有记录则跳过。
+	// 注意 status 不限 open — SOC 标 fp / resolved 后,24h 内同 exe 再触发也应 dedup
+	// (避免 fp 标记后又重新冒出 open 记录,SOC 处置无效)。
+	// 真新威胁:24h 后窗口外新触发能正常写入。
 	if hostID != "" && exe != "" && threatType != "" {
 		var cnt int64
 		cutoff := time.Now().Add(-24 * time.Hour)
 		err := w.db.Model(&model.MemoryThreat{}).
-			Where("host_id = ? AND exe = ? AND threat_type = ? AND status = ? AND created_at >= ?",
-				hostID, exe, threatType, "open", cutoff).
+			Where("host_id = ? AND exe = ? AND threat_type = ? AND created_at >= ?",
+				hostID, exe, threatType, cutoff).
 			Limit(1).
 			Count(&cnt).Error
 		if err != nil {
