@@ -84,10 +84,14 @@ export const vulnerabilitiesApi = {
     restart_action?: string // P5.5: reboot_host/restart_specific_service/...
     // 资产维度分类(P-vuln-classify): os/middleware/app/container/image/unknown
     asset_type?: string
-    // 修复责任方: ops/sre/dba/dev/image_maintainer/unknown
+    // 细分(P-vuln-classify Phase4): cloud_agent/monitoring_agent/security_agent/system_tool/system_lib/os_package/business_binary/business_jar
+    subscope?: string
+    // 修复责任方: ops/sre/dba/dev/image_maintainer/cloud_provider/apm_vendor/platform_team/unknown
     fix_owner?: string
     // CWE 高级分类: rce/privesc/sqli/xss/info_disclosure/dos/path_traversal/ssrf/other
     cwe_category?: string
+    // 显示所有(含 advisory orphan 库存),默认仅集群命中
+    show_all?: boolean
     sort?: string
   }) => {
     return apiClient.get<VulnerabilityListResult>('/vulnerabilities', { params })
