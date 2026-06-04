@@ -120,9 +120,16 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 	}
 
 	// 清理 v2.5.0 之前 ScanAll 留下的跨 OS host_vuln 误报 + OSS-Fuzz 噪音
-	if err := migrateCleanupLegacyHostVuln(db, logger); err != nil {
-		logger.Warn("legacy host_vuln 清理失败", zap.Error(err))
-	}
+	// 改为后台 goroutine 跑:涉及 host_vulnerabilities × software 60M+ 行 JOIN,
+	// 单次 cleanup 60-90s,会阻塞 HTTP server 启动 → manager unhealthy。
+	// 这是 housekeeping 数据修复,无业务实时性要求,后台跑即可。
+	go func() {
+		if err := migrateCleanupLegacyHostVuln(db, logger); err != nil {
+			logger.Warn("legacy host_vuln 清理失败(异步)", zap.Error(err))
+		} else {
+			logger.Info("legacy host_vuln 异步清理完成")
+		}
+	}()
 
 	// 扩 advisory_packages.source_advisory_id varchar(64)→255（Alpine 拼接 ID 易超 64）
 	if err := migrateAdvisoryPackagesSourceAdvisoryID(db, logger); err != nil {
