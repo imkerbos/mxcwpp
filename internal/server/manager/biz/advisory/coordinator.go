@@ -47,7 +47,14 @@ type Coordinator struct {
 	sources []Source
 	matcher Matcher
 	checker EnabledChecker // 可选：注入 enabled 检查与状态回写
+
+	// onVulnUpserted 可选回调：upsertVuln 成功后调用。
+	// 用途：异步创建 VulnBulletin、发送通知等。callback 必须自己 recover panic。
+	onVulnUpserted func(vuln *model.Vulnerability, adv *Advisory)
 }
+
+// VulnUpsertCallback upsertVuln 成功后的回调签名。
+type VulnUpsertCallback func(vuln *model.Vulnerability, adv *Advisory)
 
 // NewCoordinator 构造默认 Coordinator，注册全部 5 个 source + DefaultMatcher。
 func NewCoordinator(db *gorm.DB, logger *zap.Logger) *Coordinator {
@@ -88,6 +95,26 @@ func (c *Coordinator) WithMatcher(m Matcher) *Coordinator {
 func (c *Coordinator) WithEnabledChecker(ck EnabledChecker) *Coordinator {
 	c.checker = ck
 	return c
+}
+
+// WithVulnUpsertCallback 注入 upsertVuln 成功回调（异步 bulletin / 通知钩子）。
+func (c *Coordinator) WithVulnUpsertCallback(cb VulnUpsertCallback) *Coordinator {
+	c.onVulnUpserted = cb
+	return c
+}
+
+// FindPURLSource 找出第一个实现 PURLSource 的 source，按 name 匹配。
+// 主要给 SyncByPURLs 用：当前仅 OSVSource 实现 PURLSource。
+func (c *Coordinator) FindPURLSource(name string) PURLSource {
+	for _, s := range c.sources {
+		if s.Name() != name {
+			continue
+		}
+		if ps, ok := s.(PURLSource); ok {
+			return ps
+		}
+	}
+	return nil
 }
 
 // Sync 拉取所有 source 自 since 起的 advisory，匹配 hosts 后入库。
@@ -348,6 +375,9 @@ func confidenceRank(c Confidence) int {
 }
 
 // upsertVuln 写入 vulnerabilities + host_vulnerabilities。
+//
+// 对 PURL-based advisory（OSV，含 OsvID/PURL/AttackVector/VulnType/AffectedVersions）
+// 额外写这 5 个列；OS advisory 字段为空，覆写空也无碍（旧值不会被 dirty）。
 func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 	if entry == nil {
 		return nil
@@ -360,43 +390,69 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 		component = adv.AffectedPkgs[0].Name
 		fixedVer = adv.AffectedPkgs[0].FixedVersion
 	}
-	if len(entry.affectedHosts) > 0 {
+	// PURL-based source（OSV）：优先用 advisory.CurrentVersion（命中 PURL 携带的版本）
+	if adv.CurrentVersion != "" {
+		currentVer = adv.CurrentVersion
+	} else if len(entry.affectedHosts) > 0 {
 		currentVer = entry.affectedHosts[0].InstalledVer
 	}
 
 	vuln := &model.Vulnerability{
-		CveID:          cveID,
-		Severity:       string(adv.Severity),
-		CvssScore:      adv.CVSSScore,
-		CvssVector:     adv.CVSSVector,
-		Component:      component,
-		Description:    adv.Description,
-		Status:         "unpatched",
-		DiscoveredAt:   model.LocalTime(adv.IssuedAt),
-		CurrentVersion: currentVer,
-		FixedVersion:   fixedVer,
-		ReferenceUrl:   adv.ReferenceURL,
-		Source:         entry.source,
-		PatchAvailable: fixedVer != "",
-		Confidence:     string(entry.confidence),
-		AffectedHosts:  len(entry.affectedHosts),
+		CveID:            cveID,
+		OsvID:            adv.OsvID,
+		PURL:             adv.PURL,
+		Severity:         string(adv.Severity),
+		CvssScore:        adv.CVSSScore,
+		CvssVector:       adv.CVSSVector,
+		AttackVector:     adv.AttackVector,
+		VulnType:         adv.VulnType,
+		AffectedVersions: adv.AffectedVersions,
+		Component:        component,
+		Description:      adv.Description,
+		Status:           "unpatched",
+		DiscoveredAt:     model.LocalTime(adv.IssuedAt),
+		CurrentVersion:   currentVer,
+		FixedVersion:     fixedVer,
+		ReferenceUrl:     adv.ReferenceURL,
+		Source:           entry.source,
+		PatchAvailable:   fixedVer != "",
+		Confidence:       string(entry.confidence),
+		AffectedHosts:    len(entry.affectedHosts),
+	}
+
+	assign := map[string]any{
+		"severity":        vuln.Severity,
+		"cvss_score":      vuln.CvssScore,
+		"cvss_vector":     vuln.CvssVector,
+		"component":       vuln.Component,
+		"description":     vuln.Description,
+		"current_version": vuln.CurrentVersion,
+		"fixed_version":   vuln.FixedVersion,
+		"reference_url":   vuln.ReferenceUrl,
+		"source":          vuln.Source,
+		"patch_available": vuln.PatchAvailable,
+		"confidence":      vuln.Confidence,
+		"affected_hosts":  vuln.AffectedHosts,
+	}
+	// OSV 字段仅在非空时回写（避免 OS source 覆盖 OSV 已写入的 osv_id 等）
+	if adv.OsvID != "" {
+		assign["osv_id"] = vuln.OsvID
+	}
+	if adv.PURL != "" {
+		assign["purl"] = vuln.PURL
+	}
+	if adv.AttackVector != "" {
+		assign["attack_vector"] = vuln.AttackVector
+	}
+	if adv.VulnType != "" {
+		assign["vuln_type"] = vuln.VulnType
+	}
+	if adv.AffectedVersions != "" {
+		assign["affected_versions"] = vuln.AffectedVersions
 	}
 
 	if err := c.db.Where("cve_id = ?", cveID).
-		Assign(map[string]any{
-			"severity":        vuln.Severity,
-			"cvss_score":      vuln.CvssScore,
-			"cvss_vector":     vuln.CvssVector,
-			"component":       vuln.Component,
-			"description":     vuln.Description,
-			"current_version": vuln.CurrentVersion,
-			"fixed_version":   vuln.FixedVersion,
-			"reference_url":   vuln.ReferenceUrl,
-			"source":          vuln.Source,
-			"patch_available": vuln.PatchAvailable,
-			"confidence":      vuln.Confidence,
-			"affected_hosts":  vuln.AffectedHosts,
-		}).
+		Assign(assign).
 		FirstOrCreate(vuln).Error; err != nil {
 		return fmt.Errorf("upsert vuln: %w", err)
 	}
@@ -422,6 +478,11 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 				zap.String("host_id", a.HostID),
 				zap.Error(err))
 		}
+	}
+
+	// 触发可选回调（异步通报 / 通知）
+	if c.onVulnUpserted != nil {
+		c.onVulnUpserted(vuln, adv)
 	}
 	return nil
 }
@@ -498,4 +559,175 @@ func (c *Coordinator) bulkUpsertAdvisoryPackages(merged map[string]*mergedVuln) 
 		return 0
 	}
 	return len(rows)
+}
+
+// PURLPkgInfo 单个 PURL 命中后用于写 host_vuln 的元信息。
+type PURLPkgInfo struct {
+	PkgName  string   // pkg 名（写 vulnerabilities.component）
+	Version  string   // 当前装版本（写 host_vulnerabilities.current_version）
+	HostIDs  []string // 命中该 PURL 的所有 host_id
+	Hostname map[string]string
+	IP       map[string]string
+}
+
+// SyncByPURLs PURL 模式漏洞同步路径（OSV / 未来 GHSA 等）。
+//
+// 与 Sync 不同：
+//   - 数据来源：PURLSource.FetchByPURLs（按 PURL 查 osv.dev）
+//   - host 关联：直接用 purlPkgInfo[purl].HostIDs（PURL 已精确）
+//     不走 matcher gate（matcher 用于时间增量 advisory，PURL 自带精确性）
+//   - 仍走 upsertVuln + bulkUpsertAdvisoryPackages 同一 DB 写路径
+//   - 触发 onVulnUpserted callback（bulletin / 通知）
+//
+// 参数：
+//
+//	purls         去重 PURL 列表（调用方应已 FilterOSVPURLs）
+//	purlPkgInfo   purl → PURLPkgInfo（host_id 关联 + pkg 名/版本）
+//	knownVulnIDs  已入库 vuln ID 集合（OSVSource 跳过 detail HTTP 用，可为 nil）
+//	sourceName    要使用的 PURLSource 名（一般 "osv"）
+//
+// 返回：处理 PURL 数 + upsert vuln 数 + 写入 host_vuln 关联数。
+func (c *Coordinator) SyncByPURLs(ctx context.Context, sourceName string, purls []string,
+	purlPkgInfo map[string]PURLPkgInfo, knownVulnIDs map[string]struct{}) (purlCount, vulnCount, hostVulnCount int, err error) {
+	src := c.FindPURLSource(sourceName)
+	if src == nil {
+		return 0, 0, 0, fmt.Errorf("PURLSource %q not registered", sourceName)
+	}
+
+	// 注入 known IDs（仅 OSVSource 内部使用此优化）
+	if osv, ok := src.(*OSVSource); ok && knownVulnIDs != nil {
+		osv.WithKnownVulnIDs(knownVulnIDs)
+	}
+
+	c.logger.Info("PURL 漏洞同步开始", zap.String("source", sourceName), zap.Int("purl_count", len(purls)))
+	srcStart := time.Now()
+	if c.checker != nil {
+		c.checker.MarkRunning(sourceName)
+	}
+
+	purlToAdvs, ferr := src.FetchByPURLs(ctx, purls)
+	if ferr != nil {
+		if c.checker != nil {
+			c.checker.MarkFailed(sourceName, ferr)
+		}
+		return 0, 0, 0, fmt.Errorf("PURLSource fetch: %w", ferr)
+	}
+
+	// 统计 advisory 总数（含 known minimal entries）
+	var totalAdv int
+	for _, advs := range purlToAdvs {
+		totalAdv += len(advs)
+	}
+
+	// 写入：每个 PURL 的每条 advisory 关联其 PURL 命中的所有 host_id
+	// 同 CVE 重复出现时 upsertVuln 会 update（ON DUPLICATE KEY）
+	mergedForAP := make(map[string]*mergedVuln) // 仅供 bulkUpsertAdvisoryPackages 用
+	for purl, advs := range purlToAdvs {
+		info, ok := purlPkgInfo[purl]
+		if !ok || len(info.HostIDs) == 0 {
+			continue
+		}
+		for _, adv := range advs {
+			if adv == nil {
+				continue
+			}
+			affected := make([]AffectedHost, 0, len(info.HostIDs))
+			for _, hid := range info.HostIDs {
+				affected = append(affected, AffectedHost{
+					HostID:       hid,
+					PkgName:      info.PkgName,
+					InstalledVer: info.Version,
+					NeedsUpdate:  true,
+				})
+			}
+			// affected.FixedVersion: 取 advisory 第一个 fix（detailToAdvisory 已填）
+			if len(adv.AffectedPkgs) > 0 {
+				fv := adv.AffectedPkgs[0].FixedVersion
+				for i := range affected {
+					affected[i].FixedVersion = fv
+				}
+			}
+
+			entry := &mergedVuln{
+				advisory:      adv,
+				confidence:    src.Confidence(),
+				source:        src.Name(),
+				affectedHosts: affected,
+				allAdvisories: []sourcedAdvisory{{src: src, advisory: adv, confidence: src.Confidence()}},
+			}
+			purlCount++
+
+			// minimal advisory（known ID 无 detail）跳过 upsertVuln，仅做 host_vuln 关联
+			if len(adv.CVEIDs) == 0 && adv.AffectedPkgs == nil {
+				if hvAdded := c.relinkHostVulnByOsvID(adv.OsvID, affected); hvAdded > 0 {
+					hostVulnCount += hvAdded
+				}
+				continue
+			}
+
+			for _, cveID := range adv.CVEIDs {
+				if err := c.upsertVuln(cveID, entry); err != nil {
+					c.logger.Warn("upsert vuln 失败", zap.String("cve", cveID), zap.Error(err))
+					continue
+				}
+				vulnCount++
+				hostVulnCount += len(affected)
+				mergedForAP[cveID] = entry
+			}
+		}
+	}
+
+	// advisory_packages 批量 upsert（PURL 模式下 OS 字段空，仅入 ecosystem 维度）
+	apStart := time.Now()
+	if apRows := c.bulkUpsertAdvisoryPackages(mergedForAP); apRows > 0 {
+		c.logger.Info("advisory_packages PURL 批量 upsert 完成",
+			zap.Int("rows", apRows),
+			zap.Duration("cost", time.Since(apStart)))
+	}
+
+	if c.checker != nil {
+		c.checker.MarkSuccess(sourceName, int64(totalAdv), time.Since(srcStart))
+	}
+	c.logger.Info("PURL 漏洞同步完成",
+		zap.String("source", sourceName),
+		zap.Int("purl_count", purlCount),
+		zap.Int("vuln_upsert", vulnCount),
+		zap.Int("host_vuln_links", hostVulnCount),
+		zap.Duration("cost", time.Since(srcStart)))
+	return purlCount, vulnCount, hostVulnCount, nil
+}
+
+// relinkHostVulnByOsvID 对 minimal advisory（仅 OsvID + PURL），找现有 vulnerabilities 行 ID
+// 后写入 host_vuln 关联。命中 0 行不报错（advisory 可能尚未入库）。
+func (c *Coordinator) relinkHostVulnByOsvID(osvID string, affected []AffectedHost) int {
+	if osvID == "" {
+		return 0
+	}
+	var vulnIDs []uint
+	c.db.Model(&model.Vulnerability{}).
+		Where("osv_id = ? OR cve_id = ?", osvID, osvID).
+		Pluck("id", &vulnIDs)
+	if len(vulnIDs) == 0 {
+		return 0
+	}
+	added := 0
+	for _, vid := range vulnIDs {
+		for _, a := range affected {
+			hv := &model.HostVulnerability{
+				VulnID:         vid,
+				HostID:         a.HostID,
+				CurrentVersion: a.InstalledVer,
+				Status:         "unpatched",
+			}
+			if err := c.db.Where("vuln_id = ? AND host_id = ?", vid, a.HostID).
+				Assign(map[string]any{
+					"current_version": hv.CurrentVersion,
+					"status":          hv.Status,
+				}).
+				FirstOrCreate(hv).Error; err == nil {
+				added++
+			}
+		}
+	}
+	return added
 }
