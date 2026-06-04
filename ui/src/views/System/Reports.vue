@@ -1046,9 +1046,9 @@ onUnmounted(() => {
   align-items: center;
   margin-bottom: 20px;
   padding: 16px 20px;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  background: var(--mxsec-card-bg);
   border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--mxsec-border);
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
@@ -1071,10 +1071,10 @@ onUnmounted(() => {
 
 .reports-tabs {
   margin-bottom: 20px;
-  background: #ffffff;
+  background: var(--mxsec-card-bg);
   padding: 4px 16px 0 16px;
   border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--mxsec-border);
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 
   :deep(.ant-tabs-nav) {
