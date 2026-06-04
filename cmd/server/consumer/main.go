@@ -258,7 +258,7 @@ func main() {
 	router.SetStorylineEngine(storyEngine)
 
 	// 初始化 ML 异常检测引擎（IForest + 关联检测）
-	anomalyDet := anomaly.NewDetector(db, logger.Named("anomaly"))
+	anomalyDet := anomaly.NewDetector(db, chConn, logger.Named("anomaly"))
 	anomalyDet.StartRetrain(ctx.Done())
 	router.SetAnomalyDetector(anomalyDet)
 	logger.Info("ML 异常检测引擎已启动")
