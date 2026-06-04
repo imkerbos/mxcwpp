@@ -793,7 +793,10 @@ func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
 	}
 
 	q := h.db.Table("host_vulnerabilities AS hv").
-		Select(`hv.host_id, hv.hostname, hv.ip, h.business_line,
+		Select(`hv.host_id,
+			COALESCE(NULLIF(h.hostname, ''), hv.hostname) AS hostname,
+			COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(h.ipv4, '$[0]')), ''), hv.ip) AS ip,
+			h.business_line,
 			bl.owner AS bl_owner, bl.contact AS bl_contact,
 			v.cve_id, v.severity, v.cvss_score AS cvss, v.cwe_category,
 			hv.asset_type, hv.subscope, hv.fix_owner, hv.host_binary_path, v.vuln_category,

@@ -352,36 +352,36 @@
             </template>
 
             <template v-else-if="column.key === 'category'">
-              <a-tag :color="vulnCategoryConfig[effectiveCategory(record)].color" :bordered="false">
-                {{ vulnCategoryConfig[effectiveCategory(record)].text }}
+              <a-tag :color="safeVulnCat(effectiveCategory(record)).color" :bordered="false">
+                {{ safeVulnCat(effectiveCategory(record)).text }}
               </a-tag>
               <span v-if="record.vulnCategoryOverride" style="margin-left:4px;font-size:11px;color:#86909C">(manual)</span>
             </template>
 
             <template v-else-if="column.key === 'cwe'">
               <a-tooltip :title="record.cweId || ''">
-                <a-tag :color="cweCategoryConfig[record.cweCategory || 'other'].color" :bordered="false">
-                  {{ cweCategoryConfig[record.cweCategory || 'other'].text }}
+                <a-tag :color="safeCWE(record.cweCategory || 'other').color" :bordered="false">
+                  {{ safeCWE(record.cweCategory || 'other').text }}
                 </a-tag>
               </a-tooltip>
             </template>
 
             <template v-else-if="column.key === 'assetType'">
-              <a-tag :color="assetTypeConfig[firstHostAssetType(record) || 'unknown'].color" :bordered="false">
-                {{ assetTypeConfig[firstHostAssetType(record) || 'unknown'].icon }} {{ assetTypeConfig[firstHostAssetType(record) || 'unknown'].text }}
+              <a-tag :color="safeAssetType(firstHostAssetType(record) || 'unknown').color" :bordered="false">
+                {{ safeAssetType(firstHostAssetType(record) || 'unknown').icon }} {{ safeAssetType(firstHostAssetType(record) || 'unknown').text }}
               </a-tag>
             </template>
 
             <template v-else-if="column.key === 'fixOwner'">
-              <a-tag :color="fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].color" :bordered="false">
-                {{ fixOwnerConfig[firstHostFixOwner(record) || 'unknown'].text }}
+              <a-tag :color="safeFixOwner(firstHostFixOwner(record) || 'unknown').color" :bordered="false">
+                {{ safeFixOwner(firstHostFixOwner(record) || 'unknown').text }}
               </a-tag>
             </template>
 
             <template v-else-if="column.key === 'subscope'">
-              <a-tooltip :title="subscopeConfig[firstHostSubscope(record) || 'unknown'].text">
-                <a-tag :color="subscopeConfig[firstHostSubscope(record) || 'unknown'].color" :bordered="false">
-                  {{ subscopeConfig[firstHostSubscope(record) || 'unknown'].icon }} {{ subscopeConfig[firstHostSubscope(record) || 'unknown'].text }}
+              <a-tooltip :title="safeSubscope(firstHostSubscope(record) || 'unknown').text">
+                <a-tag :color="safeSubscope(firstHostSubscope(record) || 'unknown').color" :bordered="false">
+                  {{ safeSubscope(firstHostSubscope(record) || 'unknown').icon }} {{ safeSubscope(firstHostSubscope(record) || 'unknown').text }}
                 </a-tag>
               </a-tooltip>
             </template>
@@ -395,9 +395,9 @@
             </template>
 
             <template v-else-if="column.key === 'restart'">
-              <a-tooltip :title="`修复影响：${restartActionConfig[effectiveRestartAction(record)].text}`">
-                <a-tag :color="restartActionConfig[effectiveRestartAction(record)].color" :bordered="false">
-                  {{ restartActionConfig[effectiveRestartAction(record)].text }}
+              <a-tooltip :title="`修复影响：${safeRestart(effectiveRestartAction(record)).text}`">
+                <a-tag :color="safeRestart(effectiveRestartAction(record)).color" :bordered="false">
+                  {{ safeRestart(effectiveRestartAction(record)).text }}
                 </a-tag>
               </a-tooltip>
             </template>
@@ -675,8 +675,19 @@ const fixOwnerConfig: Record<string, { color: string; text: string }> = {
   dba:              { color: 'geekblue', text: 'DBA' },
   dev:              { color: 'purple',   text: '研发' },
   image_maintainer: { color: 'magenta',  text: '镜像维护' },
+  cloud_provider:   { color: 'orange',   text: '云厂商' },
+  apm_vendor:       { color: 'cyan',     text: 'APM 厂商' },
+  platform_team:    { color: 'purple',   text: '平台团队' },
   unknown:          { color: 'default',  text: '未分配' },
 }
+
+// 通用 fallback helper(避免某天 backend 加新枚举值 UI 未同步导致 undefined.color 抛错)
+const safeFixOwner = (k: string) => fixOwnerConfig[k] || fixOwnerConfig.unknown
+const safeAssetType = (k: string) => assetTypeConfig[k] || assetTypeConfig.unknown
+const safeSubscope = (k: string) => subscopeConfig[k] || subscopeConfig.unknown
+const safeCWE = (k: string) => cweCategoryConfig[k] || cweCategoryConfig.other
+const safeVulnCat = (k: string) => vulnCategoryConfig[k] || vulnCategoryConfig.other
+const safeRestart = (k: string) => restartActionConfig[k] || restartActionConfig.unknown
 
 // CWE 高级分类显示配置
 const cweCategoryConfig: Record<string, { color: string; text: string }> = {
