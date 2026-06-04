@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/csv"
+	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +38,14 @@ type vulnerabilityListFilter struct {
 	Priority      string // high / medium-high / medium / low
 	VulnCategory  string // P5.1: kernel/critical_shared_lib/shared_lib/system_daemon/cli_tool/web_service/db_service/container_runtime/virtualization/language_dep/other
 	RestartAction string // P5.5: reboot_host/restart_dependent_services/restart_specific_service/no_action/rebuild_app/unknown
-	Sort          string // priority_score / cvss_score
+	// AssetType 资产维度: os/middleware/app/container/image/unknown
+	// 决定 UI tab 归属和修复责任方,host_vulnerabilities 字段
+	AssetType string
+	// FixOwner 修复责任方: ops/dev/dba/sre/image_maintainer/unknown
+	FixOwner string
+	// CWECategory CWE 高级分类: rce/privesc/sqli/xss/info_disclosure/dos/path_traversal/ssrf/other
+	CWECategory string
+	Sort        string // priority_score / cvss_score
 }
 
 func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityListFilter) *gorm.DB {
@@ -108,6 +118,32 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		query = query.Where(
 			"COALESCE(NULLIF(vulnerabilities.restart_action_override, ''), vulnerabilities.restart_action) = ?",
 			filter.RestartAction)
+	}
+	if filter.CWECategory != "" {
+		query = query.Where("vulnerabilities.cwe_category = ?", filter.CWECategory)
+	}
+
+	// 资产维度 / 修复责任方筛选(P-vuln-classify):字段在 host_vulnerabilities 上,需要 join
+	if filter.AssetType != "" || filter.FixOwner != "" {
+		if filter.HostID == "" {
+			// 全局 list 时未必已 join host_vulnerabilities,补 join
+			query = query.Joins("JOIN host_vulnerabilities ahv ON ahv.vuln_id = vulnerabilities.id").
+				Group("vulnerabilities.id")
+			if filter.AssetType != "" {
+				query = query.Where("ahv.asset_type = ?", filter.AssetType)
+			}
+			if filter.FixOwner != "" {
+				query = query.Where("ahv.fix_owner = ?", filter.FixOwner)
+			}
+		} else {
+			// 已有 hv join,直接 where
+			if filter.AssetType != "" {
+				query = query.Where("hv.asset_type = ?", filter.AssetType)
+			}
+			if filter.FixOwner != "" {
+				query = query.Where("hv.fix_owner = ?", filter.FixOwner)
+			}
+		}
 	}
 
 	// 优先级筛选
@@ -216,6 +252,9 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		Ecosystem:     strings.TrimSpace(c.Query("ecosystem")),
 		VulnCategory:  strings.TrimSpace(c.Query("vuln_category")),
 		RestartAction: strings.TrimSpace(c.Query("restart_action")),
+		AssetType:     strings.TrimSpace(c.Query("asset_type")),
+		FixOwner:      strings.TrimSpace(c.Query("fix_owner")),
+		CWECategory:   strings.TrimSpace(c.Query("cwe_category")),
 		Sort:          strings.TrimSpace(c.Query("sort")),
 	}
 	if page <= 0 {
@@ -555,6 +594,202 @@ func (h *VulnerabilitiesHandler) GetPriorityStats(c *gin.Context) {
 	results = append(results, PriorityBucket{Level: "low", Count: low})
 
 	Success(c, results)
+}
+
+// GetAssetTypeStats 按 asset_type × severity 统计漏洞数(host 维度)
+// GET /api/v1/vulnerabilities/stats/asset-type?host_id=...&business_line=...
+//
+// 返回结构:
+//
+//	{
+//	  "asset_types": [
+//	    {"asset_type":"os","critical":0,"high":0,"medium":1,"low":0,"total":1},
+//	    {"asset_type":"app","critical":8,"high":12,"medium":30,"low":2,"total":52},
+//	    ...
+//	  ],
+//	  "fix_owners": [...同样结构 by fix_owner...]
+//	}
+//
+// UI 主机详情漏洞 tab 用此 endpoint 渲染分类徽章 + 切换 tab 内容。
+func (h *VulnerabilitiesHandler) GetAssetTypeStats(c *gin.Context) {
+	hostID := strings.TrimSpace(c.Query("host_id"))
+	businessLine := strings.TrimSpace(c.Query("business_line"))
+
+	type bucket struct {
+		Key      string `json:"key"`
+		Critical int64  `json:"critical"`
+		High     int64  `json:"high"`
+		Medium   int64  `json:"medium"`
+		Low      int64  `json:"low"`
+		Total    int64  `json:"total"`
+	}
+	type rawRow struct {
+		Group    string `gorm:"column:grp"`
+		Severity string
+		N        int64
+	}
+
+	buildQuery := func(groupCol string) *gorm.DB {
+		q := h.db.Table("host_vulnerabilities AS hv").
+			Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+			Where("hv.status = ?", "unpatched")
+		if hostID != "" {
+			q = q.Where("hv.host_id = ?", hostID)
+		}
+		if businessLine != "" {
+			q = q.Joins("JOIN hosts h ON h.host_id = hv.host_id").
+				Where("h.business_line = ?", businessLine)
+		}
+		return q.Select("hv." + groupCol + " AS grp, v.severity AS severity, COUNT(*) AS n").
+			Group("hv." + groupCol + ", v.severity")
+	}
+
+	aggregate := func(rows []rawRow) []bucket {
+		m := map[string]*bucket{}
+		for _, r := range rows {
+			b, ok := m[r.Group]
+			if !ok {
+				b = &bucket{Key: r.Group}
+				m[r.Group] = b
+			}
+			switch r.Severity {
+			case "critical":
+				b.Critical = r.N
+			case "high":
+				b.High = r.N
+			case "medium":
+				b.Medium = r.N
+			case "low":
+				b.Low = r.N
+			}
+			b.Total += r.N
+		}
+		out := make([]bucket, 0, len(m))
+		for _, b := range m {
+			out = append(out, *b)
+		}
+		return out
+	}
+
+	var assetTypeRows []rawRow
+	if err := buildQuery("asset_type").Scan(&assetTypeRows).Error; err != nil {
+		h.logger.Error("asset_type stats query 失败", zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
+	var fixOwnerRows []rawRow
+	if err := buildQuery("fix_owner").Scan(&fixOwnerRows).Error; err != nil {
+		h.logger.Error("fix_owner stats query 失败", zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
+
+	Success(c, gin.H{
+		"asset_types": aggregate(assetTypeRows),
+		"fix_owners":  aggregate(fixOwnerRows),
+	})
+}
+
+// ExportByOwner 按修复责任方导出漏洞 CSV
+// GET /api/v1/vulnerabilities/export-by-owner?fix_owner=dev[&asset_type=app&business_line=G02&severity=critical,high]
+//
+// 业务场景:漏洞分级分类后,需把工作量分派到对应团队:
+//   - ops/sre/dba: OS / middleware 漏洞 → 直接 dnf update
+//   - dev: app/language_dep → 业务程序 rebuild,需要 binary_path + module + fix_version
+//   - image_maintainer: container/image → 镜像 rebuild,需要 image_id
+//
+// 导出列:host_id, hostname, ip, business_line, business_owner, business_contact,
+//
+//	cve, severity, cvss, cwe_category, asset_type, vuln_category,
+//	component, current, fixed, restart_action, message
+func (h *VulnerabilitiesHandler) ExportByOwner(c *gin.Context) {
+	fixOwner := strings.TrimSpace(c.Query("fix_owner"))
+	assetType := strings.TrimSpace(c.Query("asset_type"))
+	businessLine := strings.TrimSpace(c.Query("business_line"))
+	severity := strings.TrimSpace(c.Query("severity"))
+	if fixOwner == "" && assetType == "" {
+		BadRequest(c, "必须指定 fix_owner 或 asset_type")
+		return
+	}
+
+	type row struct {
+		HostID          string `gorm:"column:host_id"`
+		Hostname        string `gorm:"column:hostname"`
+		IP              string `gorm:"column:ip"`
+		BusinessLine    string `gorm:"column:business_line"`
+		BusinessOwner   string `gorm:"column:bl_owner"`
+		BusinessContact string `gorm:"column:bl_contact"`
+		CVE             string `gorm:"column:cve_id"`
+		Severity        string `gorm:"column:severity"`
+		CVSS            float64
+		CWECategory     string `gorm:"column:cwe_category"`
+		AssetType       string `gorm:"column:asset_type"`
+		FixOwner        string `gorm:"column:fix_owner"`
+		VulnCategory    string `gorm:"column:vuln_category"`
+		Component       string
+		Current         string `gorm:"column:current_version"`
+		Fixed           string `gorm:"column:fixed_version"`
+		RestartAction   string `gorm:"column:restart_action"`
+		Message         string `gorm:"column:precheck_message"`
+	}
+
+	q := h.db.Table("host_vulnerabilities AS hv").
+		Select(`hv.host_id, hv.hostname, hv.ip, h.business_line,
+			bl.owner AS bl_owner, bl.contact AS bl_contact,
+			v.cve_id, v.severity, v.cvss_score AS cvss, v.cwe_category,
+			hv.asset_type, hv.fix_owner, v.vuln_category,
+			v.component, hv.current_version, v.fixed_version,
+			v.restart_action, hv.precheck_message`).
+		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+		Joins("LEFT JOIN hosts h ON h.host_id = hv.host_id").
+		Joins("LEFT JOIN business_lines bl ON bl.name = h.business_line").
+		Where("hv.status = ?", "unpatched")
+	if fixOwner != "" {
+		q = q.Where("hv.fix_owner = ?", fixOwner)
+	}
+	if assetType != "" {
+		q = q.Where("hv.asset_type = ?", assetType)
+	}
+	if businessLine != "" {
+		q = q.Where("h.business_line = ?", businessLine)
+	}
+	if severity != "" {
+		sevs := strings.Split(severity, ",")
+		q = q.Where("v.severity IN ?", sevs)
+	}
+	q = q.Order("v.severity ASC, v.cvss_score DESC")
+
+	var rows []row
+	if err := q.Scan(&rows).Error; err != nil {
+		h.logger.Error("export-by-owner query 失败", zap.Error(err))
+		InternalError(c, "导出失败")
+		return
+	}
+
+	fname := fmt.Sprintf("vulns_%s_%s_%s.csv",
+		fixOwner, assetType, time.Now().Format("20060102_150405"))
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="`+fname+`"`)
+	c.Status(http.StatusOK)
+	if _, err := c.Writer.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil { // UTF-8 BOM, Excel 友好
+		return
+	}
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+	_ = w.Write([]string{
+		"host_id", "hostname", "ip", "business_line", "business_owner", "business_contact",
+		"cve", "severity", "cvss", "cwe_category", "asset_type", "fix_owner",
+		"vuln_category", "component", "current_version", "fixed_version",
+		"restart_action", "precheck_message",
+	})
+	for _, r := range rows {
+		_ = w.Write([]string{
+			r.HostID, r.Hostname, r.IP, r.BusinessLine, r.BusinessOwner, r.BusinessContact,
+			r.CVE, r.Severity, fmt.Sprintf("%.1f", r.CVSS), r.CWECategory, r.AssetType, r.FixOwner,
+			r.VulnCategory, r.Component, r.Current, r.Fixed,
+			r.RestartAction, r.Message,
+		})
+	}
 }
 
 // GetScanHistory 获取漏洞扫描历史记录

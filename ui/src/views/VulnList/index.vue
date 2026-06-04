@@ -193,6 +193,54 @@
           </a-select>
 
           <a-select
+            v-model:value="filterAssetType"
+            style="width: 150px"
+            placeholder="资产类型"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="os">🖥 OS 主机</a-select-option>
+            <a-select-option value="middleware">⚙️ 中间件</a-select-option>
+            <a-select-option value="app">📦 应用依赖</a-select-option>
+            <a-select-option value="container">🐳 容器</a-select-option>
+            <a-select-option value="image">🖼 镜像</a-select-option>
+            <a-select-option value="unknown">❓ 未分类</a-select-option>
+          </a-select>
+
+          <a-select
+            v-model:value="filterFixOwner"
+            style="width: 150px"
+            placeholder="责任方"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="ops">运维</a-select-option>
+            <a-select-option value="sre">SRE</a-select-option>
+            <a-select-option value="dba">DBA</a-select-option>
+            <a-select-option value="dev">研发</a-select-option>
+            <a-select-option value="image_maintainer">镜像维护</a-select-option>
+            <a-select-option value="unknown">未分配</a-select-option>
+          </a-select>
+
+          <a-select
+            v-model:value="filterCWECategory"
+            style="width: 160px"
+            placeholder="攻击类型 CWE"
+            allow-clear
+            @change="handleFilterChange"
+          >
+            <a-select-option value="rce">远程代码执行</a-select-option>
+            <a-select-option value="privesc">权限提升</a-select-option>
+            <a-select-option value="sqli">SQL 注入</a-select-option>
+            <a-select-option value="xss">跨站脚本</a-select-option>
+            <a-select-option value="info_disclosure">信息泄露</a-select-option>
+            <a-select-option value="path_traversal">路径遍历</a-select-option>
+            <a-select-option value="ssrf">SSRF</a-select-option>
+            <a-select-option value="dos">拒绝服务</a-select-option>
+            <a-select-option value="other">其他</a-select-option>
+          </a-select>
+
+          <a-select
             v-model:value="filterSort"
             style="width: 160px"
             placeholder="排序方式"
@@ -430,6 +478,9 @@ const filterSeverity = ref<string>()
 const filterStatus = ref<string>()
 const filterVulnCategory = ref<string>()
 const filterRestartAction = ref<string>()
+const filterAssetType = ref<string>()
+const filterFixOwner = ref<string>()
+const filterCWECategory = ref<string>()
 const filterComponent = ref('')
 const filterExploitStatus = ref<string>()
 const filterPriority = ref<string>()
@@ -653,6 +704,9 @@ const loadVulns = async () => {
       priority: filterPriority.value || undefined,
       vuln_category: filterVulnCategory.value || undefined,
       restart_action: filterRestartAction.value || undefined,
+      asset_type: filterAssetType.value || undefined,
+      fix_owner: filterFixOwner.value || undefined,
+      cwe_category: filterCWECategory.value || undefined,
       sort: filterSort.value || undefined,
     })
     vulns.value = res.items ?? []
@@ -792,6 +846,9 @@ const handleReset = () => {
   filterPriority.value = undefined
   filterVulnCategory.value = undefined
   filterRestartAction.value = undefined
+  filterAssetType.value = undefined
+  filterFixOwner.value = undefined
+  filterCWECategory.value = undefined
   filterSort.value = undefined
   filterHostId.value = undefined
   pagination.value.current = 1

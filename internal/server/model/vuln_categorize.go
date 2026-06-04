@@ -40,6 +40,95 @@ const (
 	RestartActionUnknown                  = "unknown"
 )
 
+// AssetType 资产维度漏洞分类（写入 host_vulnerabilities.asset_type）
+// 决定修复责任方和修复路径:
+//
+//	os         → 运维 yum/apt patch (OS RPM/DEB)
+//	middleware → DBA/SRE 升级中间件包 (jar/binary_probe 主机本体服务)
+//	app        → 研发 rebuild 业务程序 (embedded scope, Go/Python/Node 静态依赖)
+//	container  → 镜像维护者 rebuild image (container scope, docker 容器内 SBOM)
+//	image      → 镜像维护者 (image_scans 来源)
+//	unknown    → 软件关联缺失,数据治理
+const (
+	AssetTypeOS         = "os"
+	AssetTypeMiddleware = "middleware"
+	AssetTypeApp        = "app"
+	AssetTypeContainer  = "container"
+	AssetTypeImage      = "image"
+	AssetTypeUnknown    = "unknown"
+)
+
+// FixOwner 修复责任方枚举（写入 host_vulnerabilities.fix_owner）
+const (
+	FixOwnerOps             = "ops"              // 运维: os asset + 系统类 vuln_category
+	FixOwnerDev             = "dev"              // 研发: app asset + language_dep
+	FixOwnerDBA             = "dba"              // DBA: middleware + db_service
+	FixOwnerSRE             = "sre"              // SRE/中间件: middleware + web_service/container_runtime
+	FixOwnerImageMaintainer = "image_maintainer" // 镜像维护者: container/image
+	FixOwnerUnknown         = "unknown"
+)
+
+// DeriveAssetType 根据 software.scope + source_handler 推导资产类型
+// scope=embedded 必然是 app(静态依赖,无论 handler);
+// scope=container 必然是 container;
+// scope=system 按 handler 区分 os(RPM/DEB/APK)和 middleware(jar/binary_probe)
+func DeriveAssetType(scope, sourceHandler string) string {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	h := strings.ToLower(strings.TrimSpace(sourceHandler))
+	switch scope {
+	case "embedded":
+		return AssetTypeApp
+	case "container":
+		return AssetTypeContainer
+	case "system", "":
+		// OS 包管理器
+		switch h {
+		case "rpm", "dpkg", "apk", "pacman", "portage":
+			return AssetTypeOS
+		case "jar_scanner", "binary_probe":
+			return AssetTypeMiddleware
+		case "go_buildinfo", "python", "node", "ruby", "php":
+			// system scope + 语言运行时 → 主机本体的 Go/Python 服务（中间件层）
+			return AssetTypeMiddleware
+		case "container_sbom":
+			return AssetTypeContainer
+		}
+	}
+	if scope == "" && h == "" {
+		return AssetTypeUnknown
+	}
+	return AssetTypeOS // 兜底:scope=system 但 handler 缺失,大概率 OS 包
+}
+
+// DeriveFixOwner 根据 asset_type + vuln_category 推导修复责任方
+func DeriveFixOwner(assetType, vulnCategory string) string {
+	switch assetType {
+	case AssetTypeApp:
+		return FixOwnerDev
+	case AssetTypeContainer, AssetTypeImage:
+		return FixOwnerImageMaintainer
+	case AssetTypeOS:
+		switch vulnCategory {
+		case VulnCategoryDBService:
+			return FixOwnerDBA
+		case VulnCategoryWebService, VulnCategoryContainerRuntime, VulnCategoryVirtualization:
+			return FixOwnerSRE
+		}
+		return FixOwnerOps
+	case AssetTypeMiddleware:
+		switch vulnCategory {
+		case VulnCategoryDBService:
+			return FixOwnerDBA
+		case VulnCategoryWebService, VulnCategoryContainerRuntime:
+			return FixOwnerSRE
+		case VulnCategoryLanguageDep:
+			return FixOwnerDev
+		}
+		return FixOwnerSRE
+	}
+	return FixOwnerUnknown
+}
+
 // CategorizeVuln 根据 component + purl 推导分类 + 重启动作。
 // 优先级（高→低）：language_dep（PURL 优先） > kernel > critical_shared_lib >
 //
