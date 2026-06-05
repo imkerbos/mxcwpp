@@ -168,15 +168,39 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 			advertiseGRPCAddr = fmt.Sprintf("%s:%d", advertiseIP, cfg.Server.GRPC.Port)
 		}
 
-		sdClient = sdclient.NewClient(
+		mtlsCfg := sdclient.MTLSConfig{
+			Enabled:    cfg.Server.InternalMTLS.Enabled,
+			CACertPath: cfg.Server.InternalMTLS.CACertPath,
+			ClientCert: cfg.Server.InternalMTLS.ClientCert,
+			ClientKey:  cfg.Server.InternalMTLS.ClientKey,
+			ServerName: cfg.Server.InternalMTLS.ServerName,
+		}
+		var sdErr error
+		sdClient, sdErr = sdclient.NewClientWithTLS(
 			cfg.Server.ManagerAddr,
 			cfg.Server.InstanceID,
 			advertiseGRPCAddr,
 			advertiseHTTPAddr,
 			cfg.Server.InternalSecret,
+			mtlsCfg,
 			transferService.GetOnlineAgentCount,
 			logger,
 		)
+		if sdErr != nil {
+			logger.Warn("AC SD 客户端 mTLS 初始化失败,降级走 HTTP+Secret",
+				zap.Error(sdErr),
+				zap.Bool("mtls_enabled", mtlsCfg.Enabled),
+			)
+			sdClient = sdclient.NewClient(
+				cfg.Server.ManagerAddr,
+				cfg.Server.InstanceID,
+				advertiseGRPCAddr,
+				advertiseHTTPAddr,
+				cfg.Server.InternalSecret,
+				transferService.GetOnlineAgentCount,
+				logger,
+			)
+		}
 	}
 
 	// 12. 创建网络监听器
