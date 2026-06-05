@@ -14,6 +14,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
@@ -84,7 +85,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	router.StaticFS("/uploads", gin.Dir("./uploads", false))
 
 	// K8s Audit Webhook（不需要认证，apiserver 通过 cluster_token 鉴权）
-	alarmService := biz.NewKubeAlarmService(db, logger)
+	alarmService := kube.NewKubeAlarmService(db, logger)
 	auditHandler := api.NewKubeAuditHandler(db, logger, alarmService)
 	router.POST("/api/v1/kube/audit-webhook/:cluster_token", auditHandler.ReceiveAuditWebhook)
 
@@ -163,7 +164,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *kube.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -610,7 +611,7 @@ func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupKubeAPI 设置 Kubernetes 容器安全 API 路由
-func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) {
+func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *kube.KubeAlarmService, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) {
 	kubeClient := biz.NewKubeClientManager(db, logger)
 
 	// 集群管理
@@ -640,7 +641,7 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.POST("/kube/events/:id/handle", eventHandler.HandleEvent)
 
 	// CEL 规则引擎
-	ruleEngine, err := biz.NewKubeRuleEngine(logger)
+	ruleEngine, err := kube.NewKubeRuleEngine(logger)
 	if err != nil {
 		logger.Error("初始化 K8s CEL 规则引擎失败", zap.Error(err))
 	}

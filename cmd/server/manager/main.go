@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
@@ -76,7 +77,9 @@ func main() {
 	services.Logger.Info("NVD enrich cron 已启动")
 
 	// 启动 GCP Pub/Sub 消费者管理器（GKE 审计日志接入，per-cluster 配置）
-	alarmService := biz.NewKubeAlarmService(services.DB, services.Logger)
+	alarmService := kube.NewKubeAlarmService(services.DB, services.Logger)
+	// 注入 notification 派发器,解耦 engine/kube 反向依赖 manager/biz
+	alarmService.SetNotifier(biz.NewKubeAlarmNotifier(services.DB, services.Logger))
 	consumerManager := gcppubsub.NewConsumerManager(services.DB, services.Logger, alarmService)
 	consumerManager.Start(ctx)
 
