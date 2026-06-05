@@ -516,6 +516,9 @@ import { formatDateTime } from '@/utils/date'
 import ScanScopeDialog from './components/ScanScopeDialog.vue'
 import ScanTaskProgress from './components/ScanTaskProgress.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 // 定向扫描状态
 const scanDialogOpen = ref(false)
 const activeTaskId = ref('')
@@ -525,9 +528,10 @@ function onScanStarted(taskId: string) {
 function onScanDone() {
   // 任务完成后由 onMounted 的 fetchVulnList/loadStats 等已有逻辑刷新（保持 toast 显示统计）
 }
-
-const route = useRoute()
-const router = useRouter()
+// 主机列表点击"扫此机"跳过来后自动显示进度
+if (route.query.task_id) {
+  activeTaskId.value = String(route.query.task_id)
+}
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 

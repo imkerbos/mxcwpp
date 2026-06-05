@@ -264,6 +264,14 @@
           <div class="action-cell">
             <a-button type="link" size="small" class="action-link" @click="$router.push(`/hosts/${record.host_id}`)">详情</a-button>
             <a-divider type="vertical" />
+            <a-button
+              type="link"
+              size="small"
+              class="action-link"
+              :disabled="record.status !== 'online'"
+              @click="handleScanHost(record)"
+            >扫此机</a-button>
+            <a-divider type="vertical" />
             <a-popconfirm
               title="确定重启此主机的 Agent？"
               ok-text="确定"
@@ -388,11 +396,27 @@ import {
 import VChart from 'vue-echarts'
 import { hostsApi, type HostStatusDistribution, type HostRiskDistribution } from '@/api/hosts'
 import { businessLinesApi, type BusinessLine } from '@/api/business-lines'
+import { vulnerabilitiesApi } from '@/api/vulnerabilities'
 import type { Host } from '@/api/types'
 import ScoreDisplay from './components/ScoreDisplay.vue'
 import { message, Modal } from 'ant-design-vue'
 import { formatDateTime } from '@/utils/date'
 import { OS_OPTIONS } from '@/constants/os'
+
+// 单机触发漏洞定向扫描，跳到漏洞中心带 task_id 自动显示进度
+async function handleScanHost(record: Host) {
+  try {
+    const resp = await vulnerabilitiesApi.triggerScopedScan({
+      scope: 'hosts',
+      host_ids: [record.host_id],
+      reconcile_stale: true,
+    })
+    message.success(`扫描已启动: ${resp.data.task_id.slice(0, 8)}...`)
+    router.push({ path: '/vulnerabilities', query: { task_id: resp.data.task_id } })
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || '触发扫描失败')
+  }
+}
 
 // 注册 ECharts 组件
 use([CanvasRenderer, PieChart, TitleComponent, TooltipComponent, LegendComponent])
