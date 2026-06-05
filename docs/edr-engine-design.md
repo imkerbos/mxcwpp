@@ -1,3 +1,9 @@
+> **状态: 历史档案 (archived)**
+>
+> 本文档反映 mxsec **v1.x 阶段**(2026-05 前)的 EDR 设计,**v2.0 架构(六微服务)** 已升级,新设计参见 [docs/engine-design.md](engine-design.md) / [docs/engine-detection-design.md](engine-detection-design.md) / [docs/edr-agent-design.md](edr-agent-design.md)。
+>
+> 文档保留用于历史追溯,**不再维护**。Windows / 三层架构 / 默认即响应 等已被 [docs/architecture.md](architecture.md) §12 升级声明取代。
+
 # MxSec EDR 引擎架构设计方案
 
 **版本**: v1.0-draft  

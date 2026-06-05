@@ -1,3 +1,9 @@
+> **状态: 历史档案 (archived)**
+>
+> 本文档反映 mxsec **v1.x 阶段**(2026-05 前)的设计/评估,**v2.0 架构(六微服务)** 已升级,新设计参见 [docs/architecture.md](architecture.md) 与 [ref/00-总体评估与商业化路线.md](../ref/00-总体评估与商业化路线.md)。
+>
+> 文档保留用于历史追溯,**不再维护**。
+
 # Prod 部署 2.4.0 — alerts / vulnerabilities / host_vulnerabilities 迁 CH
 
 ## 背景

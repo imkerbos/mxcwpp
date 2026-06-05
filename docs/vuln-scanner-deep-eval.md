@@ -1,3 +1,9 @@
+> **状态: 历史档案 (archived)**
+>
+> 本文档反映 mxsec **v1.x 阶段**(2026-05 前)的设计/评估,**v2.0 架构(六微服务)** 已升级,新设计参见 [docs/architecture.md](architecture.md) 与 [ref/00-总体评估与商业化路线.md](../ref/00-总体评估与商业化路线.md)。
+>
+> 文档保留用于历史追溯,**不再维护**。
+
 # 漏洞扫描误报问题 — 深度评估
 
 > User 反馈：prod 入库 CVE 与实际不符（CVE-2026-32253 / -39831 / -39832 / -44930 错关联到 openssl / ssh / httpd）。Gemini/ChatGPT 诊断为「description keyword 匹配」误报，建议改 CPE / OSV PURL 结构化匹配。
