@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ func main() {
 	otelEnabled := flag.Bool("otel", false, "enable OpenTelemetry tracing")
 	otelEndpoint := flag.String("otel-endpoint", "localhost:4318", "OTLP collector endpoint")
 	otelSampleRate := flag.Float64("otel-sample-rate", 0.1, "OTel trace sample rate (0-1)")
+	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka broker addresses (comma separated); empty disables ConsumerGroup B")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -78,8 +80,19 @@ func main() {
 		}
 	}()
 
-	// 后续 PR: 启动 Kafka ConsumerGroup B 订阅 mxsec.agent.* 和检测管线。
-	_ = ctx
+	// 启动 Kafka ConsumerGroup B (订阅 mxsec.agent.* 5 Topic + mxsec.vuln.advisory)
+	// PR13 仅注入 noop handler;真实检测管线由后续 PR 引入。
+	if *kafkaBrokers != "" {
+		brokers := strings.Split(*kafkaBrokers, ",")
+		kc, err := engine.NewKafkaConsumer(brokers, nil, logger)
+		if err != nil {
+			logger.Fatal("Engine Kafka consumer 初始化失败", zap.Error(err))
+		}
+		kc.Start(ctx)
+		defer func() { _ = kc.Close() }()
+	} else {
+		logger.Warn("Engine Kafka brokers 未配置,跳过 ConsumerGroup B 启动")
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
