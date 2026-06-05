@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/tenant"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
@@ -53,8 +54,9 @@ func (h *HostsHandler) ListHosts(c *gin.Context) {
 	isContainerStr := c.Query("is_container") // 容器/主机类型筛选（废弃，使用 runtime_type）
 	runtimeType := c.Query("runtime_type")    // 运行环境类型筛选：vm/docker/k8s
 
-	// 构建查询
-	query := h.db.Model(&model.Host{})
+	// 构建查询。Scopes(tenant.GinScope) 会自动追加 WHERE tenant_id = ?，
+	// 实现行级多租户隔离；详见 docs/multi-tenant.md §3.3。
+	query := h.db.Model(&model.Host{}).Scopes(tenant.GinScope(c))
 
 	// 过滤条件
 	if osFamily != "" {
