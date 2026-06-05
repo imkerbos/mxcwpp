@@ -780,6 +780,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
 	router.GET("/vulnerabilities/scan-history/:id", handler.GetScanHistoryDetail)
+	router.GET("/vulnerabilities/scan-tasks", handler.ListScanTasks)
+	router.GET("/vulnerabilities/scan-tasks/:task_id", handler.GetScanTask)
 
 	router.GET("/vulnerabilities/:id", handler.GetVulnerability)
 

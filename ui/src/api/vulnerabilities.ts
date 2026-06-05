@@ -2,6 +2,42 @@ import apiClient from './client'
 import type { Vulnerability, VulnerabilityListResult } from './types'
 import type { SecurityDBSyncRecord } from './antivirus'
 
+// 定向扫描请求参数
+export interface TriggerScopedScanParams {
+  scope: 'global' | 'hosts' | 'business_line'
+  host_ids?: string[]
+  business_line?: string
+  sync_db?: boolean
+  reconcile_stale?: boolean
+}
+
+// 触发扫描响应
+export interface TriggerScanResponse {
+  task_id: string
+  scope: string
+  target_host_count: number
+  estimated_seconds: number
+}
+
+// 扫描任务
+export interface VulnScanTask {
+  taskId: string
+  scope: string
+  businessLine?: string
+  status: 'pending' | 'running' | 'success' | 'failed'
+  progressTotal: number
+  progressScanned: number
+  newVulns: number
+  patchedCount: number
+  vanishedCount: number
+  resurfacedCount: number
+  errorMsg?: string
+  triggeredBy: string
+  startedAt?: string
+  finishedAt?: string
+  createdAt: string
+}
+
 export interface ScanHistoryDetail {
   record: SecurityDBSyncRecord
   vulns: {
@@ -128,6 +164,22 @@ export const vulnerabilitiesApi = {
 
   triggerScan: (scanType: 'full_scan' | 'incremental_scan' = 'full_scan') => {
     return apiClient.post('/vulnerabilities/scan', { scan_type: scanType })
+  },
+
+  // 定向扫描（targeted scan v1）：按 scope/hosts/business_line 触发
+  triggerScopedScan: (params: TriggerScopedScanParams) => {
+    return apiClient.post<TriggerScanResponse>('/vulnerabilities/scan', params)
+  },
+
+  getScanTask: (taskID: string) => {
+    return apiClient.get<VulnScanTask>(`/vulnerabilities/scan-tasks/${taskID}`)
+  },
+
+  listScanTasks: (status?: string, limit = 20) => {
+    return apiClient.get<{ items: VulnScanTask[]; count: number }>(
+      '/vulnerabilities/scan-tasks',
+      { params: { status, limit } },
+    )
   },
 
   getScanStatus: () => {

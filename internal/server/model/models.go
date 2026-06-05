@@ -232,6 +232,7 @@ var (
 		&ScanScheduleExecution{},
 		&VulnCache{},
 		&VulnDBImport{},
+		&VulnScanTask{},
 		&ImageScan{},
 		&ImageVulnerability{},
 		&ImageRegistry{},
