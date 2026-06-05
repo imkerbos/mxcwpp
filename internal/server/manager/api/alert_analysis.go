@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
-	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/llmproxy"
 )
 
 // AlertAnalysisHandler LLM 告警分析 API 处理器
@@ -38,7 +38,7 @@ func (h *AlertAnalysisHandler) AnalyzeAlert(c *gin.Context) {
 		return
 	}
 
-	assist := biz.NewLLMAssist(h.db, h.logger, llmCfg.APIURL, llmCfg.APIKey, llmCfg.Model)
+	assist := llmproxy.NewLLMAssist(h.db, h.logger, llmCfg.APIURL, llmCfg.APIKey, llmCfg.Model)
 	result, err := assist.AnalyzeAlert(uint(id))
 	if err != nil {
 		h.logger.Error("LLM 告警分析失败", zap.Uint64("alert_id", id), zap.Error(err))
