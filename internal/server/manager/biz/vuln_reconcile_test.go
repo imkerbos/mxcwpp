@@ -28,6 +28,7 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 
 	tables := []string{
 		`CREATE TABLE hosts (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			host_id       TEXT PRIMARY KEY,
 			hostname      TEXT,
 			ipv4          TEXT DEFAULT '[]',
@@ -35,6 +36,7 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 			business_line TEXT
 		)`,
 		`CREATE TABLE vulnerabilities (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
 			cve_id            TEXT NOT NULL UNIQUE,
 			osv_id            TEXT,
@@ -77,6 +79,7 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 			deleted_at        DATETIME
 		)`,
 		`CREATE TABLE host_vulnerabilities (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
 			vuln_id         INTEGER NOT NULL,
 			host_id         TEXT NOT NULL,
@@ -103,6 +106,7 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 			UNIQUE(vuln_id, host_id)
 		)`,
 		`CREATE TABLE software (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id              TEXT PRIMARY KEY,
 			host_id         TEXT NOT NULL,
 			name            TEXT NOT NULL,
