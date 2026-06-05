@@ -97,6 +97,10 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			precheck_packages             TEXT,
 			precheck_affected_processes   TEXT,
 			precheck_checked_at           DATETIME,
+			patched_reason                TEXT DEFAULT '',
+			prev_status                   TEXT DEFAULT '',
+			vanished_at                   DATETIME,
+			resurfaced_at                 DATETIME,
 			created_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(vuln_id, host_id)
