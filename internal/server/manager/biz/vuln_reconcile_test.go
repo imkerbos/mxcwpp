@@ -324,5 +324,78 @@ func TestReconcileHostVulns_MultipleHosts_BatchCorrect(t *testing.T) {
 	assert.Equal(t, 1, result.Patched)
 }
 
-// time import 占位（resurface 测试后续追加）
-var _ = time.Now
+func TestReconcileHostVulns_PrevPatchedReappears_MarksResurfaced(t *testing.T) {
+	db := setupReconcileTestDB(t)
+	logger := zap.NewNop()
+
+	vuln := model.Vulnerability{
+		CveID: "CVE-2026-39830", Severity: "critical",
+		PURL: "pkg:golang/golang.org/x/crypto", FixedVersion: "0.52.0",
+	}
+	require.NoError(t, db.Create(&vuln).Error)
+
+	patchedTime := model.LocalTime(time.Now().Add(-24 * time.Hour))
+	hv := model.HostVulnerability{
+		VulnID: vuln.ID, HostID: "host-1",
+		CurrentVersion: "v0.52.0",
+		Status:         model.HostVulnStatusPatched,
+		PrevStatus:     model.HostVulnStatusUnpatched,
+		PatchedReason:  model.PatchedReasonAutoVersionMatch,
+		PatchedAt:      &patchedTime,
+	}
+	require.NoError(t, db.Create(&hv).Error)
+
+	// software 表显示版本回滚到漏洞版本（依赖回滚等场景）
+	require.NoError(t, db.Create(&model.Software{
+		ID: "sw-1", HostID: "host-1",
+		Name: "golang.org/x/crypto", Version: "v0.38.0",
+		PURL: "pkg:golang/golang.org/x/crypto",
+	}).Error)
+
+	rec := NewVulnReconciler(db, logger)
+	count := rec.DetectResurfaced([]string{"host-1"})
+
+	assert.Equal(t, 1, count)
+	var got model.HostVulnerability
+	require.NoError(t, db.First(&got, hv.ID).Error)
+	assert.Equal(t, model.HostVulnStatusResurfaced, got.Status)
+	assert.Equal(t, model.HostVulnStatusPatched, got.PrevStatus)
+	require.NotNil(t, got.ResurfacedAt)
+}
+
+func TestReconcileHostVulns_PrevVanishedReappears_MarksResurfaced(t *testing.T) {
+	db := setupReconcileTestDB(t)
+	logger := zap.NewNop()
+
+	vuln := model.Vulnerability{
+		CveID: "CVE-2026-39830", Severity: "critical",
+		PURL: "pkg:golang/golang.org/x/crypto", FixedVersion: "0.52.0",
+	}
+	require.NoError(t, db.Create(&vuln).Error)
+
+	vanishedTime := model.LocalTime(time.Now().Add(-24 * time.Hour))
+	hv := model.HostVulnerability{
+		VulnID: vuln.ID, HostID: "host-1",
+		CurrentVersion: "v0.38.0",
+		Status:         model.HostVulnStatusVanished,
+		PrevStatus:     model.HostVulnStatusUnpatched,
+		PatchedReason:  model.PatchedReasonPackageRemoved,
+		VanishedAt:     &vanishedTime,
+	}
+	require.NoError(t, db.Create(&hv).Error)
+
+	require.NoError(t, db.Create(&model.Software{
+		ID: "sw-1", HostID: "host-1",
+		Name: "golang.org/x/crypto", Version: "v0.38.0",
+		PURL: "pkg:golang/golang.org/x/crypto",
+	}).Error)
+
+	rec := NewVulnReconciler(db, logger)
+	count := rec.DetectResurfaced([]string{"host-1"})
+
+	assert.Equal(t, 1, count)
+	var got model.HostVulnerability
+	require.NoError(t, db.First(&got, hv.ID).Error)
+	assert.Equal(t, model.HostVulnStatusResurfaced, got.Status)
+	assert.Equal(t, model.HostVulnStatusVanished, got.PrevStatus)
+}

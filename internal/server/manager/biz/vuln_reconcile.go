@@ -159,3 +159,74 @@ func (r *VulnReconciler) loadCurrentPURLsByHosts(hostIDs []string) (map[string]m
 
 	return result, nil
 }
+
+// DetectResurfaced 检测之前 patched/vanished 现在又匹配上的漏洞 → resurfaced
+//
+// 触发条件：
+//   - status IN (patched, vanished)
+//   - software 表中 PURL 重新出现
+//   - 之前 vanished → 总是 resurfaced（包又出现了）
+//   - 之前 patched → 仅当当前版本退回未达 fix 时 resurfaced（依赖回滚等场景）
+//
+// 返回标记的数量。每条 resurface 会写 warn 日志（v2 接 alerting 模块）。
+func (r *VulnReconciler) DetectResurfaced(hostIDs []string) int {
+	if len(hostIDs) == 0 {
+		return 0
+	}
+
+	currentPkgs, err := r.loadCurrentPURLsByHosts(hostIDs)
+	if err != nil {
+		r.logger.Error("DetectResurfaced: 取 software 快照失败", zap.Error(err))
+		return 0
+	}
+
+	var hvs []model.HostVulnerability
+	err = r.db.
+		Where("host_id IN ? AND status IN ?", hostIDs,
+			[]string{model.HostVulnStatusPatched, model.HostVulnStatusVanished}).
+		Find(&hvs).Error
+	if err != nil {
+		r.logger.Error("DetectResurfaced: 取历史 host_vuln 失败", zap.Error(err))
+		return 0
+	}
+
+	count := 0
+	now := model.LocalTime(time.Now())
+	for i := range hvs {
+		hv := &hvs[i]
+
+		var vuln model.Vulnerability
+		if err := r.db.Select("purl, fixed_version, cve_id").First(&vuln, hv.VulnID).Error; err != nil {
+			continue
+		}
+
+		hostPkgs := currentPkgs[hv.HostID]
+		currentVersion, exists := hostPkgs[vuln.PURL]
+		if !exists {
+			continue
+		}
+
+		// 之前 vanished → 总是 resurface
+		// 之前 patched → 仅当 version 退回未达 fix 时 resurface
+		shouldResurface := hv.Status == model.HostVulnStatusVanished ||
+			(hv.Status == model.HostVulnStatusPatched && vuln.FixedVersion != "" &&
+				compareVersionStrings(currentVersion, vuln.FixedVersion) < 0)
+
+		if shouldResurface {
+			r.db.Model(hv).Updates(map[string]any{
+				"status":          model.HostVulnStatusResurfaced,
+				"prev_status":     hv.Status,
+				"resurfaced_at":   &now,
+				"current_version": currentVersion,
+			})
+			r.logger.Warn("vulnerability resurfaced",
+				zap.String("host_id", hv.HostID),
+				zap.String("cve_id", vuln.CveID),
+				zap.String("prev_status", hv.Status),
+				zap.String("current_version", currentVersion),
+			)
+			count++
+		}
+	}
+	return count
+}
