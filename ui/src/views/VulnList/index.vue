@@ -85,8 +85,19 @@
       <div class="scan-status-actions">
         <a-button size="small" @click="showScanHistory">历史记录</a-button>
         <a-button size="small" type="primary" @click="handleSync">手动同步</a-button>
+        <a-button size="small" type="primary" @click="scanDialogOpen = true">立即扫描</a-button>
       </div>
     </div>
+
+    <!-- 定向扫描进度（targeted scan v1） -->
+    <ScanTaskProgress
+      v-if="activeTaskId"
+      :task-id="activeTaskId"
+      @done="onScanDone"
+      @close="activeTaskId = ''"
+    />
+
+    <ScanScopeDialog v-model:open="scanDialogOpen" @success="onScanStarted" />
 
     <div class="dashboard-card">
       <div class="card-body">
@@ -502,6 +513,18 @@ import { useAuthStore } from '@/stores/auth'
 import type { SecurityDBSyncRecord } from '@/api/antivirus'
 import type { Vulnerability, VulnerabilityStats } from '@/api/types'
 import { formatDateTime } from '@/utils/date'
+import ScanScopeDialog from './components/ScanScopeDialog.vue'
+import ScanTaskProgress from './components/ScanTaskProgress.vue'
+
+// 定向扫描状态
+const scanDialogOpen = ref(false)
+const activeTaskId = ref('')
+function onScanStarted(taskId: string) {
+  activeTaskId.value = taskId
+}
+function onScanDone() {
+  // 任务完成后由 onMounted 的 fetchVulnList/loadStats 等已有逻辑刷新（保持 toast 显示统计）
+}
 
 const route = useRoute()
 const router = useRouter()

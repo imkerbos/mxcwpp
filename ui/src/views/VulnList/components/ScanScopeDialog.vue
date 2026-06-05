@@ -61,7 +61,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { vulnerabilityApi } from '@/api/vulnerabilities'
+import { vulnerabilitiesApi } from '@/api/vulnerabilities'
 import { businessLinesApi } from '@/api/business-lines'
 import { hostsApi } from '@/api/hosts'
 
@@ -145,7 +145,7 @@ async function handleSubmit() {
     if (form.scope === 'hosts') params.host_ids = form.host_ids
     if (form.scope === 'global') params.sync_db = form.sync_db
 
-    const resp = await vulnerabilityApi.triggerScopedScan(params)
+    const resp = await vulnerabilitiesApi.triggerScopedScan(params)
     const data = resp.data
     message.success(`扫描已启动，任务 ID: ${data.task_id.slice(0, 8)}...，预计 ${data.estimated_seconds}s`)
     emit('success', data.task_id)

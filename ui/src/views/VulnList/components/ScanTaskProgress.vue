@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { vulnerabilityApi, type VulnScanTask } from '@/api/vulnerabilities'
+import { vulnerabilitiesApi, type VulnScanTask } from '@/api/vulnerabilities'
 
 const props = defineProps<{ taskId: string }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'done'): void }>()
@@ -70,7 +70,7 @@ const progressPercent = computed(() => {
 async function poll() {
   if (!props.taskId) return
   try {
-    const resp = await vulnerabilityApi.getScanTask(props.taskId)
+    const resp = await vulnerabilitiesApi.getScanTask(props.taskId)
     task.value = resp.data
     if (task.value.status === 'success' || task.value.status === 'failed') {
       stopPoll()
