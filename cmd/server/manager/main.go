@@ -16,9 +16,9 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
-	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
+	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/advisory"
 )
 
 var (

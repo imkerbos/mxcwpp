@@ -25,8 +25,8 @@ const notificationThrottleWindow = time.Hour
 // 避免 engine/kube 包反向依赖 manager/biz。
 type KubeAlarmService struct {
 	notifier AlarmNotifier
-	db     *gorm.DB
-	logger *zap.Logger
+	db       *gorm.DB
+	logger   *zap.Logger
 }
 
 // NewKubeAlarmService 创建告警服务
