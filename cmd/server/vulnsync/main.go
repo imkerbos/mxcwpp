@@ -23,12 +23,17 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync"
+	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/leader"
 )
 
 func main() {
 	configPath := flag.String("config", "configs/vulnsync.yaml", "path to vulnsync config")
 	httpAddr := flag.String("http", ":8083", "HTTP listen address for /health and /metrics")
+	redisAddr := flag.String("redis-addr", "", "Redis 地址 (启用 Leader Election);空时跳过")
+	instanceID := flag.String("instance-id", "", "实例唯一 ID (默认 hostname+pid)")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -57,7 +62,31 @@ func main() {
 		}
 	}()
 
-	// 后续 PR: Leader Election + Cron 同步管线
+	// Leader Election (Sprint 2 PR17 引入)
+	// Redis 未配置时跳过,单实例部署不需要 Leader Election。
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if *redisAddr != "" {
+		id := *instanceID
+		if id == "" {
+			if h, err := os.Hostname(); err == nil {
+				id = fmt.Sprintf("%s-%d", h, os.Getpid())
+			} else {
+				id = fmt.Sprintf("vulnsync-%d", os.Getpid())
+			}
+		}
+		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
+		defer func() { _ = rdb.Close() }()
+		election := leader.NewElection(rdb, id, leader.Config{}, logger)
+		go election.Run(ctx)
+		logger.Info("VulnSync Leader Election started",
+			zap.String("redis_addr", *redisAddr),
+			zap.String("instance_id", id),
+		)
+	} else {
+		logger.Warn("Redis 未配置,单实例模式,跳过 Leader Election")
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
