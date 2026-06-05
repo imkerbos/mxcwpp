@@ -23,12 +23,16 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/observability"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine"
 )
 
 func main() {
 	configPath := flag.String("config", "configs/engine.yaml", "path to engine config")
 	httpAddr := flag.String("http", ":8082", "HTTP listen address for /health and /metrics")
+	otelEnabled := flag.Bool("otel", false, "enable OpenTelemetry tracing")
+	otelEndpoint := flag.String("otel-endpoint", "localhost:4318", "OTLP collector endpoint")
+	otelSampleRate := flag.Float64("otel-sample-rate", 0.1, "OTel trace sample rate (0-1)")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -46,6 +50,20 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// v2.0: OTel 全链路追踪初始化 (otel.enabled=false 时走 noop,零开销)
+	tracerProvider, err := observability.InitTracing(ctx, observability.Config{
+		Enabled:        *otelEnabled,
+		ServiceName:    "engine",
+		ServiceVersion: engine.Version,
+		Endpoint:       *otelEndpoint,
+		Insecure:       true,
+		SampleRate:     *otelSampleRate,
+	})
+	if err != nil {
+		logger.Error("OTel 初始化失败,继续走 noop", zap.Error(err))
+	}
+	defer func() { _ = tracerProvider.Shutdown(context.Background()) }()
 
 	server := &http.Server{
 		Addr:              *httpAddr,
