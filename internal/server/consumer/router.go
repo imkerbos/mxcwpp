@@ -14,12 +14,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/anomaly"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/baseline"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
 	consumermetrics "github.com/imkerbos/mxsec-platform/internal/server/consumer/metrics"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/anomaly"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/baseline"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 )
 

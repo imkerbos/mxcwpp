@@ -8,7 +8,7 @@
 // 设计文档: docs/engine-design.md / docs/engine-detection-design.md
 //
 // 本 PR (PR3) 仅提供空骨架: HTTP /health + /metrics + 优雅退出。
-// 检测层实现由后续 PR 从 internal/server/consumer/celengine 等子包搬入。
+// 检测层实现由后续 PR 从 internal/server/engine/celengine 等子包搬入。
 package main
 
 import (
