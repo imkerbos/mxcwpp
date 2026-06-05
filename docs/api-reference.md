@@ -598,9 +598,11 @@
 | GET | `/api/v1/vulnerabilities` | 漏洞列表 |
 | POST | `/api/v1/vulnerabilities/:id/ignore` | 忽略漏洞 |
 | POST | `/api/v1/vulnerabilities/sync` | 触发漏洞库同步 |
-| POST | `/api/v1/vulnerabilities/scan` | 触发漏洞扫描 |
+| POST | `/api/v1/vulnerabilities/scan` | 触发漏洞扫描（支持 scope=global/hosts/business_line） |
 | GET | `/api/v1/vulnerabilities/scan-status` | 扫描状态 |
 | GET | `/api/v1/vulnerabilities/scan-history` | 扫描历史 |
+| GET | `/api/v1/vulnerabilities/scan-tasks` | 定向扫描任务列表 |
+| GET | `/api/v1/vulnerabilities/scan-tasks/:task_id` | 定向扫描任务进度 |
 | GET | `/api/v1/vulnerabilities/:id/advice` | 修复建议 |
 | POST | `/api/v1/vulnerabilities/:id/patch` | 修复漏洞 |
 | POST | `/api/v1/vulnerabilities/:id/verify` | 验证修复 |
