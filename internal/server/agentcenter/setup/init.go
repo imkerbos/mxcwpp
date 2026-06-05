@@ -268,8 +268,9 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 	// 启动任务超时调度器（检查超时任务）
 	go scheduler.StartTaskTimeoutScheduler(s.DB, s.Logger)
 
-	// 启动定期告警调度器（按配置间隔发送告警通知）
-	go scheduler.StartAlertScheduler(s.DB, s.Logger)
+	// Sprint 2 PR16: 定期告警调度器已迁到 Manager 进程
+	// (manager/scheduler.StartAlertScheduler),AC 不再启动。
+	// 见 internal/server/engine/scheduler/README.md §3 PR3
 
 	// 启动漏洞通报升级调度器（SLA 检查、升级通知、自动关闭）
 	go scheduler.StartBulletinEscalationScheduler(s.DB, s.Logger)

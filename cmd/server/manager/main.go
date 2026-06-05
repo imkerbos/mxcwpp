@@ -17,6 +17,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
+	managerscheduler "github.com/imkerbos/mxsec-platform/internal/server/manager/scheduler"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/advisory"
 )
@@ -57,6 +58,9 @@ func main() {
 
 	// 启动 pre-check 周期巡检（每 6h 对 unpatched + 未检/过期的 host_vuln 自动 pre-check）
 	go services.PreCheckCron.Run(ctx)
+
+	// Sprint 2 PR16: 启动定期告警调度器 (从 AC 迁过来,业务调度归 Manager)
+	go managerscheduler.StartAlertScheduler(services.DB, services.Logger)
 
 	// 启动漏洞扫描定时调度器
 	vulnScanner := biz.NewVulnScanner(services.DB, services.Logger)
