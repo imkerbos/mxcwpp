@@ -24,8 +24,8 @@ func TestInitTracing_Disabled_ReturnsNoop(t *testing.T) {
 func TestInitTracing_ZeroSampleRate_ReturnsNoop(t *testing.T) {
 	t.Parallel()
 	tp, err := InitTracing(context.Background(), Config{
-		Enabled:    true,
-		SampleRate: 0,
+		Enabled:     true,
+		SampleRate:  0,
 		ServiceName: "engine",
 	})
 	if err != nil {
