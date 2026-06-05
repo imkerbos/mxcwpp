@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/tenant"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
@@ -144,6 +145,19 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	// 注册 API 路由
 	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater, consumerManager)
 	setupAdminAPIRoutes(apiV1Admin, db, logger, cfg, chConn)
+
+	// v2.0 平台超管路由 /api/v2/admin/*
+	// 鉴权链: Auth (复用 v1) → tenant.AdminMiddleware (强制 IsPlatformAdmin)
+	apiV2 := router.Group("/api/v2")
+	apiV2.Use(authHandler.AuthMiddleware())
+	apiV2Admin := apiV2.Group("/admin")
+	apiV2Admin.Use(tenant.AdminMiddleware())
+	adminTenantsHandler := api.NewAdminTenantsHandler(db, logger)
+	apiV2Admin.GET("/tenants", adminTenantsHandler.ListTenants)
+	apiV2Admin.GET("/tenants/:id", adminTenantsHandler.GetTenant)
+	apiV2Admin.POST("/tenants", adminTenantsHandler.CreateTenant)
+	apiV2Admin.POST("/tenants/:id/suspend", adminTenantsHandler.SuspendTenant)
+	apiV2Admin.POST("/tenants/:id/resume", adminTenantsHandler.ResumeTenant)
 
 	return router
 }
