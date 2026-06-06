@@ -8,8 +8,10 @@
  * 4 级覆盖优先级 (高→低):
  *   rule > host_label > tenant > global
  */
-import { get, post } from './client'
+import apiClient from './client'
 import type { ApiResponse } from './types'
+
+const { get, post } = apiClient
 
 export type RunningMode = 'observe' | 'protect'
 
