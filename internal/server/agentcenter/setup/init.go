@@ -16,6 +16,7 @@ import (
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	grpcProto "github.com/imkerbos/mxsec-platform/api/proto/grpc"
+	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/commandsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/httptrans"
 	acmetrics "github.com/imkerbos/mxsec-platform/internal/server/agentcenter/metrics"
 	"github.com/imkerbos/mxsec-platform/internal/server/agentcenter/scheduler"
@@ -133,6 +134,26 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 					attempt++
 				}
 			}()
+		}
+	}
+
+	// 6.2 启动 Engine→AC 命令订阅消费者 (Sprint 2 PR37)
+	// 订阅 mxsec.engine.command Topic, 把 Engine 产出的命令推到 Agent gRPC stream。
+	// transferService 满足 commandsub.AgentPusher interface (PR36 加 PushToAgent/PushToAgents)。
+	if cfg.Kafka.Enabled && len(cfg.Kafka.Brokers) > 0 {
+		csConsumer, err := commandsub.NewConsumer(cfg.Kafka.Brokers, transferService, logger)
+		if err != nil {
+			logger.Warn("AC commandsub 初始化失败,Engine→AC 命令链路降级",
+				zap.Error(err))
+		} else {
+			ctxCS, cancelCS := context.WithCancel(context.Background())
+			csConsumer.Start(ctxCS)
+			// 注: cancelCS / csConsumer.Close 由 setup 的 cleanup 路径接管 (后续 PR 完善优雅退出)
+			_ = cancelCS
+			logger.Info("AC commandsub 已启动",
+				zap.Strings("brokers", cfg.Kafka.Brokers),
+				zap.String("topic", "mxsec.engine.command"),
+			)
 		}
 	}
 
