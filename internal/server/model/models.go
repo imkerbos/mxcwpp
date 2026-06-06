@@ -222,6 +222,8 @@ var (
 		&SecurityDBSyncRecord{},
 		&GeneratedReport{},
 		&FeatureFlag{},
+		&HoneypotPolicy{},
+		&HoneypotDeploymentRecord{},
 		&RetentionPolicy{},
 		&MigrationJob{},
 		&ComponentPushHost{},
