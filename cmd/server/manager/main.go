@@ -14,10 +14,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
-	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/advisory"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/router"
+	managerscheduler "github.com/imkerbos/mxsec-platform/internal/server/manager/scheduler"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/setup"
+	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/advisory"
 )
 
 var (
@@ -57,6 +59,9 @@ func main() {
 	// 启动 pre-check 周期巡检（每 6h 对 unpatched + 未检/过期的 host_vuln 自动 pre-check）
 	go services.PreCheckCron.Run(ctx)
 
+	// Sprint 2 PR16: 启动定期告警调度器 (从 AC 迁过来,业务调度归 Manager)
+	go managerscheduler.StartAlertScheduler(services.DB, services.Logger)
+
 	// 启动漏洞扫描定时调度器
 	vulnScanner := biz.NewVulnScanner(services.DB, services.Logger)
 	scanScheduler := biz.NewScanScheduler(services.DB, services.Logger, vulnScanner)
@@ -76,7 +81,9 @@ func main() {
 	services.Logger.Info("NVD enrich cron 已启动")
 
 	// 启动 GCP Pub/Sub 消费者管理器（GKE 审计日志接入，per-cluster 配置）
-	alarmService := biz.NewKubeAlarmService(services.DB, services.Logger)
+	alarmService := kube.NewKubeAlarmService(services.DB, services.Logger)
+	// 注入 notification 派发器,解耦 engine/kube 反向依赖 manager/biz
+	alarmService.SetNotifier(biz.NewKubeAlarmNotifier(services.DB, services.Logger))
 	consumerManager := gcppubsub.NewConsumerManager(services.DB, services.Logger, alarmService)
 	consumerManager.Start(ctx)
 

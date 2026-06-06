@@ -2,6 +2,7 @@ package model
 
 // HostIsolation tracks the network isolation state of a host.
 type HostIsolation struct {
+	TenantID   string     `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID         uint       `gorm:"primarykey" json:"id"`
 	HostID     string     `gorm:"type:varchar(64);uniqueIndex" json:"host_id"`
 	Hostname   string     `gorm:"type:varchar(255)" json:"hostname"`

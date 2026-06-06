@@ -32,12 +32,14 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 
 	tables := []string{
 		`CREATE TABLE hosts (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			host_id  TEXT PRIMARY KEY,
 			hostname TEXT,
 			ipv4     TEXT DEFAULT '[]',
 			status   TEXT DEFAULT 'offline'
 		)`,
 		`CREATE TABLE vulnerabilities (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
 			cve_id            TEXT NOT NULL UNIQUE,
 			osv_id            TEXT,
@@ -80,6 +82,7 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			deleted_at        DATETIME
 		)`,
 		`CREATE TABLE host_vulnerabilities (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id                            INTEGER PRIMARY KEY AUTOINCREMENT,
 			vuln_id                       INTEGER NOT NULL,
 			host_id                       TEXT NOT NULL,
@@ -97,11 +100,16 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			precheck_packages             TEXT,
 			precheck_affected_processes   TEXT,
 			precheck_checked_at           DATETIME,
+			patched_reason                TEXT DEFAULT '',
+			prev_status                   TEXT DEFAULT '',
+			vanished_at                   DATETIME,
+			resurfaced_at                 DATETIME,
 			created_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(vuln_id, host_id)
 		)`,
 		`CREATE TABLE remediation_tasks (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
 			vuln_id           INTEGER NOT NULL,
 			cve_id            TEXT NOT NULL,
@@ -128,6 +136,7 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE software (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id           TEXT PRIMARY KEY,
 			host_id      TEXT NOT NULL,
 			name         TEXT NOT NULL,
