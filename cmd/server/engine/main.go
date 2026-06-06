@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/observability"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine"
 )
@@ -35,6 +36,8 @@ func main() {
 	otelEndpoint := flag.String("otel-endpoint", "localhost:4318", "OTLP collector endpoint")
 	otelSampleRate := flag.Float64("otel-sample-rate", 0.1, "OTel trace sample rate (0-1)")
 	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka broker addresses (comma separated); empty disables ConsumerGroup B")
+	alertTopic := flag.String("alert-topic", "mxsec.engine.alert", "engine alert producer topic")
+	defaultMode := flag.String("default-mode", "observe", "default operating mode (observe/protect)")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -80,18 +83,38 @@ func main() {
 		}
 	}()
 
-	// 启动 Kafka ConsumerGroup B (订阅 mxsec.agent.* 5 Topic + mxsec.vuln.advisory)
-	// PR13 仅注入 noop handler;真实检测管线由后续 PR 引入。
+	// 启动 Kafka 检测链路 (Producer → Pipeline → ConsumerGroup B)。
+	// Sprint 2 PR33: Pipeline 真实接入 (stages 由后续 PR 注入,本 PR 用空 stages 跑通)。
 	if *kafkaBrokers != "" {
 		brokers := strings.Split(*kafkaBrokers, ",")
-		kc, err := engine.NewKafkaConsumer(brokers, nil, logger)
+
+		// Producer (推送告警到 mxsec.engine.alert)
+		producer, err := engine.NewAlertProducer(brokers, *alertTopic, logger)
+		if err != nil {
+			logger.Fatal("Engine AlertProducer 初始化失败", zap.Error(err))
+		}
+		defer func() { _ = producer.Close() }()
+
+		// Mode Resolver (默认 observe, 后续 PR 接租户/规则覆盖加载)
+		resolver := mode.NewMemoryResolver(mode.Mode(*defaultMode))
+
+		// Pipeline (stages 由后续 PR 注入,目前为空数组,等同 noop)
+		pipeline := engine.NewPipeline(producer, resolver, nil, logger)
+
+		// Consumer (用 Pipeline.Handler 作为消息处理器)
+		kc, err := engine.NewKafkaConsumer(brokers, pipeline.Handler(), logger)
 		if err != nil {
 			logger.Fatal("Engine Kafka consumer 初始化失败", zap.Error(err))
 		}
 		kc.Start(ctx)
 		defer func() { _ = kc.Close() }()
+
+		logger.Info("Engine 检测链路启动",
+			zap.String("alert_topic", *alertTopic),
+			zap.String("default_mode", *defaultMode),
+		)
 	} else {
-		logger.Warn("Engine Kafka brokers 未配置,跳过 ConsumerGroup B 启动")
+		logger.Warn("Engine Kafka brokers 未配置,跳过检测链路启动")
 	}
 
 	sigCh := make(chan os.Signal, 1)
