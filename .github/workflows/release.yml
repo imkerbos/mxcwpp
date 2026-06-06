@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-binaries:
+    name: Build agent + server + plugins
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Build all
+        run: ./scripts/build.sh all --arch=${{ matrix.arch }} --version=${GITHUB_REF##*/}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.arch }}
+          path: |
+            dist/
+            packages/
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/dist/**/*
+            release/packages/**/*
+          body: |
+            ## mxsec-platform ${{ github.ref_name }}
+
+            自动构建产物 (amd64 + arm64):
+            - Server 二进制: manager / agentcenter / consumer / engine / vulnsync / llmproxy
+            - Agent + 插件: agent / baseline / collector / fim / scanner / remediation / avscanner
+            - RPM/DEB 包
+
+            详细变更见 git log。
