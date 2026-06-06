@@ -355,6 +355,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Anomaly/index.vue'),
         meta: { title: 'ML 异常检测' },
       },
+      // Sprint 4 PR69: 运行模式 (observe/protect) + 6 闸门 admission
+      {
+        path: 'mode',
+        name: 'ModePanel',
+        component: () => import('@/views/Mode/ModePanel.vue'),
+        meta: { title: '运行模式' },
+      },
       // M4: 行为基线引擎
       {
         path: 'bde',
