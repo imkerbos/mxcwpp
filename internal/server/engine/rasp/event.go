@@ -15,7 +15,6 @@
 package rasp
 
 import (
-	"context"
 	"encoding/json"
 	"time"
 )
@@ -146,7 +145,8 @@ func MemshellIndicators(ev Event) []string {
 			hits = append(hits, "class_name_match:"+suspect)
 		}
 	}
-	// stack_trace 含可疑特征
+	// stack_trace 含可疑特征 (命中一次即可,不重复加 hit)
+stackLoop:
 	for _, frame := range ev.StackTrace {
 		switch {
 		case containsCaseInsensitive(frame, "javax.servlet.Filter.doFilter"),
@@ -154,7 +154,7 @@ func MemshellIndicators(ev Event) []string {
 			containsCaseInsensitive(frame, "org.apache.catalina.core.StandardContext.addFilterDef"):
 			// 运行时动态注册 Filter/Servlet 是经典内存马指标
 			hits = append(hits, "dynamic_filter_servlet_register")
-			break
+			break stackLoop
 		}
 	}
 	return hits
