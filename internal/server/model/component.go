@@ -40,6 +40,7 @@ const (
 // Component 组件表
 // 存储组件的基本信息（agent、baseline、collector 等）
 type Component struct {
+	TenantID    string            `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID          uint              `gorm:"primaryKey" json:"id"`
 	Name        string            `gorm:"size:32;not null;uniqueIndex:idx_component_name" json:"name"` // 组件名称 (agent, baseline, collector)
 	Category    ComponentCategory `gorm:"size:16;not null" json:"category"`                            // 组件分类 (agent, plugin)
@@ -61,6 +62,7 @@ func (Component) TableName() string {
 // ComponentVersion 组件版本表
 // 存储组件的版本信息
 type ComponentVersion struct {
+	TenantID    string         `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	ComponentID uint           `gorm:"not null;index:idx_version_component" json:"component_id"`               // 关联的组件 ID
 	Version     string         `gorm:"size:32;not null;index:idx_version_component,priority:2" json:"version"` // 版本号 (1.0.0, 1.8.5.31)
@@ -84,6 +86,7 @@ func (ComponentVersion) TableName() string {
 // ComponentPackage 组件包表
 // 存储组件版本的具体文件（不同平台、架构）
 type ComponentPackage struct {
+	TenantID   string         `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID         uint           `gorm:"primaryKey" json:"id"`
 	VersionID  uint           `gorm:"not null;uniqueIndex:idx_unique_package" json:"version_id"`       // 关联的版本 ID
 	OS         string         `gorm:"size:32;not null;default:linux" json:"os"`                        // 操作系统 (linux)

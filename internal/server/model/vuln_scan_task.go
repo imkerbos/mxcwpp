@@ -10,6 +10,7 @@ import (
 // scope=hosts     → 指定 host_ids
 // scope=business_line → 按业务线扫，business_line 字段记原始值，target_host_ids 存解析后
 type VulnScanTask struct {
+	TenantID        string         `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID              uint           `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
 	TaskID          string         `gorm:"column:task_id;type:varchar(64);not null;uniqueIndex" json:"taskId"`
 	Scope           string         `gorm:"column:scope;type:varchar(20);not null" json:"scope"`

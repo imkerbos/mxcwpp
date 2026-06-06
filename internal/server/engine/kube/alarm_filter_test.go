@@ -1,4 +1,4 @@
-package biz
+package kube
 
 import (
 	"encoding/json"
@@ -31,6 +31,7 @@ func setupAlarmFilterTestDB(t *testing.T) (*gorm.DB, *KubeAlarmService) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	if err := db.Exec(`CREATE TABLE kube_alarms (
+		tenant_id TEXT NOT NULL DEFAULT 't-default',
 		id               INTEGER PRIMARY KEY AUTOINCREMENT,
 		cluster_id       INTEGER NOT NULL,
 		cluster_name     TEXT,
@@ -61,6 +62,7 @@ func setupAlarmFilterTestDB(t *testing.T) (*gorm.DB, *KubeAlarmService) {
 		t.Fatalf("failed to create kube_alarms: %v", err)
 	}
 	if err := db.Exec(`CREATE TABLE kube_whitelists (
+		tenant_id TEXT NOT NULL DEFAULT 't-default',
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
 		name         TEXT NOT NULL,
 		cluster_id   INTEGER,
