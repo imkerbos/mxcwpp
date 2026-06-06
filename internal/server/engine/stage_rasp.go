@@ -51,8 +51,30 @@ func (s *RASPStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error
 
 	// 内存马规则 (Java)
 	hits := rasp.MemshellIndicators(*raspEv)
+
+	// PHP 危险函数 + 可疑参数 (PR71)
+	if raspEv.Language == "php" {
+		if desc, isDanger := rasp.PHPDangerousFunctions[raspEv.MethodName]; isDanger {
+			hits = append(hits, "php_dangerous_fn:"+raspEv.MethodName+":"+desc)
+		}
+		hits = append(hits, rasp.PHPSuspiciousArgs(raspEv.MethodName, raspEv.Arguments)...)
+	}
+
+	// Python 危险 audit + 反弹 shell 链 (PR71)
+	if raspEv.Language == "python" {
+		if desc, isDanger := rasp.PythonDangerousAudits[raspEv.MethodName]; isDanger {
+			hits = append(hits, "python_audit:"+raspEv.MethodName+":"+desc)
+		}
+		if sus := rasp.PythonSuspiciousImport(raspEv.ClassName); sus != "" {
+			hits = append(hits, sus)
+		}
+		if rasp.PythonReverseShellPattern(raspEv.StackTrace) {
+			hits = append(hits, "python_reverse_shell_pattern")
+		}
+	}
+
 	if len(hits) == 0 {
-		// 非内存马事件: 仅其他高危类型 (反序列化 / php eval / py exec / 反弹链) 才产 Alert
+		// 非内存马 / 非语言特定命中: 仅其他高危类型才产 Alert
 		if !isHighRiskKind(raspEv.Kind) {
 			return nil, nil
 		}
@@ -76,9 +98,16 @@ func (s *RASPStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error
 
 	severity := "medium"
 	rule := "RASP_HIGH_RISK_CALL"
-	if len(hits) > 0 {
+	switch {
+	case len(hits) > 0 && raspEv.Language == "java":
 		severity = "critical"
 		rule = "JAVA_MEMSHELL"
+	case len(hits) > 0 && raspEv.Language == "php":
+		severity = "high"
+		rule = "PHP_DANGEROUS_CALL"
+	case len(hits) > 0 && raspEv.Language == "python":
+		severity = "high"
+		rule = "PYTHON_DANGEROUS_CALL"
 	}
 
 	return []Alert{
