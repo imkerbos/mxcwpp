@@ -5,10 +5,8 @@
 //   - 多层引擎: CEL 规则 + 序列检测 + ONNX ML + Storyline + K8s Audit
 //   - 产出 mxsec.engine.alert / storyline / feedback
 //
-// 设计文档: docs/engine-design.md / docs/engine-detection-design.md
-//
-// 本 PR (PR3) 仅提供空骨架: HTTP /health + /metrics + 优雅退出。
-// 检测层实现由后续 PR 从 internal/server/engine/celengine 等子包搬入。
+// PR67 起: 配置走 viper 统一加载, 仅保留 --config flag。
+// 兼容: 老部署 env 直接覆盖, 无 yaml 文件也能起 (走 default + env)。
 package main
 
 import (
@@ -18,7 +16,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +24,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/observability"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine"
@@ -35,16 +33,14 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "configs/engine.yaml", "path to engine config")
-	httpAddr := flag.String("http", ":8082", "HTTP listen address for /health and /metrics")
-	otelEnabled := flag.Bool("otel", false, "enable OpenTelemetry tracing")
-	otelEndpoint := flag.String("otel-endpoint", "localhost:4318", "OTLP collector endpoint")
-	otelSampleRate := flag.Float64("otel-sample-rate", 0.1, "OTel trace sample rate (0-1)")
-	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka broker addresses (comma separated); empty disables ConsumerGroup B")
-	alertTopic := flag.String("alert-topic", "mxsec.engine.alert", "engine alert producer topic")
-	defaultMode := flag.String("default-mode", "observe", "default operating mode (observe/protect)")
-	dbDSN := flag.String("db-dsn", "", "MySQL DSN for stages requiring DB (CEL/sequence/baseline/storyline);空时跳过实际检测 stages")
+	configPath := flag.String("config", "configs/engine.yaml", "path to engine config (viper yaml)")
 	flag.Parse()
+
+	cfg, err := config.LoadEngine(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
+	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -53,67 +49,67 @@ func main() {
 	}
 	defer func() { _ = logger.Sync() }()
 
-	logger.Info("Engine starting (skeleton)",
+	logger.Info("Engine starting",
 		zap.String("config", *configPath),
-		zap.String("http_addr", *httpAddr),
+		zap.String("http_addr", cfg.HTTPAddr),
+		zap.String("default_mode", cfg.DefaultMode),
 		zap.String("version", engine.Version),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// v2.0: OTel 全链路追踪初始化 (otel.enabled=false 时走 noop,零开销)
 	tracerProvider, err := observability.InitTracing(ctx, observability.Config{
-		Enabled:        *otelEnabled,
+		Enabled:        cfg.OTel.Enabled,
 		ServiceName:    "engine",
 		ServiceVersion: engine.Version,
-		Endpoint:       *otelEndpoint,
-		Insecure:       true,
-		SampleRate:     *otelSampleRate,
+		Endpoint:       cfg.OTel.Endpoint,
+		Insecure:       cfg.OTel.Insecure,
+		SampleRate:     cfg.OTel.SampleRate,
 	})
 	if err != nil {
-		logger.Error("OTel 初始化失败,继续走 noop", zap.Error(err))
+		logger.Error("OTel 初始化失败, 走 noop", zap.Error(err))
 	}
 	defer func() { _ = tracerProvider.Shutdown(context.Background()) }()
 
 	server := &http.Server{
-		Addr:              *httpAddr,
+		Addr:              cfg.HTTPAddr,
 		Handler:           engine.NewHTTPHandler(logger),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
-		logger.Info("Engine HTTP server listening", zap.String("addr", *httpAddr))
+		logger.Info("Engine HTTP server listening", zap.String("addr", cfg.HTTPAddr))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", zap.Error(err))
 		}
 	}()
 
-	// 启动 Kafka 检测链路 (Producer → Pipeline → ConsumerGroup B)。
-	// Sprint 2 PR33: Pipeline 真实接入 (stages 由后续 PR 注入,本 PR 用空 stages 跑通)。
-	if *kafkaBrokers != "" {
-		brokers := strings.Split(*kafkaBrokers, ",")
-
-		// Producer (推送告警到 mxsec.engine.alert)
-		producer, err := engine.NewAlertProducer(brokers, *alertTopic, logger)
+	if len(cfg.Kafka.Brokers) > 0 {
+		producer, err := engine.NewAlertProducer(cfg.Kafka.Brokers, cfg.AlertTopic, logger)
 		if err != nil {
-			logger.Fatal("Engine AlertProducer 初始化失败", zap.Error(err))
+			logger.Fatal("AlertProducer 初始化失败", zap.Error(err))
 		}
 		defer func() { _ = producer.Close() }()
 
-		// Mode Resolver (默认 observe, 后续 PR 接租户/规则覆盖加载)
-		resolver := mode.NewMemoryResolver(mode.Mode(*defaultMode))
+		resolver := mode.NewMemoryResolver(mode.Mode(cfg.DefaultMode))
 
-		// Stages (DB 可用时启用 CEL/Sequence/Storyline; 否则空数组)
 		var stages []engine.Stage
-		if *dbDSN != "" {
-			db, err := gorm.Open(mysql.Open(*dbDSN), &gorm.Config{})
+		if cfg.Database.DSN != "" {
+			db, err := gorm.Open(mysql.Open(cfg.Database.DSN), &gorm.Config{})
 			if err != nil {
 				logger.Warn("Engine DB 初始化失败, 跳过 stages", zap.Error(err))
 			} else {
+				if sqlDB, e := db.DB(); e == nil {
+					sqlDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
+					sqlDB.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+					if d, perr := time.ParseDuration(cfg.Database.ConnMaxLifetime); perr == nil {
+						sqlDB.SetConnMaxLifetime(d)
+					}
+				}
 				celEng, err := celengine.New(db, logger.Named("cel"))
 				if err != nil {
-					logger.Warn("Engine celengine 初始化失败,跳过 CelRuleStage", zap.Error(err))
+					logger.Warn("celengine 初始化失败, 跳过 CelRuleStage", zap.Error(err))
 				} else {
 					stages = append(stages, engine.NewCelRuleStage(celEng, logger))
 					stages = append(stages, engine.NewSequenceStage(
@@ -122,9 +118,7 @@ func main() {
 				}
 				storyEng := storyline.NewEngine(db, logger.Named("story"))
 				stages = append(stages, engine.NewStorylineStage(storyEng, logger))
-				logger.Info("Engine stages 已注入",
-					zap.Int("stages_count", len(stages)),
-				)
+				logger.Info("Engine stages 已注入", zap.Int("stages_count", len(stages)))
 			}
 		} else {
 			logger.Warn("Engine DB DSN 未配置, stages 为空, 仅 noop 跑通管线")
@@ -132,20 +126,20 @@ func main() {
 
 		pipeline := engine.NewPipeline(producer, resolver, stages, logger)
 
-		// Consumer (用 Pipeline.Handler 作为消息处理器)
-		kc, err := engine.NewKafkaConsumer(brokers, pipeline.Handler(), logger)
+		kc, err := engine.NewKafkaConsumer(cfg.Kafka.Brokers, pipeline.Handler(), logger)
 		if err != nil {
-			logger.Fatal("Engine Kafka consumer 初始化失败", zap.Error(err))
+			logger.Fatal("Kafka consumer 初始化失败", zap.Error(err))
 		}
 		kc.Start(ctx)
 		defer func() { _ = kc.Close() }()
 
 		logger.Info("Engine 检测链路启动",
-			zap.String("alert_topic", *alertTopic),
-			zap.String("default_mode", *defaultMode),
+			zap.String("alert_topic", cfg.AlertTopic),
+			zap.String("default_mode", cfg.DefaultMode),
+			zap.Strings("brokers", cfg.Kafka.Brokers),
 		)
 	} else {
-		logger.Warn("Engine Kafka brokers 未配置,跳过检测链路启动")
+		logger.Warn("Kafka brokers 未配置, 跳过检测链路启动")
 	}
 
 	sigCh := make(chan os.Signal, 1)
