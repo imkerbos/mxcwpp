@@ -322,12 +322,16 @@ case "$TARGET" in
     remediation)
         for arch in $(get_archs); do build_plugin remediation $arch; done
         ;;
+    avscanner)
+        for arch in $(get_archs); do build_plugin avscanner $arch; done
+        ;;
     plugins)
         for arch in $(get_archs); do
             build_plugin baseline $arch
             build_plugin collector $arch
             build_plugin fim $arch
             build_plugin remediation $arch
+            build_plugin avscanner $arch
             build_scanner $arch || echo -e "${YELLOW}[WARN] scanner 构建失败（依赖下载问题），已跳过。可单独执行: $0 scanner${NC}"
         done
         ;;
@@ -338,12 +342,13 @@ case "$TARGET" in
             build_plugin collector $arch
             build_plugin fim $arch
             build_plugin remediation $arch
+            build_plugin avscanner $arch
             build_scanner $arch || echo -e "${YELLOW}[WARN] scanner 构建失败（依赖下载问题），已跳过。可单独执行: $0 scanner${NC}"
         done
         ;;
     *)
         echo -e "${RED}Unknown target: $TARGET${NC}"
-        echo "Usage: $0 [agent|baseline|collector|fim|scanner|remediation|plugins|all] [--arch=amd64|arm64|all]"
+        echo "Usage: $0 [agent|baseline|collector|fim|scanner|remediation|avscanner|plugins|all] [--arch=amd64|arm64|all]"
         exit 1
         ;;
 esac
