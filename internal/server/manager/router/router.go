@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/tenant"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
@@ -160,7 +161,42 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV2Admin.POST("/tenants/:id/suspend", adminTenantsHandler.SuspendTenant)
 	apiV2Admin.POST("/tenants/:id/resume", adminTenantsHandler.ResumeTenant)
 
+	// Sprint 2 PR38: /api/v2/system/mode (用户级查询) + /api/v2/admin/tenants/:id/mode (超管切换)
+	// MemoryResolver 启动时从 tenants 表加载初始 mode (后续 PR 加 Redis Pub/Sub 同步多副本)
+	modeResolver := mode.NewMemoryResolver(mode.Observe)
+	loadTenantModes(db, modeResolver, logger)
+	systemModeHandler := api.NewSystemModeHandler(db, logger, modeResolver)
+
+	apiV2.GET("/system/mode", systemModeHandler.GetCurrentMode)
+	apiV2Admin.POST("/tenants/:id/mode", systemModeHandler.SetTenantMode)
+	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
+
 	return router
+}
+
+// loadTenantModes 启动时把 tenants.default_mode 加载到 MemoryResolver。
+func loadTenantModes(db *gorm.DB, resolver *mode.MemoryResolver, logger *zap.Logger) {
+	var tenants []struct {
+		ID          string
+		DefaultMode string
+	}
+	if err := db.Table("tenants").Where("status = ?", "active").Find(&tenants).Error; err != nil {
+		logger.Warn("加载 tenants mode 失败,使用全局默认 observe",
+			zap.Error(err))
+		return
+	}
+	loaded := 0
+	for _, t := range tenants {
+		m := mode.Mode(t.DefaultMode)
+		if !m.IsValid() {
+			continue
+		}
+		if err := resolver.SetTenant(t.ID, m); err == nil {
+			loaded++
+		}
+	}
+	logger.Info("Mode Resolver 初始化完成",
+		zap.Int("tenants_loaded", loaded))
 }
 
 // setupAPIRoutes 注册所有需要认证的 API 路由
