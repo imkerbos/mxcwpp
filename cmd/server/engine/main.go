@@ -24,9 +24,14 @@ import (
 
 	"go.uber.org/zap"
 
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+
 	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/observability"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/storyline"
 )
 
 func main() {
@@ -38,6 +43,7 @@ func main() {
 	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka broker addresses (comma separated); empty disables ConsumerGroup B")
 	alertTopic := flag.String("alert-topic", "mxsec.engine.alert", "engine alert producer topic")
 	defaultMode := flag.String("default-mode", "observe", "default operating mode (observe/protect)")
+	dbDSN := flag.String("db-dsn", "", "MySQL DSN for stages requiring DB (CEL/sequence/baseline/storyline);空时跳过实际检测 stages")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -98,8 +104,33 @@ func main() {
 		// Mode Resolver (默认 observe, 后续 PR 接租户/规则覆盖加载)
 		resolver := mode.NewMemoryResolver(mode.Mode(*defaultMode))
 
-		// Pipeline (stages 由后续 PR 注入,目前为空数组,等同 noop)
-		pipeline := engine.NewPipeline(producer, resolver, nil, logger)
+		// Stages (DB 可用时启用 CEL/Sequence/Storyline; 否则空数组)
+		var stages []engine.Stage
+		if *dbDSN != "" {
+			db, err := gorm.Open(mysql.Open(*dbDSN), &gorm.Config{})
+			if err != nil {
+				logger.Warn("Engine DB 初始化失败, 跳过 stages", zap.Error(err))
+			} else {
+				celEng, err := celengine.New(db, logger.Named("cel"))
+				if err != nil {
+					logger.Warn("Engine celengine 初始化失败,跳过 CelRuleStage", zap.Error(err))
+				} else {
+					stages = append(stages, engine.NewCelRuleStage(celEng, logger))
+					stages = append(stages, engine.NewSequenceStage(
+						celengine.NewSequenceDetector(celEng, db, nil, logger.Named("seq")),
+						logger))
+				}
+				storyEng := storyline.NewEngine(db, logger.Named("story"))
+				stages = append(stages, engine.NewStorylineStage(storyEng, logger))
+				logger.Info("Engine stages 已注入",
+					zap.Int("stages_count", len(stages)),
+				)
+			}
+		} else {
+			logger.Warn("Engine DB DSN 未配置, stages 为空, 仅 noop 跑通管线")
+		}
+
+		pipeline := engine.NewPipeline(producer, resolver, stages, logger)
 
 		// Consumer (用 Pipeline.Handler 作为消息处理器)
 		kc, err := engine.NewKafkaConsumer(brokers, pipeline.Handler(), logger)
