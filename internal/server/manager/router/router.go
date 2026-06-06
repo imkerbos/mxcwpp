@@ -10,8 +10,11 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
+	"github.com/imkerbos/mxsec-platform/internal/server/common/tenant"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
@@ -83,7 +86,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	router.StaticFS("/uploads", gin.Dir("./uploads", false))
 
 	// K8s Audit Webhook（不需要认证，apiserver 通过 cluster_token 鉴权）
-	alarmService := biz.NewKubeAlarmService(db, logger)
+	alarmService := kube.NewKubeAlarmService(db, logger)
 	auditHandler := api.NewKubeAuditHandler(db, logger, alarmService)
 	router.POST("/api/v1/kube/audit-webhook/:cluster_token", auditHandler.ReceiveAuditWebhook)
 
@@ -145,11 +148,59 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	setupAPIRoutes(apiV1Auth, db, logger, cfg, scoreCache, metricsService, alarmService, acRegistry, acDispatcher, chConn, redisClient, promClient, virusDBUpdater, consumerManager)
 	setupAdminAPIRoutes(apiV1Admin, db, logger, cfg, chConn)
 
+	// v2.0 平台超管路由 /api/v2/admin/*
+	// 鉴权链: Auth (复用 v1) → tenant.AdminMiddleware (强制 IsPlatformAdmin)
+	apiV2 := router.Group("/api/v2")
+	apiV2.Use(authHandler.AuthMiddleware())
+	apiV2Admin := apiV2.Group("/admin")
+	apiV2Admin.Use(tenant.AdminMiddleware())
+	adminTenantsHandler := api.NewAdminTenantsHandler(db, logger)
+	apiV2Admin.GET("/tenants", adminTenantsHandler.ListTenants)
+	apiV2Admin.GET("/tenants/:id", adminTenantsHandler.GetTenant)
+	apiV2Admin.POST("/tenants", adminTenantsHandler.CreateTenant)
+	apiV2Admin.POST("/tenants/:id/suspend", adminTenantsHandler.SuspendTenant)
+	apiV2Admin.POST("/tenants/:id/resume", adminTenantsHandler.ResumeTenant)
+
+	// Sprint 2 PR38: /api/v2/system/mode (用户级查询) + /api/v2/admin/tenants/:id/mode (超管切换)
+	// MemoryResolver 启动时从 tenants 表加载初始 mode (后续 PR 加 Redis Pub/Sub 同步多副本)
+	modeResolver := mode.NewMemoryResolver(mode.Observe)
+	loadTenantModes(db, modeResolver, logger)
+	systemModeHandler := api.NewSystemModeHandler(db, logger, modeResolver)
+
+	apiV2.GET("/system/mode", systemModeHandler.GetCurrentMode)
+	apiV2Admin.POST("/tenants/:id/mode", systemModeHandler.SetTenantMode)
+	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
+
 	return router
 }
 
+// loadTenantModes 启动时把 tenants.default_mode 加载到 MemoryResolver。
+func loadTenantModes(db *gorm.DB, resolver *mode.MemoryResolver, logger *zap.Logger) {
+	var tenants []struct {
+		ID          string
+		DefaultMode string
+	}
+	if err := db.Table("tenants").Where("status = ?", "active").Find(&tenants).Error; err != nil {
+		logger.Warn("加载 tenants mode 失败,使用全局默认 observe",
+			zap.Error(err))
+		return
+	}
+	loaded := 0
+	for _, t := range tenants {
+		m := mode.Mode(t.DefaultMode)
+		if !m.IsValid() {
+			continue
+		}
+		if err := resolver.SetTenant(t.ID, m); err == nil {
+			loaded++
+		}
+	}
+	logger.Info("Mode Resolver 初始化完成",
+		zap.Int("tenants_loaded", loaded))
+}
+
 // setupAPIRoutes 注册所有需要认证的 API 路由
-func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *biz.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) {
+func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.BaselineScoreCache, metricsService *biz.MetricsService, alarmService *kube.KubeAlarmService, acRegistry *sd.Registry, acDispatcher *sd.ACDispatcher, chConn chdriver.Conn, redisClient *redis.Client, promClient *prometheus.Client, virusDBUpdater *biz.VirusDBUpdater, consumerManager *gcppubsub.ConsumerManager) {
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
@@ -596,7 +647,7 @@ func setupInspectionAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupKubeAPI 设置 Kubernetes 容器安全 API 路由
-func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *biz.KubeAlarmService, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) {
+func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alarmService *kube.KubeAlarmService, cfg *config.Config, consumerManager *gcppubsub.ConsumerManager) {
 	kubeClient := biz.NewKubeClientManager(db, logger)
 
 	// 集群管理
@@ -626,7 +677,7 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.POST("/kube/events/:id/handle", eventHandler.HandleEvent)
 
 	// CEL 规则引擎
-	ruleEngine, err := biz.NewKubeRuleEngine(logger)
+	ruleEngine, err := kube.NewKubeRuleEngine(logger)
 	if err != nil {
 		logger.Error("初始化 K8s CEL 规则引擎失败", zap.Error(err))
 	}
@@ -780,6 +831,8 @@ func setupVulnerabilitiesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.L
 	router.GET("/vulnerabilities/scan-status", handler.GetScanStatus)
 	router.GET("/vulnerabilities/scan-history", handler.GetScanHistory)
 	router.GET("/vulnerabilities/scan-history/:id", handler.GetScanHistoryDetail)
+	router.GET("/vulnerabilities/scan-tasks", handler.ListScanTasks)
+	router.GET("/vulnerabilities/scan-tasks/:task_id", handler.GetScanTask)
 
 	router.GET("/vulnerabilities/:id", handler.GetVulnerability)
 

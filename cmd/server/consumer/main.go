@@ -18,15 +18,15 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/anomaly"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/baseline"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/celengine"
 	consumermetrics "github.com/imkerbos/mxsec-platform/internal/server/consumer/metrics"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/rulesync"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/siem"
-	"github.com/imkerbos/mxsec-platform/internal/server/consumer/storyline"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
 	"github.com/imkerbos/mxsec-platform/internal/server/database"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/anomaly"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/baseline"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/celengine"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/rulesync"
+	"github.com/imkerbos/mxsec-platform/internal/server/engine/storyline"
 	serverLogger "github.com/imkerbos/mxsec-platform/internal/server/logger"
 	"github.com/imkerbos/mxsec-platform/internal/server/model"
 	"gorm.io/gorm"
@@ -146,10 +146,19 @@ func main() {
 
 	dlqHandler := consumer.NewDLQHandler(dlqProducer, logger)
 
+	// Sprint 2 PR48: 分析模块可选启用 (默认 true 兼容 v1; v2 部署应设 false 由 Engine 服务承担)。
+	// 详见 docs/architecture.md §2.3 Consumer 职责: 只做 Kafka -> 存储幂等写入。
+	analysisEnabled := os.Getenv("MXSEC_CONSUMER_ANALYSIS") != "false"
+	if !analysisEnabled {
+		logger.Info("Consumer 分析模块已禁用 (MXSEC_CONSUMER_ANALYSIS=false), 仅运行 writer 路径; 检测由 Engine 服务承担")
+	}
+
 	// 6.1 初始化 CEL 规则引擎（可选，失败不阻塞启动）
 	var celEng *celengine.Engine
 	var alertGen *celengine.AlertGenerator
-	if eng, err := celengine.New(db, logger); err != nil {
+	if !analysisEnabled {
+		// v2 部署: Consumer 不启动 CEL 引擎,Engine 服务接管
+	} else if eng, err := celengine.New(db, logger); err != nil {
 		logger.Warn("CEL 引擎初始化失败，跳过实时检测", zap.Error(err))
 	} else {
 		celEng = eng

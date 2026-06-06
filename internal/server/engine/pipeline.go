@@ -1,0 +1,178 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/IBM/sarama"
+	"go.uber.org/zap"
+
+	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
+)
+
+// Pipeline 把 Kafka 消息按"规则 → 序列 → ML → Storyline"4 层引擎处理,
+// 命中告警时通过 AlertProducer 发到 mxsec.engine.alert。
+//
+// 设计文档: docs/engine-detection-design.md
+type Pipeline struct {
+	producer  *AlertProducer
+	resolver  *mode.MemoryResolver
+	stages    []Stage
+	logger    *zap.Logger
+}
+
+// Stage 是 Pipeline 中的一层检测处理器。
+//
+// 每个 Stage 接收 PipelineEvent (从 Kafka 消息解码得到),
+// 检测命中时返回 Alert(s),不命中返回空 slice。
+type Stage interface {
+	Name() string
+	Process(ctx context.Context, ev PipelineEvent) ([]Alert, error)
+}
+
+// PipelineEvent 是 Engine 内部统一事件 schema (解码自 Kafka).
+type PipelineEvent struct {
+	TenantID  string          `json:"tenant_id"`
+	AgentID   string          `json:"agent_id"`
+	HostID    string          `json:"host_id"`
+	DataType  int32           `json:"data_type"`
+	Topic     string          `json:"-"`
+	Partition int32           `json:"-"`
+	Offset    int64           `json:"-"`
+	ReceivedAt time.Time      `json:"received_at"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+// Alert 是 Pipeline 产出的告警 (转换为 AlertEnvelope 后推送)。
+type Alert struct {
+	AlertID        string
+	RuleID         string
+	Severity       string
+	ATTCKTactic    string
+	ATTCKTechnique string
+	WouldAction    json.RawMessage
+	Action         json.RawMessage
+	Payload        json.RawMessage
+}
+
+// NewPipeline 构造检测管线。
+func NewPipeline(producer *AlertProducer, resolver *mode.MemoryResolver, stages []Stage, logger *zap.Logger) *Pipeline {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	if resolver == nil {
+		resolver = mode.NewMemoryResolver(mode.Observe)
+	}
+	return &Pipeline{
+		producer: producer,
+		resolver: resolver,
+		stages:   stages,
+		logger:   logger,
+	}
+}
+
+// Handler 把 Pipeline 包装成 engine.MessageHandler,
+// 供 KafkaConsumer 注入。
+func (p *Pipeline) Handler() MessageHandler {
+	return func(ctx context.Context, msg *sarama.ConsumerMessage) error {
+		ev, err := decodeEvent(msg)
+		if err != nil {
+			p.logger.Warn("engine pipeline decode failed",
+				zap.String("topic", msg.Topic),
+				zap.Int32("partition", msg.Partition),
+				zap.Int64("offset", msg.Offset),
+				zap.Error(err))
+			return nil // 不阻塞 offset
+		}
+		ev.Topic = msg.Topic
+		ev.Partition = msg.Partition
+		ev.Offset = msg.Offset
+		ev.ReceivedAt = time.Now().UTC()
+
+		// 逐层处理
+		for _, st := range p.stages {
+			alerts, err := st.Process(ctx, ev)
+			if err != nil {
+				p.logger.Warn("stage error",
+					zap.String("stage", st.Name()),
+					zap.String("topic", ev.Topic),
+					zap.Error(err))
+				continue
+			}
+			for _, a := range alerts {
+				if err := p.emitAlert(ctx, ev, a); err != nil {
+					p.logger.Warn("emit alert failed", zap.Error(err))
+				}
+			}
+		}
+		return nil
+	}
+}
+
+// emitAlert 把 Alert 转 AlertEnvelope 推到 mxsec.engine.alert,
+// 根据当前 mode 决定 Action vs WouldAction 字段。
+func (p *Pipeline) emitAlert(ctx context.Context, ev PipelineEvent, a Alert) error {
+	if p.producer == nil {
+		return nil
+	}
+	decision := p.resolver.Resolve(mode.Scope{
+		TenantID: ev.TenantID,
+		RuleID:   a.RuleID,
+	})
+
+	env := AlertEnvelope{
+		AlertID:        a.AlertID,
+		TenantID:       ev.TenantID,
+		HostID:         ev.HostID,
+		RuleID:         a.RuleID,
+		Severity:       a.Severity,
+		Mode:           string(decision.Mode),
+		DetectedAt:     time.Now().UTC(),
+		ATTCKTactic:    a.ATTCKTactic,
+		ATTCKTechnique: a.ATTCKTechnique,
+		Payload:        a.Payload,
+	}
+
+	// mode 决定 would_action vs action 字段填充
+	if mode.ShouldEnforce(decision) {
+		env.Action = a.Action
+	} else {
+		env.WouldAction = a.WouldAction
+		// observe 模式下如果没有 WouldAction,用 Action 内容(预期动作描述)
+		if len(env.WouldAction) == 0 && len(a.Action) > 0 {
+			env.WouldAction = a.Action
+		}
+	}
+
+	return p.producer.Publish(ctx, env)
+}
+
+// decodeEvent 解码 Kafka 消息为 PipelineEvent。
+//
+// 消息格式假设是 MQMessage (internal/server/common/kafka/message.go);
+// 本 PR 暂用宽松 JSON 解码 (key 不匹配时仍能跑过)。
+func decodeEvent(msg *sarama.ConsumerMessage) (PipelineEvent, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Value, &raw); err != nil {
+		return PipelineEvent{}, fmt.Errorf("unmarshal: %w", err)
+	}
+	ev := PipelineEvent{Payload: msg.Value}
+	if v, ok := raw["tenant_id"]; ok {
+		_ = json.Unmarshal(v, &ev.TenantID)
+	}
+	if v, ok := raw["agent_id"]; ok {
+		_ = json.Unmarshal(v, &ev.AgentID)
+	}
+	if v, ok := raw["host_id"]; ok {
+		_ = json.Unmarshal(v, &ev.HostID)
+	}
+	if v, ok := raw["data_type"]; ok {
+		_ = json.Unmarshal(v, &ev.DataType)
+	}
+	if v, ok := raw["body"]; ok {
+		ev.Payload = v
+	}
+	return ev, nil
+}

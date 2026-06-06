@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -557,49 +558,103 @@ func (h *VulnerabilitiesHandler) TriggerSync(c *gin.Context) {
 	SuccessMessage(c, "漏洞库同步任务已启动")
 }
 
-// TriggerScan 触发漏洞扫描（包含漏洞库同步 + 主机扫描）
+// TriggerScan 触发漏洞扫描
 // POST /api/v1/vulnerabilities/scan
-// 支持 scan_type 参数：full_scan（全量，默认）/ incremental_scan（增量）
+//
+// 兼容两种参数:
+//
+//	旧: { scan_type: "full_scan" | "incremental_scan" } → 等价 scope=global
+//	新: { scope: "global"|"hosts"|"business_line", host_ids: [], business_line: "" }
+//
+// 当 scope 字段存在时以 scope 为准（新字段优先）。
 func (h *VulnerabilitiesHandler) TriggerScan(c *gin.Context) {
 	var req struct {
-		ScanType string `json:"scan_type"`
+		ScanType       string   `json:"scan_type"`
+		Scope          string   `json:"scope"`
+		HostIDs        []string `json:"host_ids"`
+		BusinessLine   string   `json:"business_line"`
+		SyncDB         *bool    `json:"sync_db"`
+		ReconcileStale *bool    `json:"reconcile_stale"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	if req.ScanType == "" {
-		req.ScanType = "full_scan"
+
+	// 解析 scope（新字段优先；缺失时按旧 scan_type 推导）
+	scope := req.Scope
+	if scope == "" {
+		scope = model.ScanScopeGlobal
 	}
-	if req.ScanType != "full_scan" && req.ScanType != "incremental_scan" {
-		BadRequest(c, "无效的扫描类型，支持 full_scan / incremental_scan")
+	if scope != model.ScanScopeGlobal && scope != model.ScanScopeHosts && scope != model.ScanScopeBusinessLine {
+		BadRequest(c, "无效的 scope，支持 global / hosts / business_line")
 		return
 	}
 
-	// 并发保护：检查是否有正在运行的同步/扫描任务
-	var running int64
-	h.db.Model(&model.SecurityDBSyncRecord{}).
-		Where("db_type IN ? AND status = ?", []string{"osv", "osv-incremental", "vuln-sync"}, "running").
-		Count(&running)
-	if running > 0 {
-		BadRequest(c, "已有同步或扫描任务正在运行，请等待完成后再试")
+	syncDB := false
+	if req.SyncDB != nil {
+		syncDB = *req.SyncDB
+	}
+	// 兼容旧 full_scan：等价于 global + sync_db=true
+	if req.Scope == "" && req.ScanType == "full_scan" {
+		syncDB = true
+	}
+
+	reconcileStale := true
+	if req.ReconcileStale != nil {
+		reconcileStale = *req.ReconcileStale
+	}
+
+	// 全局扫描沿用旧并发保护（DB 同步锁）
+	if scope == model.ScanScopeGlobal {
+		var running int64
+		h.db.Model(&model.SecurityDBSyncRecord{}).
+			Where("db_type IN ? AND status = ?", []string{"osv", "osv-incremental", "vuln-sync"}, "running").
+			Count(&running)
+		if running > 0 {
+			BadRequest(c, "已有同步或扫描任务正在运行，请等待完成后再试")
+			return
+		}
+	}
+
+	triggeredBy := ""
+	if v, ok := c.Get("username"); ok {
+		if s, ok := v.(string); ok {
+			triggeredBy = s
+		}
+	}
+
+	mgr := biz.NewScanTaskManager(h.db, h.logger)
+	task, err := mgr.Create(biz.CreateTaskOpts{
+		Scope:          scope,
+		HostIDs:        req.HostIDs,
+		BusinessLine:   req.BusinessLine,
+		SyncDB:         syncDB,
+		ReconcileStale: reconcileStale,
+		TriggeredBy:    triggeredBy,
+	})
+	if err != nil {
+		BadRequest(c, err.Error())
 		return
 	}
 
-	scanner := biz.NewVulnScanner(h.db, h.logger)
+	// 异步执行
+	go func(taskID string) {
+		ctx := context.Background()
+		if err := mgr.Execute(ctx, taskID); err != nil {
+			h.logger.Error("targeted scan 执行失败",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}(task.TaskID)
 
-	if req.ScanType == "incremental_scan" {
-		go func() {
-			if err := scanner.ScanIncremental(); err != nil {
-				h.logger.Error("增量扫描失败", zap.Error(err))
-			}
-		}()
-		SuccessMessage(c, "增量扫描任务已启动")
-	} else {
-		go func() {
-			if err := scanner.ScanAll(); err != nil {
-				h.logger.Error("漏洞扫描失败", zap.Error(err))
-			}
-		}()
-		SuccessMessage(c, "全量扫描任务已启动")
+	estimated := 5 + task.ProgressTotal*2
+	if syncDB {
+		estimated += 600
 	}
+
+	Success(c, gin.H{
+		"task_id":           task.TaskID,
+		"scope":             task.Scope,
+		"target_host_count": task.ProgressTotal,
+		"estimated_seconds": estimated,
+	})
 }
 
 // GetScanStatus 获取漏洞扫描最新同步状态

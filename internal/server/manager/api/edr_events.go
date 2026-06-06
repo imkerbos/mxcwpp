@@ -155,10 +155,8 @@ func normalizeDateBound(s string, upper bool) string {
 	if s == "" {
 		return s
 	}
-	// ISO 8601: 把 'T' 替换为空格
-	if strings.Contains(s, "T") {
-		s = strings.Replace(s, "T", " ", 1)
-	}
+	// ISO 8601: 把 'T' 替换为空格（不含 'T' 时 Replace 返回原值）
+	s = strings.Replace(s, "T", " ", 1)
 	// 剥末尾 Z 时区
 	s = strings.TrimSuffix(s, "Z")
 	// 剥末尾 " HH:MM" 时区(URL 未编码 '+' 时,Go 把 '+' decode 成空格 → 末尾 " HH:MM")
