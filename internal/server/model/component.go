@@ -16,6 +16,8 @@ const (
 	ComponentTypeScanner     ComponentType = "scanner"        // 病毒查杀插件
 	ComponentTypeRemediation ComponentType = "remediation"    // 漏洞修复插件
 	ComponentTypeVirusDB     ComponentType = "virus-database" // ClamAV 病毒库
+	ComponentTypeMLModel     ComponentType = "ml-model"       // 本地 ML 模型 (ONNX/TFLite, Sprint 4 PR68)
+	ComponentTypeYARARules   ComponentType = "yara-rules"     // YARA 规则包 (后续 Sprint)
 )
 
 // ComponentCategory 组件分类
