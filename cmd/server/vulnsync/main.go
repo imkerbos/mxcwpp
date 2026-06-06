@@ -7,8 +7,6 @@
 //   - Leader Election (避免重复抓取)
 //
 // 设计文档: docs/vulnsync-design.md
-//
-// 本 PR (PR3) 仅提供空骨架: HTTP /health + /metrics + 优雅退出。
 package main
 
 import (
@@ -18,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +26,8 @@ import (
 
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync"
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/leader"
+	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/publisher"
+	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/sources"
 )
 
 func main() {
@@ -34,6 +35,10 @@ func main() {
 	httpAddr := flag.String("http", ":8083", "HTTP listen address for /health and /metrics")
 	redisAddr := flag.String("redis-addr", "", "Redis 地址 (启用 Leader Election);空时跳过")
 	instanceID := flag.String("instance-id", "", "实例唯一 ID (默认 hostname+pid)")
+	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka 地址 (启用 Publisher);空时跳过 advisory 推送")
+	advisoryTopic := flag.String("advisory-topic", "mxsec.vuln.advisory", "advisory 推送 topic")
+	nvdAPIKey := flag.String("nvd-api-key", "", "NVD API key (留空走 6s 无 key 限速)")
+	enabledSources := flag.String("sources", "nvd,osv,cisa_kev,exploitdb,epss", "启用的 source 列表(逗号分隔);留空启用所有")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -43,7 +48,7 @@ func main() {
 	}
 	defer func() { _ = logger.Sync() }()
 
-	logger.Info("VulnSync starting (skeleton)",
+	logger.Info("VulnSync starting",
 		zap.String("config", *configPath),
 		zap.String("http_addr", *httpAddr),
 		zap.String("version", vulnsync.Version),
@@ -62,10 +67,11 @@ func main() {
 		}
 	}()
 
-	// Leader Election (Sprint 2 PR17 引入)
-	// Redis 未配置时跳过,单实例部署不需要 Leader Election。
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Leader Election
+	var election *leader.Election
 	if *redisAddr != "" {
 		id := *instanceID
 		if id == "" {
@@ -77,7 +83,7 @@ func main() {
 		}
 		rdb := redis.NewClient(&redis.Options{Addr: *redisAddr})
 		defer func() { _ = rdb.Close() }()
-		election := leader.NewElection(rdb, id, leader.Config{}, logger)
+		election = leader.NewElection(rdb, id, leader.Config{}, logger)
 		go election.Run(ctx)
 		logger.Info("VulnSync Leader Election started",
 			zap.String("redis_addr", *redisAddr),
@@ -87,13 +93,93 @@ func main() {
 		logger.Warn("Redis 未配置,单实例模式,跳过 Leader Election")
 	}
 
+	// Publisher (Kafka mxsec.vuln.advisory)
+	var pub *publisher.Publisher
+	if *kafkaBrokers != "" {
+		brokers := strings.Split(*kafkaBrokers, ",")
+		pub, err = publisher.New(brokers, *advisoryTopic, logger)
+		if err != nil {
+			logger.Fatal("VulnSync Publisher 初始化失败", zap.Error(err))
+		}
+		defer func() { _ = pub.Close() }()
+		logger.Info("VulnSync Publisher started",
+			zap.String("topic", *advisoryTopic),
+		)
+	} else {
+		logger.Warn("Kafka brokers 未配置,advisory 仅写入日志,不推 Topic")
+	}
+
+	// Sources Registry
+	reg := sources.NewRegistry()
+	enabled := map[string]bool{}
+	for _, s := range strings.Split(*enabledSources, ",") {
+		enabled[strings.TrimSpace(s)] = true
+	}
+
+	registerAll(reg, *nvdAPIKey, enabled, logger)
+
+	// Schedules
+	schedules := []vulnsync.SourceSchedule{
+		{Name: "nvd", Interval: 1 * time.Hour},
+		{Name: "osv", Interval: 1 * time.Hour},
+		{Name: "cisa_kev", Interval: 6 * time.Hour},
+		{Name: "exploitdb", Interval: 6 * time.Hour},
+		{Name: "epss", Interval: 24 * time.Hour},
+		{Name: "openeuler", Interval: 6 * time.Hour},
+		{Name: "anolis", Interval: 6 * time.Hour},
+		{Name: "kylin", Interval: 6 * time.Hour},
+		{Name: "uos", Interval: 6 * time.Hour},
+	}
+
+	sch := vulnsync.NewScheduler(reg, pub, election, schedules, logger)
+	go sch.Run(ctx)
+	logger.Info("VulnSync Scheduler started",
+		zap.Int("schedules", len(schedules)),
+		zap.Strings("registered_sources", reg.Names()),
+	)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	logger.Info("VulnSync shutting down...")
 
+	cancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("VulnSync stopped")
+}
+
+func registerAll(reg *sources.Registry, nvdAPIKey string, enabled map[string]bool, logger *zap.Logger) {
+	allEnabled := len(enabled) == 0
+	if allEnabled || enabled["nvd"] {
+		_ = reg.Register(sources.NewNVDDriver("", nvdAPIKey, 0))
+	}
+	if allEnabled || enabled["osv"] {
+		_ = reg.Register(sources.NewOSVDriver("", 0))
+	}
+	if allEnabled || enabled["cisa_kev"] {
+		_ = reg.Register(sources.NewCISAKEVDriver(0))
+	}
+	if allEnabled || enabled["exploitdb"] {
+		_ = reg.Register(sources.NewExploitDBDriver(0))
+	}
+	if allEnabled || enabled["epss"] {
+		_ = reg.Register(sources.NewEPSSDriver(0))
+	}
+	if allEnabled || enabled["openeuler"] {
+		_ = reg.Register(sources.NewOpenEulerDriver(0))
+	}
+	if allEnabled || enabled["anolis"] {
+		_ = reg.Register(sources.NewAnolisDriver(0))
+	}
+	if allEnabled || enabled["kylin"] {
+		_ = reg.Register(sources.NewKylinDriver(0))
+	}
+	if allEnabled || enabled["uos"] {
+		_ = reg.Register(sources.NewUOSDriver(0))
+	}
+	logger.Info("VulnSync sources 注册完成",
+		zap.Strings("names", reg.Names()),
+	)
 }
