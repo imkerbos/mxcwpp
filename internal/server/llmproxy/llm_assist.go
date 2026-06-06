@@ -1,5 +1,5 @@
 // Package biz - C2: LLM 告警辅助分析
-package biz
+package llmproxy
 
 import (
 	"bytes"

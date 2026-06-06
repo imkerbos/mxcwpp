@@ -1,4 +1,4 @@
-package biz
+package kube
 
 import (
 	"crypto/sha256"
@@ -19,10 +19,14 @@ import (
 // 首次触发立即通知，重复触发在窗口内不重复通知
 const notificationThrottleWindow = time.Hour
 
-// KubeAlarmService 告警服务，负责告警创建与白名单过滤
+// KubeAlarmService 告警服务,负责告警创建、白名单过滤与通知派发。
+//
+// 通知派发通过 AlarmNotifier interface 解耦,
+// 避免 engine/kube 包反向依赖 manager/biz。
 type KubeAlarmService struct {
-	db     *gorm.DB
-	logger *zap.Logger
+	notifier AlarmNotifier
+	db       *gorm.DB
+	logger   *zap.Logger
 }
 
 // NewKubeAlarmService 创建告警服务
@@ -136,21 +140,24 @@ func (s *KubeAlarmService) CreateAlarmWithFilter(alarm *model.KubeAlarm) (bool, 
 	return created, nil
 }
 
-// sendAlarmNotification 异步发送 K8s 告警通知
+// AlarmNotifier 是 KubeAlarmService 向外发送通知的解耦接口。
+// 实现方在 Manager biz 层 (NotificationService 包装),
+// router 启动时注入,避免 engine/kube 循环依赖 biz。
+type AlarmNotifier interface {
+	NotifyKubeAlarm(alarm *model.KubeAlarm)
+}
+
+// SetNotifier 注入 notifier (启动时调用一次)。
+func (s *KubeAlarmService) SetNotifier(n AlarmNotifier) {
+	s.notifier = n
+}
+
+// sendAlarmNotification 异步发送 K8s 告警通知 (通过注入的 notifier)
 func (s *KubeAlarmService) sendAlarmNotification(alarm *model.KubeAlarm) {
-	ns := NewNotificationService(s.db, s.logger)
-	if err := ns.SendKubeAlertNotification(&KubeAlertData{
-		ClusterName: alarm.ClusterName,
-		Severity:    alarm.Severity,
-		AlarmType:   string(alarm.AlarmType),
-		Title:       alarm.Title,
-		Description: alarm.Description,
-		Message:     alarm.Message,
-		Namespace:   alarm.Namespace,
-		Target:      alarm.Target,
-	}); err != nil {
-		s.logger.Error("发送 K8s 告警通知失败", zap.Error(err))
+	if s.notifier == nil {
+		return
 	}
+	s.notifier.NotifyKubeAlarm(alarm)
 }
 
 // BatchCreateAlarmsWithFilter 批量创建告警（带白名单过滤）

@@ -28,6 +28,7 @@ func setupTargetedScanDB(t *testing.T) *gorm.DB {
 
 	tables := []string{
 		`CREATE TABLE hosts (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			host_id                   TEXT PRIMARY KEY,
 			hostname                  TEXT,
 			os_family                 TEXT,
@@ -82,6 +83,7 @@ func setupTargetedScanDB(t *testing.T) *gorm.DB {
 			updated_at                DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE vuln_scan_tasks (
+			tenant_id TEXT NOT NULL DEFAULT 't-default',
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
 			task_id           TEXT NOT NULL UNIQUE,
 			scope             TEXT NOT NULL,
