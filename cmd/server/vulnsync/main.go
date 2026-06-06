@@ -38,7 +38,9 @@ func main() {
 	kafkaBrokers := flag.String("kafka-brokers", "", "Kafka 地址 (启用 Publisher);空时跳过 advisory 推送")
 	advisoryTopic := flag.String("advisory-topic", "mxsec.vuln.advisory", "advisory 推送 topic")
 	nvdAPIKey := flag.String("nvd-api-key", "", "NVD API key (留空走 6s 无 key 限速)")
-	enabledSources := flag.String("sources", "nvd,osv,cisa_kev,exploitdb,epss", "启用的 source 列表(逗号分隔);留空启用所有")
+	enabledSources := flag.String("sources", "nvd,osv,cisa_kev,exploitdb,epss,redhat,ubuntu,debian,alpine,suse", "启用的 source 列表(逗号分隔);留空启用所有")
+	cnnvdEndpoint := flag.String("cnnvd-endpoint", "", "CNNVD 商业 API 端点 (留空走占位)")
+	cnnvdAPIKey := flag.String("cnnvd-api-key", "", "CNNVD 商业 API key")
 	flag.Parse()
 
 	logger, err := zap.NewProduction()
@@ -116,7 +118,7 @@ func main() {
 		enabled[strings.TrimSpace(s)] = true
 	}
 
-	registerAll(reg, *nvdAPIKey, enabled, logger)
+	registerAll(reg, *nvdAPIKey, *cnnvdEndpoint, *cnnvdAPIKey, enabled, logger)
 
 	// Schedules
 	schedules := []vulnsync.SourceSchedule{
@@ -129,6 +131,12 @@ func main() {
 		{Name: "anolis", Interval: 6 * time.Hour},
 		{Name: "kylin", Interval: 6 * time.Hour},
 		{Name: "uos", Interval: 6 * time.Hour},
+		{Name: "redhat", Interval: 4 * time.Hour},
+		{Name: "ubuntu", Interval: 4 * time.Hour},
+		{Name: "debian", Interval: 4 * time.Hour},
+		{Name: "alpine", Interval: 4 * time.Hour},
+		{Name: "suse", Interval: 4 * time.Hour},
+		{Name: "cnnvd", Interval: 24 * time.Hour},
 	}
 
 	sch := vulnsync.NewScheduler(reg, pub, election, schedules, logger)
@@ -150,7 +158,7 @@ func main() {
 	logger.Info("VulnSync stopped")
 }
 
-func registerAll(reg *sources.Registry, nvdAPIKey string, enabled map[string]bool, logger *zap.Logger) {
+func registerAll(reg *sources.Registry, nvdAPIKey, cnnvdEndpoint, cnnvdAPIKey string, enabled map[string]bool, logger *zap.Logger) {
 	allEnabled := len(enabled) == 0
 	if allEnabled || enabled["nvd"] {
 		_ = reg.Register(sources.NewNVDDriver("", nvdAPIKey, 0))
@@ -178,6 +186,24 @@ func registerAll(reg *sources.Registry, nvdAPIKey string, enabled map[string]boo
 	}
 	if allEnabled || enabled["uos"] {
 		_ = reg.Register(sources.NewUOSDriver(0))
+	}
+	if allEnabled || enabled["redhat"] {
+		_ = reg.Register(sources.NewRedHatDriver(0))
+	}
+	if allEnabled || enabled["ubuntu"] {
+		_ = reg.Register(sources.NewUbuntuDriver(0))
+	}
+	if allEnabled || enabled["debian"] {
+		_ = reg.Register(sources.NewDebianDriver(0))
+	}
+	if allEnabled || enabled["alpine"] {
+		_ = reg.Register(sources.NewAlpineDriver("", 0))
+	}
+	if allEnabled || enabled["suse"] {
+		_ = reg.Register(sources.NewSUSEDriver(0))
+	}
+	if allEnabled || enabled["cnnvd"] {
+		_ = reg.Register(sources.NewCNNVDDriver(cnnvdEndpoint, cnnvdAPIKey, 0))
 	}
 	logger.Info("VulnSync sources 注册完成",
 		zap.Strings("names", reg.Names()),
