@@ -37,6 +37,14 @@ type PolicyGenConfig struct {
 	NameTemplate    string // policy name 模板, 默认 "auto-{namespace}"
 }
 
+// ingressRule 单条 ingress (file scope).
+type ingressRule struct {
+	fromNs     string
+	fromLabels map[string]string
+	proto      string
+	port       string
+}
+
 // GeneratePolicies 把流量集合聚合成 NetworkPolicy YAML.
 //
 // 返回 namespace → YAML 字符串映射 (一 ns 一 policy file).
@@ -65,11 +73,6 @@ func GeneratePolicies(edges []FlowEdge, cfg PolicyGenConfig) map[string]string {
 	}
 
 	// 2. 按 dst ns 聚合 (NetworkPolicy 部署在 dst ns)
-	type ingressRule struct {
-		fromNs      string
-		fromLabels  map[string]string
-		proto, port string
-	}
 	byNs := map[string][]ingressRule{}
 	for k, c := range counts {
 		if c < cfg.MinFlowCount {
