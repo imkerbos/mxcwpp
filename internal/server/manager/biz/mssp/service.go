@@ -165,3 +165,17 @@ func (s *Service) countUnpatchedVulns(ctx context.Context, tenantID string) int6
 		Where("tenant_id = ? AND status = ?", tenantID, "unpatched").Count(&n).Error
 	return n
 }
+
+// UpdateChildStatus 更子租户 status, 仅当 parent_id 匹配, 防越权改其它租户 (A3).
+func (s *Service) UpdateChildStatus(ctx context.Context, parentTenantID, childID, status string) error {
+	res := s.db.WithContext(ctx).Model(&model.Tenant{}).
+		Where("id = ? AND parent_id = ?", childID, parentTenantID).
+		Update("status", status)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("child tenant not found under this parent")
+	}
+	return nil
+}

@@ -231,7 +231,7 @@ func (w *Watcher) loop() {
 			if metaLen <= 0 || off+metaLen > n {
 				break
 			}
-			ev := w.parseEvent(buf[off:off+metaLen], meta)
+			ev := w.parseEventWithInfo(buf[off:off+metaLen], meta)
 			if ev != nil {
 				select {
 				case w.events <- *ev:
@@ -246,6 +246,43 @@ func (w *Watcher) loop() {
 			off += metaLen
 		}
 	}
+}
+
+// parseEventWithInfo 解析 metadata + 后续 FID/DFID_NAME/PIDFD info records (P5-4).
+//
+// 优先级:
+//   - 路径: DFID_NAME (open_by_handle_at + 拼 name) > meta.Fd > readlink /proc/self/fd
+//   - PID:  PIDFD (/proc/self/fdinfo/<pidfd>:Pid) > meta.Pid
+func (w *Watcher) parseEventWithInfo(payload []byte, meta *unix.FanotifyEventMetadata) *Event {
+	ev := w.parseEvent(payload, meta)
+	if ev == nil {
+		return nil
+	}
+	records := iterInfoRecords(meta, payload)
+	for _, rec := range records {
+		switch rec.Type {
+		case FAN_EVENT_INFO_TYPE_PIDFD:
+			pidfd := parsePidfd(rec)
+			if pid := resolvePidfd(pidfd); pid > 0 {
+				ev.PID = pid
+				ev.Exe = readlinkProcExe(pid)
+				ev.UID, ev.GID = procUIDGID(pid)
+			}
+			if pidfd >= 0 {
+				_ = unix.Close(int(pidfd))
+			}
+		case FAN_EVENT_INFO_TYPE_DFID_NAME, FAN_EVENT_INFO_TYPE_FID, FAN_EVENT_INFO_TYPE_DFID:
+			if parsed, ok := parseFIDName(rec); ok {
+				// mountFd=0 → 用 AT_FDCWD 兜底, 生产应在 WatchFilesystem 里 keep mount_fd 表
+				if path, err := resolveByHandle(parsed, 0); err == nil && path != "" {
+					ev.Path = path
+				} else if parsed.Name != "" && ev.Path != "" {
+					ev.Path = filepath.Join(ev.Path, parsed.Name)
+				}
+			}
+		}
+	}
+	return ev
 }
 
 // parseEvent 把 raw bytes 解析成 Event.

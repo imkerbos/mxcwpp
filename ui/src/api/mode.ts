@@ -65,47 +65,56 @@ export interface AdmissionSummary {
 }
 
 export const ModeAPI = {
-  /** 取全局默认模式. */
+  /** 取当前用户租户模式 (后端 GET /api/v2/system/mode). */
   getGlobal(): Promise<ApiResponse<GlobalMode>> {
-    return get('/mode/global')
+    return get('/v2/system/mode')
   },
 
-  /** 全局模式切换 (需 admin + 6 闸门通过). */
+  /**
+   * 全局模式切换 - 通过给当前 tenant 设置 mode 实现 (POST /api/v2/admin/tenants/t-default/mode).
+   * tenant_id 走默认; 多租户走 setTenant.
+   */
   setGlobal(mode: RunningMode, reason: string): Promise<ApiResponse<GlobalMode>> {
-    return post('/mode/global', { mode, reason })
+    return post('/v2/admin/tenants/t-default/mode', { mode, reason })
   },
 
-  /** 取租户模式. */
+  /** 列出所有租户模式 (admin). */
   getTenant(tenantId: string): Promise<ApiResponse<TenantMode>> {
-    return get(`/mode/tenant/${tenantId}`)
+    return get(`/v2/admin/tenants/${tenantId}/mode`)
   },
 
-  /** 租户模式切换. */
+  /** 租户模式切换 (POST /api/v2/admin/tenants/:id/mode). */
   setTenant(tenantId: string, mode: RunningMode, reason: string): Promise<ApiResponse<TenantMode>> {
-    return post(`/mode/tenant/${tenantId}`, { mode, reason })
+    return post(`/v2/admin/tenants/${tenantId}/mode`, { mode, reason })
   },
 
-  /** 查 host_label 覆盖列表. */
+  /** 列所有租户模式. */
+  listTenantModes(): Promise<ApiResponse<TenantMode[]>> {
+    return get('/v2/admin/tenants/modes')
+  },
+
+  /** 占位: 后续 PR 实现 host_label 覆盖 (后端尚未提供, 返回空). */
   listHostLabelOverrides(): Promise<ApiResponse<HostLabelOverride[]>> {
-    return get('/mode/overrides/host-label')
+    return Promise.resolve({ code: 0, message: 'not implemented', data: [] } as ApiResponse<HostLabelOverride[]>)
   },
 
-  /** 新增/更新 host_label 覆盖 (e.g. env=staging 强制 observe). */
-  upsertHostLabelOverride(payload: Omit<HostLabelOverride, 'id'>): Promise<ApiResponse<HostLabelOverride>> {
-    return post('/mode/overrides/host-label', payload)
-  },
-
-  /** 查 rule 覆盖列表. */
+  /** 占位: 后续 PR 实现 rule 覆盖. */
   listRuleOverrides(): Promise<ApiResponse<RuleOverride[]>> {
-    return get('/mode/overrides/rule')
+    return Promise.resolve({ code: 0, message: 'not implemented', data: [] } as ApiResponse<RuleOverride[]>)
   },
 
-  upsertRuleOverride(payload: Omit<RuleOverride, 'id'>): Promise<ApiResponse<RuleOverride>> {
-    return post('/mode/overrides/rule', payload)
-  },
-
-  /** 查 6 闸门当前状态 (切 protect 前必须 ready=true). */
+  /** 6 闸门检查 (后端 endpoint 待实现, 占位返 ready=false). */
   checkAdmission(targetMode: RunningMode): Promise<ApiResponse<AdmissionSummary>> {
-    return get(`/mode/admission?target=${targetMode}`)
+    return Promise.resolve({
+      code: 0,
+      message: 'not implemented',
+      data: {
+        tenant_id: 't-default',
+        target_mode: targetMode,
+        ready: false,
+        gates: [],
+        blocking_reasons: ['admission endpoint not yet exposed'],
+      },
+    } as ApiResponse<AdmissionSummary>)
   },
 }
