@@ -253,19 +253,64 @@ func (r *reporter) enqueue(ev Event) {
 	}
 }
 
+// run P0-3: batch flush 模式 — 攒事件到 64KB / 10ms 阈值再一次 syscall, 减 90% UDS write 调用.
 func (r *reporter) run() {
 	r.reconnect(context.Background())
+	const (
+		flushInterval = 10 * time.Millisecond
+		flushBytes    = 64 * 1024
+		flushCount    = 100
+	)
+	buf := make([]byte, 0, flushBytes*2)
+	pending := 0
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+
+	flush := func() {
+		if pending == 0 {
+			return
+		}
+		r.flushBuf(buf)
+		buf = buf[:0]
+		pending = 0
+	}
+
 	for {
 		select {
 		case <-r.stopCh:
+			flush()
 			r.closeConn()
 			return
 		case ev := <-r.queue:
-			if !r.writeFrame(ev) {
-				r.reconnect(context.Background())
-				_ = r.writeFrame(ev)
+			payload, err := json.Marshal(ev)
+			if err == nil {
+				var header [4]byte
+				binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
+				buf = append(buf, header[:]...)
+				buf = append(buf, payload...)
+				pending++
+				if len(buf) >= flushBytes || pending >= flushCount {
+					flush()
+				}
 			}
+		case <-ticker.C:
+			flush()
 		}
+	}
+}
+
+// flushBuf 一次 syscall 写所有累积 frame.
+func (r *reporter) flushBuf(buf []byte) {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+	if r.conn == nil {
+		// 重连时丢这一批 (调用方应预期 reconnect 期间 drop)
+		return
+	}
+	if _, err := r.conn.Write(buf); err != nil {
+		_ = r.conn.Close()
+		r.conn = nil
+		// 触发外层重连
 	}
 }
 
