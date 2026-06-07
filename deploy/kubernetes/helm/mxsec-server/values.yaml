@@ -212,3 +212,19 @@ observability:
     enabled: false
     endpoint: jaeger.default.svc.cluster.local:4318
     sampleRate: 0.1
+
+# ===================== K8s 镜像扫描 CronJob =====================
+
+imageScan:
+  enabled: false
+  schedule: "0 2 * * *"
+  image: aquasec/trivy:0.50.0
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
