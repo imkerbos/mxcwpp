@@ -35,9 +35,16 @@ func NewMLStage(reg *ml.Registry, threshold float64, logger *zap.Logger) *MLStag
 // Name 满足 Stage interface。
 func (s *MLStage) Name() string { return "ml" }
 
-// Process 把 ev.fields 转 features 后依次跑所有 model。
+// Process 把 ev.fields 转 features 后依次跑所有 model.
+//
+// P1-5: 加 DataType 段过滤短路, 仅对 ML 段 (3000-3099) 跑模型, 其它 DataType 直接 return.
+// 避免每事件都遍历全部 model.
 func (s *MLStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error) {
 	if s.registry == nil {
+		return nil, nil
+	}
+	// P1-5: DataType 段过滤 — ML 仅处理 EDR 内核事件 (3000-3099) + RASP (4000-4099)
+	if !(ev.DataType >= 3000 && ev.DataType < 3100) && !(ev.DataType >= 4000 && ev.DataType < 4100) {
 		return nil, nil
 	}
 	fields, err := ev.Fields()
