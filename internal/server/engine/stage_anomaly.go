@@ -43,7 +43,7 @@ func (s *AnomalyStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, er
 		return nil, nil
 	}
 
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

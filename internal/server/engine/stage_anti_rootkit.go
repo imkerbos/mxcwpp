@@ -41,7 +41,7 @@ func (s *AntiRootkitStage) Process(_ context.Context, ev PipelineEvent) ([]Alert
 	if ev.DataType != 3006 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}
