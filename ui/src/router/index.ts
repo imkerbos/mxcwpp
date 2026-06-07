@@ -362,6 +362,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Mode/ModePanel.vue'),
         meta: { title: '运行模式' },
       },
+      // P1-6: 配置变更审批
+      {
+        path: 'config-changes',
+        name: 'ConfigChange',
+        component: () => import('@/views/ConfigChange/index.vue'),
+        meta: { title: '配置变更审批' },
+      },
       // M4: 行为基线引擎
       {
         path: 'bde',
