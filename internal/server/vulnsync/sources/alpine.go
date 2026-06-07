@@ -31,7 +31,7 @@ func NewAlpineDriver(branch string, timeout time.Duration) *AlpineDriver {
 	return &AlpineDriver{
 		BaseURL: "https://secdb.alpinelinux.org",
 		Branch:  branch,
-		Client:  &http.Client{Timeout: timeout},
+		Client:  SharedHTTPClient(),
 	}
 }
 

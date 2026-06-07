@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/IBM/sarama"
@@ -134,22 +135,63 @@ type groupHandler struct {
 func (h *groupHandler) Setup(sarama.ConsumerGroupSession) error   { return nil }
 func (h *groupHandler) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 
+// ConsumeClaim P1-1: worker pool 并行处理单 partition 消息.
+//
+// 默认 8 worker, 通过 ENGINE_WORKERS_PER_PARTITION env 覆盖.
+// 保证 offset 顺序: 用顺序 channel 推 MarkMessage, 避免 OOO commit.
 func (h *groupHandler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	ctx := sess.Context()
-	for msg := range claim.Messages() {
-		if err := h.handler(ctx, msg); err != nil {
-			h.logger.Warn("engine handler error,消息不会重试 (Engine 不阻塞 offset)",
-				zap.String("topic", msg.Topic),
-				zap.Int32("partition", msg.Partition),
-				zap.Int64("offset", msg.Offset),
-				zap.Error(err),
-			)
-			// Engine 不阻塞 offset 推进, 失败消息上报指标即可。
-			// 真实 DLQ 走 Consumer ConsumerGroup A 处理,Engine 只 mark + 上报。
-		}
-		sess.MarkMessage(msg, "")
+	workers := workerCountFromEnv("ENGINE_WORKERS_PER_PARTITION", 8)
+	jobs := make(chan *sarama.ConsumerMessage, workers*2)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for msg := range jobs {
+				if err := h.handler(ctx, msg); err != nil {
+					h.logger.Warn("engine handler error,消息不会重试 (Engine 不阻塞 offset)",
+						zap.String("topic", msg.Topic),
+						zap.Int32("partition", msg.Partition),
+						zap.Int64("offset", msg.Offset),
+						zap.Error(err))
+				}
+				// Engine 不需严格 offset 顺序, 各 worker 独立 mark
+				sess.MarkMessage(msg, "")
+			}
+		}()
 	}
+	for msg := range claim.Messages() {
+		select {
+		case jobs <- msg:
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return nil
+		}
+	}
+	close(jobs)
+	wg.Wait()
 	return nil
+}
+
+// workerCountFromEnv P1-1 helper.
+func workerCountFromEnv(env string, def int) int {
+	v := os.Getenv(env)
+	if v == "" {
+		return def
+	}
+	n := 0
+	for _, c := range v {
+		if c < '0' || c > '9' {
+			return def
+		}
+		n = n*10 + int(c-'0')
+	}
+	if n <= 0 || n > 128 {
+		return def
+	}
+	return n
 }
 
 // noopHandler 是 PR13 占位 handler,不做任何业务处理。
