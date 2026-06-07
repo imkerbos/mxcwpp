@@ -38,11 +38,11 @@ func TestPipeline_NoStages_NoOp(t *testing.T) {
 
 func TestPipeline_StageProduces_AlertObserveMode(t *testing.T) {
 	t.Parallel()
-	mp := mocks.NewSyncProducer(t, nil)
+	mp := mocks.NewAsyncProducer(t, nil)
 	defer mp.Close()
-	mp.ExpectSendMessageAndSucceed()
+	mp.ExpectInputAndSucceed()
 
-	producer := &AlertProducer{producer: mp, topic: "mxsec.engine.alert"}
+	producer := &AlertProducer{producer: mp, topic: "mxsec.engine.alert", stopCh: make(chan struct{})}
 	resolver := mode.NewMemoryResolver(mode.Observe)
 
 	stage := &stubStage{
@@ -72,11 +72,11 @@ func TestPipeline_StageProduces_AlertObserveMode(t *testing.T) {
 
 func TestPipeline_ProtectMode_FillsAction(t *testing.T) {
 	t.Parallel()
-	mp := mocks.NewSyncProducer(t, nil)
+	mp := mocks.NewAsyncProducer(t, nil)
 	defer mp.Close()
-	mp.ExpectSendMessageAndSucceed()
+	mp.ExpectInputAndSucceed()
 
-	producer := &AlertProducer{producer: mp, topic: "mxsec.engine.alert"}
+	producer := &AlertProducer{producer: mp, topic: "mxsec.engine.alert", stopCh: make(chan struct{})}
 	resolver := mode.NewMemoryResolver(mode.Observe)
 	_ = resolver.SetRule("DANGER_RULE", mode.Protect)
 

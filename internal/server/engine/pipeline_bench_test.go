@@ -32,11 +32,11 @@ func BenchmarkPipeline_NoStages(b *testing.B) {
 // BenchmarkPipeline_OneStage 单 stage 产 1 个 alert 的开销。
 func BenchmarkPipeline_OneStage(b *testing.B) {
 	cfg := mocks.NewTestConfig()
-	producer := mocks.NewSyncProducer(b, cfg)
+	producer := mocks.NewAsyncProducer(b, cfg)
 	for i := 0; i < b.N; i++ {
-		producer.ExpectSendMessageAndSucceed()
+		producer.ExpectInputAndSucceed()
 	}
-	prod := &AlertProducer{producer: producer, topic: "test"}
+	prod := &AlertProducer{producer: producer, topic: "test", stopCh: make(chan struct{})}
 	resolver := mode.NewMemoryResolver(mode.Observe)
 	stage := &stubStage{name: "bench", alerts: []Alert{{
 		AlertID: "x", RuleID: "R1", Severity: "low",
