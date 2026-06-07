@@ -37,7 +37,7 @@ func (s *ReverseShellStage) Process(ctx context.Context, ev PipelineEvent) ([]Al
 	if ev.DataType < 3000 || ev.DataType > 3001 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func (s *PrivEscalationStage) Process(ctx context.Context, ev PipelineEvent) ([]
 	if ev.DataType < 3000 || ev.DataType > 3001 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

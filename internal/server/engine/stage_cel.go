@@ -35,7 +35,7 @@ func (s *CelRuleStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, er
 	}
 
 	// 把 ev.Payload 解码成 fields map (celengine.Engine 接受 map[string]string)
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		s.logger.Debug("cel stage decode payload failed", zap.Error(err))
 		return nil, nil

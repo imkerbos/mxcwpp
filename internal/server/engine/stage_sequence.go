@@ -33,7 +33,7 @@ func (s *SequenceStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, e
 	if s.detector == nil || ev.HostID == "" {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		s.logger.Debug("sequence decode payload failed", zap.Error(err))
 		return nil, nil

@@ -37,7 +37,7 @@ func (s *StorylineStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, 
 	if s.storyEngine == nil {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

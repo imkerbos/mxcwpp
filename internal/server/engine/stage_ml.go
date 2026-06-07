@@ -40,7 +40,7 @@ func (s *MLStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error) 
 	if s.registry == nil {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

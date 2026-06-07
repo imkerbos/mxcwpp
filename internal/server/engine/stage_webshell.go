@@ -37,7 +37,7 @@ func (s *WebshellStage) Process(ctx context.Context, ev PipelineEvent) ([]Alert,
 	if ev.DataType < 6001 || ev.DataType > 6019 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

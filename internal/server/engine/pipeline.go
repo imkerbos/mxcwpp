@@ -43,6 +43,33 @@ type PipelineEvent struct {
 	Offset    int64           `json:"-"`
 	ReceivedAt time.Time      `json:"received_at"`
 	Payload   json.RawMessage `json:"payload"`
+	// P0-5: Pipeline 顶层预解码 fields, 各 stage 共享避免 3+ 次 json.Unmarshal.
+	// 用 *fieldsCache 指针, 多个 ev 值拷贝共享同一 cache (struct copy 仅复制 pointer).
+	fieldsCache *fieldsCache `json:"-"`
+}
+
+// fieldsCache 保存解码后的 fields, 多 stage 共享.
+type fieldsCache struct {
+	fields map[string]string
+	err    error
+	done   bool
+}
+
+// Fields P0-5: lazy 一次解码, 多 stage 共享.
+//
+// 调用者 ev.Fields(), 内部第一次访问触发解码 + 写 cache; 后续直接命中.
+// 单 goroutine 走完所有 stage 时安全 (Pipeline 串行 stage 走顺序).
+func (ev *PipelineEvent) Fields() (map[string]string, error) {
+	if ev.fieldsCache == nil {
+		ev.fieldsCache = &fieldsCache{}
+	}
+	c := ev.fieldsCache
+	if c.done {
+		return c.fields, c.err
+	}
+	c.fields, c.err = payloadToFields(ev.Payload)
+	c.done = true
+	return c.fields, c.err
 }
 
 // Alert 是 Pipeline 产出的告警 (转换为 AlertEnvelope 后推送)。
@@ -90,6 +117,8 @@ func (p *Pipeline) Handler() MessageHandler {
 		ev.Partition = msg.Partition
 		ev.Offset = msg.Offset
 		ev.ReceivedAt = time.Now().UTC()
+		// P0-5: 顶层 init shared fields cache, 各 stage Process(ev copy) 共享同一 *fieldsCache.
+		ev.fieldsCache = &fieldsCache{}
 
 		// 逐层处理
 		for _, st := range p.stages {
