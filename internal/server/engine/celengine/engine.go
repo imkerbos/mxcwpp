@@ -36,6 +36,10 @@ type Engine struct {
 	mu       sync.RWMutex
 	env      *cel.Env
 	rules    []compiledRule
+	// P0-4: DataType → 适用规则索引, 替 Evaluate O(M) 线性扫为 O(1) 查找
+	rulesByDataType map[int32][]compiledRule
+	// 全 DataType 适用规则 (DataTypes 列表为空 → 任意 DataType 都用)
+	rulesAnyDataType []compiledRule
 	db       *gorm.DB
 	log      *zap.Logger
 	procTree *ProcessTree  // 进程树（自动维护，用于祖先链查询）
@@ -103,8 +107,44 @@ func NewInMemory(logger *zap.Logger, rules []model.DetectionRule) (*Engine, erro
 		compiled = append(compiled, compiledRule{rule: rule, program: program})
 	}
 	e.rules = compiled
+	e.rebuildDataTypeIndex()
 
 	return e, nil
+}
+
+// rebuildDataTypeIndex 重建 DataType → 规则索引 (P0-4).
+//
+// 调用者必须持 e.mu.Lock(), 该函数内不再加锁.
+func (e *Engine) rebuildDataTypeIndex() {
+	byDT := make(map[int32][]compiledRule, 16)
+	var anyDT []compiledRule
+	for _, cr := range e.rules {
+		if len(cr.rule.DataTypes) == 0 {
+			anyDT = append(anyDT, cr)
+			continue
+		}
+		seen := make(map[int32]bool, len(cr.rule.DataTypes))
+		for _, dtStr := range cr.rule.DataTypes {
+			var dt int32
+			for _, c := range dtStr {
+				if c < '0' || c > '9' {
+					dt = -1
+					break
+				}
+				dt = dt*10 + int32(c-'0')
+			}
+			if dt < 0 {
+				continue
+			}
+			if seen[dt] {
+				continue
+			}
+			seen[dt] = true
+			byDT[dt] = append(byDT[dt], cr)
+		}
+	}
+	e.rulesByDataType = byDT
+	e.rulesAnyDataType = anyDT
 }
 
 // newCELEnv 创建 CEL 环境，声明所有事件变量
@@ -216,6 +256,7 @@ func (e *Engine) ReloadRules() error {
 
 	e.mu.Lock()
 	e.rules = compiled
+	e.rebuildDataTypeIndex()
 	e.mu.Unlock()
 
 	e.log.Info("CEL 规则加载完成",
@@ -259,8 +300,10 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 		e.feedProcessTree(fields)
 	}
 
+	// P0-4: 用 DataType 索引取适用规则, 避免 O(M) 线性扫
 	e.mu.RLock()
-	rules := e.rules
+	indexed := e.rulesByDataType[dataType]
+	anyIdx := e.rulesAnyDataType
 	e.mu.RUnlock()
 
 	// 构建 CEL 求值变量
@@ -298,13 +341,10 @@ func (e *Engine) Evaluate(dataType int32, fields map[string]string) []model.Dete
 		activation["first_seen_remote_addr"] = false
 	}
 
-	// 按 DataType 过滤适用规则
-	applicable := make([]compiledRule, 0, len(rules))
-	for _, cr := range rules {
-		if cr.rule.MatchesDataType(dataType) {
-			applicable = append(applicable, cr)
-		}
-	}
+	// P0-4: 直接拼索引 + any DataType 兜底, 无线性扫
+	applicable := make([]compiledRule, 0, len(indexed)+len(anyIdx))
+	applicable = append(applicable, indexed...)
+	applicable = append(applicable, anyIdx...)
 
 	if len(applicable) == 0 {
 		return nil
