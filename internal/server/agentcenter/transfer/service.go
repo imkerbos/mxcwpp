@@ -98,6 +98,48 @@ type Service struct {
 
 	// 优雅关闭标志：Server 自身重启时跳过离线通知，避免假告警
 	shutdownFlag atomic.Bool
+
+	// P1-3: 异步通知 ctx + semaphore 限并发, 服务关闭时取消所有 dangling goroutine.
+	notifyCtx    context.Context
+	notifyCancel context.CancelFunc
+	notifySem    chan struct{}
+}
+
+// initAsyncNotify P1-3: 启动时调一次, 后续 SpawnNotify 用 notifyCtx 接管 dangling goroutine.
+func (s *Service) initAsyncNotify() {
+	if s.notifyCtx == nil {
+		s.notifyCtx, s.notifyCancel = context.WithCancel(context.Background())
+		s.notifySem = make(chan struct{}, 100)
+	}
+}
+
+// SpawnNotify P1-3: 接 service ctx + 限并发跑异步通知, 替代裸 go func().
+// service 关闭时所有 dangling 通知统一取消.
+func (s *Service) SpawnNotify(name string, fn func(ctx context.Context)) {
+	s.initAsyncNotify()
+	select {
+	case s.notifySem <- struct{}{}:
+		go func() {
+			defer func() { <-s.notifySem }()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("transfer notify panic recovered",
+						zap.String("kind", name),
+						zap.Any("panic", r))
+				}
+			}()
+			fn(s.notifyCtx)
+		}()
+	default:
+		s.logger.Warn("transfer notify queue full, drop", zap.String("kind", name))
+	}
+}
+
+// CancelAsyncNotify P1-3: Shutdown 调.
+func (s *Service) CancelAsyncNotify() {
+	if s.notifyCancel != nil {
+		s.notifyCancel()
+	}
 }
 
 // SetKafkaProducer 注入 Kafka 生产者（在 AgentCenter 启动后调用）
