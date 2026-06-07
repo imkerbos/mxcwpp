@@ -1,7 +1,27 @@
-# mxsec v2.0 Phase 1+2 进度 (动态更新)
+# mxsec v2.0 Phase 1+2+4 进度 (动态更新)
 
-**最后更新**: 2026-06-08
-**总进度**: 140/185 ≈ **76%** (基线 110 + Phase 1/2 新增 ~30)
+**最后更新**: 2026-06-07
+**总进度**: 168/195 ≈ **86%** (基线 110 + P1/P2 30 + P4 15 + P3 13)
+
+## Phase 4 完成 (15 项, PR146-PR161)
+
+| ID | PR | 标题 | 状态 |
+|---|---|---|---|
+| P4-1 | #146 | Java RASP premain agent 骨架 | 🟢 |
+| P4-2 | #147 | Python RASP PEP 578 audit hook | 🟢 |
+| P4-3 | #148 | PHP RASP auto_prepend + Go SDK | 🟢 |
+| P4-4 | #149 | Python SDK | 🟢 |
+| P4-5 | #150 | Java SDK + AuditLog Enricher | 🟢 |
+| P4-6 | #151 | Aliyun SLS protobuf wire 格式 | 🟢 |
+| P4-7 | #152 | GraphQL 风格命名查询端点 | 🟢 |
+| P4-8 | #153 | K8s 镜像扫描 CronJob | 🟢 |
+| P4-9 | #154 | NPatch DirtyPipe + PwnKit eBPF | 🟢 |
+| P4-10 | #155 | YARA 规则集 18 → 51 | 🟢 |
+| P4-11 | #156 | MSSP 控制台 UI | 🟢 |
+| P4-12 | #157 | OpenAPI 端点 12 → 68 | 🟢 |
+| P4-13 | #159 | Node.js RASP UDS hooks | 🟢 |
+| P4-14 | #160 | Go RASP 显式观察 SDK | 🟢 |
+| P4-15 | #161 | ConfigChange → 5 服务 viper 热重载 | 🟢 |
 
 ## Phase 1 完成 (6 项)
 
