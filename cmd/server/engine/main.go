@@ -118,6 +118,12 @@ func main() {
 				}
 				storyEng := storyline.NewEngine(db, logger.Named("story"))
 				stages = append(stages, engine.NewStorylineStage(storyEng, logger))
+				// P1-3: DataType 3005 privilege escalation
+				stages = append(stages, engine.NewPrivilegeStage(logger))
+				// P1-4: DataType 3006 anti-rootkit
+				stages = append(stages, engine.NewAntiRootkitStage(logger))
+				// PR63 RASP read-only (DataType 4000-4099)
+				stages = append(stages, engine.NewRASPStage(logger))
 				logger.Info("Engine stages 已注入", zap.Int("stages_count", len(stages)))
 			}
 		} else {
