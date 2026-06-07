@@ -9,13 +9,12 @@
 //   或走 cgroup_skb 抓 multipart upload, 扫 body 含 mvg:|msl:|https:|url:( 的
 //   组合 + magick 特定字串.
 
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+
+#include "common_fastpath.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_SCAN 512
+#define MAX_SCAN NPATCH_MAX_SCAN
 #define ETH_HLEN 14
 
 struct imagemagick_event {
@@ -47,7 +46,7 @@ static __always_inline int scan(const char *buf, int len, const char *p, int ple
 
 SEC("cgroup_skb/ingress")
 int scan_imagemagick(struct __sk_buff *skb) {
-    if (skb->protocol != bpf_htons(0x0800)) return 1;
+    if (!is_http_inbound(skb)) return 1; /* P0-2 fastpath */
     char buf[MAX_SCAN] = {0};
     int len = skb->len > MAX_SCAN ? MAX_SCAN : skb->len;
     if (bpf_skb_load_bytes(skb, ETH_HLEN, buf, len) < 0) return 1;

@@ -7,14 +7,11 @@
 // 虚拟补丁: URI 命中 /server-info.action + setupComplete=false 组合, 或 /setup/setupadministrator.action
 // 上报 ringbuf, observe-only.
 
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+#include "common_fastpath.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_SCAN 512
-#define ETH_HLEN 14
+#define MAX_SCAN NPATCH_MAX_SCAN
 
 struct atlassian_event {
     __u64 ts_ns;
@@ -45,7 +42,7 @@ static __always_inline int find(const char *buf, int len, const char *p, int ple
 
 SEC("cgroup_skb/ingress")
 int scan_atlassian(struct __sk_buff *skb) {
-    if (skb->protocol != bpf_htons(0x0800)) return 1;
+    if (!is_http_inbound(skb)) return 1; // P0-2: 早退 非 HTTP 流量
     char buf[MAX_SCAN] = {0};
     int len = skb->len > MAX_SCAN ? MAX_SCAN : skb->len;
     if (bpf_skb_load_bytes(skb, ETH_HLEN, buf, len) < 0) return 1;

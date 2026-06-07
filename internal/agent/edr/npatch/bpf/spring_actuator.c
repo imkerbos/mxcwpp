@@ -8,13 +8,12 @@
 // 虚拟补丁: 扫 URI 路径关键串 + POST body 含 spring.cloud.bootstrap.location
 // 等危险参数. observe-only.
 
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+
+#include "common_fastpath.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_SCAN 512
+#define MAX_SCAN NPATCH_MAX_SCAN
 #define ETH_HLEN 14
 
 struct actuator_event {
@@ -47,7 +46,7 @@ static __always_inline int find_pattern(const char *buf, int len, const char *pa
 
 SEC("cgroup_skb/ingress")
 int scan_actuator(struct __sk_buff *skb) {
-    if (skb->protocol != bpf_htons(0x0800)) return 1;
+    if (!is_http_inbound(skb)) return 1; /* P0-2 fastpath */
     char buf[MAX_SCAN] = {0};
     int len = skb->len > MAX_SCAN ? MAX_SCAN : skb->len;
     if (bpf_skb_load_bytes(skb, ETH_HLEN, buf, len) < 0) return 1;
