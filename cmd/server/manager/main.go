@@ -56,6 +56,10 @@ func main() {
 	// 启动病毒库自动更新器
 	go services.VirusDBUpdater.Start(ctx)
 
+	// P1-1: 启动配置变更审批 Worker (30s 周期扫 approved → apply)
+	configChangeWorker := biz.NewConfigChangeWorker(services.DB, services.Logger, 0)
+	go configChangeWorker.Start(ctx)
+
 	// 启动 pre-check 周期巡检（每 6h 对 unpatched + 未检/过期的 host_vuln 自动 pre-check）
 	go services.PreCheckCron.Run(ctx)
 

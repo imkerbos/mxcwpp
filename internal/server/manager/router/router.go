@@ -171,6 +171,17 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV2Admin.POST("/tenants/:id/mode", systemModeHandler.SetTenantMode)
 	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
 
+	// P1-1: 配置中心变更审批 /api/v2/config/change-requests/*
+	configChangeHandler := api.NewConfigChangeRequestHandler(db, logger)
+	configChangeGroup := apiV2.Group("/config/change-requests")
+	configChangeGroup.POST("", configChangeHandler.Create)
+	configChangeGroup.GET("", configChangeHandler.List)
+	configChangeGroup.GET("/sensitivity", configChangeHandler.GetSensitivity)
+	configChangeGroup.GET("/:id", configChangeHandler.Get)
+	configChangeGroup.POST("/:id/approve", configChangeHandler.Approve)
+	configChangeGroup.POST("/:id/reject", configChangeHandler.Reject)
+	configChangeGroup.POST("/:id/cancel", configChangeHandler.Cancel)
+
 	return router
 }
 
