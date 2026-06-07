@@ -17,6 +17,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/api"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
+	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz/mssp"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/middleware"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/sd"
 	"github.com/imkerbos/mxsec-platform/internal/server/metrics"
@@ -181,6 +182,18 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	configChangeGroup.POST("/:id/approve", configChangeHandler.Approve)
 	configChangeGroup.POST("/:id/reject", configChangeHandler.Reject)
 	configChangeGroup.POST("/:id/cancel", configChangeHandler.Cancel)
+
+	// A3: MSSP 控制台路由 /api/v2/mssp/*
+	msspSvc := mssp.NewService(db, logger)
+	msspHandler := api.NewMSSPHandler(msspSvc, logger)
+	msspGroup := apiV2.Group("/mssp")
+	msspGroup.GET("/dashboard", msspHandler.Dashboard)
+	msspGroup.GET("/child-tenants", msspHandler.ListChildTenants)
+	msspGroup.POST("/child-tenants", msspHandler.CreateChildTenant)
+	msspGroup.GET("/child-tenants/:id", msspHandler.GetChildTenant)
+	msspGroup.POST("/child-tenants/:id/suspend", msspHandler.SuspendChildTenant)
+	msspGroup.POST("/child-tenants/:id/resume", msspHandler.ResumeChildTenant)
+	msspGroup.GET("/alerts", msspHandler.CrossTenantAlerts)
 
 	return router
 }
