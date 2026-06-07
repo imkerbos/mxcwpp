@@ -24,7 +24,7 @@ func NewOSVDriver(baseURL string, timeout time.Duration) *OSVDriver {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	return &OSVDriver{BaseURL: baseURL, Client: &http.Client{Timeout: timeout}}
+	return &OSVDriver{BaseURL: baseURL, Client: SharedHTTPClient()}
 }
 
 func (d *OSVDriver) Name() string { return "osv" }

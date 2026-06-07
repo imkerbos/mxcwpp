@@ -24,7 +24,7 @@ func NewCISAKEVDriver(timeout time.Duration) *CISAKEVDriver {
 	}
 	return &CISAKEVDriver{
 		URL:    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-		Client: &http.Client{Timeout: timeout},
+		Client: SharedHTTPClient(),
 	}
 }
 

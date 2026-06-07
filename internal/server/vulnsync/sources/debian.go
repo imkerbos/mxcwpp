@@ -24,7 +24,7 @@ func NewDebianDriver(timeout time.Duration) *DebianDriver {
 	}
 	return &DebianDriver{
 		URL:    "https://security-tracker.debian.org/tracker/data/json",
-		Client: &http.Client{Timeout: timeout},
+		Client: SharedHTTPClient(),
 	}
 }
 

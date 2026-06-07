@@ -23,7 +23,7 @@ func NewRedHatDriver(timeout time.Duration) *RedHatDriver {
 	}
 	return &RedHatDriver{
 		BaseURL: "https://access.redhat.com/hydra/rest/securitydata",
-		Client:  &http.Client{Timeout: timeout},
+		Client:  SharedHTTPClient(),
 	}
 }
 

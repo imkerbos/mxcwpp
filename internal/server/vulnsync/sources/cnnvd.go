@@ -30,7 +30,7 @@ func NewCNNVDDriver(apiEndpoint, apiKey string, timeout time.Duration) *CNNVDDri
 	return &CNNVDDriver{
 		APIEndpoint: apiEndpoint,
 		APIKey:      apiKey,
-		Client:      &http.Client{Timeout: timeout},
+		Client:      SharedHTTPClient(),
 	}
 }
 
