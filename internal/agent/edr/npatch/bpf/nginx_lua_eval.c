@@ -6,13 +6,12 @@
 //
 // 虚拟补丁: URI query 含 loadstring( / dofile( / os.execute( / io.popen(.
 
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+
+#include "common_fastpath.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_SCAN 512
+#define MAX_SCAN NPATCH_MAX_SCAN
 #define ETH_HLEN 14
 
 struct lua_event {
@@ -44,7 +43,7 @@ static __always_inline int find(const char *buf, int len, const char *p, int ple
 
 SEC("cgroup_skb/ingress")
 int scan_nginx_lua(struct __sk_buff *skb) {
-    if (skb->protocol != bpf_htons(0x0800)) return 1;
+    if (!is_http_inbound(skb)) return 1; /* P0-2 fastpath */
     char buf[MAX_SCAN] = {0};
     int len = skb->len > MAX_SCAN ? MAX_SCAN : skb->len;
     if (bpf_skb_load_bytes(skb, ETH_HLEN, buf, len) < 0) return 1;
