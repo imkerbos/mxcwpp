@@ -81,12 +81,19 @@ else
 fi
 
 # 获取架构列表
+#
+# 支持架构 (M1-7 信创扩展):
+#   amd64      — 主流 x86_64 (CentOS/Rocky/Ubuntu/Debian)
+#   arm64      — ARM64 (Kylin V10 ARM64 / Ampere Altra / Apple Silicon Linux)
+#   loong64    — 龙芯 LoongArch64 (UOS 1060 / 中标麒麟 / Anolis Loong 23)
+#   all        — amd64 + arm64
+#   xc         — amd64 + arm64 + loong64 (信创全栈)
 get_archs() {
-    if [ "$ARCH" = "all" ]; then
-        echo "amd64 arm64"
-    else
-        echo "$ARCH"
-    fi
+    case "$ARCH" in
+        all) echo "amd64 arm64" ;;
+        xc)  echo "amd64 arm64 loong64" ;;
+        *)   echo "$ARCH" ;;
+    esac
 }
 
 # 打包 Agent
