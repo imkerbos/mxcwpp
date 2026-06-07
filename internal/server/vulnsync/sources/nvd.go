@@ -29,7 +29,7 @@ func NewNVDDriver(baseURL, apiKey string, timeout time.Duration) *NVDDriver {
 	return &NVDDriver{
 		BaseURL: baseURL,
 		APIKey:  apiKey,
-		Client:  &http.Client{Timeout: timeout},
+		Client:  SharedHTTPClient(),
 	}
 }
 

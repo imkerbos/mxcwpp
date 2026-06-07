@@ -121,7 +121,7 @@ func NewOpenEulerDriver(timeout time.Duration) *rssDriver {
 	return &rssDriver{
 		name:   "openeuler",
 		url:    "https://www.openeuler.org/zh/security/cve/rss/",
-		client: &http.Client{Timeout: timeout},
+		client: SharedHTTPClient(),
 	}
 }
 
@@ -133,7 +133,7 @@ func NewAnolisDriver(timeout time.Duration) *rssDriver {
 	return &rssDriver{
 		name:   "anolis",
 		url:    "https://anas.openanolis.cn/rss",
-		client: &http.Client{Timeout: timeout},
+		client: SharedHTTPClient(),
 	}
 }
 
@@ -145,7 +145,7 @@ func NewKylinDriver(timeout time.Duration) *rssDriver {
 	return &rssDriver{
 		name:   "kylin",
 		url:    "https://www.kylinos.cn/securityadvisory/rss.xml",
-		client: &http.Client{Timeout: timeout},
+		client: SharedHTTPClient(),
 	}
 }
 
@@ -157,6 +157,6 @@ func NewUOSDriver(timeout time.Duration) *rssDriver {
 	return &rssDriver{
 		name:   "uos",
 		url:    "https://security.deepin.com/rss.xml",
-		client: &http.Client{Timeout: timeout},
+		client: SharedHTTPClient(),
 	}
 }

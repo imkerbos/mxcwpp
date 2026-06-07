@@ -27,7 +27,7 @@ func NewSUSEDriver(timeout time.Duration) *SUSEDriver {
 	}
 	return &SUSEDriver{
 		URL:    "https://ftp.suse.com/pub/projects/security/json/suse-cvrf-cve-master.json",
-		Client: &http.Client{Timeout: timeout},
+		Client: SharedHTTPClient(),
 	}
 }
 
