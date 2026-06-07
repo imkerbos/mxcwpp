@@ -369,6 +369,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ConfigChange/index.vue'),
         meta: { title: '配置变更审批' },
       },
+      // P4-11: MSSP 控制台 (NOC 视图)
+      {
+        path: 'mssp',
+        name: 'MSSPConsole',
+        component: () => import('@/views/MSSP/MSSPConsole.vue'),
+        meta: { title: 'MSSP 控制台' },
+      },
       // M4: 行为基线引擎
       {
         path: 'bde',
