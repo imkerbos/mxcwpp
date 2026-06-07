@@ -2,12 +2,18 @@
 //
 // 设计文档: docs/architecture.md §2.1 Manager + ref/05-容器K8s.md §5
 //
-// 5 条内置策略 (PR58 第一批):
-//   - PRIVILEGED: 阻止 privileged: true Pod
-//   - HOST_NETWORK: 阻止 hostNetwork: true
-//   - HOST_PID: 阻止 hostPID: true
-//   - HOST_PATH: 阻止 mount /etc / /proc / /sys hostPath
-//   - SA_TOKEN: 阻止 automountServiceAccountToken=true 且无 SA 限定
+// 12 条内置策略 (P2-22 扩展):
+//   - PRIVILEGED:           阻止 privileged: true Pod
+//   - HOST_NETWORK:         阻止 hostNetwork: true
+//   - HOST_PID:             阻止 hostPID: true
+//   - HOST_PATH:            阻止 mount /etc / /proc / /sys hostPath
+//   - SA_TOKEN:             阻止 automountServiceAccountToken=true 且无 SA 限定
+//   - IMAGE_LATEST:         拒绝 :latest tag (不可复现)
+//   - RUN_AS_ROOT:          容器 UID=0 / runAsNonRoot=false
+//   - DANGEROUS_CAPS:       SYS_ADMIN/SYS_PTRACE/NET_RAW 等高危 capability
+//   - DOCKER_SOCK:          挂载 /var/run/docker.sock (容器逃逸)
+//   - NO_RESOURCES:         无 resources.limits (易 OOM)
+//   - UNTRUSTED_REGISTRY:   非白名单 registry (warning)
 //
 // 模式遵循全局 mode.Resolver:
 //   - observe (默认): 仅 warning 不 deny
@@ -172,6 +178,52 @@ func (h *Handler) checkPolicies(obj json.RawMessage) []string {
 	if strings.Contains(s, `"automountServiceAccountToken":true`) && !strings.Contains(s, `"serviceAccountName"`) {
 		violations = append(violations, "SA_TOKEN: 拒绝 automount SA token 且无 serviceAccountName 限定")
 	}
+
+	// P2-22 扩展: 5 条新策略
+	// IMAGE_LATEST: 拒绝镜像 :latest tag (不可复现)
+	if strings.Contains(s, `:latest"`) {
+		violations = append(violations, "IMAGE_LATEST: 镜像不应使用 :latest tag, 改用 sha256: 或语义版本")
+	}
+	// RUN_AS_ROOT: 容器 runAsUser=0 / runAsNonRoot=false
+	if strings.Contains(s, `"runAsUser":0`) || strings.Contains(s, `"runAsUser": 0`) {
+		violations = append(violations, "RUN_AS_ROOT: 容器禁以 root (UID=0) 运行")
+	}
+	if strings.Contains(s, `"runAsNonRoot":false`) || strings.Contains(s, `"runAsNonRoot": false`) {
+		violations = append(violations, "RUN_AS_ROOT: securityContext.runAsNonRoot 不应为 false")
+	}
+	// DANGEROUS_CAPS: SYS_ADMIN / SYS_PTRACE / NET_ADMIN 等高危 capability
+	for _, cap := range []string{`"SYS_ADMIN"`, `"SYS_PTRACE"`, `"NET_RAW"`, `"NET_ADMIN"`, `"SYS_MODULE"`} {
+		if strings.Contains(s, `"add":[`+cap) || strings.Contains(s, cap) && strings.Contains(s, `capabilities`) {
+			violations = append(violations, "DANGEROUS_CAPS: 危险 capability 命中 (含 "+cap+")")
+			break
+		}
+	}
+	// DOCKER_SOCK: 挂载 /var/run/docker.sock (容器逃逸经典)
+	if strings.Contains(s, `/var/run/docker.sock`) || strings.Contains(s, `/run/docker.sock`) {
+		violations = append(violations, "DOCKER_SOCK: 拒绝 mount Docker socket (容器逃逸)")
+	}
+	// NO_RESOURCES: 容器无 resources.limits (易 OOM 拖垮节点)
+	if !strings.Contains(s, `"limits"`) && strings.Contains(s, `"containers"`) {
+		violations = append(violations, "NO_RESOURCES: 容器未配置 resources.limits (CPU/Memory)")
+	}
+	// UNAUTHORIZED_REGISTRY: 镜像非内部 registry (后续可配置白名单)
+	// 默认白名单: 内部 registry.mxsec.local + 公共可信
+	knownGood := []string{"gcr.io/google_containers/", "gcr.io/k8s/", "registry.k8s.io/", "k8s.gcr.io/",
+		"registry.mxsec.local/", "docker.io/library/"}
+	if strings.Contains(s, `"image":"`) {
+		isWhitelisted := false
+		for _, w := range knownGood {
+			if strings.Contains(s, w) {
+				isWhitelisted = true
+				break
+			}
+		}
+		if !isWhitelisted {
+			// 仅 warning, 不直接 deny (避免误伤业务自定义镜像)
+			violations = append(violations, "UNTRUSTED_REGISTRY: 镜像源非白名单 registry (warning)")
+		}
+	}
+
 	return violations
 }
 
