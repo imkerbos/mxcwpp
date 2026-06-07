@@ -11,15 +11,16 @@ import (
 
 func TestAlertProducer_Publish_WithMock(t *testing.T) {
 	t.Parallel()
-	mp := mocks.NewSyncProducer(t, nil)
+	mp := mocks.NewAsyncProducer(t, nil)
 	defer mp.Close()
 
-	mp.ExpectSendMessageAndSucceed()
+	mp.ExpectInputAndSucceed()
 
 	p := &AlertProducer{
 		producer: mp,
 		topic:    "mxsec.engine.alert",
 		logger:   nil,
+		stopCh:   make(chan struct{}),
 	}
 
 	env := AlertEnvelope{
@@ -37,11 +38,11 @@ func TestAlertProducer_Publish_WithMock(t *testing.T) {
 
 func TestAlertProducer_DefaultMode(t *testing.T) {
 	t.Parallel()
-	mp := mocks.NewSyncProducer(t, nil)
+	mp := mocks.NewAsyncProducer(t, nil)
 	defer mp.Close()
-	mp.ExpectSendMessageAndSucceed()
+	mp.ExpectInputAndSucceed()
 
-	p := &AlertProducer{producer: mp, topic: "x"}
+	p := &AlertProducer{producer: mp, topic: "x", stopCh: make(chan struct{})}
 	env := AlertEnvelope{AlertID: "a", TenantID: "t", RuleID: "r"}
 	if err := p.Publish(context.Background(), env); err != nil {
 		t.Fatalf("publish: %v", err)
