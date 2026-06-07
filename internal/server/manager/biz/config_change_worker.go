@@ -100,10 +100,54 @@ func (w *ConfigChangeWorker) dispatch(ctx context.Context, r *model.ConfigChange
 	switch r.TargetTable {
 	case "feature_flags":
 		return w.applyFeatureFlag(ctx, r)
-	case "system_config", "kube_clusters":
-		return fmt.Errorf("target_table %s not yet supported", r.TargetTable)
+	case "system_config":
+		return w.applySystemConfig(ctx, r)
+	case "kube_clusters":
+		return w.applyKubeCluster(ctx, r)
 	}
 	return fmt.Errorf("unknown target_table %s", r.TargetTable)
+}
+
+// applySystemConfig 把 system_config 表里 key 改成 proposed_value (P4-15).
+//
+// 5 个微服务 (Manager/AgentCenter/Consumer/Engine/VulnSync) 启动后会通过
+// SystemConfigWatcher 订阅 system_config 表的变更, 自动 hot-reload viper.
+func (w *ConfigChangeWorker) applySystemConfig(ctx context.Context, r *model.ConfigChangeRequest) error {
+	updatedBy := r.Approvers
+	if i := strings.LastIndex(updatedBy, ","); i >= 0 {
+		updatedBy = updatedBy[i+1:]
+	}
+	_ = updatedBy
+	res := w.db.WithContext(ctx).
+		Model(&model.SystemConfig{}).
+		Where("tenant_id = ? AND `key` = ?", r.TenantID, r.TargetKey).
+		Updates(map[string]any{
+			"value": r.ProposedValue,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		sc := model.SystemConfig{
+			TenantID:    r.TenantID,
+			Key:         r.TargetKey,
+			Value:       r.ProposedValue,
+			Category:    "general",
+			Description: "via ConfigChangeRequest #" + fmt.Sprint(r.ID),
+		}
+		return w.db.WithContext(ctx).Create(&sc).Error
+	}
+	return nil
+}
+
+// applyKubeCluster 改 kube_clusters 表 (CR 流程治理 KubeConfig 之类敏感配置).
+func (w *ConfigChangeWorker) applyKubeCluster(ctx context.Context, r *model.ConfigChangeRequest) error {
+	return w.db.WithContext(ctx).
+		Table("kube_clusters").
+		Where("tenant_id = ? AND id = ?", r.TenantID, r.TargetKey).
+		Updates(map[string]any{
+			"kubeconfig": r.ProposedValue,
+		}).Error
 }
 
 func (w *ConfigChangeWorker) applyFeatureFlag(ctx context.Context, r *model.ConfigChangeRequest) error {
