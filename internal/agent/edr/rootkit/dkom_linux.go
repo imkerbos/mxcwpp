@@ -64,8 +64,8 @@ func DetectDKOM() (*DKOMResult, error) {
 	}
 
 	// 3. /proc/modules vs /sys/module/
-	procMods, _ := readProcModules()
-	sysMods, _ := readSysModules()
+	procMods, _ := readProcModulesDKOM()
+	sysMods, _ := readSysModulesDKOM()
 	for m := range sysMods {
 		if _, ok := procMods[m]; !ok {
 			r.HiddenModules = append(r.HiddenModules, m)
@@ -133,8 +133,8 @@ func getdentsDirect(path string) ([]string, error) {
 	return out, nil
 }
 
-// readProcModules /proc/modules 解析.
-func readProcModules() (map[string]bool, error) {
+// readProcModulesDKOM /proc/modules 解析.
+func readProcModulesDKOM() (map[string]bool, error) {
 	f, err := os.Open("/proc/modules")
 	if err != nil {
 		return nil, err
@@ -151,8 +151,8 @@ func readProcModules() (map[string]bool, error) {
 	return out, nil
 }
 
-// readSysModules /sys/module/ 子目录.
-func readSysModules() (map[string]bool, error) {
+// readSysModulesDKOM /sys/module/ 子目录.
+func readSysModulesDKOM() (map[string]bool, error) {
 	entries, err := os.ReadDir("/sys/module")
 	if err != nil {
 		return nil, err
