@@ -223,8 +223,10 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 		consumermetrics.RecordProcessing(raw.Topic, dataTypeLabel, procStatus, time.Since(start))
 	}()
 
-	var msg kafka.MQMessage
-	if err := json.Unmarshal(raw.Value, &msg); err != nil {
+	// P2-6: 池化 MQMessage 减 GC 压力
+	msg := kafka.GetMQMessage()
+	defer kafka.PutMQMessage(msg)
+	if err := json.Unmarshal(raw.Value, msg); err != nil {
 		r.logger.Error("反序列化 MQMessage 失败",
 			zap.String("topic", raw.Topic),
 			zap.Error(err),
@@ -239,82 +241,82 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	switch {
 	case msg.DataType == 1000:
 		// 心跳：upsert hosts 表 + 写 Redis agent:ac: 映射 + 写 ClickHouse 指标
-		writeErr = r.mysql.WriteHeartbeat(&msg)
-		r.writeAgentACMapping(&msg)
-		_ = r.ch.WriteHostMetrics(&msg)
+		writeErr = r.mysql.WriteHeartbeat(msg)
+		r.writeAgentACMapping(msg)
+		_ = r.ch.WriteHostMetrics(msg)
 	case msg.DataType == 1001:
-		_ = r.ch.WriteHostMetrics(&msg) // 插件心跳，Phase 4 实现
+		_ = r.ch.WriteHostMetrics(msg) // 插件心跳，Phase 4 实现
 
 	// 资产数据（5050~5060）
 	case msg.DataType >= 5050 && msg.DataType <= 5060:
-		writeErr = r.mysql.WriteAsset(&msg, msg.DataType)
+		writeErr = r.mysql.WriteAsset(msg, msg.DataType)
 
 	// FIM 事件
 	case msg.DataType == 6001:
-		writeErr = r.mysql.WriteFIMEvent(&msg)
+		writeErr = r.mysql.WriteFIMEvent(msg)
 		if writeErr == nil {
-			_ = r.ch.WriteFIMEvent(&msg)
-			r.evaluateCEL(&msg)
+			_ = r.ch.WriteFIMEvent(msg)
+			r.evaluateCEL(msg)
 		}
 	// FIM 任务完成
 	case msg.DataType == 6002:
-		writeErr = r.mysql.WriteFIMTaskComplete(&msg)
+		writeErr = r.mysql.WriteFIMTaskComplete(msg)
 
 	// 基线检查结果
 	case msg.DataType == 8000:
-		writeErr = r.mysql.WriteBaseline(&msg)
+		writeErr = r.mysql.WriteBaseline(msg)
 	// 基线扫描任务完成
 	case msg.DataType == 8001:
-		writeErr = r.mysql.WriteTaskCompletion(&msg)
+		writeErr = r.mysql.WriteTaskCompletion(msg)
 	// 修复结果
 	case msg.DataType == 8003:
-		writeErr = r.mysql.WriteFixResult(&msg)
+		writeErr = r.mysql.WriteFixResult(msg)
 	// 修复任务完成
 	case msg.DataType == 8004:
-		writeErr = r.mysql.WriteFixTaskComplete(&msg)
+		writeErr = r.mysql.WriteFixTaskComplete(msg)
 
 	// Scanner 扫描结果
 	case msg.DataType == 7001:
-		writeErr = r.mysql.WriteScanResult(&msg)
+		writeErr = r.mysql.WriteScanResult(msg)
 		if writeErr == nil {
-			r.evaluateCEL(&msg)
+			r.evaluateCEL(msg)
 		}
 	// Scanner 任务完成
 	case msg.DataType == 7002:
-		writeErr = r.mysql.WriteScanTaskComplete(&msg)
+		writeErr = r.mysql.WriteScanTaskComplete(msg)
 	// Scanner 隔离/删除结果
 	case msg.DataType == 7004:
-		writeErr = r.mysql.WriteQuarantineResult(&msg)
+		writeErr = r.mysql.WriteQuarantineResult(msg)
 
 	// BDE 行为画像快照
 	case msg.DataType == 3010:
-		r.evaluateBDE(&msg)
+		r.evaluateBDE(msg)
 
 	// 内存威胁事件
 	case msg.DataType == 3004:
-		r.writeMemoryThreat(&msg)
+		r.writeMemoryThreat(msg)
 
 	// eBPF 事件（3000-3003，含 DNS 事件）
 	case msg.DataType >= 3000 && msg.DataType <= 3003:
-		_ = r.ch.WriteEBPFEvent(&msg)
-		r.evaluateCEL(&msg)
-		r.ingestStoryline(&msg)
+		_ = r.ch.WriteEBPFEvent(msg)
+		r.evaluateCEL(msg)
+		r.ingestStoryline(msg)
 		// 网络事件额外进行端口扫描检测
 		if msg.DataType == 3002 {
-			r.checkPortScan(&msg)
+			r.checkPortScan(msg)
 		}
 
 	// 漏洞修复结果
 	case msg.DataType == 9200:
-		writeErr = r.mysql.WriteRemediationResult(&msg)
+		writeErr = r.mysql.WriteRemediationResult(msg)
 
 	// 漏洞修复阶段进度（11 state lifecycle 实时事件）
 	case msg.DataType == 9201:
-		writeErr = r.mysql.WriteRemediationProgress(&msg)
+		writeErr = r.mysql.WriteRemediationProgress(msg)
 
 	// 命令执行回包
 	case msg.DataType == 9999:
-		writeErr = r.mysql.WriteCommandAck(&msg)
+		writeErr = r.mysql.WriteCommandAck(msg)
 
 	default:
 		r.logger.Debug("Consumer 忽略未路由的 DataType",
@@ -330,7 +332,7 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 			zap.String("agent_id", msg.AgentID),
 			zap.Error(writeErr),
 		)
-		r.dlq.Send(raw.Topic, &msg, writeErr, 1)
+		r.dlq.Send(raw.Topic, msg, writeErr, 1)
 		procStatus = "dlq"
 	}
 
