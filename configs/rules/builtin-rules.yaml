@@ -1659,3 +1659,446 @@ rules:
     mitre_id: "T1070.003"
     data_types: ["3000"]
     description: "shell 历史相关环境变量被关闭"
+
+  # ==================== P6-3 扩展规则 ====================
+  # ATT&CK 198 → 250 条覆盖更细子技术: 防御逃避/凭证窃取/发现/横移/收集/外传/C2/影响
+
+  - name: "防御逃避 - timestomp 篡改文件时间"
+    expression: 'cmdline.contains("touch -r") || cmdline.contains("touch -t") || cmdline.contains("touch -d")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1070.006"
+    data_types: ["3000"]
+    description: "改文件 mtime/atime, 留隐蔽"
+
+  - name: "防御逃避 - Process Hollowing 痕迹"
+    expression: 'cmdline.contains("ptrace") && cmdline.contains("PTRACE_POKETEXT")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1055.012"
+    data_types: ["3000"]
+    description: "ptrace 改进程内存 (Process Hollowing 注入)"
+
+  - name: "防御逃避 - DLL Side-Loading (Windows)"
+    expression: 'cmdline.contains("rundll32.exe") && cmdline.contains(",DllRegisterServer")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1574.002"
+    data_types: ["3000"]
+    description: "rundll32 加载非签名 DLL"
+
+  - name: "防御逃避 - 命令间接执行 forfiles"
+    expression: 'cmdline.contains("forfiles /c") || cmdline.contains("pcalua.exe")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1202"
+    data_types: ["3000"]
+    description: "用 forfiles/pcalua 间接执行命令"
+
+  - name: "防御逃避 - PowerShell EncodedCommand"
+    expression: 'cmdline.contains("powershell") && (cmdline.contains("-EncodedCommand") || cmdline.contains("-enc "))'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1027"
+    data_types: ["3000"]
+    description: "PowerShell base64 编码隐藏命令"
+
+  - name: "防御逃避 - bash IFS 混淆"
+    expression: 'cmdline.contains("${IFS}") || cmdline.contains("$IFS$")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1027"
+    data_types: ["3000"]
+    description: "用 IFS 变量混淆命令空格"
+
+  - name: "防御逃避 - whitespace 字符混淆"
+    expression: 'cmdline.contains("$@") && cmdline.contains("bash")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1027"
+    data_types: ["3000"]
+    description: "bash $@ 替换混淆"
+
+  - name: "凭证窃取 - /etc/shadow 读"
+    expression: 'event_type == "file_read" && file_path == "/etc/shadow" && uid != 0'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1003.008"
+    data_types: ["3001"]
+    description: "非 root 读 /etc/shadow"
+
+  - name: "凭证窃取 - LSASS dump (Windows)"
+    expression: 'cmdline.contains("lsass.exe") && (cmdline.contains("MiniDump") || cmdline.contains("procdump"))'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1003.001"
+    data_types: ["3000"]
+    description: "lsass 进程内存 dump"
+
+  - name: "凭证窃取 - SAM 文件读 (Windows)"
+    expression: 'cmdline.contains("reg save") && cmdline.contains("HKLM\\SAM")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1003.002"
+    data_types: ["3000"]
+    description: "导出 SAM 注册表 hive"
+
+  - name: "凭证窃取 - DCSync 仿冒域控"
+    expression: 'cmdline.contains("DSReplicaGetChanges") || cmdline.contains("DRSUAPI")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1003.006"
+    data_types: ["3000"]
+    description: "模拟域控同步 hash"
+
+  - name: "凭证窃取 - Kerberoasting"
+    expression: 'cmdline.contains("Get-Domain") && cmdline.contains("SPN")'
+    severity: high
+    category: credential_access
+    mitre_id: "T1558.003"
+    data_types: ["3000"]
+    description: "枚举 SPN 拿 Kerberos TGS"
+
+  - name: "凭证窃取 - SSH 私钥读取"
+    expression: 'event_type == "file_read" && (file_path.endsWith("/.ssh/id_rsa") || file_path.endsWith("/.ssh/id_ed25519"))'
+    severity: high
+    category: credential_access
+    mitre_id: "T1552.004"
+    data_types: ["3001"]
+    description: "私钥被非 owner 进程读"
+
+  - name: "凭证窃取 - AWS credentials 读"
+    expression: 'event_type == "file_read" && file_path.endsWith("/.aws/credentials")'
+    severity: high
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3001"]
+    description: ".aws/credentials 被读"
+
+  - name: "凭证窃取 - Azure profile 读"
+    expression: 'event_type == "file_read" && file_path.endsWith("/.azure/azureProfile.json")'
+    severity: high
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3001"]
+    description: ".azure/azureProfile 被读"
+
+  - name: "凭证窃取 - GCP application_default 读"
+    expression: 'event_type == "file_read" && file_path.endsWith("/.config/gcloud/application_default_credentials.json")'
+    severity: high
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3001"]
+    description: "GCP 默认凭证文件被读"
+
+  - name: "凭证窃取 - kubectl kubeconfig 读"
+    expression: 'event_type == "file_read" && file_path.endsWith("/.kube/config")'
+    severity: high
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3001"]
+    description: "kubeconfig 被非 owner 读"
+
+  - name: "凭证窃取 - Docker config 读"
+    expression: 'event_type == "file_read" && file_path.endsWith("/.docker/config.json")'
+    severity: medium
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3001"]
+    description: "docker config (含 registry token) 被读"
+
+  - name: "凭证窃取 - Browser password DB"
+    expression: 'event_type == "file_read" && (file_path.contains("Login Data") || file_path.contains("signons.sqlite"))'
+    severity: high
+    category: credential_access
+    mitre_id: "T1555.003"
+    data_types: ["3001"]
+    description: "浏览器密码 DB 被读"
+
+  - name: "凭证窃取 - keytab 文件读"
+    expression: 'event_type == "file_read" && (file_path.endsWith("/krb5.keytab") || file_path.endsWith(".keytab"))'
+    severity: high
+    category: credential_access
+    mitre_id: "T1558"
+    data_types: ["3001"]
+    description: "Kerberos keytab 读"
+
+  - name: "发现 - net user/group 枚举"
+    expression: 'cmdline.startsWith("net user") || cmdline.startsWith("net group") || cmdline.startsWith("net localgroup")'
+    severity: low
+    category: discovery
+    mitre_id: "T1087"
+    data_types: ["3000"]
+    description: "Windows 账户枚举"
+
+  - name: "发现 - find SUID 二进制扫描"
+    expression: 'cmdline.contains("find /") && cmdline.contains("-perm") && (cmdline.contains("4000") || cmdline.contains("u+s"))'
+    severity: medium
+    category: discovery
+    mitre_id: "T1083"
+    data_types: ["3000"]
+    description: "扫描 SUID 二进制 (提权候选)"
+
+  - name: "发现 - /proc/*/maps 大量读"
+    expression: 'event_type == "file_read" && file_path.startsWith("/proc/") && file_path.endsWith("/maps")'
+    severity: low
+    category: discovery
+    mitre_id: "T1057"
+    data_types: ["3001"]
+    description: "读进程内存映射 (gadget 找 / 注入侦察)"
+
+  - name: "发现 - container 自我识别"
+    expression: 'event_type == "file_read" && (file_path == "/proc/1/cgroup" || file_path == "/.dockerenv")'
+    severity: low
+    category: discovery
+    mitre_id: "T1614"
+    data_types: ["3001"]
+    description: "判断自身是否在容器内"
+
+  - name: "发现 - arp 邻居枚举"
+    expression: 'cmdline == "arp -a" || cmdline.startsWith("arp -n")'
+    severity: low
+    category: discovery
+    mitre_id: "T1018"
+    data_types: ["3000"]
+    description: "ARP 表枚举 (横向探测)"
+
+  - name: "发现 - last/lastlog 登录历史"
+    expression: 'cmdline == "last" || cmdline == "lastlog" || cmdline.startsWith("last -")'
+    severity: low
+    category: discovery
+    mitre_id: "T1087.001"
+    data_types: ["3000"]
+    description: "查登录记录"
+
+  - name: "发现 - 域控查询 nltest"
+    expression: 'cmdline.contains("nltest /dclist") || cmdline.contains("nltest /domain_trusts")'
+    severity: medium
+    category: discovery
+    mitre_id: "T1482"
+    data_types: ["3000"]
+    description: "枚举域控/信任关系"
+
+  - name: "发现 - bloodhound SharpHound"
+    expression: 'cmdline.contains("SharpHound") || cmdline.contains("BloodHound")'
+    severity: high
+    category: discovery
+    mitre_id: "T1482"
+    data_types: ["3000"]
+    description: "AD 关系图谱采集工具"
+
+  - name: "横移 - WMI 远程执行"
+    expression: 'cmdline.contains("wmic /node:") && cmdline.contains("process call create")'
+    severity: high
+    category: lateral_movement
+    mitre_id: "T1047"
+    data_types: ["3000"]
+    description: "wmic 远程启动进程"
+
+  - name: "横移 - PsExec 启动"
+    expression: 'cmdline.contains("psexec") || cmdline.contains("PsExec.exe")'
+    severity: high
+    category: lateral_movement
+    mitre_id: "T1021.002"
+    data_types: ["3000"]
+    description: "PsExec 横向执行"
+
+  - name: "横移 - SSH key 横向"
+    expression: 'cmdline.contains("ssh-copy-id") || (cmdline.contains("cat") && cmdline.contains("authorized_keys"))'
+    severity: medium
+    category: lateral_movement
+    mitre_id: "T1021.004"
+    data_types: ["3000"]
+    description: "SSH key 部署到目标 (横向准备)"
+
+  - name: "横移 - winrm 调用"
+    expression: 'cmdline.contains("winrs") || cmdline.contains("Invoke-Command -ComputerName")'
+    severity: high
+    category: lateral_movement
+    mitre_id: "T1021.006"
+    data_types: ["3000"]
+    description: "Windows Remote Management 横移"
+
+  - name: "横移 - RDP 客户端发起"
+    expression: 'cmdline.startsWith("xfreerdp ") || cmdline.startsWith("rdesktop ")'
+    severity: medium
+    category: lateral_movement
+    mitre_id: "T1021.001"
+    data_types: ["3000"]
+    description: "RDP 客户端发起连接"
+
+  - name: "收集 - 屏幕截图工具"
+    expression: 'cmdline.startsWith("scrot ") || cmdline.startsWith("import ") || cmdline.contains("gnome-screenshot")'
+    severity: medium
+    category: collection
+    mitre_id: "T1113"
+    data_types: ["3000"]
+    description: "截图工具被调"
+
+  - name: "收集 - 录音工具"
+    expression: 'cmdline.startsWith("arecord ") || cmdline.startsWith("ffmpeg") && cmdline.contains("-f alsa")'
+    severity: medium
+    category: collection
+    mitre_id: "T1123"
+    data_types: ["3000"]
+    description: "麦克风录音"
+
+  - name: "收集 - 剪贴板读取"
+    expression: 'cmdline.startsWith("xclip ") || cmdline.startsWith("xsel ")'
+    severity: low
+    category: collection
+    mitre_id: "T1115"
+    data_types: ["3000"]
+    description: "剪贴板内容被读"
+
+  - name: "收集 - 系统日志归档"
+    expression: 'cmdline.contains("tar") && cmdline.contains("/var/log")'
+    severity: low
+    category: collection
+    mitre_id: "T1005"
+    data_types: ["3000"]
+    description: "/var/log 被批量归档"
+
+  - name: "外传 - curl 大文件上传"
+    expression: 'cmdline.contains("curl") && (cmdline.contains("--upload-file") || cmdline.contains("-T "))'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1041"
+    data_types: ["3000"]
+    description: "curl 上传文件出站"
+
+  - name: "外传 - rclone 出云"
+    expression: 'cmdline.startsWith("rclone copy") || cmdline.startsWith("rclone sync")'
+    severity: high
+    category: exfiltration
+    mitre_id: "T1567.002"
+    data_types: ["3000"]
+    description: "rclone 同步到云端 (常见外传工具)"
+
+  - name: "外传 - python http.server 启"
+    expression: 'cmdline.contains("python") && (cmdline.contains("http.server") || cmdline.contains("SimpleHTTPServer"))'
+    severity: medium
+    category: exfiltration
+    mitre_id: "T1567"
+    data_types: ["3000"]
+    description: "本机起 HTTP 服务暴露数据"
+
+  - name: "外传 - DNS 隧道 dnscat2"
+    expression: 'cmdline.contains("dnscat2") || cmdline.contains("dnscat")'
+    severity: critical
+    category: exfiltration
+    mitre_id: "T1071.004"
+    data_types: ["3000"]
+    description: "DNS 隧道工具"
+
+  - name: "外传 - ICMP 隧道 icmpsh"
+    expression: 'cmdline.contains("icmpsh") || cmdline.contains("ptunnel")'
+    severity: critical
+    category: exfiltration
+    mitre_id: "T1095"
+    data_types: ["3000"]
+    description: "ICMP 隧道"
+
+  - name: "C2 - nc -e 反向 shell"
+    expression: 'cmdline.contains("nc -e") || cmdline.contains("ncat -e")'
+    severity: critical
+    category: command_and_control
+    mitre_id: "T1059.004"
+    data_types: ["3000"]
+    description: "nc -e 反弹 shell (常见 C2 落地)"
+
+  - name: "C2 - bash /dev/tcp 反弹"
+    expression: 'cmdline.contains("bash -i") && cmdline.contains("/dev/tcp/")'
+    severity: critical
+    category: command_and_control
+    mitre_id: "T1059.004"
+    data_types: ["3000"]
+    description: "bash 反向 shell"
+
+  - name: "C2 - Cobalt Strike checksum8 URI"
+    expression: 'event_type == "http_out" && (http_url.matches("^/[a-zA-Z0-9]{4}$") || http_url.matches("^/[a-zA-Z0-9]{8}$"))'
+    severity: high
+    category: command_and_control
+    mitre_id: "T1071.001"
+    data_types: ["3001"]
+    description: "Cobalt Strike Beacon checksum8 URI 特征"
+
+  - name: "C2 - Sliver beacon 特征"
+    expression: 'event_type == "http_out" && http_url.matches(".*/(secure-status|update-check|websocket).*")'
+    severity: high
+    category: command_and_control
+    mitre_id: "T1071.001"
+    data_types: ["3001"]
+    description: "Sliver C2 默认 callback URI"
+
+  - name: "C2 - Tor 端口连接"
+    expression: 'event_type == "network_connect" && (dst_port == 9001 || dst_port == 9030 || dst_port == 9050)'
+    severity: medium
+    category: command_and_control
+    mitre_id: "T1090.003"
+    data_types: ["3001"]
+    description: "连接 Tor 默认端口"
+
+  - name: "影响 - shred 安全擦除"
+    expression: 'cmdline.startsWith("shred ") && cmdline.contains("-u")'
+    severity: high
+    category: impact
+    mitre_id: "T1485"
+    data_types: ["3000"]
+    description: "shred 不可恢复删除"
+
+  - name: "影响 - dd 磁盘清零"
+    expression: 'cmdline.contains("dd if=/dev/zero") && cmdline.contains("of=/dev/")'
+    severity: critical
+    category: impact
+    mitre_id: "T1561.001"
+    data_types: ["3000"]
+    description: "dd 写零到磁盘设备"
+
+  - name: "影响 - mkfs 重新格式化磁盘"
+    expression: 'cmdline.startsWith("mkfs.") && cmdline.contains("/dev/")'
+    severity: critical
+    category: impact
+    mitre_id: "T1561.002"
+    data_types: ["3000"]
+    description: "在挂载分区上 mkfs (毁数据)"
+
+  - name: "影响 - vssadmin 删快照 (Windows)"
+    expression: 'cmdline.contains("vssadmin") && cmdline.contains("delete shadows")'
+    severity: critical
+    category: impact
+    mitre_id: "T1490"
+    data_types: ["3000"]
+    description: "卷影子副本删除 (勒索软件典型行为)"
+
+  - name: "影响 - wbadmin 删备份"
+    expression: 'cmdline.contains("wbadmin") && cmdline.contains("delete catalog")'
+    severity: critical
+    category: impact
+    mitre_id: "T1490"
+    data_types: ["3000"]
+    description: "Windows Backup catalog 删除"
+
+  - name: "影响 - bcdedit 禁恢复"
+    expression: 'cmdline.contains("bcdedit") && (cmdline.contains("recoveryenabled No") || cmdline.contains("bootstatuspolicy ignoreallfailures"))'
+    severity: critical
+    category: impact
+    mitre_id: "T1490"
+    data_types: ["3000"]
+    description: "BCD 禁系统恢复"
+
+  - name: "影响 - 大量文件加密 (.locked/.encrypted)"
+    expression: 'event_type == "file_write" && (file_path.endsWith(".locked") || file_path.endsWith(".encrypted") || file_path.endsWith(".crypt"))'
+    severity: critical
+    category: impact
+    mitre_id: "T1486"
+    data_types: ["3001"]
+    description: "文件被批量改名为加密后缀 (勒索)"
+
+  - name: "影响 - 比特币钱包搜索"
+    expression: 'cmdline.contains("wallet.dat") || cmdline.contains("Electrum/wallets") || cmdline.contains("Exodus")'
+    severity: high
+    category: impact
+    mitre_id: "T1565"
+    data_types: ["3000"]
+    description: "搜索数字货币钱包文件"
