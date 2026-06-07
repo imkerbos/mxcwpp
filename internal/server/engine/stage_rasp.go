@@ -39,7 +39,7 @@ func (s *RASPStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error
 	if ev.DataType < 4000 || ev.DataType > 4099 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}

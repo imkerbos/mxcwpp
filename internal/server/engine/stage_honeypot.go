@@ -40,7 +40,7 @@ func (s *HoneypotStage) Process(ctx context.Context, ev PipelineEvent) ([]Alert,
 	if ev.DataType < 7020 || ev.DataType > 7029 {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}
