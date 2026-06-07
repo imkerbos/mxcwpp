@@ -1,7 +1,17 @@
-# mxsec v2.0 Phase 1+2+4 进度 (动态更新)
+# mxsec v2.0 Phase 1+2+4+5 进度 (动态更新)
 
 **最后更新**: 2026-06-07
-**总进度**: 168/195 ≈ **86%** (基线 110 + P1/P2 30 + P4 15 + P3 13)
+**总进度**: 173/195 ≈ **89%** (基线 110 + P1/P2 30 + P3 13 + P4 15 + P5 5)
+
+## Phase 5 完成 (5 项, PR163-PR166)
+
+| ID | PR | 标题 | 状态 |
+|---|---|---|---|
+| P5-1 | #163 | NPatch 扩 5 条 eBPF (Confluence/SpringActuator/PHPUnit/ImageMagick/Bitbucket) | 🟢 |
+| P5-2 | #164 | RASP Server 端 ingest endpoint + TopicRASP | 🟢 |
+| P5-3 | — | Agent SelfProtect+ELFIntegrity+Watchdog (已存在, skip) | 🟢 |
+| P5-4 | #165 | fanotify FID/DFID_NAME/PIDFD 完整解析 | 🟢 |
+| P5-5 | #166 | ConfigChange+Quarantine → Engine Pipeline 闭环 | 🟢 |
 
 ## Phase 4 完成 (15 项, PR146-PR161)
 
