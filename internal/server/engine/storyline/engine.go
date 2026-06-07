@@ -144,8 +144,22 @@ func (e *Engine) Ingest(storyID, hostID, hostname string, dataType int32, fields
 		evt.RuleName = ruleName
 		evt.Severity = severity
 	}
-	st.pendingEvts = append(st.pendingEvts, evt)
+	// P1-6: pendingEvts 上限保护, 防止单 story 内存爆 (高频 30s flush 间隔内可能数千事件).
+	const maxPendingEvts = 500
+	if len(st.pendingEvts) < maxPendingEvts {
+		st.pendingEvts = append(st.pendingEvts, evt)
+	} else {
+		// drop oldest 半窗口, 保留最新
+		copy(st.pendingEvts, st.pendingEvts[maxPendingEvts/2:])
+		st.pendingEvts = st.pendingEvts[:maxPendingEvts/2]
+		st.pendingEvts = append(st.pendingEvts, evt)
+	}
 }
+
+// P1-6: storyline map 上限 (LRU 风格 — flush 时按 lastSeen 淘汰过老 story).
+//
+// 与 stale TTL 配合: stale 是按时间, capacity 是按数量. 防长会话 + 海量 story_id 内存爆.
+const maxStories = 10000
 
 // StartFlush starts a background goroutine that periodically flushes dirty storylines to DB.
 func (e *Engine) StartFlush(done <-chan struct{}) {
@@ -176,6 +190,23 @@ func (e *Engine) getOrCreate(storyID, hostID, hostname string) *storyState {
 	defer e.mu.Unlock()
 	if st, ok = e.stories[storyID]; ok {
 		return st
+	}
+	// P1-6: 容量到上限, 淘汰最老 (lastSeen 最早) 1 个
+	if len(e.stories) >= maxStories {
+		var oldestID string
+		var oldestT time.Time
+		for id, s := range e.stories {
+			if oldestID == "" || s.lastSeen.Before(oldestT) {
+				oldestID = id
+				oldestT = s.lastSeen
+			}
+		}
+		if oldestID != "" {
+			delete(e.stories, oldestID)
+			e.logger.Debug("storyline LRU evict",
+				zap.String("evicted_id", oldestID),
+				zap.Time("last_seen", oldestT))
+		}
 	}
 	st = &storyState{
 		storyID:   storyID,
