@@ -34,7 +34,7 @@ func (s *RootkitStage) Process(ctx context.Context, ev PipelineEvent) ([]Alert, 
 	if s.detector == nil {
 		return nil, nil
 	}
-	fields, err := payloadToFields(ev.Payload)
+	fields, err := ev.Fields()
 	if err != nil {
 		return nil, nil
 	}
