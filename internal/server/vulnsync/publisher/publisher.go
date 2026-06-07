@@ -75,13 +75,15 @@ func (p *Publisher) PublishAdvisory(ctx context.Context, a sources.Advisory) err
 	if err != nil {
 		return fmt.Errorf("send: %w", err)
 	}
-	p.logger.Debug("advisory published",
-		zap.String("topic", p.topic),
-		zap.Int32("partition", part),
-		zap.Int64("offset", off),
-		zap.String("source", a.Source),
-		zap.String("source_id", a.SourceID),
-	)
+	if p.logger != nil {
+		p.logger.Debug("advisory published",
+			zap.String("topic", p.topic),
+			zap.Int32("partition", part),
+			zap.Int64("offset", off),
+			zap.String("source", a.Source),
+			zap.String("source_id", a.SourceID),
+		)
+	}
 	return nil
 }
 
