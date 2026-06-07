@@ -5,6 +5,7 @@ const (
 	// v1.x Agent → Server 数据 Topic
 	TopicHeartbeat   = "mxsec.agent.heartbeat"   // DataType 1000/1001, Retention 24h
 	TopicEvents      = "mxsec.agent.events"      // DataType 6001 (FIM), Retention 72h
+	TopicRASP        = "mxsec.agent.rasp"        // DataType 4000~4099 (RASP), Retention 7d (P5-2)
 	TopicBaseline    = "mxsec.agent.baseline"    // DataType 8000~8004, Retention 7d
 	TopicAsset       = "mxsec.agent.asset"       // DataType 5050~5060, Retention 7d
 	TopicCommandAck  = "mxsec.agent.command-ack" // 命令执行回包, Retention 7d
