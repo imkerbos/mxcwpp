@@ -152,8 +152,8 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 					zap.Int("retry_count", retryCount),
 					zap.Duration("retry_delay", retryDelay),
 				)
-				// 指数退避：延迟时间 = min(初始延迟 * 2^(重试次数-1), 最大延迟)
-				time.Sleep(retryDelay)
+				// P2-3: 指数退避 + ±30% jitter 防雷鸣群 (1w 主机同时重连冲击 AgentCenter)
+				time.Sleep(withJitter(retryDelay))
 				retryDelay = retryDelay * 2
 				if retryDelay > maxRetryDelay {
 					retryDelay = maxRetryDelay
@@ -178,8 +178,8 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 					zap.Int("retry_count", retryCount),
 					zap.Duration("retry_delay", retryDelay),
 				)
-				// 指数退避
-				time.Sleep(retryDelay)
+				// P2-3: jitter 退避
+				time.Sleep(withJitter(retryDelay))
 				retryDelay = retryDelay * 2
 				if retryDelay > maxRetryDelay {
 					retryDelay = maxRetryDelay
