@@ -1257,3 +1257,405 @@ rules:
     mitre_id: "T1611"
     data_types: ["3000"]
     description: "cgroup release_agent 容器逃逸经典"
+
+  # ==================== Cloud Native (容器/K8s) 扩展 ====================
+
+  - name: "容器 - kubectl exec 进容器"
+    expression: 'cmdline.contains("kubectl exec") && (cmdline.contains("-it") || cmdline.contains("--tty"))'
+    severity: low
+    category: lateral_movement
+    mitre_id: "T1609"
+    data_types: ["3000"]
+    description: "kubectl exec 进入容器 (运维或攻击者)"
+
+  - name: "容器 - cdk-team CDK 工具"
+    expression: 'exe.contains("cdk") || cmdline.contains("cdk-team/CDK")'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "CDK 容器逃逸渗透工具"
+
+  - name: "容器 - docker.sock 写入"
+    expression: 'cmdline.contains("/var/run/docker.sock") && (exe.contains("curl") || exe.contains("nc"))'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "通过 docker.sock 写命令 (容器逃逸经典)"
+
+  - name: "容器 - cgroup release_agent 逃逸"
+    expression: 'cmdline.contains("/sys/fs/cgroup/release_agent") || cmdline.contains("notify_on_release")'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "cgroup notify_on_release/release_agent 容器逃逸"
+
+  - name: "容器 - core_pattern 修改逃逸"
+    expression: 'cmdline.contains("/proc/sys/kernel/core_pattern") && (exe.contains("echo") || exe.contains("tee"))'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3001"]
+    description: "core_pattern 注入容器逃逸"
+
+  - name: "K8s - kubeconfig 文件被读"
+    expression: 'cmdline.contains(".kube/config") && (exe.contains("cat") || exe.contains("cp") || exe.contains("base64"))'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.001"
+    data_types: ["3000"]
+    description: ".kube/config 凭证读取/传输"
+
+  - name: "K8s - ServiceAccount token 滥用"
+    expression: 'cmdline.contains("/var/run/secrets/kubernetes.io/serviceaccount/token") && (exe.contains("curl") || exe.contains("wget"))'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.004"
+    data_types: ["3000"]
+    description: "K8s SA token 被外部进程读取/传输"
+
+  - name: "K8s - kube-proxy 配置改写"
+    expression: 'event_type == "file_write" && file_path.contains("/var/lib/kube-proxy")'
+    severity: critical
+    category: persistence
+    mitre_id: "T1556"
+    data_types: ["3001"]
+    description: "kube-proxy 配置文件被改 (后门植入)"
+
+  # ==================== 数据库类异常 ====================
+
+  - name: "数据库 - mysqldump 全库 dump"
+    expression: 'exe.endsWith("/mysqldump") && cmdline.contains("--all-databases")'
+    severity: critical
+    category: collection
+    mitre_id: "T1005"
+    data_types: ["3000"]
+    description: "mysqldump --all-databases 全库导出"
+
+  - name: "数据库 - pg_dumpall"
+    expression: 'exe.endsWith("/pg_dumpall") || exe.endsWith("/pg_dump")'
+    severity: high
+    category: collection
+    mitre_id: "T1005"
+    data_types: ["3000"]
+    description: "PostgreSQL 数据库 dump"
+
+  - name: "数据库 - Redis FLUSHALL/CONFIG SET dir"
+    expression: 'exe.contains("redis-cli") && (cmdline.contains("FLUSHALL") || cmdline.contains("CONFIG SET dir") || cmdline.contains("SLAVEOF"))'
+    severity: critical
+    category: impact
+    mitre_id: "T1485"
+    data_types: ["3000"]
+    description: "Redis 危险命令 (FLUSHALL/CONFIG SET dir/SLAVEOF) — 未授权写盘攻击经典"
+
+  - name: "数据库 - sqlmap 外部探测"
+    expression: 'exe.contains("sqlmap") || cmdline.contains("--dbs --batch")'
+    severity: high
+    category: discovery
+    mitre_id: "T1190"
+    data_types: ["3000"]
+    description: "sqlmap SQL 注入探测"
+
+  # ==================== 加密货币/挖矿扩展 ====================
+
+  - name: "挖矿 - cgminer/bfgminer"
+    expression: 'exe.contains("cgminer") || exe.contains("bfgminer") || exe.contains("sgminer")'
+    severity: critical
+    category: cryptomining
+    mitre_id: "T1496"
+    data_types: ["3000"]
+    description: "BTC 矿工典型工具 (cgminer/bfgminer/sgminer)"
+
+  - name: "挖矿 - ethminer"
+    expression: 'exe.contains("ethminer") || exe.contains("phoenixminer") || exe.contains("teamredminer") || exe.contains("nbminer")'
+    severity: critical
+    category: cryptomining
+    mitre_id: "T1496"
+    data_types: ["3000"]
+    description: "ETH/各币种主流矿工 (ethminer/phoenixminer/teamredminer/nbminer)"
+
+  - name: "挖矿 - 矿池域名连接"
+    expression: 'cmdline.contains("stratum+tcp://") || cmdline.contains("pool.minexmr.com") || cmdline.contains("xmrpool.eu") || cmdline.contains("nanopool.org")'
+    severity: critical
+    category: cryptomining
+    mitre_id: "T1496"
+    data_types: ["3000"]
+    description: "已知矿池域名连接特征"
+
+  # ==================== eBPF 滥用 ====================
+
+  - name: "eBPF - 非系统 bpf 程序加载"
+    expression: 'cmdline.contains("bpftool prog load") || cmdline.contains("bpf(BPF_PROG_LOAD")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1014"
+    data_types: ["3000"]
+    description: "eBPF 程序加载 (eBPF rootkit BCC/bpftrace 攻击)"
+
+  - name: "eBPF - bpftrace 启用"
+    expression: 'exe.contains("bpftrace") && cmdline.contains("/sys/kernel/debug/tracing")'
+    severity: medium
+    category: discovery
+    mitre_id: "T1057"
+    data_types: ["3000"]
+    description: "bpftrace 系统行为追踪 (合法运维 + 攻击侦察)"
+
+  # ==================== 持久化扩展 ====================
+
+  - name: "持久化 - /etc/passwd 直接写"
+    expression: 'event_type == "file_write" && file_path == "/etc/passwd"'
+    severity: critical
+    category: persistence
+    mitre_id: "T1136.001"
+    data_types: ["3001"]
+    description: "/etc/passwd 直接写 (UID=0 后门账户植入)"
+
+  - name: "持久化 - /etc/sudoers 修改"
+    expression: 'event_type == "file_write" && (file_path == "/etc/sudoers" || file_path.startsWith("/etc/sudoers.d/"))'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1548.003"
+    data_types: ["3001"]
+    description: "/etc/sudoers 修改 (NOPASSWD 提权植入)"
+
+  - name: "持久化 - SSH config Match 子句"
+    expression: 'event_type == "file_write" && file_path == "/etc/ssh/sshd_config" || file_path.contains("ssh/sshd_config.d/")'
+    severity: high
+    category: persistence
+    mitre_id: "T1098.004"
+    data_types: ["3001"]
+    description: "sshd_config 改写 (后门用户/端口/PAM 旁路)"
+
+  - name: "持久化 - PAM 模块替换"
+    expression: 'event_type == "file_write" && (file_path.startsWith("/lib/security/") || file_path.startsWith("/lib64/security/") || file_path.startsWith("/usr/lib/x86_64-linux-gnu/security/"))'
+    severity: critical
+    category: persistence
+    mitre_id: "T1556.003"
+    data_types: ["3001"]
+    description: "PAM 模块 (.so) 替换/植入 (T1556.003 修改认证流程)"
+
+  # ==================== ATT&CK 容器子项目 ====================
+
+  - name: "容器 - DOCKER_CONTENT_TRUST 禁用"
+    expression: 'cmdline.contains("DOCKER_CONTENT_TRUST=0") || cmdline.contains("--disable-content-trust")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1610"
+    data_types: ["3000"]
+    description: "Docker 签名校验禁用 (恶意镜像注入)"
+
+  - name: "容器 - docker run --privileged"
+    expression: 'cmdline.contains("docker run") && cmdline.contains("--privileged")'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "docker run --privileged (特权容器 = root + cap_sys_admin)"
+
+  - name: "容器 - docker run -v / 挂载敏感目录"
+    expression: 'cmdline.contains("docker run") && (cmdline.contains("-v /:/") || cmdline.contains("-v /etc:") || cmdline.contains("-v /root:"))'
+    severity: critical
+    category: privilege_escalation
+    mitre_id: "T1611"
+    data_types: ["3000"]
+    description: "docker run 挂载宿主敏感目录 (容器逃逸前置)"
+
+  # ==================== 反取证 ====================
+
+  - name: "反取证 - logrotate 强制清空"
+    expression: 'cmdline.contains("> /var/log/wtmp") || cmdline.contains("> /var/log/utmp") || cmdline.contains("> /var/log/btmp") || cmdline.contains("> /var/log/secure") || cmdline.contains("> /var/log/auth.log")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1070.002"
+    data_types: ["3000"]
+    description: "日志文件被清空 (wtmp/utmp/btmp/secure/auth)"
+
+  - name: "反取证 - lastlog 清空"
+    expression: 'cmdline.contains("/var/log/lastlog") && (cmdline.contains("dd") || cmdline.contains("> "))'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1070.001"
+    data_types: ["3000"]
+    description: "lastlog 清空"
+
+  - name: "反取证 - audit 服务停止"
+    expression: 'cmdline.contains("systemctl stop auditd") || cmdline.contains("service auditd stop") || cmdline.contains("auditctl -e 0")'
+    severity: critical
+    category: defense_evasion
+    mitre_id: "T1562.001"
+    data_types: ["3000"]
+    description: "auditd 服务被停 (反取证)"
+
+  - name: "反取证 - SELinux/AppArmor 禁用"
+    expression: 'cmdline.contains("setenforce 0") || cmdline.contains("aa-disable") || (cmdline.contains("permissive") && cmdline.contains("selinux"))'
+    severity: critical
+    category: defense_evasion
+    mitre_id: "T1562.001"
+    data_types: ["3000"]
+    description: "SELinux Permissive 或 AppArmor 禁用"
+
+  # ==================== Living off the Land (LOLBins) ====================
+
+  - name: "LOLBins - find -exec 执行命令"
+    expression: 'cmdline.contains("find") && cmdline.contains("-exec") && (cmdline.contains("/bin/sh") || cmdline.contains("/bin/bash") || cmdline.contains("nc "))'
+    severity: high
+    category: execution
+    mitre_id: "T1059.004"
+    data_types: ["3000"]
+    description: "find -exec 命令执行 (LOLBins)"
+
+  - name: "LOLBins - awk system 调用"
+    expression: 'exe.endsWith("/awk") && cmdline.contains("system(")'
+    severity: medium
+    category: execution
+    mitre_id: "T1059.004"
+    data_types: ["3000"]
+    description: "awk system() 命令执行 (LOLBins)"
+
+  - name: "LOLBins - env 直接执行 shell"
+    expression: 'exe.endsWith("/env") && (cmdline.contains("env /bin/sh") || cmdline.contains("env /bin/bash"))'
+    severity: medium
+    category: execution
+    mitre_id: "T1218"
+    data_types: ["3000"]
+    description: "env 启动 shell (bypass shell 注入)"
+
+  - name: "LOLBins - python -c shell 执行"
+    expression: 'exe.contains("python") && cmdline.contains("-c") && (cmdline.contains("os.system") || cmdline.contains("subprocess.call") || cmdline.contains("Popen"))'
+    severity: high
+    category: execution
+    mitre_id: "T1059.006"
+    data_types: ["3000"]
+    description: "python -c 内嵌 shell 命令"
+
+  - name: "LOLBins - php -r 命令注入"
+    expression: 'exe.contains("php") && cmdline.contains("-r") && (cmdline.contains("system(") || cmdline.contains("exec(") || cmdline.contains("shell_exec("))'
+    severity: high
+    category: execution
+    mitre_id: "T1059.007"
+    data_types: ["3000"]
+    description: "php -r 内嵌命令"
+
+  # ==================== 横向移动扩展 ====================
+
+  - name: "横向 - mysql client 远程连接"
+    expression: 'exe.endsWith("/mysql") && (cmdline.contains("-h") || cmdline.contains("--host")) && !cmdline.contains("localhost") && !cmdline.contains("127.0.0.1")'
+    severity: low
+    category: lateral_movement
+    mitre_id: "T1021"
+    data_types: ["3000"]
+    description: "mysql client 远程连接 (横向横扩散迹象)"
+
+  - name: "横向 - SSH ProxyJump 跳板"
+    expression: 'exe.endsWith("/ssh") && (cmdline.contains("ProxyJump") || cmdline.contains("-J ") || cmdline.contains("ProxyCommand"))'
+    severity: medium
+    category: lateral_movement
+    mitre_id: "T1021.004"
+    data_types: ["3000"]
+    description: "SSH 跳板模式 (横向移动隐蔽)"
+
+  # ==================== 命令控制 (C2) 隐蔽通道 ====================
+
+  - name: "C2 - ICMP 隧道"
+    expression: 'exe.contains("ptunnel") || exe.contains("icmptunnel") || cmdline.contains("ping -p")'
+    severity: critical
+    category: c2_communication
+    mitre_id: "T1095"
+    data_types: ["3000"]
+    description: "ICMP 隧道 (ptunnel/icmptunnel/ping -p payload)"
+
+  - name: "C2 - DNS 隧道工具"
+    expression: 'exe.contains("dnscat2") || exe.contains("iodine") || exe.contains("dns2tcp")'
+    severity: critical
+    category: c2_communication
+    mitre_id: "T1071.004"
+    data_types: ["3000"]
+    description: "DNS 隧道工具 (dnscat2/iodine/dns2tcp)"
+
+  - name: "C2 - HTTPS 隧道 ssh -D socks"
+    expression: 'exe.endsWith("/ssh") && cmdline.contains("-D ") && cmdline.contains("-N")'
+    severity: medium
+    category: c2_communication
+    mitre_id: "T1572"
+    data_types: ["3000"]
+    description: "ssh -D SOCKS 动态端口转发 (隐蔽通道)"
+
+  # ==================== Cloud + Web ====================
+
+  - name: "Cloud - AWS IAM 凭证读取"
+    expression: 'cmdline.contains("169.254.169.254/latest/meta-data/iam/security-credentials")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.005"
+    data_types: ["3000"]
+    description: "AWS IMDSv1 IAM 凭证读"
+
+  - name: "Cloud - GCP metadata 读"
+    expression: 'cmdline.contains("metadata.google.internal/computeMetadata/v1/instance/service-accounts/")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.005"
+    data_types: ["3000"]
+    description: "GCP metadata 服务账号凭证读"
+
+  - name: "Cloud - Azure IMDS"
+    expression: 'cmdline.contains("169.254.169.254/metadata/identity/oauth2/token")'
+    severity: critical
+    category: credential_access
+    mitre_id: "T1552.005"
+    data_types: ["3000"]
+    description: "Azure IMDS OAuth2 token 读"
+
+  # ==================== 网络异常 ====================
+
+  - name: "网络 - 端口扫描 (大量 SYN 同源)"
+    expression: 'event_type == "tcp_connect" && recent_remote_addr_count > 50'
+    severity: medium
+    category: discovery
+    mitre_id: "T1046"
+    data_types: ["3003"]
+    description: "短时间大量目标 IP (内网横向扫描)"
+
+  - name: "网络 - Tor 节点连接"
+    expression: 'dst_port == "9001" || dst_port == "9030" || dst_port == "9050" || dst_port == "9051" || dst_port == "9150"'
+    severity: high
+    category: c2_communication
+    mitre_id: "T1090.003"
+    data_types: ["3003"]
+    description: "Tor 节点端口连接 (9001/9030/9050/9051/9150)"
+
+  - name: "网络 - 已知恶意 C2 IP"
+    expression: 'remote_addr_in_ioc_list'
+    severity: critical
+    category: c2_communication
+    mitre_id: "T1071"
+    data_types: ["3003"]
+    description: "命中 IOC 黑名单 IP (mxsec.ioc 同步源)"
+
+  # ==================== 系统级反检测 ====================
+
+  - name: "反检测 - 隐藏文件大量创建"
+    expression: 'event_type == "file_write" && file_path.contains("/.")'
+    severity: low
+    category: defense_evasion
+    mitre_id: "T1564.001"
+    data_types: ["3001"]
+    description: "隐藏文件创建 (.开头, 命中频率高时聚合告警)"
+
+  - name: "反检测 - dpkg 包静默删除"
+    expression: 'cmdline.contains("dpkg --remove --force-all") || cmdline.contains("apt-get purge --auto-remove -y")'
+    severity: medium
+    category: defense_evasion
+    mitre_id: "T1070.004"
+    data_types: ["3000"]
+    description: "强制删包 (清理工具痕迹)"
+
+  - name: "反检测 - history 命令清除"
+    expression: 'cmdline.contains("unset HISTFILE") || cmdline.contains("export HISTFILE=") || cmdline.contains("HISTSIZE=0") || cmdline.contains("HISTFILESIZE=0")'
+    severity: high
+    category: defense_evasion
+    mitre_id: "T1070.003"
+    data_types: ["3000"]
+    description: "shell 历史相关环境变量被关闭"
