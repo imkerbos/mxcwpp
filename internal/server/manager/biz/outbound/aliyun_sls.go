@@ -16,7 +16,6 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -59,48 +58,49 @@ func NewAliyunSLSConnector(project, logstore, region, accessKeyID, accessKeySecr
 // Name 名字.
 func (c *AliyunSLSConnector) Name() string { return "aliyun_sls" }
 
-// Send 推送 Event 到 SLS logstore.
-//
-// 注: 简化用 JSON body + putlogs HTTP API (实际 protobuf 性能更好, 留 M2 替换).
+// Send 推送 Event 到 SLS logstore (protobuf wire 格式).
 func (c *AliyunSLSConnector) Send(ctx context.Context, ev *Event) error {
 	url := fmt.Sprintf("https://%s/logstores/%s/shards/lb", c.endpoint, c.logstore)
 
-	// 构造 SLS LogGroup JSON (简化版)
-	body := map[string]interface{}{
-		"__topic__": "mxsec",
-		"__source__": ev.HostName,
-		"logs": []map[string]interface{}{
+	// 构造 SLS LogGroup protobuf
+	group := &slsLogGroup{
+		Topic:  "mxsec",
+		Source: ev.HostName,
+		Logs: []slsLog{
 			{
-				"__time__": ev.Timestamp.Unix(),
-				"alert_id": ev.ID,
-				"tenant_id": ev.TenantID,
-				"host_id": ev.HostID,
-				"severity": ev.Severity,
-				"category": ev.Category,
-				"rule_id": ev.RuleID,
-				"title": ev.Title,
-				"description": ev.Description,
-				"mitre_id": ev.MitreID,
-				"source": ev.Source,
+				Time: uint32(ev.Timestamp.Unix()),
+				Contents: []slsLogContent{
+					{Key: "alert_id", Value: ev.ID},
+					{Key: "tenant_id", Value: ev.TenantID},
+					{Key: "host_id", Value: ev.HostID},
+					{Key: "severity", Value: ev.Severity},
+					{Key: "category", Value: ev.Category},
+					{Key: "rule_id", Value: ev.RuleID},
+					{Key: "title", Value: ev.Title},
+					{Key: "description", Value: ev.Description},
+					{Key: "mitre_id", Value: ev.MitreID},
+					{Key: "source", Value: ev.Source},
+				},
 			},
 		},
 	}
-	bodyJSON, _ := json.Marshal(body)
+	bodyPB := group.Marshal()
+	rawSize := strconv.Itoa(len(bodyPB))
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(bodyJSON)))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(bodyPB)))
 	if err != nil {
 		return err
 	}
-	// SLS HTTP API 鉴权头
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/x-protobuf")
 	req.Header.Set("x-log-apiversion", "0.6.0")
 	req.Header.Set("x-log-signaturemethod", "hmac-sha1")
+	req.Header.Set("x-log-bodyrawsize", rawSize)
+	req.Header.Set("x-log-compresstype", "")
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
-	bodyMD5 := md5.Sum(bodyJSON)
+	bodyMD5 := md5.Sum(bodyPB)
 	req.Header.Set("Content-MD5", strings.ToUpper(hex.EncodeToString(bodyMD5[:])))
-	req.Header.Set("Content-Length", strconv.Itoa(len(bodyJSON)))
-	// 签名
-	signature := c.sign(req, bodyJSON)
+	req.Header.Set("Content-Length", strconv.Itoa(len(bodyPB)))
+	signature := c.sign(req, bodyPB)
 	req.Header.Set("Authorization", "LOG "+c.accessKeyID+":"+signature)
 
 	resp, err := c.client.Do(req)
