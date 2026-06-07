@@ -223,6 +223,8 @@ var (
 		&GeneratedReport{},
 		&FeatureFlag{},
 		&ConfigChangeRequest{},
+		&UsageMetering{},
+		&MonthlyBill{},
 		&HoneypotPolicy{},
 		&HoneypotDeploymentRecord{},
 		&MLModelSpec{},
