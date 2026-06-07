@@ -9,13 +9,12 @@
 //
 // 命中 → SK_DROP, 业务侧表现 HTTP 中断 (类 SSL handshake fail).
 
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+
+#include "common_fastpath.h"
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-#define MAX_PAYLOAD_SCAN 768
+#define MAX_PAYLOAD_SCAN 384  // P0-2 缩到 384
 #define ETH_HLEN 14
 #define IPPROTO_TCP 6
 
@@ -85,7 +84,7 @@ static __always_inline int match_spring4shell(const __u8 *data, int len) {
 SEC("cgroup_skb/ingress")
 int npatch_spring4shell_filter(struct __sk_buff *skb) {
     if (skb->family != 2) return 1;
-    if (skb->protocol != bpf_htons(0x0800)) return 1;
+    if (!is_http_inbound(skb)) return 1; /* P0-2 fastpath */
 
     void *data_end = (void *)(long)skb->data_end;
     void *data = (void *)(long)skb->data;
