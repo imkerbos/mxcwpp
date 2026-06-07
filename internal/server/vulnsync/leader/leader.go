@@ -132,13 +132,19 @@ func (e *Election) IsLeader() bool {
 	return e.isLeader.Load()
 }
 
-// tryAcquire SET NX EX 尝试取锁。
+// tryAcquire SET NX EX 尝试取锁 (改 SetArgs, SetNX 在 go-redis v9 标 deprecated).
 func (e *Election) tryAcquire(ctx context.Context) (bool, error) {
-	res, err := e.rdb.SetNX(ctx, e.key, e.value, e.ttl).Result()
+	res, err := e.rdb.SetArgs(ctx, e.key, e.value, redis.SetArgs{
+		Mode: "NX",
+		TTL:  e.ttl,
+	}).Result()
 	if err != nil {
-		return false, fmt.Errorf("redis SETNX: %w", err)
+		if err == redis.Nil {
+			return false, nil
+		}
+		return false, fmt.Errorf("redis SET NX: %w", err)
 	}
-	return res, nil
+	return res == "OK", nil
 }
 
 // renewLoop 续期循环,锁失效 / ctx 取消时返回。
