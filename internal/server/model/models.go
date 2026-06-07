@@ -222,6 +222,8 @@ var (
 		&SecurityDBSyncRecord{},
 		&GeneratedReport{},
 		&FeatureFlag{},
+		&UsageMetering{},
+		&MonthlyBill{},
 		&HoneypotPolicy{},
 		&HoneypotDeploymentRecord{},
 		&MLModelSpec{},
