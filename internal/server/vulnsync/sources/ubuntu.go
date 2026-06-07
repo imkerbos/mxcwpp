@@ -23,7 +23,7 @@ func NewUbuntuDriver(timeout time.Duration) *UbuntuDriver {
 	}
 	return &UbuntuDriver{
 		BaseURL: "https://ubuntu.com/security/notices.json",
-		Client:  &http.Client{Timeout: timeout},
+		Client:  SharedHTTPClient(),
 	}
 }
 

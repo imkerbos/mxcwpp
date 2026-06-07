@@ -26,7 +26,7 @@ func NewEPSSDriver(timeout time.Duration) *EPSSDriver {
 	}
 	return &EPSSDriver{
 		URL:    "https://epss.cyentia.com/epss_scores-current.csv",
-		Client: &http.Client{Timeout: timeout},
+		Client: SharedHTTPClient(),
 	}
 }
 
