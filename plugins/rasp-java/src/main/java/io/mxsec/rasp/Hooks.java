@@ -132,4 +132,71 @@ public class Hooks {
         if (s == null) return "";
         return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
+
+    // ===================== P6-2 ASM 字节码注入入口 =====================
+    //
+    // SinkTransformer 注入的 invokestatic 指令以 Object 形参调用本组重载,
+    // 内部再把对象转为 String/数组等格式上报.
+
+    public static void onRuntimeExec(Object arg) {
+        if (!installed || arg == null) return;
+        try {
+            if (arg instanceof String) {
+                onRuntimeExec((String) arg);
+            } else if (arg instanceof String[]) {
+                onProcessBuilderStart((String[]) arg);
+            } else {
+                onRuntimeExec(String.valueOf(arg));
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void onProcessBuilderStart(Object pbThis) {
+        if (!installed || pbThis == null) return;
+        try {
+            if (pbThis instanceof java.lang.ProcessBuilder) {
+                java.util.List<String> cmd = ((java.lang.ProcessBuilder) pbThis).command();
+                String[] arr = cmd.toArray(new String[0]);
+                onProcessBuilderStart(arr);
+            } else {
+                RaspEvent ev = new RaspEvent("java.process_builder",
+                    "java.lang.ProcessBuilder", "start");
+                ev.arguments = new String[]{trunc(String.valueOf(pbThis), 256)};
+                ev.stackTrace = captureStack();
+                reporter.emit(ev);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void onJNDILookup(Object name) {
+        if (!installed || name == null) return;
+        try {
+            onJNDILookup(String.valueOf(name));
+        } catch (Throwable ignored) {}
+    }
+
+    public static void onDeserialize(Object oisThis) {
+        if (!installed) return;
+        try {
+            RaspEvent ev = new RaspEvent("java.deserialize",
+                "java.io.ObjectInputStream", "readObject");
+            ev.arguments = new String[]{oisThis == null ? "null" : oisThis.getClass().getName()};
+            ev.stackTrace = captureStack();
+            reporter.emit(ev);
+        } catch (Throwable ignored) {}
+    }
+
+    public static void onDefineClass(String className, byte[] bytes) {
+        if (!installed) return;
+        try {
+            onDefineClass(className, bytes == null ? 0 : bytes.length);
+        } catch (Throwable ignored) {}
+    }
+
+    public static void onFilterRegistered(Object filterDef) {
+        if (!installed || filterDef == null) return;
+        try {
+            onFilterRegistered(filterDef.getClass().getName());
+        } catch (Throwable ignored) {}
+    }
 }
