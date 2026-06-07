@@ -1,0 +1,395 @@
+openapi: 3.0.3
+info:
+  title: mxsec Platform API
+  description: |
+    mxsec 商业级 CWPP 平台 REST API.
+
+    认证: JWT Bearer token (登录后获得).
+    路径前缀:
+      - /api/v1: v1 业务 API (向后兼容)
+      - /api/v2: v2 多租户 / 配置中心 / mode 等新功能
+
+    错误响应: 统一 JSON 信封 {code, message, data}.
+  version: "2.0.0"
+  contact:
+    name: mxsec dev
+    url: https://github.com/imkerbos/mxsec-platform
+  license:
+    name: Commercial
+    url: https://github.com/imkerbos/mxsec-platform/blob/main/LICENSE
+
+servers:
+  - url: https://mxsec.example.com
+    description: 生产
+  - url: http://localhost:8080
+    description: 本地开发
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: 认证
+  - name: hosts
+    description: 主机管理
+  - name: alerts
+    description: 告警管理
+  - name: vulnerabilities
+    description: 漏洞管理
+  - name: baseline
+    description: 基线检查
+  - name: mode
+    description: 运行模式 (observe/protect) + 6 闸门
+  - name: config-changes
+    description: 配置变更审批 (P1-1)
+  - name: quarantine
+    description: 文件隔离箱
+  - name: kube
+    description: K8s 集群管理
+  - name: ti
+    description: 威胁情报 (STIX/TAXII)
+
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: 用户登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/hosts:
+    get:
+      tags: [hosts]
+      summary: 主机列表
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: status
+          in: query
+          schema: { type: string, enum: [online, offline, isolated] }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HostList'
+
+  /api/v1/hosts/{host_id}:
+    get:
+      tags: [hosts]
+      summary: 主机详情
+      parameters:
+        - name: host_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Host'
+
+  /api/v1/alerts:
+    get:
+      tags: [alerts]
+      summary: 告警列表
+      parameters:
+        - name: severity
+          in: query
+          schema: { type: string, enum: [critical, high, medium, low, info] }
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, ack, resolved, false_positive] }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertList'
+
+  /api/v1/vulnerabilities:
+    get:
+      tags: [vulnerabilities]
+      summary: 漏洞列表
+      responses:
+        '200':
+          description: 成功
+
+  /api/v2/system/mode:
+    get:
+      tags: [mode]
+      summary: 查询当前运行模式
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeInfo'
+
+  /api/v2/admin/tenants/{tenant_id}/mode:
+    post:
+      tags: [mode]
+      summary: 切换租户模式 (admin)
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, reason]
+              properties:
+                mode: { type: string, enum: [observe, protect] }
+                reason: { type: string, minLength: 10 }
+      responses:
+        '200':
+          description: 成功
+
+  /api/v2/config/change-requests:
+    post:
+      tags: [config-changes]
+      summary: 提交配置变更请求 (P1-1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChangeRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigChangeRequest'
+    get:
+      tags: [config-changes]
+      summary: 列出变更请求
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: target_table
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+
+  /api/v2/config/change-requests/{id}/approve:
+    post:
+      tags: [config-changes]
+      summary: 审批通过
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 成功
+
+  /api/v2/config/change-requests/{id}/reject:
+    post:
+      tags: [config-changes]
+      summary: 拒绝
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200':
+          description: 成功
+
+  /api/v1/quarantine:
+    get:
+      tags: [quarantine]
+      summary: 隔离箱文件列表
+      responses:
+        '200':
+          description: 成功
+
+  /api/v1/quarantine/{qid}/restore:
+    post:
+      tags: [quarantine]
+      summary: 还原隔离文件
+      parameters:
+        - name: qid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        code: { type: integer, example: 0 }
+        message: { type: string, example: success }
+        data: { type: object }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+        captcha_id: { type: string }
+        captcha_value: { type: string }
+
+    LoginResponse:
+      type: object
+      properties:
+        code: { type: integer }
+        data:
+          type: object
+          properties:
+            token: { type: string }
+            user:
+              $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [admin, ops, user, viewer] }
+        tenant_id: { type: string }
+
+    Host:
+      type: object
+      properties:
+        host_id: { type: string }
+        hostname: { type: string }
+        ip: { type: string }
+        os: { type: string }
+        os_version: { type: string }
+        kernel: { type: string }
+        arch: { type: string }
+        status: { type: string, enum: [online, offline, isolated] }
+        agent_version: { type: string }
+        last_heartbeat: { type: string, format: date-time }
+        tenant_id: { type: string }
+
+    HostList:
+      type: object
+      properties:
+        code: { type: integer }
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Host' }
+            total: { type: integer }
+
+    Alert:
+      type: object
+      properties:
+        alert_id: { type: string }
+        host_id: { type: string }
+        rule_id: { type: string }
+        severity: { type: string, enum: [critical, high, medium, low, info] }
+        category: { type: string }
+        title: { type: string }
+        description: { type: string }
+        mitre_id: { type: string }
+        status: { type: string, enum: [open, ack, resolved, false_positive] }
+        created_at: { type: string, format: date-time }
+        tenant_id: { type: string }
+
+    AlertList:
+      type: object
+      properties:
+        code: { type: integer }
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Alert' }
+            total: { type: integer }
+
+    ModeInfo:
+      type: object
+      properties:
+        code: { type: integer }
+        data:
+          type: object
+          properties:
+            mode: { type: string, enum: [observe, protect] }
+            updated_by: { type: string }
+            updated_at: { type: string, format: date-time }
+
+    CreateChangeRequest:
+      type: object
+      required: [target_table, target_key, proposed_value, reason]
+      properties:
+        target_table:
+          type: string
+          enum: [feature_flags, system_config, kube_clusters]
+        target_key: { type: string }
+        proposed_value: { type: string }
+        reason: { type: string, minLength: 10 }
+
+    ConfigChangeRequest:
+      type: object
+      properties:
+        id: { type: integer }
+        target_table: { type: string }
+        target_key: { type: string }
+        old_value: { type: string }
+        proposed_value: { type: string }
+        reason: { type: string }
+        status:
+          type: string
+          enum: [pending, approved, rejected, cancelled, applied, failed]
+        requested_by: { type: string }
+        approval_required_count: { type: integer }
+        approved_count: { type: integer }
+        approvers: { type: string }
+        created_at: { type: string, format: date-time }
