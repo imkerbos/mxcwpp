@@ -28,6 +28,7 @@ func NewEngine(logger *zap.Logger) *Engine {
 	engine.RegisterChecker("file_exists", NewFileExistsChecker(logger))
 	engine.RegisterChecker("file_permission", NewFilePermissionChecker(logger))
 	engine.RegisterChecker("file_line_match", NewFileLineMatchChecker(logger))
+	engine.RegisterChecker("file_line_expr", NewFileLineExprChecker(logger))
 	engine.RegisterChecker("command_exec", NewCommandExecChecker(logger))
 	engine.RegisterChecker("sysctl", NewSysctlChecker(logger))
 	engine.RegisterChecker("service_status", NewServiceStatusChecker(logger))
@@ -232,6 +233,10 @@ func (e *Engine) describeCheckRule(rule *CheckRule) string {
 	case "file_line_match":
 		if len(rule.Param) >= 2 {
 			return fmt.Sprintf("文件 %s 包含匹配行", rule.Param[0])
+		}
+	case "file_line_expr":
+		if len(rule.Param) >= 1 {
+			return fmt.Sprintf("文件 %s 满足表达式 %s", rule.Param[0], rule.Result)
 		}
 	case "sysctl":
 		if len(rule.Param) >= 2 {
