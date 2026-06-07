@@ -22,6 +22,10 @@ type MySQLWriter struct {
 	db           *gorm.DB
 	logger       *zap.Logger
 	assetService *service.AssetService
+
+	// P1-2: 异步通知 goroutine semaphore, 限并发避免无界 goroutine 风暴.
+	// 默认 200, FIM/病毒 高 EPS 时通知发送被限流不阻塞 hot path.
+	notifySem chan struct{}
 }
 
 // NewMySQLWriter 创建 MySQLWriter
@@ -30,6 +34,28 @@ func NewMySQLWriter(db *gorm.DB, logger *zap.Logger) *MySQLWriter {
 		db:           db,
 		logger:       logger,
 		assetService: service.NewAssetService(db, logger),
+		notifySem:    make(chan struct{}, 200),
+	}
+}
+
+// runAsyncNotify P1-2: semaphore 限并发跑后台通知.
+// 队列满 → drop 通知 (调用方失败仅 metrics, 不重试).
+func (w *MySQLWriter) runAsyncNotify(name string, fn func()) {
+	select {
+	case w.notifySem <- struct{}{}:
+		go func() {
+			defer func() { <-w.notifySem }()
+			defer func() {
+				if r := recover(); r != nil {
+					w.logger.Error("async notify panic recovered",
+						zap.String("kind", name),
+						zap.Any("panic", r))
+				}
+			}()
+			fn()
+		}()
+	default:
+		w.logger.Warn("async notify queue full, drop", zap.String("kind", name))
 	}
 }
 
@@ -154,8 +180,8 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 
 	// 仅新插入的记录才发送通知（RowsAffected == 0 表示被 OnConflict 跳过了）
 	if result.RowsAffected > 0 {
-		go func(e *model.FIMEvent) {
-			// 查询主机 IP
+		e := event
+		w.runAsyncNotify("fim", func() {
 			var host model.Host
 			ip := ""
 			if w.db.Select("ipv4").First(&host, "host_id = ?", e.HostID).Error == nil && len(host.IPv4) > 0 {
@@ -174,7 +200,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 			}); err != nil {
 				w.logger.Error("发送 FIM 告警通知失败", zap.Error(err))
 			}
-		}(event)
+		})
 	}
 
 	return nil
@@ -536,8 +562,9 @@ func (w *MySQLWriter) WriteScanResult(msg *kafka.MQMessage) error {
 		w.logger.Warn("递增 threat_count 失败", zap.Uint64("task_id", taskID), zap.Error(err))
 	}
 
-	// 异步发送病毒查杀告警通知
-	go func(r *model.AntivirusScanResult) {
+	// 异步发送病毒查杀告警通知 (P1-2 限并发)
+	w.runAsyncNotify("virus", func() {
+		r := result
 		ns := biz.NewNotificationService(w.db, w.logger)
 		if err := ns.SendVirusAlertNotification(&biz.VirusAlertData{
 			HostID:     r.HostID,
@@ -553,7 +580,7 @@ func (w *MySQLWriter) WriteScanResult(msg *kafka.MQMessage) error {
 		}); err != nil {
 			w.logger.Error("发送病毒告警通知失败", zap.Error(err))
 		}
-	}(result)
+	})
 
 	return nil
 }
