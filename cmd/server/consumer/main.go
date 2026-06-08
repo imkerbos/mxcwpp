@@ -15,6 +15,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	"github.com/imkerbos/mxsec-platform/internal/server/config"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer"
@@ -82,6 +83,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = logger.Sync() }()
+
+	// P3-B: GC 调优
+	gctune.Apply("consumer", gctune.ProfileServer, logger)
 
 	// 3. 检查 Kafka 是否启用
 	if !cfg.Kafka.Enabled {
