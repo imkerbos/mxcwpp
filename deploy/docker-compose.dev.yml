@@ -259,6 +259,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       GO_ENV: development
+      # v2 拆分: Consumer 仅 writer 路径, CEL 检测全部交 Engine 服务
+      MXSEC_CONSUMER_ANALYSIS: "false"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: >
@@ -427,6 +429,9 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       GO_ENV: development
+      # v2 拆分: engine 接管 CEL 检测, consumer 仅 writer 路径 (MXSEC_CONSUMER_ANALYSIS=false)
+      MXSEC_ENGINE_DATABASE_DSN: "mxsec_user:123456@tcp(mysql:3306)/mxsec?charset=utf8mb4&parseTime=true&loc=Asia%2FShanghai"
+      MXSEC_ENGINE_KAFKA_BROKERS: "kafka:9092"
     networks: [mxsec-net]
     command: >
       sh -c "
