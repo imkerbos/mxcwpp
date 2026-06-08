@@ -50,25 +50,28 @@ RSH "$ROCKY_IP" "rm -f /tmp/mxsec-l2-eicar.com" >/dev/null 2>&1
 # === 2. host 隔离 (iptables) ===
 echo "==== 主机隔离 ===="
 resp=$($CURL -s -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d "{\"host_ids\":[\"$HID\"],\"reason\":\"L2 functional test\"}" \
+  -d "{\"host_id\":\"$HID\",\"level\":\"standard\",\"reason\":\"L2 functional test\",\"timeout\":300}" \
   "$MGR/api/v1/hosts/isolate")
 code=$(echo "$resp" | $JQ -r '.code')
-echo "isolate code=$code resp=$resp"
-sleep 15
-iso=$($CURL -s -H "Authorization: Bearer $JWT" "$MGR/api/v1/hosts/$HID/isolation-status" | $JQ -r '.data.isolated // .data.status // "unknown"')
-echo "isolation-status=$iso"
-if [ "$code" = "0" ] && [ "$iso" != "unknown" ]; then
-  echo "[PASS] 隔离 API 接受 + 状态 $iso"
-  ROWS+=("| 主机隔离 | POST /hosts/isolate | code=$code, status=$iso | PASS |")
+iso_id=$(echo "$resp" | $JQ -r '.data.id // empty')
+echo "isolate code=$code id=$iso_id resp=$(echo "$resp" | head -c 200)"
+sleep 8
+iso=$($CURL -s -H "Authorization: Bearer $JWT" "$MGR/api/v1/hosts/$HID/isolation-status" | $JQ -r '.data.isolated')
+echo "isolation-status isolated=$iso"
+if [ "$code" = "0" ] && [ "$iso" = "true" ]; then
+  echo "[PASS] 隔离 API code=0 + status isolated=true (id=$iso_id)"
+  ROWS+=("| 主机隔离 | POST /hosts/isolate {host_id,level,reason,timeout} | code=0, isolated=true, record id=$iso_id | PASS |")
   PASS=$((PASS+1))
 else
-  echo "[FAIL] 隔离失败 code=$code"
-  ROWS+=("| 主机隔离 | POST /hosts/isolate | code=$code | FAIL |")
+  echo "[FAIL] 隔离失败 code=$code iso=$iso"
+  ROWS+=("| 主机隔离 | POST /hosts/isolate | code=$code iso=$iso | FAIL |")
   FAIL=$((FAIL+1))
 fi
 # 解除
-$CURL -s -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d "{\"host_ids\":[\"$HID\"]}" "$MGR/api/v1/hosts/release" > /dev/null
+rel_resp=$($CURL -s -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d "{\"host_id\":\"$HID\",\"reason\":\"L2 cleanup\"}" "$MGR/api/v1/hosts/release")
+rel_code=$(echo "$rel_resp" | $JQ -r '.code')
+echo "release code=$rel_code"
 sleep 5
 
 # === 3. NPatch 阻断 ===
@@ -89,7 +92,7 @@ fi
 echo "==== 告警 resolve ===="
 alert_id=$($CURL -s -H "Authorization: Bearer $JWT" "$MGR/api/v1/alerts?page=1&page_size=1&status=active" | $JQ -r '.data.items[0].id // empty')
 if [ -n "$alert_id" ]; then
-  rcode=$($CURL -s -X PUT -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  rcode=$($CURL -s -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
     -d '{"reason":"l2 test ack"}' "$MGR/api/v1/alerts/$alert_id/resolve" | $JQ -r '.code')
   echo "resolve alert $alert_id -> code=$rcode"
   if [ "$rcode" = "0" ]; then
