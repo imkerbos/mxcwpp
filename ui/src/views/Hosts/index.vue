@@ -3,7 +3,7 @@
     <!-- 主机状态分布和风险分布 -->
     <a-row :gutter="16" style="margin-bottom: 16px" class="distribution-row">
       <!-- 主机状态分布 -->
-      <a-col :span="12" class="distribution-col">
+      <a-col :span="8" class="distribution-col">
         <a-card title="主机状态分布" :bordered="false" class="distribution-card">
           <div class="status-distribution-container">
             <div class="chart-container" @click="handleStatusChartClick">
@@ -47,8 +47,8 @@
         </a-card>
       </a-col>
 
-      <!-- 主机基线风险分布 -->
-      <a-col :span="12" class="distribution-col">
+      <!-- 主机基线风险分布 (1/3 宽) -->
+      <a-col :span="8" class="distribution-col">
         <a-card title="主机基线风险分布" :bordered="false" class="distribution-card">
           <div class="risk-distribution-container">
             <div class="risk-card">
@@ -87,6 +87,21 @@
                 <div class="risk-value" style="color: #3B82F6">{{ riskDistribution.low }}</div>
               </div>
             </div>
+          </div>
+        </a-card>
+      </a-col>
+
+      <!-- 操作系统分布 -->
+      <a-col :span="8" class="distribution-col">
+        <a-card title="操作系统分布" :bordered="false" class="distribution-card">
+          <div class="os-distribution-container">
+            <v-chart
+              v-if="osDistributionData.length > 0"
+              class="os-chart"
+              :option="osChartOption"
+              autoresize
+            />
+            <a-empty v-else description="暂无主机" />
           </div>
         </a-card>
       </a-col>
@@ -548,6 +563,33 @@ const statusChartOption = computed(() => {
     ],
   }
 })
+
+// 操作系统分布 (从 hosts 列表本地 group)
+const OS_COLORS = ['#5B8FF9', '#5AD8A6', '#5D7092', '#F6BD16', '#E8684A', '#6DC8EC', '#9270CA']
+const osDistributionData = computed(() => {
+  const m = new Map<string, number>()
+  for (const h of hosts.value) {
+    const os = h.os_family || h.osFamily || h.os || '未知'
+    m.set(os, (m.get(os) || 0) + 1)
+  }
+  return Array.from(m.entries()).map(([name, value], i) => ({
+    name, value, itemStyle: { color: OS_COLORS[i % OS_COLORS.length] },
+  }))
+})
+const osChartOption = computed(() => ({
+  tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+  legend: { orient: 'vertical', right: 8, top: 'center', itemWidth: 10, itemHeight: 10 },
+  series: [{
+    name: '操作系统',
+    type: 'pie',
+    radius: ['45%', '70%'],
+    center: ['35%', '50%'],
+    avoidLabelOverlap: false,
+    itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+    label: { show: true, position: 'inside', formatter: '{c}', fontSize: 11 },
+    data: osDistributionData.value,
+  }],
+}))
 
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
@@ -1083,7 +1125,7 @@ onMounted(() => {
 .risk-distribution-container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+  gap: 10px;
   flex: 1;
   align-content: start;
 }
@@ -1091,13 +1133,24 @@ onMounted(() => {
 .risk-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 10px 12px;
   border: none;
   border-radius: 8px;
   background: var(--mxsec-fill-1);
-  min-height: 70px;
+  min-height: 56px;
   transition: all 0.3s ease;
+}
+
+.os-distribution-container {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.os-chart {
+  width: 100%;
+  height: 100%;
 }
 
 .risk-card:hover {
