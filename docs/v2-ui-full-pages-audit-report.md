@@ -1,0 +1,89 @@
+# UI 全量巡检报告 (64 routes)
+
+- PASS: 60 / WARN: 3 / FAIL: 1
+
+| Route | Status | 5xx | 4xx | console err | key DOM |
+|---|---|---|---|---|---|
+| /ad-audit | PASS | 0 | 0 | 0 | Y |
+| /alerts | PASS | 0 | 0 | 0 | Y |
+| /anomaly | PASS | 0 | 0 | 0 | Y |
+| /asset-fingerprint | PASS | 0 | 0 | 0 | Y |
+| /audit-log | PASS | 0 | 0 | 0 | Y |
+| /baseline/fix | PASS | 0 | 0 | 0 | Y |
+| /baseline/fix-history | PASS | 0 | 0 | 0 | Y |
+| /bde | PASS | 0 | 0 | 0 | Y |
+| /business-lines | PASS | 0 | 0 | 0 | Y |
+| /dashboard | PASS | 0 | 0 | 0 | Y |
+| /detection/rules | PASS | 0 | 0 | 0 | Y |
+| /edr/events | FAIL | 1 | 0 | 3 | Y |
+| /fim/baselines | PASS | 0 | 0 | 0 | Y |
+| /fim/dashboard | PASS | 0 | 0 | 0 | Y |
+| /fim/events | PASS | 0 | 0 | 0 | Y |
+| /fim/policies | PASS | 0 | 0 | 0 | Y |
+| /fim/tasks | PASS | 0 | 0 | 0 | Y |
+| /honeypot | PASS | 0 | 0 | 0 | Y |
+| /host-isolation | PASS | 0 | 0 | 0 | Y |
+| /hosts | PASS | 0 | 0 | 0 | Y |
+| /hunting | PASS | 0 | 0 | 0 | Y |
+| /kube/alarms | PASS | 0 | 0 | 0 | Y |
+| /kube/baseline | PASS | 0 | 0 | 0 | Y |
+| /kube/baseline-rules | PASS | 0 | 0 | 0 | Y |
+| /kube/clusters | PASS | 0 | 0 | 0 | Y |
+| /kube/events | PASS | 0 | 0 | 0 | Y |
+| /kube/image-scan | PASS | 0 | 0 | 0 | Y |
+| /kube/whitelist | PASS | 0 | 0 | 0 | Y |
+| /memory-threats | PASS | 0 | 0 | 0 | Y |
+| /policies | WARN | 0 | 0 | 1 | Y |
+| /policy-groups | WARN | 0 | 0 | 1 | Y |
+| /rootkit | PASS | 0 | 0 | 0 | Y |
+| /sbom-import | PASS | 0 | 0 | 0 | Y |
+| /storylines | PASS | 0 | 0 | 0 | Y |
+| /system/backup | PASS | 0 | 0 | 0 | Y |
+| /system/collection | PASS | 0 | 0 | 0 | Y |
+| /system/components | PASS | 0 | 0 | 0 | Y |
+| /system/data-retention | PASS | 0 | 0 | 0 | Y |
+| /system/feature-flags | PASS | 0 | 0 | 0 | Y |
+| /system/host-monitor | PASS | 0 | 0 | 0 | Y |
+| /system/inspection | PASS | 0 | 0 | 0 | Y |
+| /system/install | PASS | 0 | 0 | 0 | Y |
+| /system/migration | PASS | 0 | 0 | 0 | Y |
+| /system/notification | PASS | 0 | 0 | 0 | Y |
+| /system/reports | PASS | 0 | 0 | 0 | Y |
+| /system/service-alert | PASS | 0 | 0 | 0 | Y |
+| /system/service-monitor | PASS | 0 | 0 | 0 | Y |
+| /system/settings | PASS | 0 | 0 | 0 | Y |
+| /system/task-report | PASS | 0 | 0 | 0 | Y |
+| /tasks | PASS | 0 | 0 | 0 | Y |
+| /threat-intel | PASS | 0 | 0 | 0 | Y |
+| /users | WARN | 0 | 0 | 1 | Y |
+| /vex | PASS | 0 | 0 | 0 | Y |
+| /virus/quarantine | PASS | 0 | 0 | 0 | Y |
+| /virus/scan | PASS | 0 | 0 | 0 | Y |
+| /vuln-bulletins | PASS | 0 | 0 | 0 | Y |
+| /vuln-data-sources | PASS | 0 | 0 | 0 | Y |
+| /vuln-db-manage | PASS | 0 | 0 | 0 | Y |
+| /vuln-list | PASS | 0 | 0 | 0 | Y |
+| /vuln-remediation | PASS | 0 | 0 | 0 | Y |
+| /vuln-remediation/policies | PASS | 0 | 0 | 0 | Y |
+| /vuln-remediation/tasks | PASS | 0 | 0 | 0 | Y |
+| /vuln-scan-schedules | PASS | 0 | 0 | 0 | Y |
+| /whitelist | PASS | 0 | 0 | 0 | Y |
+
+## 详细 (FAIL/WARN)
+
+### /edr/events (FAIL)
+- console:
+  - Warning: [ant-design-vue: Table] `index` parameter of `rowKey` function is deprecated. There is no guarantee that it will work as expected.
+  - Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+  - HTTP Error: AxiosError
+- 5xx:
+  - 500 /api/v1/edr/events?page=1&page_size=50&date_from=2026-06-07+10:33:10&date_to=2026-06-08+10:33:10
+### /policies (WARN)
+- console:
+  - Warning: [ant-design-vue: Modal] `visible` will be removed in next major version, please use `open` instead.
+### /policy-groups (WARN)
+- console:
+  - Warning: [ant-design-vue: Modal] `visible` will be removed in next major version, please use `open` instead.
+### /users (WARN)
+- console:
+  - Warning: [ant-design-vue: Modal] `visible` will be removed in next major version, please use `open` instead.
