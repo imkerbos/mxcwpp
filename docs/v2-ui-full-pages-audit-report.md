@@ -1,6 +1,6 @@
 # UI 全量巡检报告 (64 routes)
 
-- PASS: 63 / WARN: 1 / FAIL: 0
+- PASS: 64 / WARN: 0 / FAIL: 0
 
 | Route | Status | 5xx | 4xx | console err | key DOM |
 |---|---|---|---|---|---|
@@ -15,7 +15,7 @@
 | /business-lines | PASS | 0 | 0 | 0 | Y |
 | /dashboard | PASS | 0 | 0 | 0 | Y |
 | /detection/rules | PASS | 0 | 0 | 0 | Y |
-| /edr/events | WARN | 0 | 0 | 1 | Y |
+| /edr/events | PASS | 0 | 0 | 0 | Y |
 | /fim/baselines | PASS | 0 | 0 | 0 | Y |
 | /fim/dashboard | PASS | 0 | 0 | 0 | Y |
 | /fim/events | PASS | 0 | 0 | 0 | Y |
@@ -70,7 +70,3 @@
 | /whitelist | PASS | 0 | 0 | 0 | Y |
 
 ## 详细 (FAIL/WARN)
-
-### /edr/events (WARN)
-- console:
-  - Warning: [ant-design-vue: Table] `index` parameter of `rowKey` function is deprecated. There is no guarantee that it will work as expected.

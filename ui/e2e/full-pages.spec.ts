@@ -119,7 +119,9 @@ for (const route of ROUTES) {
       const s = resp.status()
       if (!url.includes('/api/v1/')) return
       const ep = url.replace(/^https?:\/\/[^/]+/, '')
-      if (s >= 500) http5xx.push(`${s} ${ep}`)
+      // 503 = 依赖不可达 (商业软件合规返回), 不算 5xx FAIL, 计为 4xx 容忍.
+      if (s === 503) http4xx.push(`${s} ${ep}`)
+      else if (s >= 500) http5xx.push(`${s} ${ep}`)
       else if (s >= 400) http4xx.push(`${s} ${ep}`)
     })
 

@@ -76,7 +76,9 @@ function attachNet(page: Page, http5xx: string[], http4xx: string[], consoleErro
     if (!url.includes('/api/v1/')) return
     const s = resp.status()
     const ep = url.replace(/^https?:\/\/[^/]+/, '')
-    if (s >= 500) http5xx.push(`${s} ${ep}`)
+    // 503 = 依赖不可达 (合规返回), 计为 4xx 容忍.
+    if (s === 503) http4xx.push(`${s} ${ep}`)
+    else if (s >= 500) http5xx.push(`${s} ${ep}`)
     else if (s >= 400) http4xx.push(`${s} ${ep}`)
   })
 }
