@@ -9,6 +9,7 @@ import (
 	"github.com/IBM/sarama"
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/common/jsonx"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 )
 
@@ -43,7 +44,7 @@ type PipelineEvent struct {
 	Offset    int64           `json:"-"`
 	ReceivedAt time.Time      `json:"received_at"`
 	Payload   json.RawMessage `json:"payload"`
-	// P0-5: Pipeline 顶层预解码 fields, 各 stage 共享避免 3+ 次 json.Unmarshal.
+	// P0-5: Pipeline 顶层预解码 fields, 各 stage 共享避免 3+ 次 jsonx.Unmarshal.
 	// 用 *fieldsCache 指针, 多个 ev 值拷贝共享同一 cache (struct copy 仅复制 pointer).
 	fieldsCache *fieldsCache `json:"-"`
 }
@@ -184,21 +185,21 @@ func (p *Pipeline) emitAlert(ctx context.Context, ev PipelineEvent, a Alert) err
 // 本 PR 暂用宽松 JSON 解码 (key 不匹配时仍能跑过)。
 func decodeEvent(msg *sarama.ConsumerMessage) (PipelineEvent, error) {
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(msg.Value, &raw); err != nil {
+	if err := jsonx.Unmarshal(msg.Value, &raw); err != nil {
 		return PipelineEvent{}, fmt.Errorf("unmarshal: %w", err)
 	}
 	ev := PipelineEvent{Payload: msg.Value}
 	if v, ok := raw["tenant_id"]; ok {
-		_ = json.Unmarshal(v, &ev.TenantID)
+		_ = jsonx.Unmarshal(v, &ev.TenantID)
 	}
 	if v, ok := raw["agent_id"]; ok {
-		_ = json.Unmarshal(v, &ev.AgentID)
+		_ = jsonx.Unmarshal(v, &ev.AgentID)
 	}
 	if v, ok := raw["host_id"]; ok {
-		_ = json.Unmarshal(v, &ev.HostID)
+		_ = jsonx.Unmarshal(v, &ev.HostID)
 	}
 	if v, ok := raw["data_type"]; ok {
-		_ = json.Unmarshal(v, &ev.DataType)
+		_ = jsonx.Unmarshal(v, &ev.DataType)
 	}
 	if v, ok := raw["body"]; ok {
 		ev.Payload = v
