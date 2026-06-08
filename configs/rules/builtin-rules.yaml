@@ -2129,10 +2129,10 @@ rules:
     data_types: ["3000", "3001"]
     description: "memfd_create + execve fileless 执行, 进程绕过磁盘落盘检测"
 
-  - name: "进程异常 - 高频 fork (fork bomb 嫌疑)"
-    expression: 'event_type == "process_exec" && recent_exe_count > 50'
+  - name: "进程异常 - 同 ppid 高频 fork (fork bomb 嫌疑)"
+    expression: 'event_type == "process_exec" && (recent_exe_count > 50 || (agg_count != "" && int(agg_count) > 50))'
     severity: high
     category: impact
     mitre_id: "T1499.004"
     data_types: ["3000"]
-    description: "同一 exe 10s 滑动窗口 fork 50+ 次, fork bomb / 资源耗尽攻击嫌疑"
+    description: "同一 exe 高频 fork. 看 server 端 5min 窗口 tracker (recent_exe_count > 50) 或 Agent 10s 聚合摘要 (agg_count > 50, 由 EDR aggregator 写入)"

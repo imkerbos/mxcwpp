@@ -56,7 +56,7 @@ trigger_and_check "authorized_keys 写" "$ROCKY_IP" "mkdir -p ~/.ssh; for i in 1
 trigger_and_check "ld.so.preload (sudo)" "$ROCKY_IP" "echo /tmp/evil.so > /etc/ld.so.preload && rm -f /etc/ld.so.preload" "preload|ld.so|持久化|防御" yes
 
 # 提权 4
-trigger_and_check "sudo 失败 5 次" "$ROCKY_IP" "for i in 1 2 3 4 5; do echo wrong | sudo -S whoami 2>&1 | head -1; sleep 1; done" "sudo|权限提升|提权"
+trigger_and_check "sudo bash -c ×5" "$ROCKY_IP" "for i in 1 2 3 4 5; do echo wrong | sudo -S bash -c whoami 2>&1 | head -1; sleep 1; done" "sudo|权限提升|提权"
 trigger_and_check "su root 失败" "$ROCKY_IP" "echo wrong | su root -c whoami 2>&1 | head -1 || true" "su|提权|权限提升|登录失败"
 trigger_and_check "SUID 创建 + exec (sudo)" "$ROCKY_IP" "cp /bin/bash /tmp/mxsec-suid-fin && chmod u+s /tmp/mxsec-suid-fin && /tmp/mxsec-suid-fin -c whoami; rm -f /tmp/mxsec-suid-fin" "suid|提权|权限提升|privilege" yes
 trigger_and_check "setcap (sudo)" "$ROCKY_IP" "cp /bin/bash /tmp/mxsec-cap-fin && /usr/sbin/setcap cap_net_admin+ep /tmp/mxsec-cap-fin; getcap /tmp/mxsec-cap-fin; rm -f /tmp/mxsec-cap-fin" "setcap|capability|权限提升|提权" yes
@@ -73,7 +73,7 @@ trigger_and_check "网络枚举" "$ROCKY_IP" "netstat -tunlp 2>/dev/null | head;
 trigger_and_check "kernel info" "$ROCKY_IP" "uname -a; cat /proc/version; cat /etc/os-release; lsmod | head" "kernel|信息|discover|枚举"
 
 # 进程异常 2
-trigger_and_check "fork bomb 100 进程" "$ROCKY_IP" "for i in \$(seq 1 100); do (sleep 0.5 &) ; done; wait" "fork|进程异常|impact|大量"
+trigger_and_check "fork bomb 100 echo (Agent 聚合)" "$ROCKY_IP" "for i in \$(seq 1 100); do /usr/bin/echo \$i > /dev/null; done; sleep 12" "fork|进程异常|impact|大量"
 trigger_and_check "kthread 伪装 (exec -a)" "$ROCKY_IP" "for i in 1 2 3; do (exec -a '[kworker/mxsecFIN\$i:0]' sleep 3) & done; wait" "kworker|伪装|防御绕过|kthread"
 
 # WebShell 3
