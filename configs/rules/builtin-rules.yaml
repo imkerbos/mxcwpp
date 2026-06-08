@@ -981,12 +981,12 @@ rules:
     description: "touch 修改文件时间戳 (timestomping 反取证)"
 
   - name: "防御绕过 - 进程伪装成 kthreadd 等内核线程"
-    expression: '(comm.contains("[kworker") || comm.contains("[kthread")) && !exe.startsWith("/")'
+    expression: '(comm.startsWith("[kworker") || comm.startsWith("[kthread") || cmdline.startsWith("[kworker") || cmdline.startsWith("[kthread") || cmdline.contains(" [kworker") || cmdline.contains(" [kthread"))'
     severity: high
     category: defense_evasion
     mitre_id: "T1036.005"
     data_types: ["3000"]
-    description: "进程 comm 伪装内核线程名 ([kworker]/[kthread]), 但 exe 非内核态"
+    description: "进程 comm 或 cmdline (argv[0]) 伪装内核线程名 ([kworker]/[kthread]). 真攻击常用 exec -a '[kworker...]' /tmp/evil 隐藏恶意进程"
 
   # ==================== TA0008 横向移动 (Lateral Movement) 补强 ====================
 
