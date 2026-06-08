@@ -20,6 +20,7 @@ import (
 	"github.com/imkerbos/mxsec-platform/internal/agent/connection"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr"
 	"github.com/imkerbos/mxsec-platform/internal/agent/edr/antidebug"
+	agentgctune "github.com/imkerbos/mxsec-platform/internal/agent/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/agent/heartbeat"
 	"github.com/imkerbos/mxsec-platform/internal/agent/id"
 	"github.com/imkerbos/mxsec-platform/internal/agent/logger"
@@ -169,6 +170,9 @@ func main() {
 		panic(err)
 	}
 	defer func() { _ = log.Sync() }()
+
+	// P3-B: Agent GC + 内存上限调优 (默认 200MB / GOGC=100)
+	agentgctune.Apply(log)
 
 	log.Info("Agent starting",
 		zap.String("version", cfg.GetVersion()),
