@@ -1051,57 +1051,69 @@ onMounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
+  height: 180px;
 }
 
 .distribution-card :deep(.ant-card-body) {
   flex: 1;
   display: flex;
   flex-direction: column;
+  padding: 12px 16px;
+}
+
+.distribution-card :deep(.ant-card-head) {
+  min-height: 36px;
+  padding: 0 16px;
+}
+.distribution-card :deep(.ant-card-head-title) {
+  font-size: 13px;
+  padding: 8px 0;
 }
 
 .status-distribution-container {
   display: flex;
-  align-items: flex-start;
-  gap: 24px;
+  align-items: center;
+  gap: 12px;
   flex: 1;
-  min-height: 280px;
+  min-height: unset;
 }
 
 .chart-container {
-  flex: 1;
+  flex: 0 0 130px;
   position: relative;
   cursor: pointer;
 }
 
 .status-chart {
-  width: 100%;
-  height: 200px;
+  width: 130px;
+  height: 120px;
 }
 
 .chart-hint {
   text-align: center;
-  margin-top: 8px;
+  margin-top: 4px;
   color: var(--mxsec-text-3);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .legend-container {
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
 }
 
 .status-legend {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
   transition: background 0.2s;
 }
 
@@ -1125,32 +1137,32 @@ onMounted(() => {
 .risk-distribution-container {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 8px;
   flex: 1;
-  align-content: start;
+  align-content: center;
 }
 
 .risk-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 6px 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--mxsec-fill-1);
-  min-height: 56px;
+  min-height: 44px;
   transition: all 0.3s ease;
 }
 
 .os-distribution-container {
-  height: 220px;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .os-chart {
   width: 100%;
-  height: 100%;
+  height: 130px;
 }
 
 .risk-card:hover {
@@ -1160,34 +1172,37 @@ onMounted(() => {
 }
 
 .risk-icon {
-  width: 44px;
-  height: 44px;
+  width: 30px;
+  height: 30px;
   border: 2px solid;
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 
 .risk-content {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 .risk-label {
   font-size: 12px;
   color: var(--mxsec-text-2);
-  margin-bottom: 4px;
-  line-height: 1.4;
-  word-break: break-word;
+  margin-bottom: 0;
+  line-height: 1.2;
 }
 
 .risk-value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--mxsec-text-1);
+  line-height: 1;
 }
 
 .action-bar {
