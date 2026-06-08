@@ -7,6 +7,7 @@
 import { onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { MSSPApi, type ChildTenant, type MSSPDashboardSummary } from '@/api/mssp'
+import StatCard from '@/components/StatCard.vue'
 
 const loading = ref(false)
 const summary = ref<MSSPDashboardSummary | null>(null)
@@ -86,26 +87,10 @@ onMounted(() => {
     <a-page-header title="MSSP 控制台" sub-title="多租户托管 / NOC 视图" />
 
     <a-row :gutter="16" class="kpi-row">
-      <a-col :span="6">
-        <a-card>
-          <a-statistic title="管理的子租户" :value="summary?.total_child_tenants ?? '-'" />
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card>
-          <a-statistic title="活跃" :value="summary?.active_child_tenants ?? '-'" value-style="color:#52c41a" />
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card>
-          <a-statistic title="托管主机数" :value="summary?.total_hosts_managed ?? '-'" />
-        </a-card>
-      </a-col>
-      <a-col :span="6">
-        <a-card>
-          <a-statistic title="7d 严重告警" :value="summary?.critical_alerts_7d ?? '-'" value-style="color:#ff4d4f" />
-        </a-card>
-      </a-col>
+      <a-col :span="6"><StatCard title="管理的子租户" :value="(summary?.total_child_tenants ?? 0) as any" color="#3B82F6" /></a-col>
+      <a-col :span="6"><StatCard title="活跃" :value="(summary?.active_child_tenants ?? 0) as any" color="#22C55E" /></a-col>
+      <a-col :span="6"><StatCard title="托管主机数" :value="(summary?.total_hosts_managed ?? 0) as any" color="#06B6D4" /></a-col>
+      <a-col :span="6"><StatCard title="7d 严重告警" :value="(summary?.critical_alerts_7d ?? 0) as any" color="#EF4444" /></a-col>
     </a-row>
 
     <a-card title="子租户" class="tenants-card">
