@@ -981,7 +981,7 @@ rules:
     description: "touch 修改文件时间戳 (timestomping 反取证)"
 
   - name: "防御绕过 - 进程伪装成 kthreadd 等内核线程"
-    expression: 'comm.contains("[kworker") || comm.contains("[kthread") && !exe.startsWith("/") '
+    expression: '(comm.contains("[kworker") || comm.contains("[kthread")) && !exe.startsWith("/")'
     severity: high
     category: defense_evasion
     mitre_id: "T1036.005"
@@ -2102,3 +2102,37 @@ rules:
     mitre_id: "T1565"
     data_types: ["3000"]
     description: "搜索数字货币钱包文件"
+
+  # ==================== L1 v2 FAIL 补漏 (2026-06-08) ====================
+
+  - name: "持久化 - .bashrc/.profile 文件写入"
+    expression: 'event_type == "file_open" && (file_path.endsWith(".bashrc") || file_path.endsWith(".profile") || file_path.endsWith(".bash_profile") || file_path.endsWith(".zshrc"))'
+    severity: medium
+    category: persistence
+    mitre_id: "T1546.004"
+    data_types: ["3001", "6001"]
+    description: "检测 ~/.bashrc / .profile / .bash_profile / .zshrc 文件写入, 常见用户态持久化"
+
+  - name: "权限提升 - setcap 可疑能力赋予"
+    expression: '(exe.endsWith("/setcap") || cmdline.contains("setcap ")) && (cmdline.contains("cap_net_admin") || cmdline.contains("cap_sys_admin") || cmdline.contains("cap_dac_read_search") || cmdline.contains("cap_setuid") || cmdline.contains("cap_setgid") || cmdline.contains("cap_sys_ptrace") || cmdline.contains("cap_chown"))'
+    severity: high
+    category: privilege_escalation
+    mitre_id: "T1548.001"
+    data_types: ["3000"]
+    description: "setcap 给二进制赋予高危 Linux capability (cap_net_admin / cap_sys_admin 等), 可绕过 SUID 检测"
+
+  - name: "执行 - memfd_create 文件落地"
+    expression: 'event_type == "process_exec" && (exe.startsWith("/proc/self/fd/") || exe.contains("/memfd:") || file_path.startsWith("/memfd:") || cmdline.contains("memfd_create"))'
+    severity: critical
+    category: defense_evasion
+    mitre_id: "T1620"
+    data_types: ["3000", "3001"]
+    description: "memfd_create + execve fileless 执行, 进程绕过磁盘落盘检测"
+
+  - name: "进程异常 - 高频 fork (fork bomb 嫌疑)"
+    expression: 'event_type == "process_exec" && recent_exe_count > 50'
+    severity: high
+    category: impact
+    mitre_id: "T1499.004"
+    data_types: ["3000"]
+    description: "同一 exe 10s 滑动窗口 fork 50+ 次, fork bomb / 资源耗尽攻击嫌疑"
