@@ -256,6 +256,10 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupBDEBaselineAPI(router, db, logger)
 	setupStorylineAPI(router, db, logger, chConn)
 	setupMemoryThreatAPI(router, db, logger)
+	setupVEXAPI(router, db, logger)
+	setupHoneypotAPI(router, db, logger)
+	setupRootkitAPI(router, db, logger)
+	setupADAuditAPI(router, db, logger)
 	setupHuntingAPI(router, db, logger, chConn)
 	setupHostIsolationAPI(router, db, logger, acDispatcher)
 	setupAnomalyAPI(router, db, logger)
@@ -361,6 +365,40 @@ func setupMemoryThreatAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logg
 	router.GET("/memory-threats", handler.ListMemoryThreats)
 	router.GET("/memory-threats/stats", handler.GetMemoryThreatStats)
 	router.PUT("/memory-threats/:id/resolve", handler.ResolveMemoryThreat)
+}
+
+// setupVEXAPI VEX 漏洞利用性声明 API (B7).
+func setupVEXAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	h := api.NewVEXHandler(db, logger)
+	router.GET("/vex/:product_id", h.GetDocument)
+	router.GET("/vex/:product_id/statements", h.ListStatements)
+	router.GET("/vex/:product_id/cyclonedx", h.ExportCycloneDX)
+	router.GET("/vex/:product_id/csaf", h.ExportCSAF)
+}
+
+// setupHoneypotAPI 蜜罐传感器 API (C1).
+func setupHoneypotAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	h := api.NewHoneypotHandler(db, logger)
+	router.GET("/v2/honeypot/sensors", h.ListSensors)
+	router.POST("/v2/honeypot/sensors", h.CreateSensor)
+	router.POST("/v2/honeypot/sensors/:id/stop", h.StopSensor)
+	router.GET("/v2/honeypot/events", h.ListEvents)
+}
+
+// setupRootkitAPI Rootkit / DKOM 检测 API (C2).
+func setupRootkitAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	h := api.NewRootkitHandler(db, logger)
+	router.GET("/rootkit/findings", h.ListFindings)
+	router.POST("/rootkit/scan", h.TriggerScan)
+	router.POST("/rootkit/findings/:id/resolve", h.Resolve)
+}
+
+// setupADAuditAPI AD / LDAP 域控审计 API (EDR-4).
+func setupADAuditAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
+	h := api.NewADAuditHandler(db, logger)
+	router.GET("/ad-audit/events", h.ListEvents)
+	router.GET("/ad-audit/alerts", h.ListAlerts)
+	router.GET("/ad-audit/stats", h.Stats)
 }
 
 // setupHostsAPI 设置主机 API 路由
