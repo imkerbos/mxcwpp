@@ -94,14 +94,24 @@
       <!-- 操作系统分布 -->
       <a-col :span="8" class="distribution-col">
         <a-card title="操作系统分布" :bordered="false" class="distribution-card">
-          <div class="os-distribution-container">
-            <v-chart
-              v-if="osDistributionData.length > 0"
-              class="os-chart"
-              :option="osChartOption"
-              autoresize
-            />
-            <a-empty v-else description="暂无主机" />
+          <div class="status-distribution-container">
+            <div v-if="osDistributionData.length > 0" class="chart-container">
+              <v-chart class="status-chart" :option="osChartOption" autoresize />
+            </div>
+            <div class="legend-container">
+              <div class="status-legend">
+                <div
+                  v-for="(item, i) in osDistributionData"
+                  :key="item.name"
+                  class="legend-item"
+                >
+                  <span class="legend-color" :style="{ background: OS_COLORS[i % OS_COLORS.length] }"></span>
+                  <span>{{ item.name }}</span>
+                  <span class="legend-value">{{ item.value }}</span>
+                </div>
+                <a-empty v-if="osDistributionData.length === 0" description="暂无主机" :image-style="{ height: '40px' }" />
+              </div>
+            </div>
           </div>
         </a-card>
       </a-col>
@@ -514,6 +524,8 @@ const statusChartOption = computed(() => {
   return {
     tooltip: {
       trigger: 'item',
+      confine: true,
+      appendToBody: true,
       formatter: (params: any) => {
         if (!hasData) {
           return `${params.name}: 0`
@@ -568,16 +580,25 @@ const osDistributionData = computed(() => {
   }))
 })
 const osChartOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-  legend: { orient: 'vertical', right: 8, top: 'center', itemWidth: 10, itemHeight: 10 },
+  tooltip: {
+    trigger: 'item',
+    formatter: '{b}: {c} ({d}%)',
+    confine: true,
+    appendToBody: true,
+  },
   series: [{
     name: '操作系统',
     type: 'pie',
-    radius: ['45%', '70%'],
-    center: ['35%', '50%'],
+    radius: ['40%', '70%'],
+    center: ['50%', '50%'],
     avoidLabelOverlap: false,
     itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
-    label: { show: true, position: 'inside', formatter: '{c}', fontSize: 11 },
+    label: { show: false },
+    labelLine: { show: false },
+    emphasis: {
+      label: { show: false },
+      itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,0.18)' },
+    },
     data: osDistributionData.value,
   }],
 }))
