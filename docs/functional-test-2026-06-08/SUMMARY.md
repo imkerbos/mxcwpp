@@ -19,7 +19,7 @@
 | L4 性能 SLO | 8 关键 API p99 + 50 并发 + 心跳 + 事件归档 | 全 ms 级 | 0 | 0 | **100%** |
 | L5 健壮性 | Agent kill 自起 / JWT 过期 / JWT 错签 / AC health / AC 重启 Agent 重连 | 5 | 0 | 0 | **100%** |
 
-**总: PASS=78 / FAIL=9 / PARTIAL=0** (v2 重跑: L1 FIM 100%, 采集 100%, EDR 70%)
+**总: PASS=85 / FAIL=2 / PARTIAL=0** (L1 EDR 93%, 其余 6 层全 100%)
 
 ## L1 EDR 检测 PASS 详情 (21 项)
 
