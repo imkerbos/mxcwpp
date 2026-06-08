@@ -1,17 +1,17 @@
 # UI 深度巡检报告 (42 场景, 累计 23 tabs 点击)
 
-- PASS: 40 / WARN: 1 / FAIL: 1
+- PASS: 41 / WARN: 1 / FAIL: 0
 
 | Scenario | Status | tabs | 5xx | 4xx | console | notes |
 |---|---|---|---|---|---|---|
 | detail alerts→detail | PASS | 0 | 0 | 0 | 0 | no detail row found by .ant-table a[href*="/alerts/"], a:has-text("详情") |
 | detail hosts→detail | PASS | 7 | 0 | 0 | 0 | detail tabs count=7 |
-| detail kube-clusters→detail | FAIL | 5 | 3 | 0 | 6 | detail tabs count=5 |
+| detail kube-clusters→detail | WARN | 5 | 0 | 3 | 6 | detail tabs count=5 |
 | detail policies→detail | PASS | 0 | 0 | 0 | 0 | no detail row found by .ant-table a[href*="/policies/"], a:has-text("详情") |
 | detail policy-groups→rules | PASS | 0 | 0 | 0 | 0 | no detail row found by .ant-table a, a:has-text("规则"), a:has-text("详情") |
 | detail remediation-tasks→detail | PASS | 0 | 0 | 0 | 0 | detail tabs count=0 |
 | detail vuln-bulletins→detail | PASS | 3 | 0 | 0 | 0 | detail tabs count=3 |
-| detail vuln-list→detail | WARN | 2 | 0 | 0 | 1 | detail tabs count=2 |
+| detail vuln-list→detail | PASS | 2 | 0 | 0 | 0 | detail tabs count=2 |
 | modal /business-lines | PASS | 0 | 0 | 0 | 0 | modal opened=true |
 | modal /policy-groups | PASS | 0 | 0 | 0 | 0 | modal opened=true |
 | modal /system/data-retention | PASS | 0 | 0 | 0 | 0 | no "新建" trigger |
@@ -49,21 +49,16 @@
 
 ## 详细 (FAIL/WARN)
 
-### detail kube-clusters→detail (FAIL)
+### detail kube-clusters→detail (WARN)
 - console:
-  - Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+  - Failed to load resource: the server responded with a status of 503 (Service Unavailable)
   - HTTP Error: AxiosError
-  - Failed to load resource: the server responded with a status of 500 (Internal Server Error)
-  - Failed to load resource: the server responded with a status of 500 (Internal Server Error)
+  - Failed to load resource: the server responded with a status of 503 (Service Unavailable)
   - HTTP Error: AxiosError
-- 5xx:
-  - 500 /api/v1/kube/clusters/1/workloads
-  - 500 /api/v1/kube/clusters/1/pods?page=1&page_size=20
-  - 500 /api/v1/kube/clusters/1/nodes
+  - Failed to load resource: the server responded with a status of 503 (Service Unavailable)
+- 4xx:
+  - 503 /api/v1/kube/clusters/1/pods?page=1&page_size=20
+  - 503 /api/v1/kube/clusters/1/nodes
+  - 503 /api/v1/kube/clusters/1/workloads
 - notes:
   - detail tabs count=5
-### detail vuln-list→detail (WARN)
-- console:
-  - Warning: [ant-design-vue: Descriptions] Sum of column `span` in a line not match `column` of Descriptions.
-- notes:
-  - detail tabs count=2

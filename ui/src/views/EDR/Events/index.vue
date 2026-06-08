@@ -136,7 +136,7 @@
       :data-source="events"
       :loading="loading"
       :pagination="pagination"
-      :row-key="(_: EDREvent, index: number) => index"
+      :row-key="(record: EDREvent) => `${record.host_id}-${record.timestamp}-${record.pid ?? ''}`"
       size="small"
       @change="handleTableChange"
     >
