@@ -181,3 +181,48 @@ make fmt && make lint && make test
 
 剩余 35% 集中在 **实际工程实现** + **集成验证** + **M2 商业级深度**。
 预计再 1-2 月持续投入可达生产就绪.
+
+---
+
+## 2026-06-08 增量 (T7 + UI E2E 巡检)
+
+### T7 后端 API 补全 (PR #246)
+
+T3 阶段 UI 已写但后端 API 缺口的 4 个模块补齐:
+
+| 模块 | 路由 | model | 路由 |
+|---|---|---|---|
+| Honeypot (C1) | `api/honeypot.go` 复用 HoneypotDeploymentRecord | 已有 | `/v2/honeypot/sensors\|events` |
+| Rootkit (C2) | `api/rootkit.go` + `model.RootkitFinding` | **新增** rootkit_findings 表 | `/rootkit/findings\|scan\|resolve` |
+| AD/LDAP 审计 (EDR-4) | `api/ad_audit.go` + `model.ADAuditEvent\|ADAuditAlert` | **新增** ad_audit_events + ad_audit_alerts 表 | `/ad-audit/events\|alerts\|stats` |
+| VEX (B7) | `api/vex.go` 复用 `biz/vex.Generator` | N/A | `/vex/:product\|statements\|cyclonedx\|csaf` |
+
+### UI 全量 E2E 巡检 (PR #246)
+
+`ui/e2e/` 加 2 套 Playwright spec:
+
+- **full-pages.spec.ts**: 64 路由静态访问 + DOM 检查 → **64/64 PASS, 0 WARN, 0 FAIL**
+- **deep-pages.spec.ts**: 42 场景 (22 tabs + 8 list→detail + 8 modal + 4 RASP), 累计 23 tabs 点击 → **40/41 PASS, 1 WARN (kube 503 axios console - 合规)**
+
+### 顺手修的 4 个 bug (PR #246)
+
+- `/api/v1/edr/events` ClickHouse code 584 (force_optimize_projection 但表无 projection) → 透明降级到无 projection ctx 重试, 不返 500
+- `/api/v1/kube/clusters/:id/{pods,nodes,workloads}` K8s 不可达 → 503 + 空 items, 不再 500
+- `VulnList/Detail.vue` a-descriptions OSV ID v-if 去掉 (span 奇数 Vue warning)
+- `EDR/Events/index.vue` row-key 改用 `host_id-timestamp-pid` 复合键 (antd `index` 参数弃用)
+- 7 文件 Modal/Drawer `v-model:visible` → `v-model:open` (antd v4 → v5)
+- 加 `@playwright/test@1.60.0` devDep
+
+### dev VM 联调 (PR #245)
+
+rocky9 + centos7 7 场景 e2e:
+- S0 Agent 进程 + 内核 (rocky9 5.14 cgroup_skb / centos7 3.10 AF_PACKET) PASS
+- S1 上线 + 心跳 PASS
+- S2 反向 shell (cel-392 + cel-154 命中) PASS
+- S3 FIM PARTIAL (3673 历史事件证明工作, /tmp 不在默认监控)
+- S4 NPatch log4j SKIP (centos7 无 web 服务)
+- S5 EICAR (YARA + ClamAV 双命中) PASS
+- S6 基线扫描 (LINUX_ACCOUNT_SECURITY 21 规则) PASS
+- S7 RASP SKIP (rocky9 无 Java demo)
+
+报告: `docs/v2-t6-dev-vm-e2e-report.md`, `docs/v2-ui-full-pages-audit-report.md`, `docs/v2-ui-deep-pages-audit-report.md`
