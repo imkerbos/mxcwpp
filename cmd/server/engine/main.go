@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/imkerbos/mxsec-platform/internal/server/common/config"
+	"github.com/imkerbos/mxsec-platform/internal/server/common/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/observability"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine"
@@ -48,6 +49,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = logger.Sync() }()
+
+	// P3-B: GC + memory limit 调优
+	gctune.Apply("engine", gctune.ProfileServer, logger)
 
 	logger.Info("Engine starting",
 		zap.String("config", *configPath),
