@@ -511,18 +511,20 @@ func ensureManagedPluginConfig(db *gorm.DB, logger *zap.Logger, pluginsCfg *conf
 
 	if !found {
 		if hasExisting {
+			// 包不存在不再禁用: Agent 端可能已有本地 cache (历史下载),
+			// 仍发 config 走 cache 启动. download_urls 保留指向 manager,
+			// 让新装 Agent 能感知缺包(下载 404 后管理员补传).
+			downloadURL := buildManagedPluginDownloadURL(pluginsCfg, plugin.Name)
 			updates := map[string]interface{}{
-				"enabled":       false,
-				"download_urls": model.StringArray{},
-				"sha256":        "",
+				"download_urls": model.StringArray{downloadURL},
 				"runtime_types": plugin.RuntimeTypes,
 				"description":   plugin.Description,
 				"detail":        plugin.Detail,
 			}
 			if err := db.Model(&existing).Updates(updates).Error; err != nil {
-				return fmt.Errorf("禁用未上传插件配置 %s 失败: %w", plugin.Name, err)
+				return fmt.Errorf("更新插件配置 %s 失败: %w", plugin.Name, err)
 			}
-			logger.Info("插件尚未上传，已禁用历史插件配置",
+			logger.Info("插件包未上传, 保留 config 让 Agent 端走本地 cache",
 				zap.String("name", plugin.Name),
 				zap.String("current_version", existing.Version),
 			)

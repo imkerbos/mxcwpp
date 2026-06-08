@@ -2057,10 +2057,11 @@ func (s *Service) resolvePluginDelivery(pc model.PluginConfig) ([]string, string
 	}
 
 	if s.pluginConfigUsesManagerDownload(pc, downloadURLs) && !s.pluginPackageExists(pc) {
-		s.logger.Warn("插件组件包不存在，跳过下发插件配置",
+		// 服务端无组件包,仍下发 config: Agent 端若有本地 cache + 可执行可继续使用.
+		// 仅 warn 提醒管理员补上传, 避免新装 Agent 拉不到.
+		s.logger.Warn("插件组件包不存在,仍下发(依赖 Agent 本地 cache)",
 			zap.String("plugin", pc.Name),
 			zap.String("version", pc.Version))
-		return nil, ""
 	}
 
 	return downloadURLs, pc.SHA256
