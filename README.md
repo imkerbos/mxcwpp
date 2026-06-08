@@ -52,9 +52,17 @@ To build a more comprehensive security operations system, we recommend extending
 | Component management and plugin distribution | :white_check_mark: | :white_check_mark: |
 | System monitoring (Prometheus) | :white_check_mark: | :white_check_mark: |
 | Ops inspection and report export | :white_check_mark: | :white_check_mark: |
+| Memory threat detection (memfd_exec / process hollowing / shellcode / LSASS dump) | :white_check_mark: | :white_check_mark: |
+| AD / LDAP domain controller audit (7 rules: DCSync / Kerberoasting / brute force / etc.) | :white_check_mark: | :white_check_mark: |
+| DKOM rootkit detection (hidden PID / kernel module / port / LD_PRELOAD) | :white_check_mark: | :white_check_mark: |
+| Honeypot sensors (SSH / HTTP decoys + file decoy policy) | :white_check_mark: | :white_check_mark: |
+| VEX vulnerability statement export (CycloneDX 1.5 / CSAF 2.0) | :white_check_mark: | :white_check_mark: |
+| YARA-X malware signature library (73 rules / 50 families) | :white_check_mark: | :white_check_mark: |
+| Threat hunting (SPL-like DSL → SQL transpiler) | :white_check_mark: | :white_check_mark: |
+| Attack storyline (ATT&CK kill-chain timeline) | :white_check_mark: | :white_check_mark: |
+| Behavior baseline detection (ML anomaly scoring) | :white_check_mark: | :white_check_mark: |
 | Windows support | :x: | :construction: |
-| Honeypot | :x: | :construction: |
-| Active defense | :x: | :construction: |
+| Active defense (NPatch eBPF hot-patching) | `built-in samples` | :white_check_mark: |
 | Cloud antivirus | :x: | :construction: |
 
 > :white_check_mark: Supported &nbsp; `built-in samples` includes sample rules &nbsp; :x: Not supported &nbsp; :construction: Planned
@@ -72,6 +80,12 @@ To build a more comprehensive security operations system, we recommend extending
 | Container Security | K8s cluster management, container CIS baseline (80 rules), Audit Webhook integration |
 | Alert Center | Alert aggregation, whitelisting, auto-response (kill/quarantine), tracing timeline |
 | Threat Intelligence | MISP IOC import + Redis cache + CEL real-time matching |
+| Memory Forensics | memfd_exec / process hollowing / shellcode injection / LSASS dump detection (EDR-3) |
+| AD/LDAP Audit | 7 detection rules: DCSync, Kerberoasting, brute force, off-hour RDP, privilege assignment, etc. (EDR-4) |
+| Honeypot Sensors | SSH/HTTP decoys + file decoys with whitelist for legitimate backup tools (C1) |
+| Rootkit Detection | DKOM hidden PID / kernel module / port / LD_PRELOAD / /proc inconsistency (C2) |
+| Threat Hunting | SPL-like DSL → SQL transpiler over ClickHouse event archive |
+| VEX Export | CycloneDX VEX 1.5 + CSAF 2.0 for vendor vulnerability statements (B7) |
 
 ## Screenshots
 
