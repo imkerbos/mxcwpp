@@ -12,8 +12,13 @@ import (
 
 // CelRuleStage 把 PipelineEvent 喂给 celengine.Engine,
 // 返回命中的 DetectionRule 对应的 Alert(s)。
+//
+// v2 拆分: Engine 服务独立 deploy 时, alertGen 直接 upsert alerts 表 (取代旧
+// 架构 Consumer 内嵌 cel 写 DB 的路径). Kafka mxsec.engine.alert 仍推送, 供后续
+// ML / SOAR / 通知 异步消费.
 type CelRuleStage struct {
 	celEngine *celengine.Engine
+	alertGen  *celengine.AlertGenerator // 可选: 非 nil 时 stage 内直接落 DB
 	logger    *zap.Logger
 }
 
@@ -23,6 +28,13 @@ func NewCelRuleStage(cel *celengine.Engine, logger *zap.Logger) *CelRuleStage {
 		logger = zap.NewNop()
 	}
 	return &CelRuleStage{celEngine: cel, logger: logger}
+}
+
+// WithAlertGenerator 注入 AlertGenerator, 让 stage 在命中时直接 upsert alerts 表.
+// 不调时 stage 仅返 Alert slice (pipeline 推 Kafka), 不写 DB.
+func (s *CelRuleStage) WithAlertGenerator(g *celengine.AlertGenerator) *CelRuleStage {
+	s.alertGen = g
+	return s
 }
 
 // Name 满足 Stage interface。
@@ -55,6 +67,11 @@ func (s *CelRuleStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, er
 	hits := s.celEngine.Evaluate(ev.DataType, fields)
 	if len(hits) == 0 {
 		return nil, nil
+	}
+
+	// 直接 upsert alerts 表 (拆分架构核心: engine 接管检测落 DB).
+	if s.alertGen != nil && ev.HostID != "" {
+		s.alertGen.Generate(ev.HostID, hits, fields)
 	}
 
 	alerts := make([]Alert, 0, len(hits))
