@@ -24,6 +24,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync"
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/leader"
 	"github.com/imkerbos/mxsec-platform/internal/server/vulnsync/publisher"
@@ -49,6 +50,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = logger.Sync() }()
+
+	// P3-B: GC 调优
+	gctune.Apply("vulnsync", gctune.ProfileServer, logger)
 
 	logger.Info("VulnSync starting",
 		zap.String("config", *configPath),
