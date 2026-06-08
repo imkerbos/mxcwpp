@@ -9,7 +9,9 @@
 | Layer | 范围 | PASS | FAIL | SKIP/PARTIAL | 通过率 |
 |---|---|---|---|---|---|
 | L1 EDR 检测 v1 | 34 攻击样本 | 21 | 13 | 0 | 62% |
-| L1 EDR 检测 v2 | 30 样本 (sudo cron/systemd/SUID/setcap, bashrc ×10, fork bomb 100, SSH 暴破 ×8, DNS 30, memfd_create ctypes) | 21 | 9 | 0 | **70%** |
+| L1 EDR 检测 v2 (强化样本) | 30 样本 | 21 | 9 | 0 | 70% |
+| L1 EDR 检测 v3 (PR #258 + 4 CEL 规则) | 9 之前 FAIL 重测 | 6 | 3 | 0 | 67% |
+| **L1 EDR 检测 final (PR #260 + comm 字段)** | 30 样本一次跑全 | **28** | **2** | 0 | **93%** (sudo NOPASSWD dev 限制 + fork bomb 滑动窗口) |
 | L1 病毒查杀 | 4 样本 ClamAV+YARA 双引擎 | 4 | 0 | 0 | **100%** |
 | L1 FIM (v2 4 维度) | watch_paths 14 配置 / 历史事件 3673 / 任务 API / 按 host 查询 | 4 | 0 | 0 | **100%** |
 | L1 基线 | 6 LINUX_* policy | 6 | 0 | 0 | **100%** |
