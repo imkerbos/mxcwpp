@@ -152,6 +152,12 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("advisory_packages 唯一索引创建失败", zap.Error(err))
 	}
 
+	// 修 host_isolations.host_id 旧版 UNIQUE 索引 → 普通索引.
+	// 旧表 idx_host_isolations_host_id UNIQUE 阻止同主机第二次 isolate (Error 1062), 转事件流模型.
+	if err := dropHostIsolationsHostIDUnique(db, logger); err != nil {
+		logger.Warn("host_isolations.host_id UNIQUE 索引修复失败", zap.Error(err))
+	}
+
 	// 从 vulnerabilities.fixed_version 回填 advisory_packages（仅首次空表时跑）
 	if err := backfillAdvisoryPackages(db, logger); err != nil {
 		logger.Warn("advisory_packages 回填失败", zap.Error(err))
