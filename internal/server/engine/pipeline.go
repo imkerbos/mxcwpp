@@ -8,7 +8,9 @@ import (
 
 	"github.com/IBM/sarama"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/imkerbos/mxsec-platform/api/proto/bridge"
 	"github.com/imkerbos/mxsec-platform/internal/common/jsonx"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/mode"
 )
@@ -118,8 +120,10 @@ func (p *Pipeline) Handler() MessageHandler {
 		ev.Partition = msg.Partition
 		ev.Offset = msg.Offset
 		ev.ReceivedAt = time.Now().UTC()
-		// P0-5: 顶层 init shared fields cache, 各 stage Process(ev copy) 共享同一 *fieldsCache.
-		ev.fieldsCache = &fieldsCache{}
+		// P0-5: decodeEvent 若已预填 fieldsCache (protobuf Body 解码) 则保留, 否则 lazy 解.
+		if ev.fieldsCache == nil {
+			ev.fieldsCache = &fieldsCache{}
+		}
 
 		// 逐层处理
 		for _, st := range p.stages {
@@ -179,30 +183,49 @@ func (p *Pipeline) emitAlert(ctx context.Context, ev PipelineEvent, a Alert) err
 	return p.producer.Publish(ctx, env)
 }
 
-// decodeEvent 解码 Kafka 消息为 PipelineEvent。
+// decodeEvent 解码 Kafka 消息为 PipelineEvent.
 //
-// 消息格式假设是 MQMessage (internal/server/common/kafka/message.go);
-// 本 PR 暂用宽松 JSON 解码 (key 不匹配时仍能跑过)。
+// 实际消息格式: Kafka msg.Value = JSON(kafka.MQMessage), MQMessage.Body = protobuf(bridge.Record).
+// 流程: JSON 解 MQMessage → 取 AgentID/DataType + 顶层字段 → protobuf 解 Body 拿 fields map.
+//
+// AgentID 在 mxsec 模型里 = HostID (单租户). HostID 字段同时填充供 ev.HostID 用.
 func decodeEvent(msg *sarama.ConsumerMessage) (PipelineEvent, error) {
-	var raw map[string]json.RawMessage
-	if err := jsonx.Unmarshal(msg.Value, &raw); err != nil {
-		return PipelineEvent{}, fmt.Errorf("unmarshal: %w", err)
+	// 1. 顶层 MQMessage (JSON)
+	var mq struct {
+		DataType int32  `json:"data_type"`
+		AgentID  string `json:"agent_id"`
+		Hostname string `json:"hostname"`
+		Body     []byte `json:"body"`
+		TraceID  string `json:"trace_id"`
 	}
-	ev := PipelineEvent{Payload: msg.Value}
-	if v, ok := raw["tenant_id"]; ok {
-		_ = jsonx.Unmarshal(v, &ev.TenantID)
+	if err := jsonx.Unmarshal(msg.Value, &mq); err != nil {
+		return PipelineEvent{}, fmt.Errorf("unmarshal MQMessage: %w", err)
 	}
-	if v, ok := raw["agent_id"]; ok {
-		_ = jsonx.Unmarshal(v, &ev.AgentID)
+
+	ev := PipelineEvent{
+		AgentID:  mq.AgentID,
+		HostID:   mq.AgentID, // mxsec: AgentID = HostID
+		DataType: mq.DataType,
+		Payload:  msg.Value,
 	}
-	if v, ok := raw["host_id"]; ok {
-		_ = jsonx.Unmarshal(v, &ev.HostID)
-	}
-	if v, ok := raw["data_type"]; ok {
-		_ = jsonx.Unmarshal(v, &ev.DataType)
-	}
-	if v, ok := raw["body"]; ok {
-		ev.Payload = v
+
+	// 2. Body (protobuf bridge.Record) → fields map, 直接预填 cache
+	if len(mq.Body) > 0 {
+		rec := &bridge.Record{}
+		if perr := proto.Unmarshal(mq.Body, rec); perr == nil && rec.Data != nil {
+			fields := rec.Data.Fields
+			if fields == nil {
+				fields = make(map[string]string)
+			}
+			// 顶层 MQMessage 字段回填到 fields (CEL 规则需要)
+			if fields["agent_id"] == "" {
+				fields["agent_id"] = mq.AgentID
+			}
+			if fields["hostname"] == "" {
+				fields["hostname"] = mq.Hostname
+			}
+			ev.fieldsCache = &fieldsCache{fields: fields, done: true}
+		}
 	}
 	return ev, nil
 }
