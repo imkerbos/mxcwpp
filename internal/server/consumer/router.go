@@ -4,7 +4,6 @@ package consumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/common/jsonx"
 	"github.com/imkerbos/mxsec-platform/internal/server/common/kafka"
 	consumermetrics "github.com/imkerbos/mxsec-platform/internal/server/consumer/metrics"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/writer"
@@ -226,7 +226,7 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	// P2-6: 池化 MQMessage 减 GC 压力
 	msg := kafka.GetMQMessage()
 	defer kafka.PutMQMessage(msg)
-	if err := json.Unmarshal(raw.Value, msg); err != nil {
+	if err := jsonx.Unmarshal(raw.Value, msg); err != nil {
 		r.logger.Error("反序列化 MQMessage 失败",
 			zap.String("topic", raw.Topic),
 			zap.Error(err),
