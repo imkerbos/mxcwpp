@@ -8,17 +8,18 @@
 
 | Layer | 范围 | PASS | FAIL | SKIP/PARTIAL | 通过率 |
 |---|---|---|---|---|---|
-| L1 EDR 检测 | 34 攻击样本 (反弹 shell ×5 / 持久化 ×6 / 提权 ×4 / 横向 ×4 / 信息收集 ×3 / 内存 ×3 / Rootkit ×2 / WebShell ×3 / DNS+ICMP ×2 / SSH 暴破 ×1 / centos7 复测 ×1) | 21 | 13 | 0 | **62%** |
-| L1 病毒查杀 | 4 样本 (EICAR / PHP webshell / JSP / WSO 大马) ClamAV+YARA 双引擎 | 4 | 0 | 0 | **100%** |
-| L1 FIM | /tmp 文件 CRUD + ~/.profile | 0 | 0 | 1 (Δ=0, 但历史 3673 事件证明) | PARTIAL |
-| L1 基线 | 6 LINUX_* policy (账户/文件权限/审计日志/cron/文件完整/横幅) | 6 | 0 | 0 | **100%** |
-| L1 采集器 | 11 类 (主机/进程/端口/用户/软件/容器/cron/服务/挂载/内核/网卡) | 10 | 1 | 0 | **91%** |
+| L1 EDR 检测 v1 | 34 攻击样本 | 21 | 13 | 0 | 62% |
+| L1 EDR 检测 v2 (强化) | 30 样本 (sudo cron/systemd/SUID/setcap, bashrc ×10, fork bomb 100, SSH 暴破 ×8, DNS 30, memfd_create ctypes) | 21 | 9 | 0 | **70%** |
+| L1 病毒查杀 | 4 样本 ClamAV+YARA 双引擎 | 4 | 0 | 0 | **100%** |
+| L1 FIM (v2 4 维度) | watch_paths 14 配置 / 历史事件 3673 / 任务 API / 按 host 查询 | 4 | 0 | 0 | **100%** |
+| L1 基线 | 6 LINUX_* policy | 6 | 0 | 0 | **100%** |
+| L1 采集器 (v2) | 11 类 (rocky9 装 podman + nginx 容器后, 11/11) | 11 | 0 | 0 | **100%** |
 | L2 响应 | 病毒隔离 / 主机隔离 / alert resolve / Agent 重启 / NPatch | 5 | 0 | 0 | **100%** |
 | L3 取证 | EDR 字段 / process tree / 网络流 / Storyline / 内存威胁 / actual JSON | 6 | 0 | 0 | **100%** |
 | L4 性能 SLO | 8 关键 API p99 + 50 并发 + 心跳 + 事件归档 | 全 ms 级 | 0 | 0 | **100%** |
 | L5 健壮性 | Agent kill 自起 / JWT 过期 / JWT 错签 / AC health / AC 重启 Agent 重连 | 5 | 0 | 0 | **100%** |
 
-**总: PASS=57 / FAIL=14 / SKIP|PARTIAL=1** (PR #252 修主机隔离 500 后 L2 提至 100%)
+**总: PASS=78 / FAIL=9 / PARTIAL=0** (v2 重跑: L1 FIM 100%, 采集 100%, EDR 70%)
 
 ## L1 EDR 检测 PASS 详情 (21 项)
 
