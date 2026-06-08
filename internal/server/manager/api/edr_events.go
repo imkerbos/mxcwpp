@@ -108,6 +108,22 @@ func chQueryCtx(parent context.Context) context.Context {
 	}))
 }
 
+// isCHProjectionErr 判断 ClickHouse 错误是否为 projection 配置类
+// (code 584: "No projection is used when optimize_use_projections=1 and force_optimize_projection=1").
+// 用于 list_data 降级重试: 表没建对应 projection 时透明回退到无 projection 路径,
+// 不向客户端抛 500.
+func isCHProjectionErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if ex, ok := err.(*clickhouse.Exception); ok {
+		return ex.Code == 584
+	}
+	// 字符串兜底, 避免不同 driver 版本 Exception 包装差异
+	return strings.Contains(err.Error(), "code: 584") ||
+		strings.Contains(err.Error(), "force_optimize_projection")
+}
+
 // chQueryCtxWithProjection 仅给 list_data 这种"我知道 projection 一定能命中"的查询用,
 // 强制走 projection。stats/聚合类继续走默认 optimize_use_projections 让 CH 自决策。
 func chQueryCtxWithProjection(parent context.Context) context.Context {
@@ -319,6 +335,12 @@ func (h *EDREventsHandler) ListEDREvents(c *gin.Context) {
 	g.Go(func() error {
 		start := time.Now()
 		rows, err := h.chConn.Query(dataCtx, dataSQL, args...)
+		// CH code 584: projection 配置错 (force_optimize_projection=1 但表没建对应 projection).
+		// 透明降级到无 projection ctx 重试, 不抛 500 给客户端.
+		if err != nil && isCHProjectionErr(err) {
+			h.logger.Warn("ClickHouse projection 不可用, 降级到无 projection 重试", zap.Error(err))
+			rows, err = h.chConn.Query(chQueryCtx(ctx), dataSQL, args...)
+		}
 		if err != nil {
 			h.recordCHQuery("list_data", "ebpf_events", start, err)
 			h.logger.Error("ClickHouse 查询 EDR 事件列表失败", zap.Error(err))
