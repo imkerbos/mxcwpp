@@ -18,7 +18,7 @@
             <div class="detail-card">
               <a-descriptions :column="2" bordered size="small">
                 <a-descriptions-item label="漏洞编号">{{ vuln.cveId }}</a-descriptions-item>
-                <a-descriptions-item v-if="vuln.osvId" label="OSV ID">{{ vuln.osvId }}</a-descriptions-item>
+                <a-descriptions-item label="OSV ID">{{ vuln.osvId || '-' }}</a-descriptions-item>
                 <a-descriptions-item label="CVSS 评分">
                   <span :class="cvssClass(vuln.cvssScore)">{{ vuln.cvssScore }}</span>
                 </a-descriptions-item>
