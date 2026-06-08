@@ -162,6 +162,9 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("exe", cel.StringType),
 		cel.Variable("cmdline", cel.StringType),
 		cel.Variable("parent_exe", cel.StringType),
+		// comm: 进程 argv[0] / task->comm (16 字节内核字段).
+		// kthread 伪装检测靠此字段 (exec -a '[kworker/...]' 改写 argv[0]).
+		cel.Variable("comm", cel.StringType),
 		cel.Variable("uid", cel.StringType),
 		cel.Variable("username", cel.StringType),
 		cel.Variable("cwd", cel.StringType),
@@ -435,7 +438,7 @@ func buildActivation(dataType int32, fields map[string]string) map[string]any {
 	// 声明所有 CEL 环境中定义的 string 变量名
 	stringVars := []string{
 		"agent_id", "hostname",
-		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "uid", "username", "cwd",
+		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "comm", "uid", "username", "cwd",
 		"file_path", "file_action",
 		"remote_addr", "remote_port", "local_addr", "local_port", "protocol", "dns_server",
 		"severity", "threat_name",
