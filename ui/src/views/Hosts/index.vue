@@ -533,21 +533,12 @@ const statusChartOption = computed(() => {
           borderColor: '#fff',
           borderWidth: 2,
         },
-        label: {
-          show: hasData,
-          formatter: '{b}: {c}',
-          fontSize: 12,
-        },
+        label: { show: false },
         emphasis: {
-          label: {
-            show: true,
-            fontSize: 14,
-            fontWeight: 'bold',
-          },
+          label: { show: false },
+          itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,0.18)' },
         },
-        labelLine: {
-          show: hasData,
-        },
+        labelLine: { show: false },
         // 即使没有数据也显示所有分类的饼图
         data: hasData
           ? data.filter((item) => item.value > 0)
