@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/server/consumer/gcppubsub"
 	"github.com/imkerbos/mxsec-platform/internal/server/engine/kube"
 	"github.com/imkerbos/mxsec-platform/internal/server/manager/biz"
@@ -42,6 +43,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer services.Cleanup()
+
+	// P3-B: GC + 内存上限调优
+	gctune.Apply("manager", gctune.ProfileServer, services.Logger)
 
 	// 根 context，用于控制后台 goroutine 生命周期
 	ctx, cancel := context.WithCancel(context.Background())
