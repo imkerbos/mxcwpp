@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/imkerbos/mxsec-platform/internal/server/common/gctune"
 	"github.com/imkerbos/mxsec-platform/internal/server/llmproxy"
 	"github.com/imkerbos/mxsec-platform/internal/server/llmproxy/provider"
 	"github.com/imkerbos/mxsec-platform/internal/server/llmproxy/router"
@@ -44,6 +45,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() { _ = logger.Sync() }()
+
+	// P3-B: GC 调优
+	gctune.Apply("llmproxy", gctune.ProfileServer, logger)
 
 	logger.Info("LLMProxy starting",
 		zap.String("config", *configPath),
