@@ -642,6 +642,68 @@
 
 ---
 
+## 内存威胁 (EDR-3)
+
+memfd_exec / 进程镂空 / shellcode 注入 / LSASS dump 检测.
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v1/memory-threats` | 内存威胁事件列表 (filter: host_id / status / severity / kind) |
+| GET  | `/api/v1/memory-threats/stats` | 24h 聚合统计 (by_threat_type / severity / open / critical_open) |
+| PUT  | `/api/v1/memory-threats/:id/resolve` | 标记一条威胁为已处理 |
+
+---
+
+## AD / LDAP 域控审计 (EDR-4)
+
+7 条规则: DCSync / Kerberoasting / 暴力破解 / 非工时 RDP / 特权分配 / 高权限组成员添加 / 攻击工具执行.
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v1/ad-audit/events` | 原始 AD 审计事件列表 (filter: kind / username / source_ip) |
+| GET  | `/api/v1/ad-audit/alerts` | 命中规则的告警列表 (filter: rule_id / status) |
+| GET  | `/api/v1/ad-audit/stats` | 24h 统计 (total / by_kind / top_failed_users) |
+
+---
+
+## Rootkit / DKOM 检测 (C2)
+
+DKOM 隐藏 PID / 内核模块 / 端口 / LD_PRELOAD 异常 / /proc 不一致.
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v1/rootkit/findings` | 已发现 Rootkit 异常列表 (filter: host_id / status) |
+| POST | `/api/v1/rootkit/scan` | 触发一台主机扫描 (body: {host_id}); 返回最近一次扫描快照 |
+| POST | `/api/v1/rootkit/findings/:id/resolve` | 标记一条 finding 为已处理 (body: {note}) |
+
+---
+
+## 蜜罐传感器 (C1)
+
+SSH / HTTP 蜜罐 + 文件诱饵, 命中即告警 (合法备份工具白名单).
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v1/v2/honeypot/sensors` | 已部署传感器列表 (按租户隔离) |
+| POST | `/api/v1/v2/honeypot/sensors` | 部署传感器 (body: {host_id, kind, bind_addr}) |
+| POST | `/api/v1/v2/honeypot/sensors/:id/stop` | 停止/删除一个传感器 |
+| GET  | `/api/v1/v2/honeypot/events` | 蜜罐命中告警事件 (filter: sensor_id / kind / src_ip) |
+
+---
+
+## VEX 漏洞利用性声明 (B7)
+
+CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed / under_investigation.
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v1/vex/:product_id?version=X.Y.Z` | 完整 VEX 文档 (JSON) |
+| GET  | `/api/v1/vex/:product_id/statements` | CVE 声明列表 |
+| GET  | `/api/v1/vex/:product_id/cyclonedx?version=X.Y.Z` | 下载 CycloneDX VEX 1.5 |
+| GET  | `/api/v1/vex/:product_id/csaf?version=X.Y.Z` | 下载 CSAF 2.0 |
+
+---
+
 ## 错误码
 
 | HTTP 状态码 | 说明 |
