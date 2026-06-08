@@ -404,6 +404,95 @@ services:
     networks:
       - mxsec-net
 
+  # ==================== Engine (检测引擎独立服务) ====================
+  engine:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.consumer.dev
+    image: mxsec-consumer:dev
+    container_name: mxsec-engine-dev
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    volumes:
+      - ../:/workspace:rw
+      - /workspace/deploy/data
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+    networks: [mxsec-net]
+    command: >
+      sh -c "
+        cd /workspace && mkdir -p tmp && go mod tidy &&
+        echo '启动 Engine...' &&
+        go run ./cmd/server/engine -config /etc/mxsec-platform/server.yaml
+      "
+
+  # ==================== VulnSync (漏洞情报融合) ====================
+  vulnsync:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.consumer.dev
+    image: mxsec-consumer:dev
+    container_name: mxsec-vulnsync-dev
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    volumes:
+      - ../:/workspace:rw
+      - /workspace/deploy/data
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+    networks: [mxsec-net]
+    command: >
+      sh -c "
+        cd /workspace && mkdir -p tmp && go mod tidy &&
+        echo '启动 VulnSync...' &&
+        go run ./cmd/server/vulnsync -config /etc/mxsec-platform/server.yaml
+      "
+
+  # ==================== LLMProxy (LLM 网关) ====================
+  llmproxy:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile.consumer.dev
+    image: mxsec-consumer:dev
+    container_name: mxsec-llmproxy-dev
+    restart: unless-stopped
+    depends_on:
+      redis: { condition: service_healthy }
+    volumes:
+      - ../:/workspace:rw
+      - /workspace/deploy/data
+      - ./config/server.yaml:/etc/mxsec-platform/server.yaml:ro
+      - go_mod_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+    working_dir: /workspace
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GO_ENV: development
+    networks: [mxsec-net]
+    command: >
+      sh -c "
+        cd /workspace && mkdir -p tmp && go mod tidy &&
+        echo '启动 LLMProxy...' &&
+        go run ./cmd/server/llmproxy -config /etc/mxsec-platform/server.yaml
+      "
+
 networks:
   mxsec-net:
     driver: bridge
