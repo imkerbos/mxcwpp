@@ -1051,14 +1051,15 @@ onMounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
-  height: 180px;
+  height: 200px;
 }
 
 .distribution-card :deep(.ant-card-body) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 12px 16px;
+  padding: 8px 14px;
+  overflow: hidden;
 }
 
 .distribution-card :deep(.ant-card-head) {
@@ -1076,24 +1077,22 @@ onMounted(() => {
   gap: 12px;
   flex: 1;
   min-height: unset;
+  overflow: hidden;
 }
 
 .chart-container {
-  flex: 0 0 130px;
+  flex: 0 0 110px;
   position: relative;
   cursor: pointer;
 }
 
 .status-chart {
-  width: 130px;
-  height: 120px;
+  width: 110px;
+  height: 110px;
 }
 
 .chart-hint {
-  text-align: center;
-  margin-top: 4px;
-  color: var(--mxsec-text-3);
-  font-size: 11px;
+  display: none;
 }
 
 .legend-container {
@@ -1104,16 +1103,17 @@ onMounted(() => {
 .status-legend {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 6px;
+  gap: 6px;
+  padding: 1px 4px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.4;
   transition: background 0.2s;
 }
 
@@ -1159,10 +1159,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 .os-chart {
   width: 100%;
-  height: 130px;
+  height: 140px;
 }
 
 .risk-card:hover {
