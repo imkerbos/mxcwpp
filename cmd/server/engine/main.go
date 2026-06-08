@@ -115,7 +115,9 @@ func main() {
 				if err != nil {
 					logger.Warn("celengine 初始化失败, 跳过 CelRuleStage", zap.Error(err))
 				} else {
-					stages = append(stages, engine.NewCelRuleStage(celEng, logger))
+					// v2 拆分: AlertGenerator 注入 stage, 命中规则直接 upsert alerts 表.
+					alertGen := celengine.NewAlertGenerator(db, logger.Named("alert"))
+					stages = append(stages, engine.NewCelRuleStage(celEng, logger).WithAlertGenerator(alertGen))
 					stages = append(stages, engine.NewSequenceStage(
 						celengine.NewSequenceDetector(celEng, db, nil, logger.Named("seq")),
 						logger))
