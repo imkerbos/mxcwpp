@@ -52,9 +52,17 @@ MxSec Platform **社区版** 包含完整的平台框架和全部核心安全能
 | 组件管理与插件分发 | :white_check_mark: | :white_check_mark: |
 | 系统监控（Prometheus） | :white_check_mark: | :white_check_mark: |
 | 运维巡检与报告导出 | :white_check_mark: | :white_check_mark: |
+| 内存威胁检测（memfd_exec / 进程镂空 / shellcode / LSASS dump） | :white_check_mark: | :white_check_mark: |
+| AD / LDAP 域控审计（DCSync / Kerberoasting / 暴力破解等 7 规则） | :white_check_mark: | :white_check_mark: |
+| DKOM Rootkit 检测（隐藏 PID / 内核模块 / 端口 / LD_PRELOAD） | :white_check_mark: | :white_check_mark: |
+| 蜜罐传感器（SSH / HTTP 蜜罐 + 文件诱饵策略） | :white_check_mark: | :white_check_mark: |
+| VEX 漏洞利用性声明导出（CycloneDX 1.5 / CSAF 2.0） | :white_check_mark: | :white_check_mark: |
+| YARA-X 病毒规则库（73 条规则 / 50 家族） | :white_check_mark: | :white_check_mark: |
+| 威胁狩猎（SPL 风格 DSL → SQL 转译） | :white_check_mark: | :white_check_mark: |
+| 攻击故事线（ATT&CK 杀链时间线） | :white_check_mark: | :white_check_mark: |
+| 行为基线检测（ML 异常评分） | :white_check_mark: | :white_check_mark: |
 | Windows 支持 | :x: | :construction: |
-| 蜜罐 | :x: | :construction: |
-| 主动防御 | :x: | :construction: |
+| 主动防御（NPatch eBPF 热补丁） | `内置样例` | :white_check_mark: |
 | 云查杀 | :x: | :construction: |
 
 > :white_check_mark: 已支持 &nbsp; `内置样例` 含少量示例规则 &nbsp; :x: 未支持 &nbsp; :construction: 规划中
@@ -72,6 +80,12 @@ MxSec Platform **社区版** 包含完整的平台框架和全部核心安全能
 | 容器安全 | K8s 集群管理、容器 CIS 基线（80 条规则）、Audit Webhook 接入 |
 | 告警中心 | 告警聚合、白名单、自动响应（kill/隔离）、溯源时间线 |
 | 威胁情报 | MISP IOC 导入 + Redis 缓存 + CEL 实时碰撞 |
+| 内存取证 | memfd_exec / 进程镂空 / shellcode 注入 / LSASS dump 检测（EDR-3） |
+| AD/LDAP 审计 | 7 条检测规则：DCSync、Kerberoasting、暴力破解、非工时 RDP、特权分配等（EDR-4） |
+| 蜜罐传感器 | SSH/HTTP 蜜罐 + 文件诱饵 + 合法备份工具白名单（C1） |
+| Rootkit 检测 | DKOM 隐藏 PID / 内核模块 / 端口 / LD_PRELOAD / /proc 不一致（C2） |
+| 威胁狩猎 | SPL 风格 DSL → SQL 转译，跑在 ClickHouse 事件归档上 |
+| VEX 导出 | CycloneDX VEX 1.5 + CSAF 2.0 给客户出具厂商漏洞声明（B7） |
 
 ## 产品截图
 

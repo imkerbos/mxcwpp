@@ -129,6 +129,25 @@ Kafka 异步消费服务，负责数据持久化。
 
 EDR/eBPF 运行时事件采集（原 sensor/tetragon plugin）已**内置于 agent**，不再独立 plugin。
 
+Agent 内置 EDR 子模块：
+
+| 子模块 | 路径 | 能力 |
+|---|---|---|
+| collector | `internal/agent/edr/collector` | eBPF + Tetragon 进程/文件/网络事件采集 |
+| rootkit | `internal/agent/edr/rootkit` | DKOM 隐藏 PID / 内核模块 / 端口 / LD_PRELOAD / /proc 不一致扫描 (C2) |
+| honeypot | `internal/agent/edr/honeypot` | SSH / HTTP 假回应蜜罐 (C1) |
+| forensics | `internal/agent/edr/forensics` | 内存威胁取证 (memfd_exec / process hollowing / shellcode / LSASS dump) (EDR-3) |
+| npatch | `internal/agent/edr/npatch` | eBPF cgroup_skb (4.10+) + AF_PACKET v3 (CentOS 7 fallback) 热补丁 |
+| rasp | `internal/agent/edr/rasp` | 5 语言 RASP (Java/Python/PHP/Node/Go) |
+| yara | `internal/agent/edr/yara` | YARA-X 预编译规则匹配 (73 规则 / 50 家族) |
+| antidebug | `internal/agent/edr/antidebug` | Agent 自身反调试 |
+| quarantine | `internal/agent/edr/quarantine` | 文件隔离箱 |
+
+引擎层 `internal/server/engine/`：
+- `engine/adaudit/` — AD/LDAP 域控审计 7 条规则 (DCSync / Kerberoasting / 暴破等) (EDR-4)
+- `engine/hunting/` — SPL 风格 DSL → ClickHouse SQL 转译
+- `engine/storylines/` — ATT&CK 杀链时间线聚合
+
 插件共享库 `plugins/lib/go/` 提供插件与 Agent 通信的标准接口。
 
 ## 数据链路
