@@ -11,7 +11,8 @@ import (
 
 // SUSEDriver 实现 SUSE Security CVE 抓取。
 // API: https://www.suse.com/support/security/api/v1/sortedByVersion/
-//      或 https://ftp.suse.com/pub/projects/security/yaml/suse-cvrf-master.yml
+//
+//	或 https://ftp.suse.com/pub/projects/security/yaml/suse-cvrf-master.yml
 //
 // 本 driver 使用 SUSE 的 OVAL JSON 兼容端点;
 // 实际生产可能需要切换到 yaml/oval 全量 (留后续 PR 调整)。

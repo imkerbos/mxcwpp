@@ -4,7 +4,7 @@
 //
 // 客户端模式 (Agent 端 av-scanner 插件, Sprint 4 实现):
 //   - 在 /root/ /home/*/ 等关键目录投放 6 类诱饵文件:
-//     * decoy.docx / decoy.xlsx / decoy.png / decoy.csv / decoy.pdf / .important.txt
+//   - decoy.docx / decoy.xlsx / decoy.png / decoy.csv / decoy.pdf / .important.txt
 //   - 用 fanotify FAN_MODIFY | FAN_CLOSE_WRITE 监控
 //   - 命中即上报 + 立即 SIGKILL 触发进程
 //
@@ -50,14 +50,14 @@ func (d *Detector) Evaluate(_ context.Context, t HoneypotTrigger) []byte {
 		ts = time.Now()
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"host_id":         t.HostID,
-		"decoy_path":      t.DecoyPath,
-		"decoy_type":      t.DecoyType,
-		"triggering_pid":  t.TriggeringPID,
-		"triggering_exe":  t.TriggeringExe,
-		"triggering_uid":  t.TriggeringUID,
-		"operation":       t.Operation,
-		"timestamp":       ts,
+		"host_id":        t.HostID,
+		"decoy_path":     t.DecoyPath,
+		"decoy_type":     t.DecoyType,
+		"triggering_pid": t.TriggeringPID,
+		"triggering_exe": t.TriggeringExe,
+		"triggering_uid": t.TriggeringUID,
+		"operation":      t.Operation,
+		"timestamp":      ts,
 		"ransomware_indicators": []string{
 			"honeypot_decoy_modified",
 			"decoy_type:" + t.DecoyType,
@@ -67,9 +67,9 @@ func (d *Detector) Evaluate(_ context.Context, t HoneypotTrigger) []byte {
 			"target": t.TriggeringPID,
 			"reason": "反勒索 honeypot 命中: " + t.DecoyPath + " 被进程 " + t.TriggeringExe + " 修改",
 			"escalate": map[string]any{
-				"isolate_host":      true,
-				"trigger_av_full":   true,
-				"notify_severity":   "critical",
+				"isolate_host":       true,
+				"trigger_av_full":    true,
+				"notify_severity":    "critical",
 				"forensics_snapshot": true,
 			},
 		},

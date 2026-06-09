@@ -100,15 +100,15 @@ func (d *ReverseShellDetector) Scan(_ context.Context, ev ProcessEvent) ([]byte,
 			continue
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"host_id":   ev.HostID,
-			"pid":       ev.PID,
-			"ppid":      ev.PPID,
-			"uid":       ev.UID,
-			"username":  ev.UserName,
-			"exe":       ev.ExePath,
-			"cmdline":   ev.Cmdline,
-			"rule":      p.Name,
-			"hint":      p.Hint,
+			"host_id":  ev.HostID,
+			"pid":      ev.PID,
+			"ppid":     ev.PPID,
+			"uid":      ev.UID,
+			"username": ev.UserName,
+			"exe":      ev.ExePath,
+			"cmdline":  ev.Cmdline,
+			"rule":     p.Name,
+			"hint":     p.Hint,
 			"would_action": map[string]any{
 				"type":   "kill_pid",
 				"target": ev.PID,
@@ -173,14 +173,14 @@ func (d *PrivEscalationDetector) Scan(_ context.Context, ev ProcessEvent) ([]byt
 			continue
 		}
 		payload, _ := json.Marshal(map[string]any{
-			"host_id":   ev.HostID,
-			"pid":       ev.PID,
-			"uid":       ev.UID,
-			"username":  ev.UserName,
-			"exe":       ev.ExePath,
-			"cmdline":   ev.Cmdline,
-			"rule":      p.Name,
-			"hint":      p.Hint,
+			"host_id":  ev.HostID,
+			"pid":      ev.PID,
+			"uid":      ev.UID,
+			"username": ev.UserName,
+			"exe":      ev.ExePath,
+			"cmdline":  ev.Cmdline,
+			"rule":     p.Name,
+			"hint":     p.Hint,
 			"would_action": map[string]any{
 				"type":   "kill_pid",
 				"target": ev.PID,

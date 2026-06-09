@@ -12,11 +12,11 @@
 //
 // 流程:
 //
-//	1. ops 提交 → status=pending
-//	2. admin/security_lead approve → approved_count++
-//	3. approved_count >= approval_required_count → status=approved
-//	4. Worker 周期扫 approved → 应用到 FeatureFlag.Value → status=applied
-//	5. 任何阶段都写 AuditLog
+//  1. ops 提交 → status=pending
+//  2. admin/security_lead approve → approved_count++
+//  3. approved_count >= approval_required_count → status=approved
+//  4. Worker 周期扫 approved → 应用到 FeatureFlag.Value → status=applied
+//  5. 任何阶段都写 AuditLog
 package api
 
 import (
@@ -46,10 +46,10 @@ func NewConfigChangeRequestHandler(db *gorm.DB, logger *zap.Logger) *ConfigChang
 
 // CreateChangeRequestRequest 提交变更请求体。
 type CreateChangeRequestRequest struct {
-	TargetTable   string `json:"target_table" binding:"required"`    // feature_flags / kube_clusters / system_config
+	TargetTable   string `json:"target_table" binding:"required"` // feature_flags / kube_clusters / system_config
 	TargetKey     string `json:"target_key" binding:"required"`
 	ProposedValue string `json:"proposed_value" binding:"required"`
-	Reason        string `json:"reason" binding:"required,min=10"`   // 至少 10 字符 (审计要求)
+	Reason        string `json:"reason" binding:"required,min=10"` // 至少 10 字符 (审计要求)
 }
 
 // Create 提交配置变更请求。

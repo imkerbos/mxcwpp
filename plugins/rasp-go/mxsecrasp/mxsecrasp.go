@@ -212,13 +212,13 @@ func truncate(s string, n int) string {
 
 // reporter UDS 帧发送器.
 type reporter struct {
-	cfg     Config
-	queue   chan Event
-	stopCh  chan struct{}
-	rps     atomic.Int64
-	rpsAt   atomic.Int64
-	conn    net.Conn
-	connMu  sync.Mutex
+	cfg    Config
+	queue  chan Event
+	stopCh chan struct{}
+	rps    atomic.Int64
+	rpsAt  atomic.Int64
+	conn   net.Conn
+	connMu sync.Mutex
 }
 
 func newReporter(cfg Config) *reporter {

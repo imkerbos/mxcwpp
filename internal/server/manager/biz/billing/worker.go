@@ -2,10 +2,10 @@
 //
 // 流程:
 //
-//	1. UsageWorker 每小时聚合 hosts/events/storage/llm_tokens → usage_metering
-//	2. BillingWorker 每月 1 号 00:30 聚合上月 → monthly_bills (status=draft)
-//	3. 财务 review → status=approved
-//	4. 发账单 → status=billed → 付款 → status=paid
+//  1. UsageWorker 每小时聚合 hosts/events/storage/llm_tokens → usage_metering
+//  2. BillingWorker 每月 1 号 00:30 聚合上月 → monthly_bills (status=draft)
+//  3. 财务 review → status=approved
+//  4. 发账单 → status=billed → 付款 → status=paid
 //
 // 计费维度 (默认价格表, 实际单价从 tenant_config.pricing.* 读):
 //
@@ -32,12 +32,12 @@ import (
 
 // PriceTable 单价 (USD).
 type PriceTable struct {
-	AgentPerMonth      float64
-	EventsPer1k        float64
-	StoragePerGBHour   float64
-	LLMInputPer1k      float64
-	LLMOutputPer1k     float64
-	ScanPerCount       float64
+	AgentPerMonth    float64
+	EventsPer1k      float64
+	StoragePerGBHour float64
+	LLMInputPer1k    float64
+	LLMOutputPer1k   float64
+	ScanPerCount     float64
 }
 
 // DefaultPriceTable 默认价格.
@@ -175,12 +175,12 @@ func (w *BillingWorker) generateBillForTenant(ctx context.Context, tenantID, bil
 	bill.TotalUSD = round2(total)
 
 	breakdown, _ := json.Marshal(map[string]float64{
-		"agents":              float64(bill.AgentsPeak) * w.prices.AgentPerMonth,
-		"events_per_1k":       float64(bill.EventsTotal) / 1000.0 * w.prices.EventsPer1k,
-		"storage_gb_hours":    bill.StorageGBHours * w.prices.StoragePerGBHour,
-		"llm_input_per_1k":    float64(bill.LLMInputTokens) / 1000.0 * w.prices.LLMInputPer1k,
-		"llm_output_per_1k":   float64(bill.LLMOutputTokens) / 1000.0 * w.prices.LLMOutputPer1k,
-		"scan_per_count":      float64(bill.ScanCount) * w.prices.ScanPerCount,
+		"agents":            float64(bill.AgentsPeak) * w.prices.AgentPerMonth,
+		"events_per_1k":     float64(bill.EventsTotal) / 1000.0 * w.prices.EventsPer1k,
+		"storage_gb_hours":  bill.StorageGBHours * w.prices.StoragePerGBHour,
+		"llm_input_per_1k":  float64(bill.LLMInputTokens) / 1000.0 * w.prices.LLMInputPer1k,
+		"llm_output_per_1k": float64(bill.LLMOutputTokens) / 1000.0 * w.prices.LLMOutputPer1k,
+		"scan_per_count":    float64(bill.ScanCount) * w.prices.ScanPerCount,
 	})
 	bill.BreakdownJSON = string(breakdown)
 

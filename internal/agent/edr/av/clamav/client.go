@@ -183,9 +183,10 @@ func (r *ScanResult) IsInfected() bool { return !r.Clean }
 // parseScanResp 把 clamd 响应解析成 ScanResult.
 //
 // 响应格式 (zSCAN):
-//   "/path/file: OK\x00"
-//   "/path/file: Eicar-Test-Signature FOUND\x00"
-//   "/path/file: ERROR <msg>\x00"
+//
+//	"/path/file: OK\x00"
+//	"/path/file: Eicar-Test-Signature FOUND\x00"
+//	"/path/file: ERROR <msg>\x00"
 func parseScanResp(s string) (*ScanResult, error) {
 	s = strings.TrimRight(s, "\x00\n")
 	colonIdx := strings.LastIndex(s, ": ")

@@ -119,10 +119,10 @@ func (nopTracer) Start(ctx context.Context, _ string) (context.Context, Span) {
 
 type nopSpan struct{}
 
-func (nopSpan) End()                              {}
-func (nopSpan) SetAttribute(_ string, _ any)      {}
-func (nopSpan) RecordError(_ error)               {}
-func (nopSpan) SetStatus(_ int, _ string)         {}
+func (nopSpan) End()                         {}
+func (nopSpan) SetAttribute(_ string, _ any) {}
+func (nopSpan) RecordError(_ error)          {}
+func (nopSpan) SetStatus(_ int, _ string)    {}
 
 // ---- logging tracer (轻量替代品, 用 zap 记录 span) ----
 

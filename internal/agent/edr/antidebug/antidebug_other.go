@@ -17,5 +17,5 @@ func NewELFIntegrityMonitor(_ string, _ time.Duration, _ *zap.Logger) *ELFIntegr
 	return &ELFIntegrityMonitor{}
 }
 
-func (m *ELFIntegrityMonitor) SetOnTamper(_ func()) {}
+func (m *ELFIntegrityMonitor) SetOnTamper(_ func())  {}
 func (m *ELFIntegrityMonitor) Run(_ <-chan struct{}) {}

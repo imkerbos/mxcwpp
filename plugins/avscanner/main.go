@@ -213,12 +213,12 @@ func forwardHoneypotTriggers(ctx context.Context, h *engine.HoneypotManager, cli
 				Timestamp: time.Now().UnixNano(),
 				Data: &bridge.Payload{
 					Fields: map[string]string{
-						"decoy_path": trig.DecoyPath,
-						"decoy_type": string(trig.DecoyKind),
-						"operation":  trig.Operation,
-						"pid":        fmt.Sprintf("%d", trig.TriggeringPID),
-						"exe":        trig.TriggeringExe,
-						"uid":        fmt.Sprintf("%d", trig.TriggeringUID),
+						"decoy_path":  trig.DecoyPath,
+						"decoy_type":  string(trig.DecoyKind),
+						"operation":   trig.Operation,
+						"pid":         fmt.Sprintf("%d", trig.TriggeringPID),
+						"exe":         trig.TriggeringExe,
+						"uid":         fmt.Sprintf("%d", trig.TriggeringUID),
 						"detected_at": trig.Timestamp.Format(time.RFC3339),
 					},
 				},

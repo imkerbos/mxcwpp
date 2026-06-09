@@ -123,9 +123,9 @@ func (d *WebshellDetector) Scan(_ context.Context, ev FileSampleEvent) ([]byte, 
 		"ext":       ext,
 		"hits":      hits,
 		"would_action": map[string]any{
-			"type":         "quarantine_file",
-			"target":       ev.FilePath,
-			"reason":       "命中 " + intToStr(len(hits)) + " 条 Webshell 启发式规则",
+			"type":   "quarantine_file",
+			"target": ev.FilePath,
+			"reason": "命中 " + intToStr(len(hits)) + " 条 Webshell 启发式规则",
 		},
 	})
 	return payload, true

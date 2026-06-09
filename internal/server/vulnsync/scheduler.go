@@ -28,8 +28,8 @@ type Scheduler struct {
 	schedules []SourceSchedule
 	logger    *zap.Logger
 
-	mu       sync.Mutex
-	lastRun  map[string]time.Time
+	mu      sync.Mutex
+	lastRun map[string]time.Time
 }
 
 // NewScheduler 构造调度器。

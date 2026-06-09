@@ -2,13 +2,13 @@
 //
 // 关键流程:
 //
-//	1. 安全工程师上传 ONNX/TFLite 模型 → component_packages (kind=ml-model)
-//	2. 填模型元信息 → ml_model_specs (input/output shape / class label / train acc)
-//	3. G5 模型验证闸门: ROC/影子模式跑通后 approved=true
-//	4. 安全工程师创建订阅 → ml_model_subscriptions (host_id 或 label_selector)
-//	5. Agent 心跳带 model_manifest → Manager 计算 diff → 返回拉取 URL
-//	6. Agent 下载落 /opt/mxsec/agent/models/<spec_id>/<filename> + 校验 sha256
-//	7. Agent 回报 → ml_model_deployment_status
+//  1. 安全工程师上传 ONNX/TFLite 模型 → component_packages (kind=ml-model)
+//  2. 填模型元信息 → ml_model_specs (input/output shape / class label / train acc)
+//  3. G5 模型验证闸门: ROC/影子模式跑通后 approved=true
+//  4. 安全工程师创建订阅 → ml_model_subscriptions (host_id 或 label_selector)
+//  5. Agent 心跳带 model_manifest → Manager 计算 diff → 返回拉取 URL
+//  6. Agent 下载落 /opt/mxsec/agent/models/<spec_id>/<filename> + 校验 sha256
+//  7. Agent 回报 → ml_model_deployment_status
 //
 // 选择复用 component 而非新建独立分发系统的原因:
 //
@@ -120,9 +120,9 @@ func (s *Service) Subscribe(ctx context.Context, sub *model.MLModelSubscription)
 //
 // 算法:
 //
-//	1. 找 host_id 直接订阅 (enabled=1, approved=1)
-//	2. 找 label_selector 命中 (传入 hostLabels)
-//	3. 去重 → 与现有 deployment_status diff → 返回新增/更新项
+//  1. 找 host_id 直接订阅 (enabled=1, approved=1)
+//  2. 找 label_selector 命中 (传入 hostLabels)
+//  3. 去重 → 与现有 deployment_status diff → 返回新增/更新项
 func (s *Service) ManifestForHost(ctx context.Context, tenantID, hostID string, hostLabels map[string]string) ([]ManifestEntry, error) {
 	if hostID == "" {
 		return nil, errors.New("host_id required")
@@ -182,15 +182,15 @@ func (s *Service) ManifestForHost(ctx context.Context, tenantID, hostID string, 
 			continue
 		}
 		entries = append(entries, ManifestEntry{
-			SpecID:    spec.ID,
-			Kind:      spec.Kind,
-			Framework: spec.Framework,
-			FileName:  pkg.FileName,
-			SHA256:    pkg.SHA256,
-			Size:      pkg.FileSize,
+			SpecID:       spec.ID,
+			Kind:         spec.Kind,
+			Framework:    spec.Framework,
+			FileName:     pkg.FileName,
+			SHA256:       pkg.SHA256,
+			Size:         pkg.FileSize,
 			DownloadPath: fmt.Sprintf("/api/v1/components/packages/%d/download", pkg.ID),
-			InputDim:  spec.InputDim,
-			OutputDim: spec.OutputDim,
+			InputDim:     spec.InputDim,
+			OutputDim:    spec.OutputDim,
 		})
 	}
 	return entries, nil
@@ -207,11 +207,11 @@ func (s *Service) ReportStatus(ctx context.Context, st *model.MLModelDeploymentS
 	res := s.db.WithContext(ctx).
 		Where("host_id = ? AND spec_id = ?", st.HostID, st.SpecID).
 		Assign(map[string]any{
-			"status":        st.Status,
-			"sha256_local":  st.SHA256Local,
-			"error_msg":     st.ErrorMsg,
-			"deployed_at":   st.DeployedAt,
-			"updated_at":    st.UpdatedAt,
+			"status":       st.Status,
+			"sha256_local": st.SHA256Local,
+			"error_msg":    st.ErrorMsg,
+			"deployed_at":  st.DeployedAt,
+			"updated_at":   st.UpdatedAt,
 		}).
 		FirstOrCreate(st)
 	return res.Error

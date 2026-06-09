@@ -42,26 +42,26 @@ import (
 )
 
 type elkeidPolicy struct {
-	BaselineID      int    `yaml:"baseline_id"`
-	BaselineVersion string `yaml:"baseline_version"`
-	BaselineName    string `yaml:"baseline_name"`
-	BaselineNameEN  string `yaml:"baseline_name_en"`
-	System          []string `yaml:"system"`
+	BaselineID      int           `yaml:"baseline_id"`
+	BaselineVersion string        `yaml:"baseline_version"`
+	BaselineName    string        `yaml:"baseline_name"`
+	BaselineNameEN  string        `yaml:"baseline_name_en"`
+	System          []string      `yaml:"system"`
 	CheckList       []elkeidCheck `yaml:"check_list"`
 }
 
 type elkeidCheck struct {
-	CheckID        int    `yaml:"check_id"`
-	Type           string `yaml:"type"`
-	Title          string `yaml:"title"`
-	Description    string `yaml:"description"`
-	Solution       string `yaml:"solution"`
-	Security       string `yaml:"security"`
-	TypeCN         string `yaml:"type_cn"`
-	TitleCN        string `yaml:"title_cn"`
-	DescriptionCN  string `yaml:"description_cn"`
-	SolutionCN     string `yaml:"solution_cn"`
-	Check          elkeidCheckSpec `yaml:"check"`
+	CheckID       int             `yaml:"check_id"`
+	Type          string          `yaml:"type"`
+	Title         string          `yaml:"title"`
+	Description   string          `yaml:"description"`
+	Solution      string          `yaml:"solution"`
+	Security      string          `yaml:"security"`
+	TypeCN        string          `yaml:"type_cn"`
+	TitleCN       string          `yaml:"title_cn"`
+	DescriptionCN string          `yaml:"description_cn"`
+	SolutionCN    string          `yaml:"solution_cn"`
+	Check         elkeidCheckSpec `yaml:"check"`
 }
 
 type elkeidCheckSpec struct {
@@ -76,29 +76,29 @@ type elkeidRule struct {
 }
 
 type mxsecPolicy struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Version     string     `json:"version"`
-	Description string     `json:"description"`
-	OSFamily    []string   `json:"os_family"`
-	OSVersion   string     `json:"os_version,omitempty"`
-	Enabled     bool       `json:"enabled"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Version     string       `json:"version"`
+	Description string       `json:"description"`
+	OSFamily    []string     `json:"os_family"`
+	OSVersion   string       `json:"os_version,omitempty"`
+	Enabled     bool         `json:"enabled"`
 	Rules       []*mxsecRule `json:"rules"`
 }
 
 type mxsecRule struct {
-	RuleID      string        `json:"rule_id"`
-	Category    string        `json:"category"`
-	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Severity    string        `json:"severity"`
-	Check       *mxsecCheck   `json:"check"`
-	Fix         *mxsecFix     `json:"fix,omitempty"`
+	RuleID      string      `json:"rule_id"`
+	Category    string      `json:"category"`
+	Title       string      `json:"title"`
+	Description string      `json:"description"`
+	Severity    string      `json:"severity"`
+	Check       *mxsecCheck `json:"check"`
+	Fix         *mxsecFix   `json:"fix,omitempty"`
 }
 
 type mxsecCheck struct {
-	Condition string             `json:"condition"`
-	Rules     []*mxsecCheckRule  `json:"rules"`
+	Condition string            `json:"condition"`
+	Rules     []*mxsecCheckRule `json:"rules"`
 }
 
 type mxsecCheckRule struct {

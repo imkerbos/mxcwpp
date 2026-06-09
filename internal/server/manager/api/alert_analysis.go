@@ -17,8 +17,8 @@ import (
 // AlertAnalysisHandler LLM 告警分析 API 处理器 (P1-10: 异步队列模式).
 //
 // 原 AnalyzeAlert 同步调 LLM 30s 阻塞 gin worker → 改为入队 + 轮询模式:
-//   1. POST /analyze → 返 task_id, 后台 goroutine 跑 LLM
-//   2. GET  /analyze/:task_id → 返结果或 pending 状态
+//  1. POST /analyze → 返 task_id, 后台 goroutine 跑 LLM
+//  2. GET  /analyze/:task_id → 返结果或 pending 状态
 //
 // 任务结果存内存 cache, 上限 1000 条. 限并发 LLM 调用 4 个 (sem).
 type AlertAnalysisHandler struct {

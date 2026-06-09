@@ -3,12 +3,13 @@
 // 设计文档: docs/operating-modes.md §3
 //
 // 6 门槛:
-//   G1 数据沉淀: 该 tenant 持续 observe 运行 ≥ 90 天
-//   G2 误报率:    Engine 月度 fp_rate ≤ 0.02
-//   G3 告警准确率: 用户标记 TP/(TP+FP+FN) ≥ 0.85
-//   G4 数据回放:   历史攻击命中率 ≥ 0.85
-//   G5 客户授权:   客户安全运营负责人书面同意
-//   G6 灰度准备:   CanaryRollout v2 机制就绪并演练
+//
+//	G1 数据沉淀: 该 tenant 持续 observe 运行 ≥ 90 天
+//	G2 误报率:    Engine 月度 fp_rate ≤ 0.02
+//	G3 告警准确率: 用户标记 TP/(TP+FP+FN) ≥ 0.85
+//	G4 数据回放:   历史攻击命中率 ≥ 0.85
+//	G5 客户授权:   客户安全运营负责人书面同意
+//	G6 灰度准备:   CanaryRollout v2 机制就绪并演练
 package gate
 
 import (
@@ -34,10 +35,10 @@ const MinReplayHitRate = 0.85
 
 // Result 是单次门槛检查的产物。
 type Result struct {
-	Gate    string // G1/G2/G3/G4/G5/G6
-	Passed  bool
-	Reason  string
-	Metric  any // 实际值, 便于审计
+	Gate   string // G1/G2/G3/G4/G5/G6
+	Passed bool
+	Reason string
+	Metric any // 实际值, 便于审计
 }
 
 // GateResult 总体决策。
@@ -49,9 +50,9 @@ type GateResult struct {
 
 // Checker 执行 6 门槛检查。
 type Checker struct {
-	db       *gorm.DB
-	logger   *zap.Logger
-	now      func() time.Time
+	db     *gorm.DB
+	logger *zap.Logger
+	now    func() time.Time
 }
 
 // Config 配置 (允许注入自定义阈值/时钟,便于测试)。

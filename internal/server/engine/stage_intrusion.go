@@ -52,7 +52,7 @@ func (s *BruteForceStage) Process(ctx context.Context, ev PipelineEvent) ([]Aler
 			AlertID:        fmt.Sprintf("alrt-brute-%s-%d-%d", ev.HostID, ev.Partition, ev.Offset),
 			RuleID:         "BRUTE_FORCE_SSH",
 			Severity:       "high",
-			ATTCKTactic:    "TA0006", // Credential Access
+			ATTCKTactic:    "TA0006",    // Credential Access
 			ATTCKTechnique: "T1110.001", // Brute Force: Password Guessing
 			Payload:        payload,
 			WouldAction:    payload, // observe 模式直接复用

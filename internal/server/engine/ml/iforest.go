@@ -17,11 +17,11 @@ import (
 //   - 不支持 contamination 自动校准 (留 ONNX PR)
 //   - 单进程内存训练,大数据集应走 sklearn->ONNX 路径
 type IForestModel struct {
-	name      string
-	version   string
-	features  []string
-	numTrees  int
-	maxDepth  int
+	name     string
+	version  string
+	features []string
+	numTrees int
+	maxDepth int
 
 	mu    sync.RWMutex
 	trees []*iTree

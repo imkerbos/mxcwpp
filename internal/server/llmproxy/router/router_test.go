@@ -17,8 +17,8 @@ type stubProvider struct {
 	called int
 }
 
-func (s *stubProvider) Name() string             { return s.name }
-func (s *stubProvider) Type() string             { return "stub" }
+func (s *stubProvider) Name() string              { return s.name }
+func (s *stubProvider) Type() string              { return "stub" }
 func (s *stubProvider) SupportedModels() []string { return []string{"any"} }
 
 func (s *stubProvider) Complete(_ context.Context, _ provider.CompletionRequest) (*provider.CompletionResponse, error) {

@@ -44,8 +44,8 @@ func NewAnthropic(cfg AnthropicConfig) *AnthropicProvider {
 	}
 }
 
-func (p *AnthropicProvider) Name() string             { return p.cfg.Name }
-func (p *AnthropicProvider) Type() string             { return "anthropic" }
+func (p *AnthropicProvider) Name() string              { return p.cfg.Name }
+func (p *AnthropicProvider) Type() string              { return "anthropic" }
 func (p *AnthropicProvider) SupportedModels() []string { return p.cfg.Models }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
@@ -86,14 +86,14 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req CompletionRequest)
 	}
 
 	var raw struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
+		ID      string `json:"id"`
+		Model   string `json:"model"`
 		Content []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
 		StopReason string `json:"stop_reason"`
-		Usage struct {
+		Usage      struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
@@ -126,8 +126,8 @@ func (p *AnthropicProvider) Embed(_ context.Context, _ string, _ string) ([]floa
 func (p *AnthropicProvider) HealthCheck(ctx context.Context) error {
 	// 用一个最小请求探活
 	req := CompletionRequest{
-		Model:    firstNonEmpty(p.cfg.Models, "claude-3-5-haiku-latest"),
-		Messages: []Message{{Role: "user", Content: "ping"}},
+		Model:     firstNonEmpty(p.cfg.Models, "claude-3-5-haiku-latest"),
+		Messages:  []Message{{Role: "user", Content: "ping"}},
 		MaxTokens: 1,
 	}
 	_, err := p.Complete(ctx, req)

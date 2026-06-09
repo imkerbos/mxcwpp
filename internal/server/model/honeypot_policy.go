@@ -10,16 +10,16 @@ package model
 //
 // 设计参考: ref/07-病毒.md §5 + docs/operating-modes.md
 type HoneypotPolicy struct {
-	TenantID    string    `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
-	ID          uint      `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
-	Name        string    `gorm:"column:name;type:varchar(128);not null;uniqueIndex:uk_tenant_name,priority:2" json:"name"`
-	Description string    `gorm:"column:description;type:varchar(512)" json:"description"`
+	TenantID    string `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
+	ID          uint   `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
+	Name        string `gorm:"column:name;type:varchar(128);not null;uniqueIndex:uk_tenant_name,priority:2" json:"name"`
+	Description string `gorm:"column:description;type:varchar(512)" json:"description"`
 	// 匹配规则
 	HostLabelSelector string `gorm:"column:host_label_selector;type:varchar(512)" json:"host_label_selector"` // e.g. "env=prod,role=db"
 	// 部署配置
-	TargetDirsJSON  string `gorm:"column:target_dirs;type:text" json:"target_dirs"`   // JSON array
-	DecoyKindsJSON  string `gorm:"column:decoy_kinds;type:text" json:"decoy_kinds"`   // JSON array
-	NameSeed        string `gorm:"column:name_seed;type:varchar(64)" json:"name_seed"`
+	TargetDirsJSON string `gorm:"column:target_dirs;type:text" json:"target_dirs"` // JSON array
+	DecoyKindsJSON string `gorm:"column:decoy_kinds;type:text" json:"decoy_kinds"` // JSON array
+	NameSeed       string `gorm:"column:name_seed;type:varchar(64)" json:"name_seed"`
 	// 白名单 (合法备份/运维进程 exe 匹配)
 	WhitelistExeJSON string `gorm:"column:whitelist_exe;type:text" json:"whitelist_exe"` // JSON array of exe paths/regex
 	// 状态
@@ -40,14 +40,14 @@ var DefaultHoneypotWhitelist = []string{
 	"/usr/bin/rsync",
 	"/usr/bin/tar",
 	"/usr/bin/gzip",
-	"/usr/bin/borg",          // BorgBackup
+	"/usr/bin/borg", // BorgBackup
 	"/usr/bin/restic",
 	"/usr/bin/duplicati",
 	"/usr/bin/duplicity",
 	"/usr/bin/rclone",
-	"/usr/bin/find",          // 运维巡检
+	"/usr/bin/find", // 运维巡检
 	"/usr/bin/grep",
-	"/usr/sbin/clamscan",     // 老牌 AV
+	"/usr/sbin/clamscan",           // 老牌 AV
 	"/opt/mxsec/agent/bin/scanner", // 我们自己的 scanner
 }
 

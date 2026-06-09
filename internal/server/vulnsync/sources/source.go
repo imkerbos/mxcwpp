@@ -28,9 +28,9 @@ import (
 //
 // 各 Driver 把原始数据归一化成 Advisory,VulnSync 仲裁后推送到 Kafka mxsec.vuln.advisory。
 type Advisory struct {
-	Source        string    `json:"source"`         // nvd / osv / rhsa / usn / debian / alpine / suse / kev / exploitdb / cnnvd / openeuler / anolis / kylin / uos / epss
-	SourceID      string    `json:"source_id"`      // 源内唯一 ID,如 CVE-2024-1234 / RHSA-2024:0001
-	CVE           string    `json:"cve"`            // CVE 编号 (空时为 source-only)
+	Source        string    `json:"source"`    // nvd / osv / rhsa / usn / debian / alpine / suse / kev / exploitdb / cnnvd / openeuler / anolis / kylin / uos / epss
+	SourceID      string    `json:"source_id"` // 源内唯一 ID,如 CVE-2024-1234 / RHSA-2024:0001
+	CVE           string    `json:"cve"`       // CVE 编号 (空时为 source-only)
 	CNNVD         string    `json:"cnnvd,omitempty"`
 	Title         string    `json:"title"`
 	Description   string    `json:"description"`

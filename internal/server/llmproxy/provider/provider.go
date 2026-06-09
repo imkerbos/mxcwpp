@@ -34,11 +34,11 @@ type Message struct {
 
 // CompletionResponse 是 LLM 补全结果。
 type CompletionResponse struct {
-	Content      string `json:"content"`
-	Model        string `json:"model"`
-	FinishReason string `json:"finish_reason"`
-	TokensIn     int    `json:"tokens_in"`
-	TokensOut    int    `json:"tokens_out"`
+	Content      string  `json:"content"`
+	Model        string  `json:"model"`
+	FinishReason string  `json:"finish_reason"`
+	TokensIn     int     `json:"tokens_in"`
+	TokensOut    int     `json:"tokens_out"`
 	CostUSD      float64 `json:"cost_usd"`
 	Provider     string  `json:"provider"`
 }

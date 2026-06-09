@@ -4,10 +4,10 @@ package model
 //
 // 流程:
 //
-//	1. 用户 (ops) 提交变更: target_key/old_value/proposed_value/reason
-//	2. 审批人 (admin/security_lead) review → approve/reject
-//	3. approved → manager 后台 worker apply (FeatureFlag.UpdateBy=approver)
-//	4. 整个生命周期落 audit_log
+//  1. 用户 (ops) 提交变更: target_key/old_value/proposed_value/reason
+//  2. 审批人 (admin/security_lead) review → approve/reject
+//  3. approved → manager 后台 worker apply (FeatureFlag.UpdateBy=approver)
+//  4. 整个生命周期落 audit_log
 //
 // 与 FeatureFlag 关系:
 //   - 同 key 同时只允一个 status=pending 的请求

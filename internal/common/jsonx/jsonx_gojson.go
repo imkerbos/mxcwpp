@@ -14,11 +14,13 @@ import (
 	gojson "github.com/goccy/go-json"
 )
 
-func Marshal(v any) ([]byte, error)                              { return gojson.Marshal(v) }
-func MarshalIndent(v any, prefix, indent string) ([]byte, error) { return gojson.MarshalIndent(v, prefix, indent) }
-func Unmarshal(data []byte, v any) error                         { return gojson.Unmarshal(data, v) }
-func NewEncoder(w io.Writer) Encoder                             { return gojson.NewEncoder(w) }
-func NewDecoder(r io.Reader) Decoder                             { return gojson.NewDecoder(r) }
+func Marshal(v any) ([]byte, error) { return gojson.Marshal(v) }
+func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
+	return gojson.MarshalIndent(v, prefix, indent)
+}
+func Unmarshal(data []byte, v any) error { return gojson.Unmarshal(data, v) }
+func NewEncoder(w io.Writer) Encoder     { return gojson.NewEncoder(w) }
+func NewDecoder(r io.Reader) Decoder     { return gojson.NewDecoder(r) }
 
 type Encoder interface {
 	Encode(v any) error

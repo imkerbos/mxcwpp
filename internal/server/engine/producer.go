@@ -40,12 +40,12 @@ type AlertEnvelope struct {
 // 异步发送 + ack callback. Publish RT 从 SyncProducer 的 P99 ~50ms 降到 sync.Pool put
 // 级别 (<10μs). 失败由 Errors() goroutine 兜底重投 1 次 + 写 DLQ.
 type AlertProducer struct {
-	producer    sarama.AsyncProducer
-	topic       string
-	logger      *zap.Logger
-	stopCh      chan struct{}
-	failed      atomic.Uint64
-	succeeded   atomic.Uint64
+	producer  sarama.AsyncProducer
+	topic     string
+	logger    *zap.Logger
+	stopCh    chan struct{}
+	failed    atomic.Uint64
+	succeeded atomic.Uint64
 }
 
 // NewAlertProducer 构造告警 producer (Async + batch).

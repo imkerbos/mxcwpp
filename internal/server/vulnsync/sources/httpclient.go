@@ -28,14 +28,14 @@ func SharedHTTPClient() *http.Client {
 		sharedClient = &http.Client{
 			Timeout: 60 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				MaxConnsPerHost:     20,
-				IdleConnTimeout:     90 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   10,
+				MaxConnsPerHost:       20,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
 				ExpectContinueTimeout: 1 * time.Second,
-				DisableCompression:  false,
-				ForceAttemptHTTP2:   true,
+				DisableCompression:    false,
+				ForceAttemptHTTP2:     true,
 			},
 		}
 	})

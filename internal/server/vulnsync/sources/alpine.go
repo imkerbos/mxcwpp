@@ -57,14 +57,14 @@ func (d *AlpineDriver) Fetch(ctx context.Context, _ time.Time) (*FetchResult, er
 	}
 
 	var raw struct {
-		Apkurl    string `json:"apkurl"`
+		Apkurl    string   `json:"apkurl"`
 		Archs     []string `json:"archs"`
-		Reponame  string `json:"reponame"`
-		Urlprefix string `json:"urlprefix"`
+		Reponame  string   `json:"reponame"`
+		Urlprefix string   `json:"urlprefix"`
 		Packages  []struct {
 			Pkg struct {
-				Name     string                `json:"name"`
-				Secfixes map[string][]string   `json:"secfixes"`
+				Name     string              `json:"name"`
+				Secfixes map[string][]string `json:"secfixes"`
 			} `json:"pkg"`
 		} `json:"packages"`
 	}

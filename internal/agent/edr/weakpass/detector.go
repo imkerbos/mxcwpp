@@ -69,19 +69,19 @@ func NewDetector(dictName string, logger *zap.Logger) (*Detector, error) {
 
 // CheckResult 单账户检测结果.
 type CheckResult struct {
-	Username   string `json:"username"`
-	IsWeak     bool   `json:"is_weak"`
+	Username    string `json:"username"`
+	IsWeak      bool   `json:"is_weak"`
 	MatchedAlgo string `json:"matched_algo,omitempty"` // sha512/sha256/md5/des
-	HashPrefix string `json:"hash_prefix,omitempty"`  // 仅前 8 字符 (审计标识, 防泄密)
-	Note       string `json:"note,omitempty"`
+	HashPrefix  string `json:"hash_prefix,omitempty"`  // 仅前 8 字符 (审计标识, 防泄密)
+	Note        string `json:"note,omitempty"`
 }
 
 // ScanShadow 离线扫描 /etc/shadow 弱口令.
 //
 // 流程:
-//   1. 解析 shadow 行 (user:$id$salt$hash:...)
-//   2. 对字典每个候选 password 算 same algorithm hash
-//   3. 与 shadow hash 比对; 匹配即弱口令
+//  1. 解析 shadow 行 (user:$id$salt$hash:...)
+//  2. 对字典每个候选 password 算 same algorithm hash
+//  3. 与 shadow hash 比对; 匹配即弱口令
 //
 // 性能: 1000 字典 × 1000 账户 = 1e6 hash 操作; sha512 约 50μs → ~50s.
 // 实际部署: 周期跑 (每周), 不阻塞主链路.
@@ -117,11 +117,12 @@ func (d *Detector) ScanShadow(path string) ([]CheckResult, error) {
 // tryCrack 对 shadow hash 用字典尝试破解.
 //
 // shadow hash 格式: $id$salt$hash
-//   $1$ = MD5
-//   $5$ = SHA-256
-//   $6$ = SHA-512
-//   $y$ = yescrypt (现代默认, 留 M2 库依赖)
-//   $2a/2b/2y$ = bcrypt (留 M2)
+//
+//	$1$ = MD5
+//	$5$ = SHA-256
+//	$6$ = SHA-512
+//	$y$ = yescrypt (现代默认, 留 M2 库依赖)
+//	$2a/2b/2y$ = bcrypt (留 M2)
 func (d *Detector) tryCrack(user, shadowHash string) CheckResult {
 	parts := strings.SplitN(shadowHash, "$", 4)
 	if len(parts) < 4 {
@@ -150,10 +151,10 @@ func (d *Detector) tryCrack(user, shadowHash string) CheckResult {
 	for candidate := range d.dict {
 		if cryptCheck(h, candidate, salt, expected) {
 			return CheckResult{
-				Username:   user,
-				IsWeak:     true,
+				Username:    user,
+				IsWeak:      true,
 				MatchedAlgo: algo,
-				HashPrefix: prefixForAudit(shadowHash),
+				HashPrefix:  prefixForAudit(shadowHash),
 			}
 		}
 	}

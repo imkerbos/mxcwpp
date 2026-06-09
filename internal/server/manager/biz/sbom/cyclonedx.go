@@ -25,19 +25,19 @@ import (
 
 // Format 是 CycloneDX SBOM 的根结构 (v1.5)。
 type Format struct {
-	BOMFormat    string          `json:"bomFormat"`              // "CycloneDX"
-	SpecVersion  string          `json:"specVersion"`            // "1.5"
-	SerialNumber string          `json:"serialNumber"`           // urn:uuid:<random>
-	Version      int             `json:"version"`                // 1, 2, ... (每次重新生成递增)
-	Metadata     Metadata        `json:"metadata"`
-	Components   []Component     `json:"components,omitempty"`
+	BOMFormat       string          `json:"bomFormat"`    // "CycloneDX"
+	SpecVersion     string          `json:"specVersion"`  // "1.5"
+	SerialNumber    string          `json:"serialNumber"` // urn:uuid:<random>
+	Version         int             `json:"version"`      // 1, 2, ... (每次重新生成递增)
+	Metadata        Metadata        `json:"metadata"`
+	Components      []Component     `json:"components,omitempty"`
 	Vulnerabilities []Vulnerability `json:"vulnerabilities,omitempty"`
 }
 
 // Metadata SBOM 元信息。
 type Metadata struct {
-	Timestamp string       `json:"timestamp"` // ISO8601
-	Tools     []Tool       `json:"tools,omitempty"`
+	Timestamp string        `json:"timestamp"` // ISO8601
+	Tools     []Tool        `json:"tools,omitempty"`
 	Component MainComponent `json:"component,omitempty"` // 主体 (主机/镜像)
 }
 
@@ -50,27 +50,27 @@ type Tool struct {
 
 // MainComponent 主体描述 (主机/镜像).
 type MainComponent struct {
-	Type    string `json:"type"`    // "operating-system" / "container" / "device"
-	Name    string `json:"name"`    // host_id / image_name
+	Type    string `json:"type"` // "operating-system" / "container" / "device"
+	Name    string `json:"name"` // host_id / image_name
 	Version string `json:"version,omitempty"`
 }
 
 // Component 单条软件包/库。
 type Component struct {
-	Type        string  `json:"type"`        // "library" / "operating-system" / "application"
-	BomRef      string  `json:"bom-ref"`     // 唯一 ID (PURL hash)
-	Name        string  `json:"name"`
-	Version     string  `json:"version"`
-	PURL        string  `json:"purl,omitempty"`        // pkg:rpm/centos/openssl@1.0.2k...
-	CPE         string  `json:"cpe,omitempty"`
-	Hashes      []Hash  `json:"hashes,omitempty"`
+	Type        string    `json:"type"`    // "library" / "operating-system" / "application"
+	BomRef      string    `json:"bom-ref"` // 唯一 ID (PURL hash)
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	PURL        string    `json:"purl,omitempty"` // pkg:rpm/centos/openssl@1.0.2k...
+	CPE         string    `json:"cpe,omitempty"`
+	Hashes      []Hash    `json:"hashes,omitempty"`
 	Licenses    []License `json:"licenses,omitempty"`
-	Description string  `json:"description,omitempty"`
+	Description string    `json:"description,omitempty"`
 }
 
 // Hash 包文件 hash.
 type Hash struct {
-	Alg     string `json:"alg"`     // "SHA-256"
+	Alg     string `json:"alg"` // "SHA-256"
 	Content string `json:"content"`
 }
 
@@ -81,18 +81,18 @@ type License struct {
 
 // LicenseInfo SPDX ID 或 name.
 type LicenseInfo struct {
-	ID   string `json:"id,omitempty"`   // SPDX (e.g. Apache-2.0)
+	ID   string `json:"id,omitempty"` // SPDX (e.g. Apache-2.0)
 	Name string `json:"name,omitempty"`
 }
 
 // Vulnerability CycloneDX VEX 漏洞.
 type Vulnerability struct {
-	BomRef       string       `json:"bom-ref"`
-	ID           string       `json:"id"`           // CVE-2024-3094
-	Source       Source       `json:"source"`
-	Ratings      []Rating     `json:"ratings,omitempty"`
-	Description  string       `json:"description,omitempty"`
-	Affects      []AffectsRef `json:"affects"`
+	BomRef      string       `json:"bom-ref"`
+	ID          string       `json:"id"` // CVE-2024-3094
+	Source      Source       `json:"source"`
+	Ratings     []Rating     `json:"ratings,omitempty"`
+	Description string       `json:"description,omitempty"`
+	Affects     []AffectsRef `json:"affects"`
 }
 
 // Source 漏洞来源.
@@ -117,10 +117,10 @@ type AffectsRef struct {
 
 // Package 输入: 主机软件包.
 type Package struct {
-	Name        string   // openssl
-	Version     string   // 1.0.2k-26.el7
-	Type        string   // rpm / deb / pypi / npm / maven / golang
-	OS          string   // centos / ubuntu / alpine / ...
+	Name        string // openssl
+	Version     string // 1.0.2k-26.el7
+	Type        string // rpm / deb / pypi / npm / maven / golang
+	OS          string // centos / ubuntu / alpine / ...
 	License     string
 	Description string
 	SHA256      string
@@ -130,7 +130,7 @@ type Package struct {
 
 // CVEInfo 单条 CVE 关联.
 type CVEInfo struct {
-	ID       string  // CVE-2024-3094
+	ID       string // CVE-2024-3094
 	Severity string
 	CVSS     float64
 	Source   string // nvd / redhat / openeuler

@@ -31,10 +31,10 @@ type FlowEdge struct {
 
 // PolicyGenConfig 生成器配置.
 type PolicyGenConfig struct {
-	DefaultDeny     bool // 是否生成 default-deny 基础策略
-	IncludeEgress   bool // 是否含 egress
-	MinFlowCount    int  // 流量观察次数下限 (过滤偶发流量)
-	NameTemplate    string // policy name 模板, 默认 "auto-{namespace}"
+	DefaultDeny   bool   // 是否生成 default-deny 基础策略
+	IncludeEgress bool   // 是否含 egress
+	MinFlowCount  int    // 流量观察次数下限 (过滤偶发流量)
+	NameTemplate  string // policy name 模板, 默认 "auto-{namespace}"
 }
 
 // ingressRule 单条 ingress (file scope).

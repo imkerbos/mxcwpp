@@ -54,9 +54,9 @@ type PolicyRecommendation struct {
 //
 // 规则:
 //
-//	1. 同 (src→dst:port/proto) 在多个窗口被观察到 → 推荐 allow
-//	2. 单 namespace 仅出现 N 条 allow → 同时推荐 default deny ingress
-//	3. 出向只对外 (dst 不在集群) → 推荐 egress allow
+//  1. 同 (src→dst:port/proto) 在多个窗口被观察到 → 推荐 allow
+//  2. 单 namespace 仅出现 N 条 allow → 同时推荐 default deny ingress
+//  3. 出向只对外 (dst 不在集群) → 推荐 egress allow
 //
 // 不直接产 K8s NetworkPolicy yaml; 由后续 Sprint 的 renderer 输出。
 func Recommend(in RecommendInput) []PolicyRecommendation {

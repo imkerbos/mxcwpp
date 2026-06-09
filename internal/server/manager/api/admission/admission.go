@@ -33,9 +33,9 @@ import (
 
 // AdmissionReview K8s admission webhook 请求/响应 schema (v1)。
 type AdmissionReview struct {
-	APIVersion string           `json:"apiVersion"`
-	Kind       string           `json:"kind"`
-	Request    *AdmissionRequest `json:"request,omitempty"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Request    *AdmissionRequest  `json:"request,omitempty"`
 	Response   *AdmissionResponse `json:"response,omitempty"`
 }
 
@@ -71,9 +71,9 @@ type UserInfo struct {
 
 // AdmissionResponse webhook 决策。
 type AdmissionResponse struct {
-	UID     string   `json:"uid"`
-	Allowed bool     `json:"allowed"`
-	Status  *Status  `json:"status,omitempty"`
+	UID      string   `json:"uid"`
+	Allowed  bool     `json:"allowed"`
+	Status   *Status  `json:"status,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
 
