@@ -15,19 +15,19 @@ import (
 
 // Event 是单次 LLM 调用的审计事件。
 type Event struct {
-	Timestamp     time.Time `json:"timestamp"`
-	TenantID      string    `json:"tenant_id"`
-	UserID        string    `json:"user_id,omitempty"`
-	Scene         string    `json:"scene"`
-	Provider      string    `json:"provider"`
-	Model         string    `json:"model"`
-	TokensIn      int       `json:"tokens_in"`
-	TokensOut     int       `json:"tokens_out"`
-	CostUSD       float64   `json:"cost_usd"`
-	LatencyMS     int64     `json:"latency_ms"`
-	Status        string    `json:"status"` // success / failure / quota_exceeded
-	Err           string    `json:"err,omitempty"`
-	TraceID       string    `json:"trace_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	TenantID  string    `json:"tenant_id"`
+	UserID    string    `json:"user_id,omitempty"`
+	Scene     string    `json:"scene"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	TokensIn  int       `json:"tokens_in"`
+	TokensOut int       `json:"tokens_out"`
+	CostUSD   float64   `json:"cost_usd"`
+	LatencyMS int64     `json:"latency_ms"`
+	Status    string    `json:"status"` // success / failure / quota_exceeded
+	Err       string    `json:"err,omitempty"`
+	TraceID   string    `json:"trace_id,omitempty"`
 	// 不写入入参内容 (隐私), 仅记录元数据
 }
 

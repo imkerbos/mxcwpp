@@ -41,9 +41,9 @@ type VirtualPatchMetrics struct {
 // Snapshot 拷贝 counter (无锁).
 func (m *VirtualPatchMetrics) Snapshot() map[string]uint64 {
 	return map[string]uint64{
-		"dirtypipe_splice":     m.DirtyPipeSplice.Load(),
-		"dirtypipe_suspect":    m.DirtyPipeSuspect.Load(),
-		"pwnkit_invocations":   m.PwnKitInvocations.Load(),
+		"dirtypipe_splice":   m.DirtyPipeSplice.Load(),
+		"dirtypipe_suspect":  m.DirtyPipeSuspect.Load(),
+		"pwnkit_invocations": m.PwnKitInvocations.Load(),
 	}
 }
 

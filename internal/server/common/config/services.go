@@ -23,20 +23,20 @@ type CommonInfra struct {
 
 // RedisConfig Redis 连接参数。
 type RedisConfig struct {
-	Addr     string `mapstructure:"addr"`     // host:port
+	Addr     string `mapstructure:"addr"` // host:port
 	Password string `mapstructure:"password"`
 	DB       int    `mapstructure:"db"`
 }
 
 // ManagerConfig Manager 微服务配置。
 type ManagerConfig struct {
-	HTTPAddr       string         `mapstructure:"http_addr"`
-	JWTSecret      string         `mapstructure:"jwt_secret"`
-	InternalSecret string         `mapstructure:"internal_secret"`
-	UploadDir      string         `mapstructure:"upload_dir"`
+	HTTPAddr       string `mapstructure:"http_addr"`
+	JWTSecret      string `mapstructure:"jwt_secret"`
+	InternalSecret string `mapstructure:"internal_secret"`
+	UploadDir      string `mapstructure:"upload_dir"`
 	CommonInfra    `mapstructure:",squash"`
-	ClickHouse     CHConfig       `mapstructure:"clickhouse"`
-	Plugins        PluginsConfig  `mapstructure:"plugins"`
+	ClickHouse     CHConfig      `mapstructure:"clickhouse"`
+	Plugins        PluginsConfig `mapstructure:"plugins"`
 }
 
 // CHConfig ClickHouse.
@@ -78,19 +78,19 @@ type ConsumerConfig struct {
 
 // VulnSyncConfig VulnSync 微服务配置.
 type VulnSyncConfig struct {
-	HTTPAddr     string   `mapstructure:"http_addr"`
-	Sources      []string `mapstructure:"sources"`       // 启用的源列表
-	NVDAPIKey    string   `mapstructure:"nvd_api_key"`   // NVD API key
-	SyncInterval string   `mapstructure:"sync_interval"` // duration string
-	AdvisoryTopic string  `mapstructure:"advisory_topic"`
-	CommonInfra  `mapstructure:",squash"`
+	HTTPAddr      string   `mapstructure:"http_addr"`
+	Sources       []string `mapstructure:"sources"`       // 启用的源列表
+	NVDAPIKey     string   `mapstructure:"nvd_api_key"`   // NVD API key
+	SyncInterval  string   `mapstructure:"sync_interval"` // duration string
+	AdvisoryTopic string   `mapstructure:"advisory_topic"`
+	CommonInfra   `mapstructure:",squash"`
 }
 
 // LLMProxyConfig LLMProxy 微服务配置.
 type LLMProxyConfig struct {
-	HTTPAddr  string                       `mapstructure:"http_addr"`
-	Providers map[string]LLMProviderConfig `mapstructure:"providers"`
-	Quota     LLMQuotaConfig               `mapstructure:"quota"`
+	HTTPAddr    string                       `mapstructure:"http_addr"`
+	Providers   map[string]LLMProviderConfig `mapstructure:"providers"`
+	Quota       LLMQuotaConfig               `mapstructure:"quota"`
 	CommonInfra `mapstructure:",squash"`
 }
 

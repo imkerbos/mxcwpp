@@ -20,10 +20,10 @@ import (
 //
 // 设计文档: docs/engine-detection-design.md
 type Pipeline struct {
-	producer  *AlertProducer
-	resolver  *mode.MemoryResolver
-	stages    []Stage
-	logger    *zap.Logger
+	producer *AlertProducer
+	resolver *mode.MemoryResolver
+	stages   []Stage
+	logger   *zap.Logger
 }
 
 // Stage 是 Pipeline 中的一层检测处理器。
@@ -37,15 +37,15 @@ type Stage interface {
 
 // PipelineEvent 是 Engine 内部统一事件 schema (解码自 Kafka).
 type PipelineEvent struct {
-	TenantID  string          `json:"tenant_id"`
-	AgentID   string          `json:"agent_id"`
-	HostID    string          `json:"host_id"`
-	DataType  int32           `json:"data_type"`
-	Topic     string          `json:"-"`
-	Partition int32           `json:"-"`
-	Offset    int64           `json:"-"`
-	ReceivedAt time.Time      `json:"received_at"`
-	Payload   json.RawMessage `json:"payload"`
+	TenantID   string          `json:"tenant_id"`
+	AgentID    string          `json:"agent_id"`
+	HostID     string          `json:"host_id"`
+	DataType   int32           `json:"data_type"`
+	Topic      string          `json:"-"`
+	Partition  int32           `json:"-"`
+	Offset     int64           `json:"-"`
+	ReceivedAt time.Time       `json:"received_at"`
+	Payload    json.RawMessage `json:"payload"`
 	// P0-5: Pipeline 顶层预解码 fields, 各 stage 共享避免 3+ 次 jsonx.Unmarshal.
 	// 用 *fieldsCache 指针, 多个 ev 值拷贝共享同一 cache (struct copy 仅复制 pointer).
 	fieldsCache *fieldsCache `json:"-"`

@@ -25,18 +25,18 @@ import (
 type Cluster struct {
 	ID            string    `gorm:"column:id;primaryKey" json:"id"`
 	Name          string    `gorm:"column:name" json:"name"`
-	Endpoint      string    `gorm:"column:endpoint" json:"endpoint"`   // 子集群 Manager URL
-	Token         string    `gorm:"column:token" json:"-"`              // 鉴权 token (KMS 加密)
+	Endpoint      string    `gorm:"column:endpoint" json:"endpoint"` // 子集群 Manager URL
+	Token         string    `gorm:"column:token" json:"-"`           // 鉴权 token (KMS 加密)
 	Region        string    `gorm:"column:region" json:"region"`
 	Status        string    `gorm:"column:status" json:"status"` // online / offline / unreachable / paused
 	LastHeartbeat time.Time `gorm:"column:last_heartbeat" json:"last_heartbeat"`
 
 	// 子集群最新摘要
-	HostCount       int64 `gorm:"column:host_count" json:"host_count"`
-	OnlineHostCount int64 `gorm:"column:online_host_count" json:"online_host_count"`
-	OpenAlertCount  int64 `gorm:"column:open_alert_count" json:"open_alert_count"`
-	CriticalAlerts  int64 `gorm:"column:critical_alerts" json:"critical_alerts"`
-	UnpatchedVulns  int64 `gorm:"column:unpatched_vulns" json:"unpatched_vulns"`
+	HostCount       int64  `gorm:"column:host_count" json:"host_count"`
+	OnlineHostCount int64  `gorm:"column:online_host_count" json:"online_host_count"`
+	OpenAlertCount  int64  `gorm:"column:open_alert_count" json:"open_alert_count"`
+	CriticalAlerts  int64  `gorm:"column:critical_alerts" json:"critical_alerts"`
+	UnpatchedVulns  int64  `gorm:"column:unpatched_vulns" json:"unpatched_vulns"`
 	Mode            string `gorm:"column:mode" json:"mode"` // observe / protect
 }
 
@@ -45,16 +45,16 @@ func (Cluster) TableName() string { return "federated_clusters" }
 
 // HeartbeatPayload 子集群上报.
 type HeartbeatPayload struct {
-	ClusterID       string  `json:"cluster_id"`
-	Token           string  `json:"token"`
-	HostCount       int64   `json:"host_count"`
-	OnlineHostCount int64   `json:"online_host_count"`
-	OpenAlertCount  int64   `json:"open_alert_count"`
-	CriticalAlerts  int64   `json:"critical_alerts"`
-	UnpatchedVulns  int64   `json:"unpatched_vulns"`
-	Mode            string  `json:"mode"`
-	Version         string  `json:"version"`
-	AgentVersionMin string  `json:"agent_version_min"`
+	ClusterID       string `json:"cluster_id"`
+	Token           string `json:"token"`
+	HostCount       int64  `json:"host_count"`
+	OnlineHostCount int64  `json:"online_host_count"`
+	OpenAlertCount  int64  `json:"open_alert_count"`
+	CriticalAlerts  int64  `json:"critical_alerts"`
+	UnpatchedVulns  int64  `json:"unpatched_vulns"`
+	Mode            string `json:"mode"`
+	Version         string `json:"version"`
+	AgentVersionMin string `json:"agent_version_min"`
 }
 
 // Service 中心 Manager 侧的联邦管理.
@@ -175,13 +175,13 @@ func (s *Service) AggregateSummary(ctx context.Context) (*Summary, error) {
 
 // Summary 中心 dashboard 视图.
 type Summary struct {
-	TotalClusters   int   `json:"total_clusters"`
-	OnlineClusters  int   `json:"online_clusters"`
-	TotalHosts      int64 `json:"total_hosts"`
-	OnlineHosts     int64 `json:"online_hosts"`
-	OpenAlerts      int64 `json:"open_alerts"`
-	CriticalAlerts  int64 `json:"critical_alerts"`
-	UnpatchedVulns  int64 `json:"unpatched_vulns"`
+	TotalClusters  int   `json:"total_clusters"`
+	OnlineClusters int   `json:"online_clusters"`
+	TotalHosts     int64 `json:"total_hosts"`
+	OnlineHosts    int64 `json:"online_hosts"`
+	OpenAlerts     int64 `json:"open_alerts"`
+	CriticalAlerts int64 `json:"critical_alerts"`
+	UnpatchedVulns int64 `json:"unpatched_vulns"`
 }
 
 // ListClusters 列出已注册集群.

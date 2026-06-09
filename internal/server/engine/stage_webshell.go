@@ -56,7 +56,7 @@ func (s *WebshellStage) Process(ctx context.Context, ev PipelineEvent) ([]Alert,
 			AlertID:        fmt.Sprintf("alrt-webshell-%s-%d-%d", ev.HostID, ev.Partition, ev.Offset),
 			RuleID:         "WEBSHELL_HEURISTIC",
 			Severity:       "critical",
-			ATTCKTactic:    "TA0003", // Persistence
+			ATTCKTactic:    "TA0003",    // Persistence
 			ATTCKTechnique: "T1505.003", // Server Software Component: Web Shell
 			Payload:        payload,
 			WouldAction:    payload,

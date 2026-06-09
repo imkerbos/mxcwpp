@@ -33,12 +33,12 @@ import (
 
 // Source TAXII 源配置.
 type Source struct {
-	Name         string            `json:"name"`           // mitre / threatbook / qianxin / otx / vt
-	BaseURL      string            `json:"base_url"`       // https://cti-taxii.mitre.org
-	APIRoot      string            `json:"api_root"`       // /stix/
-	CollectionID string            `json:"collection_id"`  // 95ecc380-afe9-11e4-9b6c-751b66dd541e
-	Headers      map[string]string `json:"headers"`        // Authorization 等
-	PollInterval time.Duration     `json:"poll_interval"`  // 默认 1h
+	Name         string            `json:"name"`          // mitre / threatbook / qianxin / otx / vt
+	BaseURL      string            `json:"base_url"`      // https://cti-taxii.mitre.org
+	APIRoot      string            `json:"api_root"`      // /stix/
+	CollectionID string            `json:"collection_id"` // 95ecc380-afe9-11e4-9b6c-751b66dd541e
+	Headers      map[string]string `json:"headers"`       // Authorization 等
+	PollInterval time.Duration     `json:"poll_interval"` // 默认 1h
 }
 
 // Client TAXII 2.x 客户端.
@@ -151,22 +151,22 @@ type Collection struct {
 
 // ObjectEnvelope STIX objects envelope.
 type ObjectEnvelope struct {
-	More    bool       `json:"more"`
-	Next    string     `json:"next,omitempty"`
+	More    bool         `json:"more"`
+	Next    string       `json:"next,omitempty"`
 	Objects []StixObject `json:"objects"`
 }
 
 // StixObject 通用 STIX 对象 (subset, 仅取我们关心的字段).
 type StixObject struct {
-	Type    string `json:"type"`    // indicator / malware / threat-actor / attack-pattern / ...
-	ID      string `json:"id"`      // 例 indicator--abc-...
-	Created string `json:"created"`
+	Type     string `json:"type"` // indicator / malware / threat-actor / attack-pattern / ...
+	ID       string `json:"id"`   // 例 indicator--abc-...
+	Created  string `json:"created"`
 	Modified string `json:"modified"`
 	// Indicator 特有
-	Pattern      string `json:"pattern,omitempty"`        // [file:hashes.'SHA-256' = 'xxx'] 等
-	PatternType  string `json:"pattern_type,omitempty"`   // stix / pcre / sigma / snort
-	ValidFrom    string `json:"valid_from,omitempty"`
-	Labels       []string `json:"labels,omitempty"`       // malicious-activity / suspicious-activity
+	Pattern     string   `json:"pattern,omitempty"`      // [file:hashes.'SHA-256' = 'xxx'] 等
+	PatternType string   `json:"pattern_type,omitempty"` // stix / pcre / sigma / snort
+	ValidFrom   string   `json:"valid_from,omitempty"`
+	Labels      []string `json:"labels,omitempty"` // malicious-activity / suspicious-activity
 	// Malware 特有
 	Name        string   `json:"name,omitempty"`
 	Description string   `json:"description,omitempty"`
@@ -187,9 +187,9 @@ type ExternalRef struct {
 //
 // 仅识别最常见的 SHA-256/MD5/SHA-1/domain-name/ipv4-addr/url pattern.
 type IOC struct {
-	Kind  string // hash_sha256 / hash_md5 / hash_sha1 / domain / ipv4 / url
-	Value string
-	Label string // malicious-activity / suspicious-activity
+	Kind   string // hash_sha256 / hash_md5 / hash_sha1 / domain / ipv4 / url
+	Value  string
+	Label  string // malicious-activity / suspicious-activity
 	StixID string
 }
 

@@ -38,12 +38,12 @@ const (
 
 // Rule 是单条 NPatch 规则。
 type Rule struct {
-	ID          string                 `json:"id"`           // npatch-CVE-2022-22965
+	ID          string                 `json:"id"` // npatch-CVE-2022-22965
 	CVE         string                 `json:"cve"`
-	CVEName     string                 `json:"cve_name"`     // Spring4Shell
+	CVEName     string                 `json:"cve_name"` // Spring4Shell
 	Kind        RuleKind               `json:"kind"`
 	Mode        EnforceMode            `json:"mode"`
-	Pattern     map[string]interface{} `json:"pattern"`      // kind-specific 匹配规则
+	Pattern     map[string]interface{} `json:"pattern"` // kind-specific 匹配规则
 	Description string                 `json:"description"`
 	Severity    string                 `json:"severity"`
 	CreatedAt   time.Time              `json:"created_at"`
@@ -119,9 +119,9 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2021-4034", CVE: "CVE-2021-4034", CVEName: "PwnKit",
 			Kind: KindLSMHook, Mode: EnforceBlock, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"binary":         "pkexec",
-				"argc":           0,
-				"non_priv_user":  true,
+				"binary":        "pkexec",
+				"argc":          0,
+				"non_priv_user": true,
 			},
 			Description: "PolKit pkexec 无参数调用提权",
 			CreatedAt:   now,
@@ -130,8 +130,8 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2024-3094", CVE: "CVE-2024-3094", CVEName: "xz-utils backdoor",
 			Kind: KindNetworkPattern, Mode: EnforceMonitor, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"direction": "inbound",
-				"sshd":      true,
+				"direction":  "inbound",
+				"sshd":       true,
 				"version_re": `^OpenSSH_(8\.[56789]|9\.[01234567])`,
 			},
 			Description: "xz-utils 5.6.0/5.6.1 SSH 后门",
@@ -152,8 +152,8 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2017-9805", CVE: "CVE-2017-9805", CVEName: "Apache Struts2 S2-052",
 			Kind: KindNetworkPattern, Mode: EnforceBlock, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"direction": "inbound",
-				"regex":     `<map>.*<entry>.*ProcessBuilder.*</entry>.*</map>`,
+				"direction":    "inbound",
+				"regex":        `<map>.*<entry>.*ProcessBuilder.*</entry>.*</map>`,
 				"content_type": "application/xml",
 			},
 			Description: "Struts2 REST XStream 反序列化 RCE",
@@ -216,10 +216,10 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2021-22205", CVE: "CVE-2021-22205", CVEName: "GitLab ExifTool RCE",
 			Kind: KindNetworkPattern, Mode: EnforceBlock, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"direction":    "inbound",
-				"path_re":      `/uploads/user|/api/v\d+/users.*\.(jpg|png)`,
-				"content_re":   `(?i)DjVu|FORM|ANTa`,
-				"method":       "POST",
+				"direction":  "inbound",
+				"path_re":    `/uploads/user|/api/v\d+/users.*\.(jpg|png)`,
+				"content_re": `(?i)DjVu|FORM|ANTa`,
+				"method":     "POST",
 			},
 			Description: "GitLab DjVu 解析 ExifTool RCE",
 			CreatedAt:   now,
@@ -271,9 +271,9 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2023-50164", CVE: "CVE-2023-50164", CVEName: "Struts2 S2-066 Upload Path Traversal",
 			Kind: KindNetworkPattern, Mode: EnforceBlock, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"direction":  "inbound",
-				"regex":      `[Uu]pload[Ff]ile[Nn]ame=\\.\\.|filename=.*\.\./`,
-				"method":     "POST",
+				"direction": "inbound",
+				"regex":     `[Uu]pload[Ff]ile[Nn]ame=\\.\\.|filename=.*\.\./`,
+				"method":    "POST",
 			},
 			Description: "Apache Struts2 文件上传路径穿越 RCE",
 			CreatedAt:   now,
@@ -347,8 +347,8 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2024-1086", CVE: "CVE-2024-1086", CVEName: "Linux nft_double_free LPE",
 			Kind: KindSyscallParam, Mode: EnforceMonitor, Severity: "high",
 			Pattern: map[string]interface{}{
-				"syscall":  "nf_tables",
-				"verdict_op": "NFT_MSG_NEWCHAIN",
+				"syscall":       "nf_tables",
+				"verdict_op":    "NFT_MSG_NEWCHAIN",
 				"non_priv_user": true,
 			},
 			Description: "Linux netfilter nft 双重释放本地提权 (nft 命令异常)",
@@ -358,9 +358,9 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2023-32233", CVE: "CVE-2023-32233", CVEName: "Linux nftables UAF",
 			Kind: KindSyscallParam, Mode: EnforceMonitor, Severity: "high",
 			Pattern: map[string]interface{}{
-				"syscall": "setsockopt",
-				"level":   "NF_NETLINK",
-				"argv_re": `nft_set_destroy|nft_chain_use`,
+				"syscall":       "setsockopt",
+				"level":         "NF_NETLINK",
+				"argv_re":       `nft_set_destroy|nft_chain_use`,
 				"non_priv_user": true,
 			},
 			Description: "Linux netfilter nf_tables Use-After-Free 提权",
@@ -370,8 +370,8 @@ func BuiltinRules() []Rule {
 			ID: "npatch-CVE-2024-21626", CVE: "CVE-2024-21626", CVEName: "runc Leaky Vessels",
 			Kind: KindLSMHook, Mode: EnforceBlock, Severity: "critical",
 			Pattern: map[string]interface{}{
-				"binary":   "runc",
-				"argv_re":  `WORKDIR.*\/proc\/self\/fd\/[0-9]+`,
+				"binary":            "runc",
+				"argv_re":           `WORKDIR.*\/proc\/self\/fd\/[0-9]+`,
 				"container_context": true,
 			},
 			Description: "runc 文件描述符泄露容器逃逸 (Leaky Vessels)",

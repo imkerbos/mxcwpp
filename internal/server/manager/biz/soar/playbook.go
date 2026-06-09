@@ -5,13 +5,13 @@
 //
 // Playbook 是声明式的告警响应工作流, 由多个 Step 组成:
 //
-//	1. trigger     — 触发条件 (告警 severity / rule_id / host_label)
-//	2. context     — 上下文丰富 (查 host 信息 / vuln / 历史告警)
-//	3. enrichment  — 威胁情报关联 (VT/STIX 查 hash/ip)
-//	4. decision    — 条件分支 (if-else)
-//	5. action      — 执行动作 (isolate_host / kill_pid / block_ip / notify / quarantine)
-//	6. notification — 多渠道告知 (邮件/钉钉/Slack/Webhook)
-//	7. ticket      — 工单系统集成 (JIRA/ServiceNow)
+//  1. trigger     — 触发条件 (告警 severity / rule_id / host_label)
+//  2. context     — 上下文丰富 (查 host 信息 / vuln / 历史告警)
+//  3. enrichment  — 威胁情报关联 (VT/STIX 查 hash/ip)
+//  4. decision    — 条件分支 (if-else)
+//  5. action      — 执行动作 (isolate_host / kill_pid / block_ip / notify / quarantine)
+//  6. notification — 多渠道告知 (邮件/钉钉/Slack/Webhook)
+//  7. ticket      — 工单系统集成 (JIRA/ServiceNow)
 //
 // 安全 + 可审计:
 //   - 每个 Step 执行前 admission 校验
@@ -61,30 +61,30 @@ const (
 
 // Trigger Playbook 触发条件.
 type Trigger struct {
-	Severities   []string `json:"severities,omitempty"`   // critical/high/medium/low
-	Categories   []string `json:"categories,omitempty"`   // intrusion / cryptomining / ...
-	RuleIDs      []string `json:"rule_ids,omitempty"`     // 具体规则 ID
-	HostLabels   map[string]string `json:"host_labels,omitempty"`
-	MitreIDs     []string `json:"mitre_ids,omitempty"`
+	Severities []string          `json:"severities,omitempty"` // critical/high/medium/low
+	Categories []string          `json:"categories,omitempty"` // intrusion / cryptomining / ...
+	RuleIDs    []string          `json:"rule_ids,omitempty"`   // 具体规则 ID
+	HostLabels map[string]string `json:"host_labels,omitempty"`
+	MitreIDs   []string          `json:"mitre_ids,omitempty"`
 }
 
 // Step 单步.
 type Step struct {
-	ID          string                 `json:"id"`            // step-1 / context-host / decision-severity
+	ID          string                 `json:"id"` // step-1 / context-host / decision-severity
 	Kind        StepKind               `json:"kind"`
 	Description string                 `json:"description"`
-	Params      map[string]interface{} `json:"params"`        // kind-specific 参数
+	Params      map[string]interface{} `json:"params"`               // kind-specific 参数
 	OnSuccess   string                 `json:"on_success,omitempty"` // 下一步 ID; 空表示继续顺序
 	OnFailure   string                 `json:"on_failure,omitempty"` // 失败跳转 (默认 abort)
 	TimeoutSec  int                    `json:"timeout_sec,omitempty"`
 	// admission: 危险动作必填
-	RequiresMode string `json:"requires_mode,omitempty"` // protect (会强制校验)
-	RequiresApprovers int `json:"requires_approvers,omitempty"` // ≥1 时需人工确认
+	RequiresMode      string `json:"requires_mode,omitempty"`      // protect (会强制校验)
+	RequiresApprovers int    `json:"requires_approvers,omitempty"` // ≥1 时需人工确认
 }
 
 // Playbook 编排定义.
 type Playbook struct {
-	ID          string  `json:"id"`           // pb-ransomware-response / pb-c2-block
+	ID          string  `json:"id"` // pb-ransomware-response / pb-c2-block
 	TenantID    string  `json:"tenant_id"`
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
@@ -109,13 +109,13 @@ type ExecutionContext struct {
 
 // StepAuditEntry 单步执行审计记录.
 type StepAuditEntry struct {
-	StepID     string         `json:"step_id"`
-	Kind       StepKind       `json:"kind"`
-	Status     string         `json:"status"` // success / failed / skipped / pending_approval
-	Output     interface{}    `json:"output,omitempty"`
-	ErrorMsg   string         `json:"error_msg,omitempty"`
-	StartedAt  time.Time      `json:"started_at"`
-	DurationMs int64          `json:"duration_ms"`
+	StepID     string      `json:"step_id"`
+	Kind       StepKind    `json:"kind"`
+	Status     string      `json:"status"` // success / failed / skipped / pending_approval
+	Output     interface{} `json:"output,omitempty"`
+	ErrorMsg   string      `json:"error_msg,omitempty"`
+	StartedAt  time.Time   `json:"started_at"`
+	DurationMs int64       `json:"duration_ms"`
 }
 
 // Executor Playbook 执行器.
@@ -284,7 +284,7 @@ func BuiltinPlaybooks() []Playbook {
 			Steps: []Step{
 				{ID: "ctx-host", Kind: StepContext, Description: "查主机详情", Params: nil},
 				{ID: "action-isolate", Kind: StepAction, Description: "隔离主机",
-					Params: map[string]interface{}{"action_kind": "isolate_host"},
+					Params:       map[string]interface{}{"action_kind": "isolate_host"},
 					RequiresMode: "protect", RequiresApprovers: 1},
 				{ID: "action-snapshot", Kind: StepAction, Description: "内存+磁盘取证快照",
 					Params: map[string]interface{}{"action_kind": "snapshot_forensic"}},
@@ -307,10 +307,10 @@ func BuiltinPlaybooks() []Playbook {
 			Steps: []Step{
 				{ID: "ctx-host", Kind: StepContext, Description: "查主机", Params: nil},
 				{ID: "action-kill", Kind: StepAction, Description: "杀进程",
-					Params: map[string]interface{}{"action_kind": "kill_pid"},
+					Params:       map[string]interface{}{"action_kind": "kill_pid"},
 					RequiresMode: "protect"},
 				{ID: "action-block", Kind: StepAction, Description: "防火墙阻断 C2 IP",
-					Params: map[string]interface{}{"action_kind": "block_ip"},
+					Params:       map[string]interface{}{"action_kind": "block_ip"},
 					RequiresMode: "protect"},
 				{ID: "notify", Kind: StepNotification, Description: "实时告警",
 					Params: map[string]interface{}{"channels": []string{"dingtalk", "webhook"}}},

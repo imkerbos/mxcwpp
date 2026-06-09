@@ -22,11 +22,11 @@ type AbnormalLoginDetector struct {
 }
 
 type loginProfile struct {
-	Countries map[string]int        // country -> 命中次数
-	HourBuckets map[int]int         // 0-23 -> 命中次数
-	UsersSeen map[string]time.Time  // username -> last seen
-	IPv4Net24 map[string]time.Time  // /24 网段 -> last seen
-	UpdatedAt time.Time
+	Countries   map[string]int       // country -> 命中次数
+	HourBuckets map[int]int          // 0-23 -> 命中次数
+	UsersSeen   map[string]time.Time // username -> last seen
+	IPv4Net24   map[string]time.Time // /24 网段 -> last seen
+	UpdatedAt   time.Time
 }
 
 // NewAbnormalLoginDetector 构造。
@@ -108,12 +108,12 @@ func (d *AbnormalLoginDetector) Ingest(_ context.Context, login SuccessfulLogin)
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"host_id":     login.HostID,
-		"username":    login.Username,
-		"source_ip":   login.SourceIP,
-		"country":     login.Country,
-		"timestamp":   now,
-		"anomalies":   anomalies,
+		"host_id":   login.HostID,
+		"username":  login.Username,
+		"source_ip": login.SourceIP,
+		"country":   login.Country,
+		"timestamp": now,
+		"anomalies": anomalies,
 		"would_action": map[string]any{
 			"type":   "alert_only",
 			"reason": "异常登录维度命中: " + joinComma(anomalies),

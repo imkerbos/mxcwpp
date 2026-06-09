@@ -2,13 +2,14 @@
 // 提供 SystemConfig DB 行 → viper 热重载的桥接 (P4-15).
 //
 // 设计:
-//   1. service 启动后 NewSystemConfigWatcher 拉一次 system_configs 表
-//   2. 用 viper.Set(key, value) 写入运行时, 业务 viper.GetXxx 拿到新值
-//   3. 周期轮询 (默认 30s) 检查 updated_at 变化, 重新拉取
+//  1. service 启动后 NewSystemConfigWatcher 拉一次 system_configs 表
+//  2. 用 viper.Set(key, value) 写入运行时, 业务 viper.GetXxx 拿到新值
+//  3. 周期轮询 (默认 30s) 检查 updated_at 变化, 重新拉取
 //
 // 配合 ConfigChangeWorker (P1-1) 闭环:
-//   用户提变更 → CR approved → ConfigChangeWorker.applySystemConfig 写表 →
-//   5 服务的 Watcher 拉到新值 → viper.Set 热生效.
+//
+//	用户提变更 → CR approved → ConfigChangeWorker.applySystemConfig 写表 →
+//	5 服务的 Watcher 拉到新值 → viper.Set 热生效.
 //
 // 不走 Webhook / 事件总线, 是因为 5 服务可能跨集群部署, DB 是最简公共总线.
 package config

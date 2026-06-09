@@ -30,16 +30,16 @@ import (
 
 const (
 	defaultListenAddr = ":9101" // 不撞 node_exporter 9100
-	namespace          = "mxsec"
-	subsystemAgent     = "agent"
+	namespace         = "mxsec"
+	subsystemAgent    = "agent"
 )
 
 // Metrics Agent 全指标集合 (单例).
 type Metrics struct {
 	// 健康
-	BuildInfo     *prometheus.GaugeVec
-	StartTime     prometheus.Gauge
-	Uptime        prometheus.GaugeFunc
+	BuildInfo *prometheus.GaugeVec
+	StartTime prometheus.Gauge
+	Uptime    prometheus.GaugeFunc
 
 	// 心跳
 	HeartbeatTotal       *prometheus.CounterVec
@@ -66,7 +66,7 @@ type Metrics struct {
 	SelfFDs        prometheus.GaugeFunc
 	SelfGoroutines prometheus.GaugeFunc
 
-	logger *zap.Logger
+	logger    *zap.Logger
 	startedAt int64 // unix nano
 }
 

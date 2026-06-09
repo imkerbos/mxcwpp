@@ -7,17 +7,17 @@
 //
 // 方式:
 //
-//   1. 单进程 dump: /proc/<pid>/mem 走 process_vm_readv 拷可读区段 (ELF/.text/.data/heap/stack)
-//   2. 全系统 dump: /proc/kcore (root) → 转 volatility-compatible LiME / raw 格式
+//  1. 单进程 dump: /proc/<pid>/mem 走 process_vm_readv 拷可读区段 (ELF/.text/.data/heap/stack)
+//  2. 全系统 dump: /proc/kcore (root) → 转 volatility-compatible LiME / raw 格式
 //
 // 输出:
 //
-//   /var/lib/mxsec-agent/forensics/mem-<host>-<pid>-<timestamp>.raw
-//   /var/lib/mxsec-agent/forensics/mem-<host>-full-<timestamp>.lime
+//	/var/lib/mxsec-agent/forensics/mem-<host>-<pid>-<timestamp>.raw
+//	/var/lib/mxsec-agent/forensics/mem-<host>-full-<timestamp>.lime
 //
 // 上传:
 //
-//   走 S3/OSS API 或 Manager 收 forensics tar.gz (避免大文件穿透 Kafka).
+//	走 S3/OSS API 或 Manager 收 forensics tar.gz (避免大文件穿透 Kafka).
 package forensics
 
 import (

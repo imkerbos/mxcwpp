@@ -50,31 +50,31 @@ func TestTenantIDColumnCoverage(t *testing.T) {
 
 	// 白名单: 全局表 (不分租户), 无 tenant_id 是预期.
 	globalTables := map[string]bool{
-		"User":              true, // 平台用户 (含 tenant_id 但 super_admin 跨 tenant)
-		"Tenant":            true, // 租户表自身
-		"SystemConfig":      true, // 全局站点配置
-		"ComponentVersion":  true,
-		"ComponentPackage":  true,
-		"Component":         true,
-		"AdvisoryPackage":   true, // 漏洞情报全局共享
-		"FeatureFlag":       true, // 含 tenant_id 但默认空 = 全局
-		"DataSource":        true, // 漏洞数据源配置全局
-		"VulnDataSource":    true,
-		"ATTCKTactic":       true,
-		"ATTCKTechnique":    true,
-		"PocValidation":     true,
-		"NvdMetadata":       true,
-		"CnnvdMetadata":     true,
-		"RedhatMetadata":    true,
-		"ExploitMetadata":   true,
-		"BaselineRule":      true, // 平台基线规则模板
-		"DetectionRule":     true, // 同上
-		"Tag":               true,
-		"Notification":      true,
-		"PushSubscription":  true,
-		"Permission":        true, // RBAC 权限定义全局
-		"RolePermission":    true, // 角色-权限关联全局
-		"CanaryRollout":     true, // Agent 灰度发布全局
+		"User":             true, // 平台用户 (含 tenant_id 但 super_admin 跨 tenant)
+		"Tenant":           true, // 租户表自身
+		"SystemConfig":     true, // 全局站点配置
+		"ComponentVersion": true,
+		"ComponentPackage": true,
+		"Component":        true,
+		"AdvisoryPackage":  true, // 漏洞情报全局共享
+		"FeatureFlag":      true, // 含 tenant_id 但默认空 = 全局
+		"DataSource":       true, // 漏洞数据源配置全局
+		"VulnDataSource":   true,
+		"ATTCKTactic":      true,
+		"ATTCKTechnique":   true,
+		"PocValidation":    true,
+		"NvdMetadata":      true,
+		"CnnvdMetadata":    true,
+		"RedhatMetadata":   true,
+		"ExploitMetadata":  true,
+		"BaselineRule":     true, // 平台基线规则模板
+		"DetectionRule":    true, // 同上
+		"Tag":              true,
+		"Notification":     true,
+		"PushSubscription": true,
+		"Permission":       true, // RBAC 权限定义全局
+		"RolePermission":   true, // 角色-权限关联全局
+		"CanaryRollout":    true, // Agent 灰度发布全局
 	}
 
 	missing := []string{}

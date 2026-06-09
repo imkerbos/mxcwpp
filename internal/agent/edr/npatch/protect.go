@@ -4,9 +4,9 @@
 // protect 模式: 命中 → cgroup_skb 返 SK_DROP 内核态丢包 (高风险)
 //
 // 启用条件:
-//   1. tenant 已通过 6 闸门 admission
-//   2. rule 已通过 G6 灰度推送 (默认 1%→10%→100%)
-//   3. host_label 不在白名单 (e.g. env=prod 才阻, dev/staging 默认 observe)
+//  1. tenant 已通过 6 闸门 admission
+//  2. rule 已通过 G6 灰度推送 (默认 1%→10%→100%)
+//  3. host_label 不在白名单 (e.g. env=prod 才阻, dev/staging 默认 observe)
 //
 // CentOS 7 兼容性: cgroup_skb 路径 (kernel 4.10+) 支持 SK_DROP 阻断.
 // AF_PACKET v3 路径无法阻断 (用户态收包, 流量已过), 仅上报.
@@ -45,7 +45,7 @@ type ProtectController struct {
 	labelOverrides map[string]ProtectMode
 
 	// 命中阻断统计
-	blocksTotal   atomic.Uint64
+	blocksTotal     atomic.Uint64
 	wouldBlockTotal atomic.Uint64
 }
 

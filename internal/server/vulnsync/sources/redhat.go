@@ -49,14 +49,14 @@ func (d *RedHatDriver) Fetch(ctx context.Context, since time.Time) (*FetchResult
 	body, _ := io.ReadAll(resp.Body)
 
 	var raw []struct {
-		CVE              string  `json:"CVE"`
-		Severity         string  `json:"severity"`
-		PublicDate       string  `json:"public_date"`
-		Advisories       []string `json:"advisories"`
-		BugzillaDescription string `json:"bugzilla_description"`
-		CvssScore        float64 `json:"cvss3_score"`
-		CvssVector       string  `json:"cvss3_scoring_vector"`
-		ResourceURL      string  `json:"resource_url"`
+		CVE                 string   `json:"CVE"`
+		Severity            string   `json:"severity"`
+		PublicDate          string   `json:"public_date"`
+		Advisories          []string `json:"advisories"`
+		BugzillaDescription string   `json:"bugzilla_description"`
+		CvssScore           float64  `json:"cvss3_score"`
+		CvssVector          string   `json:"cvss3_scoring_vector"`
+		ResourceURL         string   `json:"resource_url"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err

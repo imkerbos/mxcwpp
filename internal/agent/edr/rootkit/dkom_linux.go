@@ -4,11 +4,11 @@
 //
 // 检测策略 (unhide-linux 风格 多源对比):
 //
-//   1. /proc 进程列表 vs syscall 直接 getdents → 隐藏进程
-//   2. /proc/<pid>/stat 存在 vs /proc 目录列表缺失 → 进程隐藏
-//   3. ss/netstat 列出 socket vs /proc/<pid>/fd 反查 → 隐藏端口
-//   4. /proc/modules vs /sys/module/ 目录差 → 隐藏内核模块
-//   5. ld.so.preload 内容 vs /etc/ld.so.preload 实际 → LD_PRELOAD rootkit
+//  1. /proc 进程列表 vs syscall 直接 getdents → 隐藏进程
+//  2. /proc/<pid>/stat 存在 vs /proc 目录列表缺失 → 进程隐藏
+//  3. ss/netstat 列出 socket vs /proc/<pid>/fd 反查 → 隐藏端口
+//  4. /proc/modules vs /sys/module/ 目录差 → 隐藏内核模块
+//  5. ld.so.preload 内容 vs /etc/ld.so.preload 实际 → LD_PRELOAD rootkit
 //
 // 任何差异 → critical alert. 多线程并行扫.
 package rootkit
@@ -26,12 +26,12 @@ import (
 
 // DKOMResult 检测结果.
 type DKOMResult struct {
-	HiddenPIDs        []int    // /proc 缺但 stat 能读
-	HiddenModules     []string // /proc/modules 缺但 /sys/module 存在
-	HiddenPorts       []int    // /proc/net/tcp 列但 ss 看不到 (反向: ss 列但 /proc/net 没)
-	PreloadAnomalies  []string // ld.so.preload 异常
-	ProcDirMismatch   int      // /proc 目录 vs getdents 计数差异
-	Warnings          []string
+	HiddenPIDs       []int    // /proc 缺但 stat 能读
+	HiddenModules    []string // /proc/modules 缺但 /sys/module 存在
+	HiddenPorts      []int    // /proc/net/tcp 列但 ss 看不到 (反向: ss 列但 /proc/net 没)
+	PreloadAnomalies []string // ld.so.preload 异常
+	ProcDirMismatch  int      // /proc 目录 vs getdents 计数差异
+	Warnings         []string
 }
 
 // DetectDKOM 跑一轮 DKOM 检测.

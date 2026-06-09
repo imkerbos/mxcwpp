@@ -22,10 +22,10 @@ import (
 
 // Enricher AuditLog 富化器.
 type Enricher struct {
-	db          *gorm.DB
-	logger      *zap.Logger
-	geoip       GeoIPLookup
-	riskCache   sync.Map // user_id → cachedRisk
+	db        *gorm.DB
+	logger    *zap.Logger
+	geoip     GeoIPLookup
+	riskCache sync.Map // user_id → cachedRisk
 }
 
 // GeoIPLookup 抽象 IP → 地理位置.

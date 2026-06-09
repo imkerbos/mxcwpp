@@ -98,8 +98,8 @@ func SnapshotMemStats() map[string]uint64 {
 	var s debug.GCStats
 	debug.ReadGCStats(&s)
 	return map[string]uint64{
-		"gc_count":      uint64(s.NumGC),
-		"last_gc_ns":    uint64(s.LastGC.UnixNano()),
+		"gc_count":       uint64(s.NumGC),
+		"last_gc_ns":     uint64(s.LastGC.UnixNano()),
 		"pause_total_ns": uint64(s.PauseTotal.Nanoseconds()),
 	}
 }

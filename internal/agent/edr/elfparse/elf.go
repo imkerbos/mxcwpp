@@ -29,9 +29,9 @@ type ELFInfo struct {
 	Exports   []string
 	NeededLib []string // DT_NEEDED
 
-	Packed       bool
-	PackerHint   string
-	HighEntropy  []string // section name 列表 entropy > 7.0
+	Packed      bool
+	PackerHint  string
+	HighEntropy []string // section name 列表 entropy > 7.0
 }
 
 // SectionInfo 单 section 摘要.
