@@ -108,10 +108,12 @@ MxSec Platform **社区版** 包含完整的平台框架和全部核心安全能
 
 ```
 浏览器 ─→ Nginx ─→ Manager ×N ─→ MySQL / Redis / ClickHouse / Prometheus
-Agent ─→ gRPC(mTLS) ─→ AgentCenter ×N ─→ Kafka ─→ Consumer ×N ─→ 存储层
+Agent ─→ gRPC(mTLS) ─→ AgentCenter ×N ─→ Kafka ─┬→ Consumer ×N ─→ 存储层（持久化）
+                                                 └→ Engine ×N    ─→ 告警/Storyline（检测分析）
+Manager ──HTTP──→ LLMProxy ×N（多 LLM 适配）   VulnSync ×N ──Kafka──→ Engine/Manager
 ```
 
-控制面（Manager / AgentCenter / Consumer）无状态，支持多实例水平扩展。通过 Kafka 异步解耦数据写入，Redis 实现服务发现与分布式锁，ClickHouse 承载时序分析与事件归档。
+v2.0 后端拆分为 **六微服务**：Manager / AgentCenter / Consumer / Engine / LLMProxy / VulnSync，控制面全部无状态，支持水平扩展。Kafka 用两个 ConsumerGroup（持久化 / 检测）独立 offset 解耦，Redis 实现服务发现与分布式锁，ClickHouse 承载时序分析与事件归档。
 
 详细架构参见 [架构设计文档](docs/architecture.md)。
 
@@ -167,15 +169,17 @@ make lint                                                # 代码检查
 
 ```
 mxsec-platform/
-├── cmd/                    # 入口（agent / manager / agentcenter / consumer）
+├── cmd/                    # 入口（agent + 6 个 server 服务 + mxctl + 工具）
+│   ├── agent/              # Agent 入口
+│   └── server/             # manager / agentcenter / consumer / engine / llmproxy / vulnsync
 ├── internal/
-│   ├── server/             # 服务端（manager / agentcenter / consumer / common）
-│   └── agent/              # Agent（connection / transport / plugin / heartbeat）
-├── plugins/                # 插件（baseline / collector / fim / scanner / sensor / remediation）
+│   ├── server/             # 服务端（manager / agentcenter / consumer / engine / llmproxy / vulnsync / common）
+│   └── agent/              # Agent（connection / transport / plugin / heartbeat / edr 25+ 子模块）
+├── plugins/                # 11 个插件（baseline / collector / fim / scanner / avscanner / remediation / rasp-go / rasp-java / rasp-python / rasp-php / rasp-node）
 ├── api/proto/              # Protobuf 定义
 ├── ui/                     # 前端工程（Vue 3 + TypeScript）
 ├── configs/                # 配置文件（server.yaml / agent.yaml / 规则文件）
-├── deploy/                 # 部署配置（Docker Compose / Nginx / systemd）
+├── deploy/                 # 部署配置（Docker Compose dev/v2/pret + Nginx + systemd + 生产集群）
 ├── scripts/                # 构建与部署脚本
 └── docs/                   # 文档
 ```
@@ -187,7 +191,6 @@ mxsec-platform/
 - [配置说明](docs/configuration.md) - 服务端配置、Agent 配置、环境变量
 - [API 文档](docs/api-reference.md) - REST API 端点、请求/响应格式、认证
 - [常见问题](docs/faq.md) - 部署与运行中的常见问题及排查方法
-- [发展路线](docs/roadmap.md) - 已完成能力、近期规划、中远期方向
 - [开源治理](docs/governance.md) - 项目治理模型、决策流程、安全策略
 - [社区规范](docs/contributing.md) - 贡献指南、开发环境、代码规范、提交流程
 

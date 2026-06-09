@@ -1,10 +1,15 @@
 # API 参考文档
 
+> 最后更新：2026-06-09 | 适用版本：v2.x
+
 ## 概览
 
-- **Base URL**: `/api/v1`
+- **Base URL**:
+  - `/api/v1` — v1 业务 API（向后兼容）
+  - `/api/v2` — v2 多租户 / 配置中心 / mode / MSSP / SOAR 等新功能
 - **认证方式**: JWT Bearer Token（公开接口除外）
 - **请求头**: `Authorization: Bearer <token>`，`Content-Type: application/json`
+- **OpenAPI 规范**: 见 [`docs/openapi/openapi.yaml`](openapi/openapi.yaml)（包含 v1+v2 全部端点的标准定义，是本文档的权威来源）
 
 **统一响应格式**：
 
@@ -701,6 +706,63 @@ CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed /
 | GET  | `/api/v1/vex/:product_id/statements` | CVE 声明列表 |
 | GET  | `/api/v1/vex/:product_id/cyclonedx?version=X.Y.Z` | 下载 CycloneDX VEX 1.5 |
 | GET  | `/api/v1/vex/:product_id/csaf?version=X.Y.Z` | 下载 CSAF 2.0 |
+
+---
+
+## v2 多租户与平台管理
+
+### 系统模式（observe / protect）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v2/system/mode` | 当前租户的模式（observe/protect） |
+| GET  | `/api/v2/admin/tenants/modes` | 列出全部租户的模式（超管） |
+| POST | `/api/v2/admin/tenants/:id/mode` | 切换租户模式（超管） |
+
+### 租户管理（超管）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v2/admin/tenants` | 租户列表 |
+| GET  | `/api/v2/admin/tenants/:id` | 租户详情 |
+| POST | `/api/v2/admin/tenants` | 创建租户 |
+| POST | `/api/v2/admin/tenants/:id/suspend` | 暂停租户 |
+| POST | `/api/v2/admin/tenants/:id/resume` | 恢复租户 |
+
+### 配置变更审批
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v2/config/change-requests` | 提交配置变更请求 |
+| GET  | `/api/v2/config/change-requests` | 变更请求列表 |
+| GET  | `/api/v2/config/change-requests/sensitivity` | 配置项敏感度定义 |
+| GET  | `/api/v2/config/change-requests/:id` | 变更请求详情 |
+| POST | `/api/v2/config/change-requests/:id/approve` | 审批通过 |
+| POST | `/api/v2/config/change-requests/:id/reject` | 审批拒绝 |
+| POST | `/api/v2/config/change-requests/:id/cancel` | 撤销请求 |
+
+### MSSP 控制台（多租户托管）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/api/v2/mssp/dashboard` | MSSP 总览面板 |
+| GET  | `/api/v2/mssp/child-tenants` | 子租户列表 |
+| POST | `/api/v2/mssp/child-tenants` | 创建子租户 |
+| GET  | `/api/v2/mssp/child-tenants/:id` | 子租户详情 |
+| POST | `/api/v2/mssp/child-tenants/:id/suspend` | 暂停子租户 |
+| POST | `/api/v2/mssp/child-tenants/:id/resume` | 恢复子租户 |
+| GET  | `/api/v2/mssp/alerts` | 跨租户告警视图 |
+
+### 其它 v2 子领域
+
+以下 v2 端点详见 OpenAPI 规范（[`docs/openapi/openapi.yaml`](openapi/openapi.yaml)）：
+
+- `/api/v2/threat-intel/*` — 威胁情报 IOC 管理与匹配
+- `/api/v2/sbom/*` — SBOM 软件物料清单 + 差异比对
+- `/api/v2/kube/clusters/*` — K8s 集群基线、Admission 接入
+- `/api/v2/soar/*` — SOAR 剧本编排与执行
+- `/api/v2/honeypot/*` — 蜜罐 v2 接口（含 sensor / events）
+- `/api/v2/microseg/*` — 微隔离策略生成与下发
 
 ---
 
