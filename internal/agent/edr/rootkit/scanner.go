@@ -2,13 +2,13 @@
 //
 // 检测维度 (4 类):
 //
-//	1. kmod 隐藏: 对比 /proc/modules 与 /sys/module/<name>/ 列表
-//	   差异 → LKM rootkit 隐藏自己 (Diamorphine/Reptile/...)
-//	2. syscall_table 异常: 读 /proc/kallsyms 取 sys_call_table 地址,
-//	   首次启动落 baseline; 周期对比, 偏移即 hook
-//	3. PID 隐藏: 对比 /proc/<pid> 与 getdents64(/proc) 系统调用结果,
-//	   差异 → 内核 hook getdents 实现 PID 隐藏
-//	4. 可疑 LKM 名: insmod 加载/已 loaded 的模块名匹配已知 rootkit 列表
+//  1. kmod 隐藏: 对比 /proc/modules 与 /sys/module/<name>/ 列表
+//     差异 → LKM rootkit 隐藏自己 (Diamorphine/Reptile/...)
+//  2. syscall_table 异常: 读 /proc/kallsyms 取 sys_call_table 地址,
+//     首次启动落 baseline; 周期对比, 偏移即 hook
+//  3. PID 隐藏: 对比 /proc/<pid> 与 getdents64(/proc) 系统调用结果,
+//     差异 → 内核 hook getdents 实现 PID 隐藏
+//  4. 可疑 LKM 名: insmod 加载/已 loaded 的模块名匹配已知 rootkit 列表
 //
 // 不做的事 (留 M2):
 //   - eBPF kallsyms read 内核态校验 (需 CO-RE + 5.5+)
@@ -39,11 +39,11 @@ var KnownRootkitModules = []string{
 
 // Indicator 是单次扫描产生的潜在 rootkit 指标。
 type Indicator struct {
-	Category    string            // kmod_hidden / syscall_drift / pid_hidden / known_rootkit_kmod
-	Severity    string            // medium / high / critical
-	Detail      string
-	Evidence    map[string]string // category 维度的细节字段
-	DetectedAt  time.Time
+	Category   string // kmod_hidden / syscall_drift / pid_hidden / known_rootkit_kmod
+	Severity   string // medium / high / critical
+	Detail     string
+	Evidence   map[string]string // category 维度的细节字段
+	DetectedAt time.Time
 }
 
 // Scanner 周期性自检 + 命中即上报。
@@ -51,9 +51,9 @@ type Scanner struct {
 	logger   *zap.Logger
 	interval time.Duration
 
-	mu             sync.Mutex
+	mu              sync.Mutex
 	syscallBaseAddr uint64 // 首次启动后落盘的 sys_call_table 地址 (kallsyms)
-	known          map[string]struct{}
+	known           map[string]struct{}
 }
 
 // NewScanner 构造。

@@ -40,8 +40,8 @@ func NewGemini(cfg GeminiConfig) *GeminiProvider {
 	}
 }
 
-func (p *GeminiProvider) Name() string             { return p.cfg.Name }
-func (p *GeminiProvider) Type() string             { return "gemini" }
+func (p *GeminiProvider) Name() string              { return p.cfg.Name }
+func (p *GeminiProvider) Type() string              { return "gemini" }
 func (p *GeminiProvider) SupportedModels() []string { return p.cfg.Models }
 
 func (p *GeminiProvider) Complete(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {

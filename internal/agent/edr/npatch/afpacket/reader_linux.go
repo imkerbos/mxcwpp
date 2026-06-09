@@ -34,13 +34,13 @@ import (
 
 // Config reader 配置.
 type Config struct {
-	Interface  string         // 网卡名 (e.g. eth0)
-	BlockSize  int            // 单 block 大小 (默认 1MB), 必须 page-size 对齐
-	NumBlocks  int            // block 数量 (默认 64), 总 ring = BlockSize × NumBlocks
-	FrameSize  int            // 单 frame 大小 (默认 2048 = MTU+headroom)
-	Timeout    time.Duration  // block 超时 (默认 10ms)
-	Promisc    bool           // 混杂模式 (大流量审计场景需开)
-	Filter     []unix.SockFilter // BPF socket filter (可选, 内核态过滤减用户态开销)
+	Interface string            // 网卡名 (e.g. eth0)
+	BlockSize int               // 单 block 大小 (默认 1MB), 必须 page-size 对齐
+	NumBlocks int               // block 数量 (默认 64), 总 ring = BlockSize × NumBlocks
+	FrameSize int               // 单 frame 大小 (默认 2048 = MTU+headroom)
+	Timeout   time.Duration     // block 超时 (默认 10ms)
+	Promisc   bool              // 混杂模式 (大流量审计场景需开)
+	Filter    []unix.SockFilter // BPF socket filter (可选, 内核态过滤减用户态开销)
 }
 
 // Packet 单包.
@@ -54,13 +54,13 @@ type Packet struct {
 
 // Reader AF_PACKET v3 reader.
 type Reader struct {
-	fd         int
-	ring       []byte
-	cfg        Config
-	packets    chan Packet
-	stopOnce   sync.Once
-	stopCh     chan struct{}
-	pktsRead   atomic.Uint64
+	fd          int
+	ring        []byte
+	cfg         Config
+	packets     chan Packet
+	stopOnce    sync.Once
+	stopCh      chan struct{}
+	pktsRead    atomic.Uint64
 	pktsDropped atomic.Uint64
 }
 
@@ -107,10 +107,10 @@ func NewReader(cfg Config) (*Reader, error) {
 
 	// 4. PACKET_RX_RING (TPACKET_V3 layout)
 	req := tpacketReqV3{
-		BlockSize:   uint32(cfg.BlockSize),
-		BlockNr:     uint32(cfg.NumBlocks),
-		FrameSize:   uint32(cfg.FrameSize),
-		FrameNr:     uint32(cfg.BlockSize/cfg.FrameSize) * uint32(cfg.NumBlocks),
+		BlockSize:    uint32(cfg.BlockSize),
+		BlockNr:      uint32(cfg.NumBlocks),
+		FrameSize:    uint32(cfg.FrameSize),
+		FrameNr:      uint32(cfg.BlockSize/cfg.FrameSize) * uint32(cfg.NumBlocks),
 		RetireBlkTov: uint32(cfg.Timeout / time.Millisecond),
 	}
 	if err := setPacketRxRingV3(fd, &req); err != nil {

@@ -11,9 +11,9 @@ import (
 // 但 json.Unmarshal 把 Body []byte 拷到堆. Pool 化 MQMessage struct + Body buffer
 // 减少 GC 压力. 调用方:
 //
-//   msg := kafka.GetMQMessage()
-//   defer kafka.PutMQMessage(msg)
-//   if err := json.Unmarshal(raw, msg); err != nil { ... }
+//	msg := kafka.GetMQMessage()
+//	defer kafka.PutMQMessage(msg)
+//	if err := json.Unmarshal(raw, msg); err != nil { ... }
 //
 // 注意: 调用方不能 keep 引用 msg 跨调用 (Body 切片会被复用).
 var mqMessagePool = sync.Pool{

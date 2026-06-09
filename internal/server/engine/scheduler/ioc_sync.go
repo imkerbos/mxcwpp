@@ -13,7 +13,8 @@ import (
 // IOCSyncScheduler 把威胁情报 IOC (域名 / IP / hash) 同步推送到 AC。
 //
 // 通过 mxsec.engine.command Topic 解耦:
-//   Engine.IOCSyncScheduler → Kafka → AC.commandsub → Agent
+//
+//	Engine.IOCSyncScheduler → Kafka → AC.commandsub → Agent
 type IOCSyncScheduler struct {
 	producer sarama.SyncProducer
 	topic    string
@@ -22,12 +23,12 @@ type IOCSyncScheduler struct {
 
 // IOCBundle 是一次 IOC 同步的载荷。
 type IOCBundle struct {
-	Version   string   `json:"version"`    // 版本号 / 时间戳
-	FullSync  bool     `json:"full_sync"`  // true=全量,false=增量
-	Domains   []string `json:"domains,omitempty"`
-	IPv4      []string `json:"ipv4,omitempty"`
+	Version    string   `json:"version"`   // 版本号 / 时间戳
+	FullSync   bool     `json:"full_sync"` // true=全量,false=增量
+	Domains    []string `json:"domains,omitempty"`
+	IPv4       []string `json:"ipv4,omitempty"`
 	HashSHA256 []string `json:"hash_sha256,omitempty"`
-	URLs      []string `json:"urls,omitempty"`
+	URLs       []string `json:"urls,omitempty"`
 }
 
 // NewIOCSyncScheduler 构造。

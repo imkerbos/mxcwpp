@@ -17,11 +17,11 @@ import (
 
 // ScanRequest 是单次扫描请求 (Server → Agent → 本插件)。
 type ScanRequest struct {
-	TaskID     string
-	Targets    []string // 文件/目录/通配
-	MaxBytes   int64    // 单文件最大扫描字节数 (0 = 不限)
-	HashOnly   bool     // 只算 hash, 不做 YARA 匹配 (Sprint 4 占位)
-	FollowSym  bool
+	TaskID    string
+	Targets   []string // 文件/目录/通配
+	MaxBytes  int64    // 单文件最大扫描字节数 (0 = 不限)
+	HashOnly  bool     // 只算 hash, 不做 YARA 匹配 (Sprint 4 占位)
+	FollowSym bool
 }
 
 // ScanFinding 是单条扫描结果。

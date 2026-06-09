@@ -21,9 +21,9 @@ type Engine struct {
 //
 // 启动顺序:
 //
-//	1. 优先连 clamd UNIX socket (守护进程, 病毒库常驻内存, 10ms/file)
-//	2. socket 不可用回退 clamscan CLI (每次启动加载 1GB DB, 5-15s/file)
-//	3. 启动时跑 EICAR Selfcheck 验证通路
+//  1. 优先连 clamd UNIX socket (守护进程, 病毒库常驻内存, 10ms/file)
+//  2. socket 不可用回退 clamscan CLI (每次启动加载 1GB DB, 5-15s/file)
+//  3. 启动时跑 EICAR Selfcheck 验证通路
 func NewEngine(logger *zap.Logger) *Engine {
 	e := &Engine{
 		clamav:      NewClamAVScanner(logger),

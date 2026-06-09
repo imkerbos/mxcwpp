@@ -10,8 +10,9 @@
 //   - 超时 (默认 30 min) → status=expired
 //
 // 与 ConfigChangeRequest 区别:
-//   ConfigChangeRequest 是配置变更审批 (异步, 走 worker apply)
-//   SOARApproval 是动作执行前阻塞审批 (同步, 阻塞 Playbook 执行)
+//
+//	ConfigChangeRequest 是配置变更审批 (异步, 走 worker apply)
+//	SOARApproval 是动作执行前阻塞审批 (同步, 阻塞 Playbook 执行)
 package soar
 
 import (

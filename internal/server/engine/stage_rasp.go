@@ -81,13 +81,13 @@ func (s *RASPStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, error
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"language":    raspEv.Language,
-		"kind":        raspEv.Kind,
-		"class_name":  raspEv.ClassName,
-		"method_name": raspEv.MethodName,
-		"http":        raspEv.HTTPContext,
-		"stack":       raspEv.StackTrace,
-		"args":        raspEv.Arguments,
+		"language":      raspEv.Language,
+		"kind":          raspEv.Kind,
+		"class_name":    raspEv.ClassName,
+		"method_name":   raspEv.MethodName,
+		"http":          raspEv.HTTPContext,
+		"stack":         raspEv.StackTrace,
+		"args":          raspEv.Arguments,
 		"memshell_hits": hits,
 		// 始终 observe,不下 action
 		"would_action": map[string]any{

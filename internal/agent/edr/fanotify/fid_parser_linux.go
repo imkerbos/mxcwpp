@@ -89,11 +89,11 @@ func parsePidfd(rec infoRecord) int32 {
 // 返回 mount-relative path 重建用的 fsid + handle + name.
 // 调用 open_by_handle_at 的部分留到 NewWatcher loop 里 (需要 mount_fd).
 type fidNameParsed struct {
-	FsID    [8]byte
-	Handle  []byte
-	HType   int32
-	HBytes  int32
-	Name    string
+	FsID   [8]byte
+	Handle []byte
+	HType  int32
+	HBytes int32
+	Name   string
 }
 
 func parseFIDName(rec infoRecord) (*fidNameParsed, bool) {

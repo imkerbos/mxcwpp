@@ -42,36 +42,36 @@ const (
 type Justification string
 
 const (
-	JustifyCodeNotPresent             Justification = "code_not_present"
-	JustifyCodeNotReachable           Justification = "code_not_reachable"
-	JustifyRequiresConfiguration      Justification = "requires_configuration"
-	JustifyRequiresDependency         Justification = "requires_dependency"
-	JustifyRequiresEnvironment        Justification = "requires_environment"
-	JustifyProtectedByCompiler        Justification = "protected_by_compiler"
-	JustifyProtectedAtRuntime         Justification = "protected_at_runtime"
-	JustifyProtectedAtPerimeter       Justification = "protected_at_perimeter"
+	JustifyCodeNotPresent               Justification = "code_not_present"
+	JustifyCodeNotReachable             Justification = "code_not_reachable"
+	JustifyRequiresConfiguration        Justification = "requires_configuration"
+	JustifyRequiresDependency           Justification = "requires_dependency"
+	JustifyRequiresEnvironment          Justification = "requires_environment"
+	JustifyProtectedByCompiler          Justification = "protected_by_compiler"
+	JustifyProtectedAtRuntime           Justification = "protected_at_runtime"
+	JustifyProtectedAtPerimeter         Justification = "protected_at_perimeter"
 	JustifyProtectedByMitigatingControl Justification = "protected_by_mitigating_control"
 )
 
 // Statement 单个 CVE 的 VEX 状态.
 type Statement struct {
-	CVE           string        `json:"cve"`
-	Status        Status        `json:"status"`
-	Justification Justification `json:"justification,omitempty"`
-	ImpactStatement string      `json:"impact_statement,omitempty"`
-	ActionStatement string      `json:"action_statement,omitempty"`
-	AffectedVersions []string   `json:"affected_versions,omitempty"`
-	FixedInVersion  string      `json:"fixed_in_version,omitempty"`
+	CVE              string        `json:"cve"`
+	Status           Status        `json:"status"`
+	Justification    Justification `json:"justification,omitempty"`
+	ImpactStatement  string        `json:"impact_statement,omitempty"`
+	ActionStatement  string        `json:"action_statement,omitempty"`
+	AffectedVersions []string      `json:"affected_versions,omitempty"`
+	FixedInVersion   string        `json:"fixed_in_version,omitempty"`
 }
 
 // Document 完整 VEX 文档.
 type Document struct {
-	ProductID    string      `json:"product_id"`
-	ProductName  string      `json:"product_name"`
-	ProductVer   string      `json:"product_version"`
-	Vendor       string      `json:"vendor"`
-	GeneratedAt  time.Time   `json:"generated_at"`
-	Statements   []Statement `json:"statements"`
+	ProductID   string      `json:"product_id"`
+	ProductName string      `json:"product_name"`
+	ProductVer  string      `json:"product_version"`
+	Vendor      string      `json:"vendor"`
+	GeneratedAt time.Time   `json:"generated_at"`
+	Statements  []Statement `json:"statements"`
 }
 
 // Generator 工厂.
@@ -172,9 +172,9 @@ func (g *Generator) GenerateForProduct(ctx context.Context, productID, version s
 // MarshalCycloneDX 输出 CycloneDX VEX 1.5 JSON.
 func (g *Generator) MarshalCycloneDX(doc *Document) ([]byte, error) {
 	cdx := map[string]any{
-		"bomFormat":   "CycloneDX",
-		"specVersion": "1.5",
-		"version":     1,
+		"bomFormat":    "CycloneDX",
+		"specVersion":  "1.5",
+		"version":      1,
 		"serialNumber": fmt.Sprintf("urn:uuid:%s", doc.ProductID),
 		"metadata": map[string]any{
 			"timestamp": doc.GeneratedAt.Format(time.RFC3339),
@@ -200,10 +200,10 @@ func buildCycloneDXVulns(doc *Document) []map[string]any {
 			"id":     s.CVE,
 			"source": map[string]any{"name": "NVD"},
 			"analysis": map[string]any{
-				"state":            mapStateCDX(s.Status),
-				"justification":    string(s.Justification),
-				"detail":           s.ImpactStatement,
-				"response":         []string{},
+				"state":         mapStateCDX(s.Status),
+				"justification": string(s.Justification),
+				"detail":        s.ImpactStatement,
+				"response":      []string{},
 			},
 			"affects": []map[string]any{
 				{"ref": doc.ProductID},
@@ -233,21 +233,21 @@ func mapStateCDX(s Status) string {
 func (g *Generator) MarshalCSAF(doc *Document) ([]byte, error) {
 	csaf := map[string]any{
 		"document": map[string]any{
-			"category":  "csaf_vex",
+			"category":     "csaf_vex",
 			"csaf_version": "2.0",
 			"distribution": map[string]any{"tlp": map[string]any{"label": "WHITE"}},
-			"title":     fmt.Sprintf("%s %s VEX", doc.ProductName, doc.ProductVer),
+			"title":        fmt.Sprintf("%s %s VEX", doc.ProductName, doc.ProductVer),
 			"publisher": map[string]any{
-				"category": "vendor",
-				"name":     g.vendor,
+				"category":  "vendor",
+				"name":      g.vendor,
 				"namespace": "https://mxsec.example.com",
 			},
 			"tracking": map[string]any{
-				"id":              doc.ProductID + "-vex",
+				"id":                   doc.ProductID + "-vex",
 				"initial_release_date": doc.GeneratedAt.Format(time.RFC3339),
 				"current_release_date": doc.GeneratedAt.Format(time.RFC3339),
-				"status":          "final",
-				"version":         "1.0.0",
+				"status":               "final",
+				"version":              "1.0.0",
 			},
 		},
 		"product_tree": map[string]any{
@@ -257,8 +257,8 @@ func (g *Generator) MarshalCSAF(doc *Document) ([]byte, error) {
 					"branches": []map[string]any{
 						{"category": "product_name", "name": doc.ProductName,
 							"product": map[string]any{
-								"product_id":   doc.ProductID,
-								"name":         doc.ProductName + " " + doc.ProductVer,
+								"product_id": doc.ProductID,
+								"name":       doc.ProductName + " " + doc.ProductVer,
 							}},
 					},
 				},

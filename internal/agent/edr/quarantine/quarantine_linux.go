@@ -4,20 +4,20 @@
 //
 // 流程:
 //
-//	1. 命中威胁 → Quarantine(path):
-//	   - 算 sha256
-//	   - mv 到 /var/mxsec/quarantine/<sha256>.qrn
-//	   - chmod 000 + 移除 ownership (chown root:root)
-//	   - 写 .meta JSON (原路径 / 原属主 / 原权限 / 隔离时间 / 触发规则)
+//  1. 命中威胁 → Quarantine(path):
+//     - 算 sha256
+//     - mv 到 /var/mxsec/quarantine/<sha256>.qrn
+//     - chmod 000 + 移除 ownership (chown root:root)
+//     - 写 .meta JSON (原路径 / 原属主 / 原权限 / 隔离时间 / 触发规则)
 //
-//	2. 还原 Restore(qid):
-//	   - 读 .meta 回原路径
-//	   - chmod 复原 + chown 复原
-//	   - 写审计日志
+//  2. 还原 Restore(qid):
+//     - 读 .meta 回原路径
+//     - chmod 复原 + chown 复原
+//     - 写审计日志
 //
-//	3. 永久删除 Delete(qid):
-//	   - 物理 unlink + 删 .meta
-//	   - 写审计日志
+//  3. 永久删除 Delete(qid):
+//     - 物理 unlink + 删 .meta
+//     - 写审计日志
 //
 // 与 plugins/scanner/engine/quarantine.go 区别:
 //
@@ -71,17 +71,17 @@ func NewManager(dir string, logger *zap.Logger) (*Manager, error) {
 
 // Metadata 单条隔离记录元信息 (持久化为 <qid>.meta JSON)。
 type Metadata struct {
-	QID            string    `json:"qid"`              // sha256 = 隔离箱内文件名
-	OriginalPath   string    `json:"original_path"`
-	OriginalUID    int       `json:"original_uid"`
-	OriginalGID    int       `json:"original_gid"`
-	OriginalMode   uint32    `json:"original_mode"`
-	OriginalSize   int64     `json:"original_size"`
-	OriginalMTime  time.Time `json:"original_mtime"`
-	SHA256         string    `json:"sha256"`
-	TriggerRule    string    `json:"trigger_rule"`     // 触发规则 ID (e.g. EICAR / CVE-2024-3094)
-	TriggerSource  string    `json:"trigger_source"`   // av-scanner / fim / honeypot / manual
-	QuarantinedAt  time.Time `json:"quarantined_at"`
+	QID           string    `json:"qid"` // sha256 = 隔离箱内文件名
+	OriginalPath  string    `json:"original_path"`
+	OriginalUID   int       `json:"original_uid"`
+	OriginalGID   int       `json:"original_gid"`
+	OriginalMode  uint32    `json:"original_mode"`
+	OriginalSize  int64     `json:"original_size"`
+	OriginalMTime time.Time `json:"original_mtime"`
+	SHA256        string    `json:"sha256"`
+	TriggerRule   string    `json:"trigger_rule"`   // 触发规则 ID (e.g. EICAR / CVE-2024-3094)
+	TriggerSource string    `json:"trigger_source"` // av-scanner / fim / honeypot / manual
+	QuarantinedAt time.Time `json:"quarantined_at"`
 }
 
 // Quarantine 把文件移入隔离箱。
@@ -124,15 +124,15 @@ func (m *Manager) Quarantine(path, triggerRule, triggerSource string) (*Metadata
 	}
 
 	meta := &Metadata{
-		QID:            hash,
-		OriginalPath:   path,
-		OriginalSize:   info.Size(),
-		OriginalMTime:  info.ModTime(),
-		OriginalMode:   uint32(info.Mode().Perm()),
-		SHA256:         hash,
-		TriggerRule:    triggerRule,
-		TriggerSource:  triggerSource,
-		QuarantinedAt:  time.Now(),
+		QID:           hash,
+		OriginalPath:  path,
+		OriginalSize:  info.Size(),
+		OriginalMTime: info.ModTime(),
+		OriginalMode:  uint32(info.Mode().Perm()),
+		SHA256:        hash,
+		TriggerRule:   triggerRule,
+		TriggerSource: triggerSource,
+		QuarantinedAt: time.Now(),
 	}
 	if sys, ok := info.Sys().(*syscall.Stat_t); ok {
 		meta.OriginalUID = int(sys.Uid)

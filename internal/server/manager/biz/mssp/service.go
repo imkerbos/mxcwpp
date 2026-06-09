@@ -36,16 +36,16 @@ func NewService(db *gorm.DB, logger *zap.Logger) *Service {
 
 // ChildTenant 子租户摘要 (供父租户控制台展示).
 type ChildTenant struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	Status        string  `json:"status"`
-	DefaultMode   string  `json:"default_mode"`
-	QuotaAgents   int     `json:"quota_agents"`
-	UsedAgents    int64   `json:"used_agents"`
-	OpenAlerts    int64   `json:"open_alerts"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	DefaultMode    string `json:"default_mode"`
+	QuotaAgents    int    `json:"quota_agents"`
+	UsedAgents     int64  `json:"used_agents"`
+	OpenAlerts     int64  `json:"open_alerts"`
 	CriticalAlerts int64  `json:"critical_alerts"`
 	UnpatchedVulns int64  `json:"unpatched_vulns"`
-	CreatedAt     string  `json:"created_at"`
+	CreatedAt      string `json:"created_at"`
 }
 
 // ListChildren 列出指定父租户的所有子租户摘要.
@@ -92,7 +92,7 @@ func (s *Service) AggregateAlerts(ctx context.Context, parentTenantID, groupBy s
 	}
 	var rows []row
 	if err := s.db.WithContext(ctx).Table("alerts").
-		Select(groupBy + " AS key, COUNT(*) AS count").
+		Select(groupBy+" AS key, COUNT(*) AS count").
 		Where("tenant_id IN ? AND status = ?", children, "open").
 		Group(groupBy).
 		Scan(&rows).Error; err != nil {

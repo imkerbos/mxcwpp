@@ -8,7 +8,8 @@
 //   - 4 级覆盖优先级: 规则级 > 主机标签级 > 租户级 > 全局默认
 //
 // 工程位置: common/mode 是 Engine/Manager/AC 等多服务共享的运行时决策点,
-//          所有"是否真执行 action"的检查都走 mode.Should(*).
+//
+//	所有"是否真执行 action"的检查都走 mode.Should(*).
 package mode
 
 import (
@@ -35,16 +36,16 @@ func (m Mode) String() string { return string(m) }
 
 // Decision 是一次 mode 决策的结果。
 type Decision struct {
-	Mode    Mode   // observe / protect
-	Source  string // global / tenant / host_label / rule (谁决定的)
-	Reason  string // 文档化原因, 写入 audit
+	Mode   Mode   // observe / protect
+	Source string // global / tenant / host_label / rule (谁决定的)
+	Reason string // 文档化原因, 写入 audit
 }
 
 // Scope 是配置查询的范围。
 type Scope struct {
-	TenantID    string
-	HostLabels  map[string]string // host_id 关联的标签
-	RuleID      string            // 规则 ID
+	TenantID   string
+	HostLabels map[string]string // host_id 关联的标签
+	RuleID     string            // 规则 ID
 }
 
 // Resolver 是运行时 mode 查询接口。
@@ -59,15 +60,15 @@ type Resolver interface {
 type MemoryResolver struct {
 	mu             sync.RWMutex
 	defaultMode    Mode
-	tenantModes    map[string]Mode               // tenant_id -> mode
-	hostLabelModes []hostLabelRule               // 按声明顺序匹配
-	ruleModes      map[string]Mode               // rule_id -> mode
+	tenantModes    map[string]Mode // tenant_id -> mode
+	hostLabelModes []hostLabelRule // 按声明顺序匹配
+	ruleModes      map[string]Mode // rule_id -> mode
 }
 
 type hostLabelRule struct {
-	TenantID  string
-	Label     string // "key=value"
-	Mode      Mode
+	TenantID string
+	Label    string // "key=value"
+	Mode     Mode
 }
 
 // NewMemoryResolver 构造内存 resolver, 默认全局 observe。
@@ -178,11 +179,11 @@ func matchLabel(spec string, labels map[string]string) bool {
 //
 // 业务层常用形式:
 //
-//   if !mode.ShouldEnforce(resolver.Resolve(scope)) {
-//       // observe 模式: 仅记录 would_action,不下发
-//       return
-//   }
-//   // protect 模式: 真执行 action
+//	if !mode.ShouldEnforce(resolver.Resolve(scope)) {
+//	    // observe 模式: 仅记录 would_action,不下发
+//	    return
+//	}
+//	// protect 模式: 真执行 action
 func ShouldEnforce(d Decision) bool {
 	return d.Mode == Protect
 }

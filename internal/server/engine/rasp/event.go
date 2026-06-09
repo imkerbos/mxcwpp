@@ -24,48 +24,48 @@ type EventKind string
 
 const (
 	// Java
-	KindJavaClassLoad      EventKind = "java.class_load"       // 类加载 (内存马典型)
-	KindJavaReflection     EventKind = "java.reflection"       // 反射调用 (Runtime.exec/ProcessBuilder)
-	KindJavaDeserialize    EventKind = "java.deserialize"      // 反序列化
-	KindJavaJDBC           EventKind = "java.jdbc"             // JDBC SQL
-	KindJavaFile           EventKind = "java.file"             // 文件操作
-	KindJavaHTTPClient     EventKind = "java.http_client"      // HTTP 出站调用
-	KindJavaMemshell       EventKind = "java.memshell"         // 内存马 (Filter/Listener/Servlet 动态注册)
+	KindJavaClassLoad   EventKind = "java.class_load"  // 类加载 (内存马典型)
+	KindJavaReflection  EventKind = "java.reflection"  // 反射调用 (Runtime.exec/ProcessBuilder)
+	KindJavaDeserialize EventKind = "java.deserialize" // 反序列化
+	KindJavaJDBC        EventKind = "java.jdbc"        // JDBC SQL
+	KindJavaFile        EventKind = "java.file"        // 文件操作
+	KindJavaHTTPClient  EventKind = "java.http_client" // HTTP 出站调用
+	KindJavaMemshell    EventKind = "java.memshell"    // 内存马 (Filter/Listener/Servlet 动态注册)
 
 	// PHP
-	KindPHPEval            EventKind = "php.eval"
-	KindPHPInclude         EventKind = "php.include"
-	KindPHPSystemCall      EventKind = "php.system_call"
+	KindPHPEval       EventKind = "php.eval"
+	KindPHPInclude    EventKind = "php.include"
+	KindPHPSystemCall EventKind = "php.system_call"
 
 	// Python
-	KindPyExec             EventKind = "py.exec"
-	KindPyImport           EventKind = "py.dynamic_import"
-	KindPySubprocess       EventKind = "py.subprocess"
+	KindPyExec       EventKind = "py.exec"
+	KindPyImport     EventKind = "py.dynamic_import"
+	KindPySubprocess EventKind = "py.subprocess"
 
 	// Node.js
-	KindNodeChildProcess   EventKind = "node.child_process"
-	KindNodeRequire        EventKind = "node.dynamic_require"
+	KindNodeChildProcess EventKind = "node.child_process"
+	KindNodeRequire      EventKind = "node.dynamic_require"
 )
 
 // Event 是 RASP Agent 上报的运行时事件。
 //
 // 所有字段 read-only;Engine 不会通过事件反向影响 Agent 进程行为。
 type Event struct {
-	HostID         string            `json:"host_id"`
-	TenantID       string            `json:"tenant_id"`
-	AgentID        string            `json:"agent_id"`
-	PID            int32             `json:"pid"`
-	Language       string            `json:"language"` // java / php / python / node / go
-	Kind           EventKind         `json:"kind"`
-	ClassName      string            `json:"class_name,omitempty"`     // Java/Node 类名
-	MethodName     string            `json:"method_name,omitempty"`
-	Arguments      []string          `json:"arguments,omitempty"`      // 关键参数 (前 256 字符截断)
-	StackTrace     []string          `json:"stack_trace,omitempty"`    // 调用栈 (最多 50 帧)
-	HTTPContext    *HTTPContext      `json:"http_context,omitempty"`   // 当前 HTTP 请求上下文
-	Metadata       map[string]string `json:"metadata,omitempty"`
-	Timestamp      time.Time         `json:"timestamp"`
+	HostID      string            `json:"host_id"`
+	TenantID    string            `json:"tenant_id"`
+	AgentID     string            `json:"agent_id"`
+	PID         int32             `json:"pid"`
+	Language    string            `json:"language"` // java / php / python / node / go
+	Kind        EventKind         `json:"kind"`
+	ClassName   string            `json:"class_name,omitempty"` // Java/Node 类名
+	MethodName  string            `json:"method_name,omitempty"`
+	Arguments   []string          `json:"arguments,omitempty"`    // 关键参数 (前 256 字符截断)
+	StackTrace  []string          `json:"stack_trace,omitempty"`  // 调用栈 (最多 50 帧)
+	HTTPContext *HTTPContext      `json:"http_context,omitempty"` // 当前 HTTP 请求上下文
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Timestamp   time.Time         `json:"timestamp"`
 	// 严格 read-only 标记
-	Mode           string            `json:"mode"` // 永远为 "observe", protect 模式留客户授权后启用
+	Mode string `json:"mode"` // 永远为 "observe", protect 模式留客户授权后启用
 }
 
 // HTTPContext 是 RASP 事件附带的 HTTP 请求上下文。

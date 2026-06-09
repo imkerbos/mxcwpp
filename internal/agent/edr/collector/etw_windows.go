@@ -24,15 +24,15 @@ import (
 type WindowsEventKind string
 
 const (
-	WinEventProcessStart      WindowsEventKind = "process_start"
-	WinEventProcessEnd        WindowsEventKind = "process_end"
-	WinEventNetworkConnect    WindowsEventKind = "network_connect"
-	WinEventFileWrite         WindowsEventKind = "file_write"
-	WinEventRegistryWrite     WindowsEventKind = "registry_write"
-	WinEventImageLoad         WindowsEventKind = "image_load"
-	WinEventDriverLoad        WindowsEventKind = "driver_load"
-	WinEventThreadCreate      WindowsEventKind = "thread_create"
-	WinEventNamedPipeCreate   WindowsEventKind = "namedpipe_create"
+	WinEventProcessStart    WindowsEventKind = "process_start"
+	WinEventProcessEnd      WindowsEventKind = "process_end"
+	WinEventNetworkConnect  WindowsEventKind = "network_connect"
+	WinEventFileWrite       WindowsEventKind = "file_write"
+	WinEventRegistryWrite   WindowsEventKind = "registry_write"
+	WinEventImageLoad       WindowsEventKind = "image_load"
+	WinEventDriverLoad      WindowsEventKind = "driver_load"
+	WinEventThreadCreate    WindowsEventKind = "thread_create"
+	WinEventNamedPipeCreate WindowsEventKind = "namedpipe_create"
 )
 
 // WindowsEvent 统一事件结构.
@@ -46,17 +46,17 @@ type WindowsEvent struct {
 	TimeStamp   time.Time
 
 	// 网络
-	DstIP   string
-	DstPort uint16
-	SrcIP   string
-	SrcPort uint16
+	DstIP    string
+	DstPort  uint16
+	SrcIP    string
+	SrcPort  uint16
 	Protocol string
 
 	// 文件
 	FilePath string
 
 	// 注册表
-	RegistryKey string
+	RegistryKey   string
 	RegistryValue string
 
 	// 镜像/驱动

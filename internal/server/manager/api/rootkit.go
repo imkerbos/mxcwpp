@@ -57,14 +57,14 @@ type TriggerScanReq struct {
 }
 
 type rootkitScanResult struct {
-	HostID            string   `json:"host_id"`
-	HiddenPIDs        []int    `json:"hidden_pids"`
-	HiddenModules     []string `json:"hidden_modules"`
-	HiddenPorts       []int    `json:"hidden_ports"`
-	PreloadAnomalies  []string `json:"preload_anomalies"`
-	ProcDirMismatch   int      `json:"proc_dir_mismatch"`
-	Warnings          []string `json:"warnings"`
-	ScannedAt         string   `json:"scanned_at"`
+	HostID           string   `json:"host_id"`
+	HiddenPIDs       []int    `json:"hidden_pids"`
+	HiddenModules    []string `json:"hidden_modules"`
+	HiddenPorts      []int    `json:"hidden_ports"`
+	PreloadAnomalies []string `json:"preload_anomalies"`
+	ProcDirMismatch  int      `json:"proc_dir_mismatch"`
+	Warnings         []string `json:"warnings"`
+	ScannedAt        string   `json:"scanned_at"`
 }
 
 // TriggerScan 下发一次扫描 (异步, 完成后 Agent 上报落 RootkitFinding 表).

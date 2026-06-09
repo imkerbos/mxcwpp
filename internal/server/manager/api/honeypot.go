@@ -30,14 +30,14 @@ func NewHoneypotHandler(db *gorm.DB, logger *zap.Logger) *HoneypotHandler {
 }
 
 type honeypotSensorView struct {
-	ID         string `json:"id"`
-	HostID     string `json:"host_id"`
-	Hostname   string `json:"hostname"`
-	Kind       string `json:"kind"`
-	BindAddr   string `json:"bind_addr"`
-	Status     string `json:"status"`
-	Hits24h    int    `json:"hits_24h"`
-	StartedAt  string `json:"started_at"`
+	ID        string `json:"id"`
+	HostID    string `json:"host_id"`
+	Hostname  string `json:"hostname"`
+	Kind      string `json:"kind"`
+	BindAddr  string `json:"bind_addr"`
+	Status    string `json:"status"`
+	Hits24h   int    `json:"hits_24h"`
+	StartedAt string `json:"started_at"`
 }
 
 // ListSensors 列出诱饵传感器 (聚合 HoneypotDeploymentRecord).
@@ -74,18 +74,18 @@ func (h *HoneypotHandler) ListSensors(c *gin.Context) {
 }
 
 type honeypotEventView struct {
-	ID         uint64 `json:"id"`
-	SensorID   string `json:"sensor_id"`
-	Kind       string `json:"kind"`
-	SrcIP      string `json:"src_ip"`
-	SrcPort    int    `json:"src_port"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	UserAgent  string `json:"user_agent"`
-	Method     string `json:"method"`
-	Path       string `json:"path"`
-	Severity   string `json:"severity"`
-	Time       string `json:"time"`
+	ID        uint64 `json:"id"`
+	SensorID  string `json:"sensor_id"`
+	Kind      string `json:"kind"`
+	SrcIP     string `json:"src_ip"`
+	SrcPort   int    `json:"src_port"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	UserAgent string `json:"user_agent"`
+	Method    string `json:"method"`
+	Path      string `json:"path"`
+	Severity  string `json:"severity"`
+	Time      string `json:"time"`
 }
 
 // ListEvents 列出蜜罐告警 (alerts 表 source=honeypot).

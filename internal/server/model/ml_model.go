@@ -7,16 +7,16 @@ package model
 //   - 本表附加 ML 专属字段: framework / input/output shape / class labels
 //   - 一条 spec 对应一个 component_version (1:1 by component_id+version)
 type MLModelSpec struct {
-	TenantID    string    `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	ComponentID uint      `gorm:"not null;uniqueIndex:uk_comp_ver,priority:1" json:"component_id"`
-	VersionID   uint      `gorm:"not null;uniqueIndex:uk_comp_ver,priority:2" json:"version_id"`
+	TenantID    string `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ComponentID uint   `gorm:"not null;uniqueIndex:uk_comp_ver,priority:1" json:"component_id"`
+	VersionID   uint   `gorm:"not null;uniqueIndex:uk_comp_ver,priority:2" json:"version_id"`
 	// 模型属性
-	Kind       string `gorm:"size:32;not null;index" json:"kind"`        // anomaly / process_classify / login_risk / webshell
-	Framework  string `gorm:"size:32;not null" json:"framework"`         // onnx / tflite / treelite
-	InputDim   string `gorm:"size:128" json:"input_dim"`                 // e.g. "1x32" or "1x3x224x224"
+	Kind       string `gorm:"size:32;not null;index" json:"kind"` // anomaly / process_classify / login_risk / webshell
+	Framework  string `gorm:"size:32;not null" json:"framework"`  // onnx / tflite / treelite
+	InputDim   string `gorm:"size:128" json:"input_dim"`          // e.g. "1x32" or "1x3x224x224"
 	OutputDim  string `gorm:"size:128" json:"output_dim"`
-	ClassLabel string `gorm:"size:512" json:"class_label"`               // JSON array, 分类模型用
+	ClassLabel string `gorm:"size:512" json:"class_label"` // JSON array, 分类模型用
 	// 训练元信息
 	TrainedAt     LocalTime `gorm:"type:timestamp" json:"trained_at"`
 	TrainSamples  int64     `gorm:"not null;default:0" json:"train_samples"`
@@ -38,8 +38,8 @@ type MLModelSubscription struct {
 	TenantID      string    `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	SpecID        uint      `gorm:"not null;index" json:"spec_id"`
-	HostID        string    `gorm:"size:64;index" json:"host_id"`          // 单主机订阅; 空则按 label
-	LabelSelector string    `gorm:"size:512" json:"label_selector"`        // e.g. "env=prod,role=web"
+	HostID        string    `gorm:"size:64;index" json:"host_id"`   // 单主机订阅; 空则按 label
+	LabelSelector string    `gorm:"size:512" json:"label_selector"` // e.g. "env=prod,role=web"
 	Enabled       bool      `gorm:"not null;default:true;index" json:"enabled"`
 	CreatedAt     LocalTime `json:"created_at"`
 	UpdatedAt     LocalTime `json:"updated_at"`

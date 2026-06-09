@@ -1,18 +1,19 @@
 // Package canary — 反勒索 / 反横移 蜜罐诱饵文件 (B9).
 //
 // 原理:
-//   Agent 在常见目标目录 (用户家 / 共享 / 数据库 backup 路径) 放置看似真实的
-//   诱饵文件 (银行账号.txt / 客户名单.xlsx / wallet.dat 等). 这些文件:
 //
-//   - 永不被合法业务读 / 写 (在白名单进程外的任何 read/write/rename/delete 都告警)
-//   - sha256 已知 → 周期校验, hash 变 = 被加密/篡改 = 勒索软件命中
-//   - 文件 setattr immutable → 攻击者 chattr 也是 IOC
+//	Agent 在常见目标目录 (用户家 / 共享 / 数据库 backup 路径) 放置看似真实的
+//	诱饵文件 (银行账号.txt / 客户名单.xlsx / wallet.dat 等). 这些文件:
+//
+//	- 永不被合法业务读 / 写 (在白名单进程外的任何 read/write/rename/delete 都告警)
+//	- sha256 已知 → 周期校验, hash 变 = 被加密/篡改 = 勒索软件命中
+//	- 文件 setattr immutable → 攻击者 chattr 也是 IOC
 //
 // 工作流:
-//   1. Deploy() 部署诱饵到目标路径, 注册 fanotify watch
-//   2. 监听到 read/write/rename/delete 触发立刻产 critical alert
-//   3. 周期 sha256 hash 校验 (5min), hash 变 = 篡改
-//   4. UnDeploy() 清理
+//  1. Deploy() 部署诱饵到目标路径, 注册 fanotify watch
+//  2. 监听到 read/write/rename/delete 触发立刻产 critical alert
+//  3. 周期 sha256 hash 校验 (5min), hash 变 = 篡改
+//  4. UnDeploy() 清理
 package canary
 
 import (
@@ -31,8 +32,8 @@ import (
 
 // File 单个诱饵.
 type File struct {
-	Path      string    // 部署路径
-	Hash      string    // sha256 (Deploy 时计算)
+	Path       string // 部署路径
+	Hash       string // sha256 (Deploy 时计算)
 	DeployedAt time.Time
 }
 
@@ -97,10 +98,10 @@ func (m *Manager) Deploy(path string, content []byte) error {
 // DeployBatch 一次性部署常见诱饵 (银行账号 / 客户名单 / wallet / SSH key 等).
 func (m *Manager) DeployBatch(baseDir string) (int, error) {
 	templates := map[string]string{
-		"银行账号.txt":  "Bank: ICBC\nAccount: 6222024500001234567\nName: 张三\nBalance: 1,234,567.89",
-		"客户名单.csv":  "name,phone,email,company\n王五,13800001111,wang@example.com,Foo Corp\n",
-		"wallet.dat": "Bitcoin Core wallet binary placeholder",
-		"id_rsa":     "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA[decoy-only-do-not-use]\n-----END OPENSSH PRIVATE KEY-----\n",
+		"银行账号.txt":      "Bank: ICBC\nAccount: 6222024500001234567\nName: 张三\nBalance: 1,234,567.89",
+		"客户名单.csv":      "name,phone,email,company\n王五,13800001111,wang@example.com,Foo Corp\n",
+		"wallet.dat":    "Bitcoin Core wallet binary placeholder",
+		"id_rsa":        "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA[decoy-only-do-not-use]\n-----END OPENSSH PRIVATE KEY-----\n",
 		"password.kdbx": "KeePass 2.x decoy database (canary)\n",
 		"backup.sql":    "-- PostgreSQL backup decoy\n-- Generated 2026-06-07\n",
 	}

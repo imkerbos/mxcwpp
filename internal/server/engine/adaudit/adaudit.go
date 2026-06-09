@@ -42,45 +42,45 @@ import (
 type EventKind string
 
 const (
-	EventLogonSuccess     EventKind = "logon_success"        // 4624
-	EventLogonFailed      EventKind = "logon_failed"         // 4625
-	EventLogonExplicit    EventKind = "logon_explicit"       // 4648 横向
-	EventPrivilegeAssign  EventKind = "privilege_assign"     // 4672
-	EventAccountCreate    EventKind = "account_create"       // 4720
-	EventAccountEnable    EventKind = "account_enable"       // 4722
-	EventPasswordChange   EventKind = "password_change"      // 4723
-	EventPasswordReset    EventKind = "password_reset"       // 4724
-	EventGroupAdd         EventKind = "group_add"            // 4728/4732/4756
-	EventKerberosTGTReq   EventKind = "kerberos_tgt_req"     // 4768
-	EventKerberosTGSReq   EventKind = "kerberos_tgs_req"     // 4769
-	EventNTLMAuth         EventKind = "ntlm_auth"            // 4776
-	EventDCSync           EventKind = "dcsync"               // 4662 + DSReplicaGetChanges
-	EventShareAccess      EventKind = "share_access"         // 5145
-	EventRemoteDesktop    EventKind = "remote_desktop"       // 4778
-	EventNewProcess       EventKind = "new_process"          // 4688
+	EventLogonSuccess    EventKind = "logon_success"    // 4624
+	EventLogonFailed     EventKind = "logon_failed"     // 4625
+	EventLogonExplicit   EventKind = "logon_explicit"   // 4648 横向
+	EventPrivilegeAssign EventKind = "privilege_assign" // 4672
+	EventAccountCreate   EventKind = "account_create"   // 4720
+	EventAccountEnable   EventKind = "account_enable"   // 4722
+	EventPasswordChange  EventKind = "password_change"  // 4723
+	EventPasswordReset   EventKind = "password_reset"   // 4724
+	EventGroupAdd        EventKind = "group_add"        // 4728/4732/4756
+	EventKerberosTGTReq  EventKind = "kerberos_tgt_req" // 4768
+	EventKerberosTGSReq  EventKind = "kerberos_tgs_req" // 4769
+	EventNTLMAuth        EventKind = "ntlm_auth"        // 4776
+	EventDCSync          EventKind = "dcsync"           // 4662 + DSReplicaGetChanges
+	EventShareAccess     EventKind = "share_access"     // 5145
+	EventRemoteDesktop   EventKind = "remote_desktop"   // 4778
+	EventNewProcess      EventKind = "new_process"      // 4688
 )
 
 // Event 标准化 AD 审计事件.
 type Event struct {
-	Kind         EventKind
-	Timestamp    time.Time
-	EventID      int    // 原始 Windows Event ID
-	UserName     string
-	UserDomain   string
-	UserSID      string
-	TargetUser   string // 4624 SubjectUser → TargetUser
-	TargetGroup  string // 4728 加组目标
-	SourceIP     string
-	SourcePort   int
-	LogonType    int    // 4624: 2=interactive 3=network 10=remoteinteractive
-	ProcessName  string // 4688
-	ProcessCmd   string // 4688 cmdline
-	ServiceName  string // 4769 SPN
-	FailureCode  string // 4625 0xC000006A=wrong password 0xC000006D=bad username
+	Kind            EventKind
+	Timestamp       time.Time
+	EventID         int // 原始 Windows Event ID
+	UserName        string
+	UserDomain      string
+	UserSID         string
+	TargetUser      string // 4624 SubjectUser → TargetUser
+	TargetGroup     string // 4728 加组目标
+	SourceIP        string
+	SourcePort      int
+	LogonType       int    // 4624: 2=interactive 3=network 10=remoteinteractive
+	ProcessName     string // 4688
+	ProcessCmd      string // 4688 cmdline
+	ServiceName     string // 4769 SPN
+	FailureCode     string // 4625 0xC000006A=wrong password 0xC000006D=bad username
 	WorkstationName string
-	TicketOptions string // Kerberos
-	Severity     string
-	Raw          map[string]string // 原始字段保留
+	TicketOptions   string // Kerberos
+	Severity        string
+	Raw             map[string]string // 原始字段保留
 }
 
 // Detector 检测器, 维护短时滑窗状态.

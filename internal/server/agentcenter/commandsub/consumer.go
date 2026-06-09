@@ -43,10 +43,10 @@ const ConsumerGroupID = "mxsec-ac-command"
 // 这样 Engine 在 protect 模式下产生的处置 action 可直接走该 Topic 路由。
 type CommandMessage struct {
 	TenantID    string          `json:"tenant_id"`
-	AgentIDs    []string        `json:"agent_ids"`     // 批量目标 Agent ID
-	CommandType string          `json:"command_type"`  // rule_sync / ioc_sync / isolate / kill / ip_block ...
-	Payload     json.RawMessage `json:"payload"`       // 命令负载,由 CommandType 决定结构
-	IssuedAt    int64           `json:"issued_at"`     // Unix ms
+	AgentIDs    []string        `json:"agent_ids"`    // 批量目标 Agent ID
+	CommandType string          `json:"command_type"` // rule_sync / ioc_sync / isolate / kill / ip_block ...
+	Payload     json.RawMessage `json:"payload"`      // 命令负载,由 CommandType 决定结构
+	IssuedAt    int64           `json:"issued_at"`    // Unix ms
 	TraceID     string          `json:"trace_id,omitempty"`
 	IdempotKey  string          `json:"idempot_key,omitempty"` // 幂等 key,AC 用作去重
 }

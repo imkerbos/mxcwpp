@@ -113,8 +113,9 @@ func (h *CompleteAPIHandler) Embed(c *gin.Context) {
 // ServerSetup 把 handler 挂到 NewHTTPHandler。
 //
 // 接入 main 时调用:
-//   gin := llmproxy.NewHTTPHandler(...)
-//   llmproxy.AttachAPI(gin.(*gin.Engine), handler)
+//
+//	gin := llmproxy.NewHTTPHandler(...)
+//	llmproxy.AttachAPI(gin.(*gin.Engine), handler)
 func AttachAPI(r *gin.Engine, h *CompleteAPIHandler) {
 	r.POST("/complete", h.Complete)
 	r.POST("/embed", h.Embed)

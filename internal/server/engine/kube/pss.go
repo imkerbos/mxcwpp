@@ -18,9 +18,9 @@ import (
 type Profile string
 
 const (
-	ProfilePrivileged  Profile = "privileged"
-	ProfileBaseline    Profile = "baseline"
-	ProfileRestricted  Profile = "restricted"
+	ProfilePrivileged Profile = "privileged"
+	ProfileBaseline   Profile = "baseline"
+	ProfileRestricted Profile = "restricted"
 )
 
 // Violation 单条违例.
@@ -34,13 +34,13 @@ type Violation struct {
 //
 // 不引 k8s.io/api 重型包, 调用方自行从 corev1.Pod 抽取后传入.
 type PodSpec struct {
-	HostNetwork     bool
-	HostPID         bool
-	HostIPC         bool
-	HostUsers       *bool // nil = 集群默认
-	Containers      []Container
-	InitContainers  []Container
-	Volumes         []Volume
+	HostNetwork    bool
+	HostPID        bool
+	HostIPC        bool
+	HostUsers      *bool // nil = 集群默认
+	Containers     []Container
+	InitContainers []Container
+	Volumes        []Volume
 }
 
 // Container 安全字段.

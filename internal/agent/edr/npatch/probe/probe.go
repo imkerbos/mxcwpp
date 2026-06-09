@@ -4,14 +4,14 @@
 //
 // 实测兼容矩阵:
 //
-//   CentOS 7 / RHEL 7 / Oracle Linux 7 RHCK (kernel 3.10):
-//     AF_PACKET v3 ✅ + cgroup_skb ❌ → 用 AF_PACKET v3 fallback
+//	CentOS 7 / RHEL 7 / Oracle Linux 7 RHCK (kernel 3.10):
+//	  AF_PACKET v3 ✅ + cgroup_skb ❌ → 用 AF_PACKET v3 fallback
 //
-//   CentOS 7 + ELRepo kernel-ml 5.x / Oracle Linux 7 UEK 5.4:
-//     AF_PACKET v3 ✅ + cgroup_skb ✅ → 优先 cgroup_skb
+//	CentOS 7 + ELRepo kernel-ml 5.x / Oracle Linux 7 UEK 5.4:
+//	  AF_PACKET v3 ✅ + cgroup_skb ✅ → 优先 cgroup_skb
 //
-//   CentOS/Rocky/RHEL 8+ / Ubuntu 22.04+ / Debian 11+:
-//     AF_PACKET v3 ✅ + cgroup_skb ✅ → 用 cgroup_skb (in-kernel 高效)
+//	CentOS/Rocky/RHEL 8+ / Ubuntu 22.04+ / Debian 11+:
+//	  AF_PACKET v3 ✅ + cgroup_skb ✅ → 用 cgroup_skb (in-kernel 高效)
 package probe
 
 import (
@@ -40,8 +40,8 @@ func (kv KernelVersion) AtLeast(major, minor int) bool {
 func (kv KernelVersion) String() string { return kv.Raw }
 
 var (
-	once    sync.Once
-	cached  KernelVersion
+	once     sync.Once
+	cached   KernelVersion
 	cacheErr error
 )
 

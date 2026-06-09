@@ -2,10 +2,10 @@
 //
 // 每小时跑一次, 对每个租户:
 //
-//	1. 查 tenants.quota_agents 上限
-//	2. 查实际 hosts 数 (online + offline)
-//	3. 若 >= 80% 且未在 24h 内告警过 → 产 alert
-//	4. 若 >= 100% → critical alert
+//  1. 查 tenants.quota_agents 上限
+//  2. 查实际 hosts 数 (online + offline)
+//  3. 若 >= 80% 且未在 24h 内告警过 → 产 alert
+//  4. 若 >= 100% → critical alert
 //
 // alert 入 alerts 表, 走标准 alert 生命周期; 同时落 outbound (webhook/syslog).
 package billing

@@ -43,8 +43,8 @@ func NewOpenAI(cfg OpenAIConfig) *OpenAIProvider {
 	}
 }
 
-func (p *OpenAIProvider) Name() string             { return p.cfg.Name }
-func (p *OpenAIProvider) Type() string             { return p.cfg.Provider }
+func (p *OpenAIProvider) Name() string              { return p.cfg.Name }
+func (p *OpenAIProvider) Type() string              { return p.cfg.Provider }
 func (p *OpenAIProvider) SupportedModels() []string { return p.cfg.Models }
 
 // Complete 调用 OpenAI Chat Completion API。

@@ -33,18 +33,18 @@ type compiledRule struct {
 // Engine CEL 规则引擎
 // 负责维护 CEL 环境、编译规则、评估事件
 type Engine struct {
-	mu       sync.RWMutex
-	env      *cel.Env
-	rules    []compiledRule
+	mu    sync.RWMutex
+	env   *cel.Env
+	rules []compiledRule
 	// P0-4: DataType → 适用规则索引, 替 Evaluate O(M) 线性扫为 O(1) 查找
 	rulesByDataType map[int32][]compiledRule
 	// 全 DataType 适用规则 (DataTypes 列表为空 → 任意 DataType 都用)
 	rulesAnyDataType []compiledRule
-	db       *gorm.DB
-	log      *zap.Logger
-	procTree *ProcessTree  // 进程树（自动维护，用于祖先链查询）
-	tracker  *EventTracker // 事件频率/首次出现追踪
-	workers  int           // 并行 worker 数量
+	db               *gorm.DB
+	log              *zap.Logger
+	procTree         *ProcessTree  // 进程树（自动维护，用于祖先链查询）
+	tracker          *EventTracker // 事件频率/首次出现追踪
+	workers          int           // 并行 worker 数量
 }
 
 // New 创建 CEL 规则引擎实例

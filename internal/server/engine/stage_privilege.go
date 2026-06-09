@@ -134,18 +134,18 @@ func (s *PrivilegeStage) Process(_ context.Context, ev PipelineEvent) ([]Alert, 
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"event_type":     eventType,
-		"pid":            fields["pid"],
-		"ppid":           fields["ppid"],
-		"old_uid":        oldUID,
-		"new_uid":        newUID,
-		"target_pid":     fields["target_pid"],
-		"cap_effective":  fields["cap_effective"],
-		"comm":           comm,
-		"data":           fields["payload"],
-		"rule":           rule,
-		"detail":         detail,
-		"would_action":   map[string]any{"type": "alert_only"},
+		"event_type":    eventType,
+		"pid":           fields["pid"],
+		"ppid":          fields["ppid"],
+		"old_uid":       oldUID,
+		"new_uid":       newUID,
+		"target_pid":    fields["target_pid"],
+		"cap_effective": fields["cap_effective"],
+		"comm":          comm,
+		"data":          fields["payload"],
+		"rule":          rule,
+		"detail":        detail,
+		"would_action":  map[string]any{"type": "alert_only"},
 	})
 
 	return []Alert{{

@@ -25,19 +25,19 @@ import (
 //
 // Connector 各自把这个 struct 映射到目标格式。
 type Event struct {
-	ID          string                 `json:"id"`
-	TenantID    string                 `json:"tenant_id"`
-	HostID      string                 `json:"host_id"`
-	HostName    string                 `json:"host_name,omitempty"`
-	Severity    string                 `json:"severity"`
-	Category    string                 `json:"category"`
-	RuleID      string                 `json:"rule_id"`
-	Title       string                 `json:"title"`
-	Description string                 `json:"description"`
-	MitreID     string                 `json:"mitre_id,omitempty"`
-	Source      string                 `json:"source"` // engine.alert / fim.event / baseline.fail / ...
-	Timestamp   time.Time              `json:"timestamp"`
-	Fields      map[string]any         `json:"fields,omitempty"`
+	ID          string         `json:"id"`
+	TenantID    string         `json:"tenant_id"`
+	HostID      string         `json:"host_id"`
+	HostName    string         `json:"host_name,omitempty"`
+	Severity    string         `json:"severity"`
+	Category    string         `json:"category"`
+	RuleID      string         `json:"rule_id"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	MitreID     string         `json:"mitre_id,omitempty"`
+	Source      string         `json:"source"` // engine.alert / fim.event / baseline.fail / ...
+	Timestamp   time.Time      `json:"timestamp"`
+	Fields      map[string]any `json:"fields,omitempty"`
 }
 
 // Connector 接口: 每种外发实现一个。

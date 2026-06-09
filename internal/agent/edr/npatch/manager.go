@@ -29,8 +29,8 @@ type Manager struct {
 	afReader *afpacket.Reader
 
 	// hit counter 给 metrics 用
-	hits     atomic.Uint64
-	dropped  atomic.Uint64
+	hits    atomic.Uint64
+	dropped atomic.Uint64
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
