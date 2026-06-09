@@ -101,13 +101,16 @@ func TestPipeline_ProtectMode_FillsAction(t *testing.T) {
 
 func TestDecodeEvent_PartialFields(t *testing.T) {
 	t.Parallel()
-	msg := &sarama.ConsumerMessage{Value: []byte(`{"tenant_id":"t-1","data_type":3001}`)}
+	msg := &sarama.ConsumerMessage{Value: []byte(`{"agent_id":"h-1","data_type":3001}`)}
 	ev, err := decodeEvent(msg)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if ev.TenantID != "t-1" {
-		t.Errorf("tenant: got %s", ev.TenantID)
+	if ev.AgentID != "h-1" {
+		t.Errorf("agent_id: got %s", ev.AgentID)
+	}
+	if ev.HostID != "h-1" {
+		t.Errorf("host_id: got %s", ev.HostID)
 	}
 	if ev.DataType != 3001 {
 		t.Errorf("data_type: got %d", ev.DataType)
