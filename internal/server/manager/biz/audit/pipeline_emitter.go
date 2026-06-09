@@ -63,9 +63,9 @@ type ConfigChangeFact struct {
 // EmitConfigChange 落 Pipeline.
 func (e *PipelineEmitter) EmitConfigChange(ctx context.Context, f ConfigChangeFact) {
 	payload := map[string]any{
-		"tenant_id":      f.TenantID,
-		"data_type":      14501,
-		"received_at":    time.Now().Format(time.RFC3339Nano),
+		"tenant_id":   f.TenantID,
+		"data_type":   14501,
+		"received_at": time.Now().Format(time.RFC3339Nano),
 		"payload": map[string]any{
 			"request_id":     f.RequestID,
 			"target_table":   f.TargetTable,

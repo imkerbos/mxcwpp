@@ -27,8 +27,8 @@ type Metrics struct {
 // Snapshot 拷贝 counter.
 func (m *Metrics) Snapshot() map[string]uint64 {
 	return map[string]uint64{
-		"memfd_creates":   m.MemfdCreates.Load(),
-		"execveat_memfd":  m.ExecveAtMemfd.Load(),
+		"memfd_creates":  m.MemfdCreates.Load(),
+		"execveat_memfd": m.ExecveAtMemfd.Load(),
 	}
 }
 

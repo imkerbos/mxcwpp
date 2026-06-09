@@ -67,11 +67,11 @@ func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, err
 	// 配置 keepalive 参数，允许客户端频繁发送 ping
 	// P2-4: 加 MaxConnectionAge + MaxConnectionAgeGrace 强制长连接定期重置, 防 LB 倾斜.
 	keepaliveParams := keepalive.ServerParameters{
-		Time:                  60 * time.Second,  // 服务端每 60 秒发送 ping（如果没有活跃流）
-		Timeout:               10 * time.Second,  // ping 超时时间
-		MaxConnectionAge:      12 * time.Hour,    // P2-4: 连接 12h 强制重连, LB 重均衡
-		MaxConnectionAgeGrace: 5 * time.Minute,   // 给客户端 5min 优雅迁移
-		MaxConnectionIdle:    30 * time.Minute,   // 空闲 30min 主动关
+		Time:                  60 * time.Second, // 服务端每 60 秒发送 ping（如果没有活跃流）
+		Timeout:               10 * time.Second, // ping 超时时间
+		MaxConnectionAge:      12 * time.Hour,   // P2-4: 连接 12h 强制重连, LB 重均衡
+		MaxConnectionAgeGrace: 5 * time.Minute,  // 给客户端 5min 优雅迁移
+		MaxConnectionIdle:     30 * time.Minute, // 空闲 30min 主动关
 	}
 
 	// 配置 enforcement policy，允许客户端更频繁的 ping

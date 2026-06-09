@@ -133,7 +133,7 @@ func PerRouteRateLimit(rdb *redis.Client, rps, burst int, keyBy KeyFunc, logger 
 // SuggestedDefaults 给路由组的合理默认 RPS.
 func SuggestedDefaults() map[string]int {
 	return map[string]int{
-		"/api/v1/auth/login":            10,   // 防爆破
+		"/api/v1/auth/login":             10,  // 防爆破
 		"/api/v2/config/change-requests": 30,  // 配置变更不可频繁
 		"/api/v2/admin/tenants/":         20,  // 管理 API
 		"/api/v1/hosts/:host_id/isolate": 5,   // 隔离动作慎重

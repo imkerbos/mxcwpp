@@ -23,8 +23,8 @@ import (
 type EventKind string
 
 const (
-	EventSSHLoginAttempt   EventKind = "ssh_login_attempt"
-	EventHTTPSensitivePath EventKind = "http_sensitive_path"
+	EventSSHLoginAttempt      EventKind = "ssh_login_attempt"
+	EventHTTPSensitivePath    EventKind = "http_sensitive_path"
 	EventHTTPCommandInjection EventKind = "http_command_injection"
 )
 

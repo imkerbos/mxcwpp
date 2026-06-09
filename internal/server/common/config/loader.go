@@ -19,13 +19,13 @@ import (
 //
 // 字段一一对应 configs/engine.yaml; flag 不再承载默认值。
 type EngineConfig struct {
-	HTTPAddr     string         `mapstructure:"http_addr"`
-	DefaultMode  string         `mapstructure:"default_mode"` // observe / protect
-	AlertTopic   string         `mapstructure:"alert_topic"`
-	Kafka        KafkaConfig    `mapstructure:"kafka"`
-	Database     DBConfig       `mapstructure:"database"`
-	OTel         OTelConfig     `mapstructure:"otel"`
-	Pipeline     PipelineConfig `mapstructure:"pipeline"`
+	HTTPAddr    string         `mapstructure:"http_addr"`
+	DefaultMode string         `mapstructure:"default_mode"` // observe / protect
+	AlertTopic  string         `mapstructure:"alert_topic"`
+	Kafka       KafkaConfig    `mapstructure:"kafka"`
+	Database    DBConfig       `mapstructure:"database"`
+	OTel        OTelConfig     `mapstructure:"otel"`
+	Pipeline    PipelineConfig `mapstructure:"pipeline"`
 }
 
 // KafkaConfig Kafka 连接参数。
@@ -65,10 +65,10 @@ type PipelineConfig struct {
 //
 // 顺序:
 //
-//	1. 设置内置默认 (与历史 flag 一致, 兼容老部署)
-//	2. 读 YAML 文件
-//	3. 环境变量覆盖 (MXSEC_ENGINE_*)
-//	4. 反序列化 → 校验
+//  1. 设置内置默认 (与历史 flag 一致, 兼容老部署)
+//  2. 读 YAML 文件
+//  3. 环境变量覆盖 (MXSEC_ENGINE_*)
+//  4. 反序列化 → 校验
 func LoadEngine(path string) (*EngineConfig, error) {
 	v := viper.New()
 	v.SetConfigFile(path)

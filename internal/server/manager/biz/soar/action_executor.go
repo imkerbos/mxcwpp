@@ -98,8 +98,8 @@ func (a *DefaultActionExecutor) isolateHost(ctx context.Context, hostID, operato
 	}
 	// AC 下发隔离命令 (走 ACDispatcher)
 	cmd := map[string]any{
-		"action":      "isolate",
-		"reason":      reason,
+		"action":       "isolate",
+		"reason":       reason,
 		"isolation_id": iso.ID,
 	}
 	if err := a.dispatchCommand(ctx, hostID, "host_isolation", cmd); err != nil {

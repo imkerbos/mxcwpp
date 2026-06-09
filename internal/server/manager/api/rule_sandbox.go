@@ -38,11 +38,11 @@ type sandboxRequest struct {
 
 // sandboxResponse 应答.
 type sandboxResponse struct {
-	Compiled  bool     `json:"compiled"`
-	CompileErr string  `json:"compile_error,omitempty"`
-	Matched   bool     `json:"matched"`
-	EvalErr   string   `json:"eval_error,omitempty"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Compiled   bool     `json:"compiled"`
+	CompileErr string   `json:"compile_error,omitempty"`
+	Matched    bool     `json:"matched"`
+	EvalErr    string   `json:"eval_error,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
 }
 
 // Test POST /api/v2/rules/test.

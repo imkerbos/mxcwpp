@@ -6,10 +6,10 @@
 //
 // 检测维度:
 //
-//	1. /etc/ld.so.preload 文件存在 + 非空 (持久化 LD_PRELOAD)
-//	2. Agent 自身 /proc/self/maps 含未知 .so 库注入
-//	3. /proc/<pid>/environ LD_PRELOAD 变量异常
-//	4. 已知 rootkit .so 名命中 (libprocesshider.so / libzaclr.so / ...)
+//  1. /etc/ld.so.preload 文件存在 + 非空 (持久化 LD_PRELOAD)
+//  2. Agent 自身 /proc/self/maps 含未知 .so 库注入
+//  3. /proc/<pid>/environ LD_PRELOAD 变量异常
+//  4. 已知 rootkit .so 名命中 (libprocesshider.so / libzaclr.so / ...)
 //
 // 命中策略:
 //   - Agent 自身被注入 → critical + 触发 self-terminate (systemd 拉新进程)
@@ -45,10 +45,10 @@ var KnownInjectionLibs = []string{
 
 // LDPreloadIndicator 单个检测指标.
 type LDPreloadIndicator struct {
-	Category    string // ld_so_preload / proc_maps_injection / environ_inject / known_lib
-	Severity    string // critical / high / medium
-	Detail      string
-	Evidence    map[string]string
+	Category string // ld_so_preload / proc_maps_injection / environ_inject / known_lib
+	Severity string // critical / high / medium
+	Detail   string
+	Evidence map[string]string
 }
 
 // LDPreloadScanner Anti-LD_PRELOAD 扫描器.

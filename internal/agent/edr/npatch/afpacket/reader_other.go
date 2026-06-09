@@ -31,7 +31,7 @@ func NewReader(_ Config) (*Reader, error) {
 	return nil, errors.New("afpacket: linux only")
 }
 
-func (r *Reader) Packets() <-chan Packet { return nil }
+func (r *Reader) Packets() <-chan Packet  { return nil }
 func (r *Reader) Stats() (uint64, uint64) { return 0, 0 }
 func (r *Reader) Close() error            { return nil }
 

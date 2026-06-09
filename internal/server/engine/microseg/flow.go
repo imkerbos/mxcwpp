@@ -3,9 +3,10 @@
 // 设计文档: ref/05-容器K8s.md §5 + ref/00 §3 C-9
 //
 // 三阶段路线:
-//   Phase 1 (本 PR Sprint 3): 观察模式 - FlowCollector 收集 5min/5 元组聚合, 不下策略
-//   Phase 2 (Sprint 4): 策略推荐 - 基于 7d 观察画像生成 NetworkPolicy 建议
-//   Phase 3 (Sprint 5): Enforce - 下发 K8s NetworkPolicy / eBPF Cilium 规则
+//
+//	Phase 1 (本 PR Sprint 3): 观察模式 - FlowCollector 收集 5min/5 元组聚合, 不下策略
+//	Phase 2 (Sprint 4): 策略推荐 - 基于 7d 观察画像生成 NetworkPolicy 建议
+//	Phase 3 (Sprint 5): Enforce - 下发 K8s NetworkPolicy / eBPF Cilium 规则
 //
 // 对标青藤零域 MSG (微隔离平台).
 package microseg
@@ -19,25 +20,25 @@ import (
 
 // FlowEvent 是单次 5min 5 元组流量聚合事件 (Agent eBPF cgroup_skb 上报)。
 type FlowEvent struct {
-	HostID         string    `json:"host_id"`
-	TenantID       string    `json:"tenant_id"`
-	SrcIP          string    `json:"src_ip"`
-	DstIP          string    `json:"dst_ip"`
-	DstPort        int32     `json:"dst_port"`
-	Protocol       string    `json:"protocol"` // tcp/udp/sctp
-	BytesIn        int64     `json:"bytes_in"`
-	BytesOut       int64     `json:"bytes_out"`
-	PacketsIn      int64     `json:"packets_in"`
-	PacketsOut     int64     `json:"packets_out"`
-	Direction      string    `json:"direction"` // ingress/egress
+	HostID     string `json:"host_id"`
+	TenantID   string `json:"tenant_id"`
+	SrcIP      string `json:"src_ip"`
+	DstIP      string `json:"dst_ip"`
+	DstPort    int32  `json:"dst_port"`
+	Protocol   string `json:"protocol"` // tcp/udp/sctp
+	BytesIn    int64  `json:"bytes_in"`
+	BytesOut   int64  `json:"bytes_out"`
+	PacketsIn  int64  `json:"packets_in"`
+	PacketsOut int64  `json:"packets_out"`
+	Direction  string `json:"direction"` // ingress/egress
 	// 容器场景额外字段
-	SrcNamespace   string `json:"src_namespace,omitempty"`
-	SrcPodName     string `json:"src_pod_name,omitempty"`
-	SrcContainer   string `json:"src_container,omitempty"`
-	DstNamespace   string `json:"dst_namespace,omitempty"`
-	DstPodName     string `json:"dst_pod_name,omitempty"`
-	StartAt        time.Time `json:"start_at"`
-	EndAt          time.Time `json:"end_at"`
+	SrcNamespace string    `json:"src_namespace,omitempty"`
+	SrcPodName   string    `json:"src_pod_name,omitempty"`
+	SrcContainer string    `json:"src_container,omitempty"`
+	DstNamespace string    `json:"dst_namespace,omitempty"`
+	DstPodName   string    `json:"dst_pod_name,omitempty"`
+	StartAt      time.Time `json:"start_at"`
+	EndAt        time.Time `json:"end_at"`
 }
 
 // FlowKey 是流量聚合的 key (5 元组 + 容器命名空间维度)。
@@ -65,9 +66,9 @@ type FlowAggregate struct {
 // Phase 1 目的: 周期性把聚合后的 FlowAggregate 推送到 Kafka mxsec.engine.feedback,
 // Phase 2 拓扑/策略推荐时拉取分析。
 type Collector struct {
-	mu        sync.Mutex
+	mu         sync.Mutex
 	aggregates map[FlowKey]*FlowAggregate
-	window    time.Duration
+	window     time.Duration
 }
 
 // NewCollector 构造。

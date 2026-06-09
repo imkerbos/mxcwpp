@@ -65,11 +65,11 @@ func (h *MSSPHandler) Dashboard(c *gin.Context) {
 		criticalAlerts += ch.CriticalAlerts
 	}
 	Success(c, gin.H{
-		"total_child_tenants":     len(children),
-		"active_child_tenants":    active,
-		"total_hosts_managed":     totalHosts,
-		"critical_alerts_7d":      criticalAlerts,
-		"pending_quota_requests":  0,
+		"total_child_tenants":    len(children),
+		"active_child_tenants":   active,
+		"total_hosts_managed":    totalHosts,
+		"critical_alerts_7d":     criticalAlerts,
+		"pending_quota_requests": 0,
 	})
 }
 

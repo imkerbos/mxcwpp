@@ -133,9 +133,9 @@ func registerProviders(reg *provider.Registry, cfg providerConfigs, logger *zap.
 	}
 	if cfg.anthropicKey != "" {
 		_ = reg.Register(provider.NewAnthropic(provider.AnthropicConfig{
-			Name:    "anthropic-haiku",
-			APIKey:  cfg.anthropicKey,
-			Models:  []string{"claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"},
+			Name:   "anthropic-haiku",
+			APIKey: cfg.anthropicKey,
+			Models: []string{"claude-3-5-haiku-latest", "claude-3-5-sonnet-latest"},
 		}))
 	}
 	if cfg.geminiKey != "" {

@@ -69,7 +69,7 @@ func main() {
 		// child 用最小日志栈 (避开 /var/log/mxsec-agent 锁竞争)
 		minimalLog, _ := zap.NewProduction()
 		if err := antidebug.ServeAsChild(antidebug.WatchdogConfig{
-			Logger: minimalLog,
+			Logger:         minimalLog,
 			RestartCommand: []string{"/bin/systemctl", "restart", "mxsec-agent"},
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "watchdog child exited: %v\n", err)

@@ -2,10 +2,10 @@
 //
 // 设计目标:
 //
-//	1. 敏感字段 (KubeConfig / API Secret / SSH 凭证 / Webhook Token) 加密存库
-//	2. 主密钥 (KEK) 从环境变量或文件加载, 永不入库
-//	3. 数据密钥 (DEK) 每次加密随机生成, 用 KEK AES-GCM 包装后与密文一起存
-//	4. 支持密钥轮换 (KEK 版本化, 解密时按密文 header 查找历史版本)
+//  1. 敏感字段 (KubeConfig / API Secret / SSH 凭证 / Webhook Token) 加密存库
+//  2. 主密钥 (KEK) 从环境变量或文件加载, 永不入库
+//  3. 数据密钥 (DEK) 每次加密随机生成, 用 KEK AES-GCM 包装后与密文一起存
+//  4. 支持密钥轮换 (KEK 版本化, 解密时按密文 header 查找历史版本)
 //
 // 加密格式 (v1):
 //
@@ -39,17 +39,17 @@ import (
 )
 
 const (
-	formatVersion = 0x01
-	dekSize       = 32 // AES-256 DEK
-	nonceSize     = 12 // GCM standard
+	formatVersion  = 0x01
+	dekSize        = 32           // AES-256 DEK
+	nonceSize      = 12           // GCM standard
 	wrappedDEKSize = dekSize + 16 // ciphertext + GCM tag
 )
 
 // KMS 是内嵌密钥管理服务。
 type KMS struct {
-	mu          sync.RWMutex
-	keks        map[uint16][]byte // version → 32-byte KEK
-	currentVer  uint16            // 最新版本 (新加密用)
+	mu         sync.RWMutex
+	keks       map[uint16][]byte // version → 32-byte KEK
+	currentVer uint16            // 最新版本 (新加密用)
 }
 
 // New 从环境变量 MXSEC_KMS_KEK_V<N> 加载所有 KEK 版本。

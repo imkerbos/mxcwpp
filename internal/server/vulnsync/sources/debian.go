@@ -64,13 +64,13 @@ func (d *DebianDriver) Fetch(ctx context.Context, _ time.Time) (*FetchResult, er
 				continue
 			}
 			res.Advisories = append(res.Advisories, Advisory{
-				Source:      "debian",
-				SourceID:    cve,
-				CVE:         cve,
-				Title:       info.Description,
-				Description: info.Description,
+				Source:        "debian",
+				SourceID:      cve,
+				CVE:           cve,
+				Title:         info.Description,
+				Description:   info.Description,
 				AffectedPURLs: []string{fmt.Sprintf("pkg:deb/debian/%s", pkg)},
-				URL:         "https://security-tracker.debian.org/tracker/" + cve,
+				URL:           "https://security-tracker.debian.org/tracker/" + cve,
 			})
 		}
 	}

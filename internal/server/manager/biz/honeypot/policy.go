@@ -2,10 +2,10 @@
 //
 // 设计点:
 //
-//	1. Policy CRUD: 不同 host_label 选择不同诱饵投放方案
-//	2. 白名单过滤: 合法备份/运维进程触发不告警 (rsync/borg/restic 等)
-//	3. 部署快照: Agent 投放完回报, 落 honeypot_deployments 表
-//	4. 命中关联: 触发事件 join deployment 表查 decoy 元信息
+//  1. Policy CRUD: 不同 host_label 选择不同诱饵投放方案
+//  2. 白名单过滤: 合法备份/运维进程触发不告警 (rsync/borg/restic 等)
+//  3. 部署快照: Agent 投放完回报, 落 honeypot_deployments 表
+//  4. 命中关联: 触发事件 join deployment 表查 decoy 元信息
 package honeypot
 
 import (

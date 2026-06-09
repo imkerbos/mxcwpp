@@ -28,6 +28,6 @@ func newDecoyWatcher(logger *zap.Logger) *decoyWatcher {
 	return &decoyWatcher{logger: logger, events: make(chan decoyEvent)}
 }
 
-func (w *decoyWatcher) Watch(_ string) error  { return nil }
+func (w *decoyWatcher) Watch(_ string) error      { return nil }
 func (w *decoyWatcher) Events() <-chan decoyEvent { return w.events }
 func (w *decoyWatcher) Close() error              { close(w.events); return nil }

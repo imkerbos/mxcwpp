@@ -107,13 +107,13 @@ func (s *QuarantineAuditStage) Name() string { return "quarantine_audit" }
 
 // quarantinePayload 与 quarantine Worker 写入 Kafka 的格式一致.
 type quarantinePayload struct {
-	QID        string `json:"qid"`
-	HostID     string `json:"host_id"`
-	OrigPath   string `json:"orig_path"`
-	Hash       string `json:"hash"`
-	Reason     string `json:"reason"`
-	Operation  string `json:"operation"` // quarantine | restore
-	RuleID     string `json:"rule_id"`
+	QID       string `json:"qid"`
+	HostID    string `json:"host_id"`
+	OrigPath  string `json:"orig_path"`
+	Hash      string `json:"hash"`
+	Reason    string `json:"reason"`
+	Operation string `json:"operation"` // quarantine | restore
+	RuleID    string `json:"rule_id"`
 }
 
 // Process 处理 DataType=14502 (隔离箱审计).

@@ -6,10 +6,10 @@
 //
 // 修复: ed25519 公钥嵌入二进制 (build-time -ldflags), Server 给签名 + SHA256, Agent 双校验.
 // 流程:
-//   1. 下载包文件
-//   2. 计算 SHA256 (完整性)
-//   3. 用嵌入公钥验签名 (真实性) - signature = ed25519.Sign(privKey, sha256_bytes)
-//   4. 双通过才安装
+//  1. 下载包文件
+//  2. 计算 SHA256 (完整性)
+//  3. 用嵌入公钥验签名 (真实性) - signature = ed25519.Sign(privKey, sha256_bytes)
+//  4. 双通过才安装
 package updater
 
 import (

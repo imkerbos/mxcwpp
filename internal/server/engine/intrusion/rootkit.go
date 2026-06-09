@@ -15,11 +15,11 @@ import (
 //   - /proc 隐藏进程 (kallsyms 钩子)
 //   - SSH key 写入到 ~/.ssh/authorized_keys
 type RootkitDetector struct {
-	lkmPatterns      []*regexp.Regexp
-	cronPatterns     []*regexp.Regexp
-	preloadPatterns  []*regexp.Regexp
-	systemdPatterns  []*regexp.Regexp
-	authKeyPatterns  []*regexp.Regexp
+	lkmPatterns     []*regexp.Regexp
+	cronPatterns    []*regexp.Regexp
+	preloadPatterns []*regexp.Regexp
+	systemdPatterns []*regexp.Regexp
+	authKeyPatterns []*regexp.Regexp
 }
 
 // NewRootkitDetector 构造。

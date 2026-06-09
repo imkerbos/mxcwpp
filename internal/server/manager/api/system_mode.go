@@ -125,13 +125,13 @@ func (h *SystemModeHandler) ListTenantModes(c *gin.Context) {
 	items := make([]gin.H, 0, len(tenants))
 	for _, t := range tenants {
 		items = append(items, gin.H{
-			"tenant_id":     t.ID,
-			"tenant_name":   t.Name,
-			"default_mode":  string(t.DefaultMode),
-			"status":        string(t.Status),
-			"quota_agents":  t.QuotaAgents,
-			"ml_enabled":    t.MLEnabled,
-			"llm_enabled":   t.LLMEnabled,
+			"tenant_id":    t.ID,
+			"tenant_name":  t.Name,
+			"default_mode": string(t.DefaultMode),
+			"status":       string(t.Status),
+			"quota_agents": t.QuotaAgents,
+			"ml_enabled":   t.MLEnabled,
+			"llm_enabled":  t.LLMEnabled,
 		})
 	}
 	Success(c, gin.H{"items": items, "total": len(items)})

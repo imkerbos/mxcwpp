@@ -24,16 +24,16 @@ const (
 
 // ConvertedRule 是转换后的规则,准备入 detection_rules 表。
 type ConvertedRule struct {
-	Source      Source
-	SourceID    string // 源中的唯一 ID
-	Name        string
-	Severity    string // critical / high / medium / low
-	CEL         string // 等价 CEL 表达式
-	ATTCKTactic string
-	ATTCK       string
-	Description string
-	Tags        []string
-	Unsupported bool
+	Source            Source
+	SourceID          string // 源中的唯一 ID
+	Name              string
+	Severity          string // critical / high / medium / low
+	CEL               string // 等价 CEL 表达式
+	ATTCKTactic       string
+	ATTCK             string
+	Description       string
+	Tags              []string
+	Unsupported       bool
 	UnsupportedReason string
 }
 

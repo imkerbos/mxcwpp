@@ -11,6 +11,6 @@ type LDPreloadIndicator struct {
 
 type LDPreloadScanner struct{}
 
-func NewLDPreloadScanner(_ *zap.Logger) *LDPreloadScanner { return &LDPreloadScanner{} }
-func (s *LDPreloadScanner) ScanSelf() []LDPreloadIndicator { return nil }
+func NewLDPreloadScanner(_ *zap.Logger) *LDPreloadScanner      { return &LDPreloadScanner{} }
+func (s *LDPreloadScanner) ScanSelf() []LDPreloadIndicator     { return nil }
 func (s *LDPreloadScanner) ScanPID(_ int) []LDPreloadIndicator { return nil }

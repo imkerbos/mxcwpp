@@ -58,8 +58,8 @@ type Watchdog struct {
 	logger *zap.Logger
 
 	mu      sync.Mutex
-	child   *os.Process    // parent 视角的 child handle
-	sock    *os.File       // parent <-> child 心跳 socket
+	child   *os.Process // parent 视角的 child handle
+	sock    *os.File    // parent <-> child 心跳 socket
 	stopped atomic.Bool
 
 	OnSuspectKill func(suspect string) // 命中 callback (上报告警用)

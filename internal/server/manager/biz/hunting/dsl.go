@@ -2,13 +2,13 @@
 //
 // 给 SOC 分析师写查询用, 借鉴 Splunk SPL 风格管道语法:
 //
-//   source="alerts" severity="critical" | where host_id="h-1" | stats count by category | sort -count | head 10
+//	source="alerts" severity="critical" | where host_id="h-1" | stats count by category | sort -count | head 10
 //
 // 编译流程:
-//   1. Lex: 切 token (字符串/数字/操作符/管道符)
-//   2. Parse: 构建 AST (Stages: search / where / stats / sort / head / table)
-//   3. Compile: 转 SQL (ClickHouse 或 MySQL 后端)
-//   4. Exec: 走查询引擎
+//  1. Lex: 切 token (字符串/数字/操作符/管道符)
+//  2. Parse: 构建 AST (Stages: search / where / stats / sort / head / table)
+//  3. Compile: 转 SQL (ClickHouse 或 MySQL 后端)
+//  4. Exec: 走查询引擎
 //
 // 当前 PR: 实现 lex + parse + 编译到 SQL (where/sort/head 子集). stats/eval 留后续 PR.
 package hunting
@@ -22,9 +22,9 @@ import (
 
 // Query 解析后的查询.
 type Query struct {
-	Source string   // 数据源: alerts / hosts / events / vulnerabilities
-	Stages []Stage  // 管道阶段
-	Raw    string   // 原始 SPL
+	Source string  // 数据源: alerts / hosts / events / vulnerabilities
+	Stages []Stage // 管道阶段
+	Raw    string  // 原始 SPL
 }
 
 // Stage 单个管道阶段.

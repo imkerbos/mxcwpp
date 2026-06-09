@@ -13,23 +13,23 @@ import (
 type WindowsEventKind string
 
 type WindowsEvent struct {
-	Kind         WindowsEventKind
-	PID          uint32
-	ParentPID    uint32
-	Image        string
-	CommandLine  string
-	User         string
-	TimeStamp    time.Time
-	DstIP        string
-	DstPort      uint16
-	SrcIP        string
-	SrcPort      uint16
-	Protocol     string
-	FilePath     string
-	RegistryKey  string
+	Kind          WindowsEventKind
+	PID           uint32
+	ParentPID     uint32
+	Image         string
+	CommandLine   string
+	User          string
+	TimeStamp     time.Time
+	DstIP         string
+	DstPort       uint16
+	SrcIP         string
+	SrcPort       uint16
+	Protocol      string
+	FilePath      string
+	RegistryKey   string
 	RegistryValue string
-	ImageHash    string
-	Raw          map[string]any
+	ImageHash     string
+	Raw           map[string]any
 }
 
 type ETWCollector struct{}

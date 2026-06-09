@@ -16,11 +16,13 @@ import (
 
 var api = sonic.ConfigDefault
 
-func Marshal(v any) ([]byte, error)                              { return api.Marshal(v) }
-func MarshalIndent(v any, prefix, indent string) ([]byte, error) { return sonic.MarshalIndent(v, prefix, indent) }
-func Unmarshal(data []byte, v any) error                         { return api.Unmarshal(data, v) }
-func NewEncoder(w io.Writer) Encoder                             { return api.NewEncoder(w) }
-func NewDecoder(r io.Reader) Decoder                             { return api.NewDecoder(r) }
+func Marshal(v any) ([]byte, error) { return api.Marshal(v) }
+func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
+	return sonic.MarshalIndent(v, prefix, indent)
+}
+func Unmarshal(data []byte, v any) error { return api.Unmarshal(data, v) }
+func NewEncoder(w io.Writer) Encoder     { return api.NewEncoder(w) }
+func NewDecoder(r io.Reader) Decoder     { return api.NewDecoder(r) }
 
 type Encoder interface {
 	Encode(v any) error
