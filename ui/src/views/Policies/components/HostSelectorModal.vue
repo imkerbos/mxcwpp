@@ -180,14 +180,14 @@ import { hostsApi } from '@/api/hosts'
 import type { Host } from '@/api/types'
 
 interface Props {
-  visible: boolean
+  open: boolean
   title?: string
   policyOsFamily?: string[]
   policyOsVersion?: string
 }
 
 interface Emits {
-  (e: 'update:visible', value: boolean): void
+  (e: 'update:open', value: boolean): void
   (e: 'confirm', data: {
     mode: 'global' | 'custom'
     targetType: 'all' | 'host_ids' | 'os_family'
@@ -205,8 +205,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>()
 
 const visible = computed({
-  get: () => props.visible,
-  set: (val) => emit('update:visible', val),
+  get: () => props.open,
+  set: (val) => emit('update:open', val),
 })
 
 const loading = ref(false)
@@ -412,7 +412,7 @@ const handleCancel = () => {
 }
 
 // 监听 visible 变化，重新加载数据
-watch(() => props.visible, (val) => {
+watch(() => props.open, (val) => {
   if (val) {
     loadHosts()
     // 重置选择
@@ -427,7 +427,7 @@ watch(() => props.visible, (val) => {
 })
 
 onMounted(() => {
-  if (props.visible) {
+  if (props.open) {
     loadHosts()
   }
 })
