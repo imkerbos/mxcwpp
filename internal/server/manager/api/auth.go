@@ -3,7 +3,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -112,8 +111,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 风控：可信设备或近期无失败时免验证码；非可信设备且连续失败达阈值才要求验证码。
 	if h.loginNeedsCaptcha(req.Username, req.DeviceID) {
 		if !captchaStore.Verify(req.CaptchaID, req.CaptchaCode, true) {
-			// need_captcha 标志告知前端展示验证码框
-			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "验证码错误或已过期", "data": gin.H{"need_captcha": true}})
+			// 统一响应封装；data.need_captcha 告知前端展示验证码框
+			BadRequestWithData(c, "验证码错误或已过期", gin.H{"need_captcha": true})
 			return
 		}
 	}

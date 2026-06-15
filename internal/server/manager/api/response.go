@@ -72,6 +72,18 @@ func BadRequest(c *gin.Context, message string) {
 	})
 }
 
+// BadRequestWithData 请求参数错误（附带 data，如 need_captcha 等前端需要的标志）
+func BadRequestWithData(c *gin.Context, message string, data interface{}) {
+	body := gin.H{
+		"code":    400,
+		"message": message,
+	}
+	if data != nil {
+		body["data"] = data
+	}
+	c.JSON(http.StatusBadRequest, body)
+}
+
 // NotFound 资源不存在
 func NotFound(c *gin.Context, message string) {
 	c.JSON(http.StatusNotFound, gin.H{
