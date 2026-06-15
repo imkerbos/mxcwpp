@@ -101,7 +101,14 @@
           :footer="null"
         >
           <p style="color: var(--mxsec-text-3); margin-bottom: 16px;">为确保账户安全，请设置新密码（至少 8 位）</p>
-          <a-form layout="vertical" @finish="handleChangePassword">
+          <a-alert
+            v-if="changePwdError"
+            :message="changePwdError"
+            type="error"
+            show-icon
+            style="margin-bottom: 16px;"
+          />
+          <a-form layout="vertical">
             <a-form-item label="新密码" required>
               <a-input-password
                 v-model:value="changePasswordForm.new_password"
@@ -115,7 +122,13 @@
               />
             </a-form-item>
             <a-form-item>
-              <a-button type="primary" html-type="submit" block :loading="changePwdLoading">
+              <a-button
+                type="primary"
+                html-type="button"
+                block
+                :loading="changePwdLoading"
+                @click="handleChangePassword"
+              >
                 确认修改
               </a-button>
             </a-form-item>
@@ -134,6 +147,7 @@
 <script setup lang="ts">
 import { ref, reactive, h, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteConfigStore } from '@/stores/site-config'
@@ -184,6 +198,7 @@ const changePasswordForm = reactive({
   confirm_password: '',
 })
 const changePwdLoading = ref(false)
+const changePwdError = ref('')
 
 const handleLogin = async () => {
   error.value = ''
@@ -198,6 +213,7 @@ const handleLogin = async () => {
     if (response.need_change_password) {
       showChangePassword.value = true
       changePasswordForm.old_password = form.password
+      changePwdError.value = ''
     } else {
       router.push('/')
     }
@@ -211,25 +227,27 @@ const handleLogin = async () => {
 }
 
 const handleChangePassword = async () => {
+  if (changePwdLoading.value) return
+  changePwdError.value = ''
   if (changePasswordForm.new_password !== changePasswordForm.confirm_password) {
-    error.value = '两次输入的密码不一致'
+    changePwdError.value = '两次输入的密码不一致'
     return
   }
   if (changePasswordForm.new_password.length < 8) {
-    error.value = '新密码长度至少 8 位'
+    changePwdError.value = '新密码长度至少 8 位'
     return
   }
   changePwdLoading.value = true
-  error.value = ''
   try {
     await authApi.changePassword({
       old_password: changePasswordForm.old_password,
       new_password: changePasswordForm.new_password,
     })
+    message.success('密码修改成功')
     showChangePassword.value = false
     router.push('/')
   } catch (err: any) {
-    error.value = err.message || '修改密码失败'
+    changePwdError.value = err.message || '修改密码失败'
   } finally {
     changePwdLoading.value = false
   }
