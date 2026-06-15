@@ -4,6 +4,7 @@ package server
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"time"
@@ -47,12 +48,41 @@ func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, err
 				return nil, fmt.Errorf("解析 CA 证书失败")
 			}
 
+			// 把 CA 加入服务端 presented chain，使首连 pin CA 指纹的 agent 能在握手中看到 CA。
+			// 默认 TLS 只发叶子证书，pin 会 fail-closed 挡住 enroll；附带 CA 后 pin 才能匹配。
+			if caBlock, _ := pem.Decode(caCert); caBlock != nil {
+				tlsConfig.Certificates[0].Certificate = append(tlsConfig.Certificates[0].Certificate, caBlock.Bytes)
+			}
+
 			tlsConfig.ClientCAs = caCertPool
-			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven // 验证客户端证书（如果提供），允许无证书连接
+			// 保留 VerifyClientCertIfGiven：首连 enroll 的 agent 尚无客户端证书，需放行以签发单机证书。
+			// 真正的强制鉴权在应用层（transfer.Transfer：EnforceAgentID + CN==AgentID 绑定），
+			// 单一监听端口无法对 enroll 与正常流分别设 ClientAuth，故用 TLS 放行 + 应用层强制的组合。
+			tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+
+			// 证书吊销：握手期拒绝吊销序列号，覆盖该监听上的所有服务（Transfer / FileExt）。
+			if revoked := buildRevokedSet(cfg.MTLS.RevokedSerials); len(revoked) > 0 {
+				tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+					for _, raw := range rawCerts {
+						cert, err := x509.ParseCertificate(raw)
+						if err != nil {
+							continue
+						}
+						if cert.SerialNumber != nil && revoked[cert.SerialNumber.String()] {
+							logger.Warn("拒绝已吊销证书", zap.String("serial", cert.SerialNumber.String()))
+							return fmt.Errorf("客户端证书已吊销: %s", cert.SerialNumber.String())
+						}
+					}
+					return nil
+				}
+			}
 			logger.Info("已启用 mTLS（客户端证书验证）",
 				zap.String("cert", cfg.MTLS.ServerCert),
 				zap.String("ca_cert", cfg.MTLS.CACert),
-				zap.String("client_auth", "VerifyClientCertIfGiven（允许无证书首次连接）"),
+				zap.String("client_auth", "VerifyClientCertIfGiven + 应用层强制 CN 绑定"),
+				zap.Bool("enforce_agent_id", cfg.MTLS.EnforceAgentID),
+				zap.Bool("per_agent_cert", cfg.MTLS.PerAgentCert),
+				zap.Int("revoked_serials", len(cfg.MTLS.RevokedSerials)),
 			)
 		} else {
 			logger.Warn("未配置 CA 证书，仅启用服务器 TLS（不验证客户端证书）")
@@ -97,4 +127,18 @@ func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, err
 	)
 
 	return grpc.NewServer(opts...), nil
+}
+
+// buildRevokedSet 把吊销序列号列表转为 set，便于握手期 O(1) 查询。
+func buildRevokedSet(serials []string) map[string]bool {
+	if len(serials) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(serials))
+	for _, s := range serials {
+		if s != "" {
+			set[s] = true
+		}
+	}
+	return set
 }

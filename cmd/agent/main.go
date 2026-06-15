@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -263,16 +264,20 @@ func main() {
 		// 处理证书包更新
 		if certBundle != nil {
 			certDir := "/var/lib/mxsec-agent/certs"
+			// 记录同步前是否已有客户端证书：无则本次为首次签发(enroll)，完成后主动重连切到单机证书 mTLS。
+			_, statErr := os.Stat(filepath.Join(certDir, "client.crt"))
+			wasEnrollment := os.IsNotExist(statErr)
 			if err := cfg.SyncCertificatesFromServer(certBundle, certDir); err != nil {
 				log.Error("failed to sync certificates from server", zap.Error(err))
 			} else {
 				log.Info("certificates updated from server",
 					zap.String("cert_dir", certDir),
-					zap.String("hint", "证书已保存，后续连接将使用正式证书"),
 				)
-				// 证书更新后，需要重新建立连接（使用新证书）
-				// 注意：当前连接会继续使用，下次重连时会自动使用新证书
-				log.Info("certificates saved successfully, will use them for next connection")
+				if wasEnrollment {
+					// 首次签发完成：关闭当前(首连/无证书)连接，下次重连即用单机证书走完整 mTLS。
+					log.Info("首次签发单机证书完成，主动重连以启用单机证书 mTLS")
+					_ = connMgr.Close()
+				}
 			}
 		}
 
