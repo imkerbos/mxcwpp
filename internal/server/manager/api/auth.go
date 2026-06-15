@@ -282,14 +282,14 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString, err := extractBearerToken(c)
 		if err != nil {
-			Unauthorized(c, "未授权")
+			UnauthorizedExpired(c, "未授权，请重新登录")
 			c.Abort()
 			return
 		}
 
 		claims, err := h.parseToken(tokenString)
 		if err != nil {
-			Unauthorized(c, "Token无效")
+			UnauthorizedExpired(c, "登录已过期，请重新登录")
 			c.Abort()
 			return
 		}
