@@ -51,7 +51,7 @@
               class="login-input"
             />
           </a-form-item>
-          <a-form-item name="captcha_code">
+          <a-form-item v-if="needCaptcha" name="captcha_code">
             <div class="captcha-row">
               <a-input
                 v-model:value="form.captcha_code"
@@ -160,6 +160,21 @@ const siteConfigStore = useSiteConfigStore()
 
 const captchaId = ref('')
 const captchaImage = ref('')
+const needCaptcha = ref(false) // 风控：仅在需要时显示验证码
+
+// 设备标识：浏览器本地生成并持久化，用于可信设备判定
+const getDeviceId = (): string => {
+  let id = localStorage.getItem('mxsec_device_id')
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'dev-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    localStorage.setItem('mxsec_device_id', id)
+  }
+  return id
+}
+const deviceId = getDeviceId()
 
 const refreshCaptcha = async () => {
   try {
@@ -171,9 +186,22 @@ const refreshCaptcha = async () => {
   }
 }
 
+// 风控预检：决定是否需要验证码；需要则加载验证码
+const ensureCaptchaIfNeeded = async (): Promise<boolean> => {
+  try {
+    const res = await authApi.loginPrecheck({ username: form.username, device_id: deviceId })
+    if (res.need_captcha && !needCaptcha.value) {
+      needCaptcha.value = true
+      await refreshCaptcha()
+    }
+    return needCaptcha.value
+  } catch {
+    return needCaptcha.value
+  }
+}
+
 onMounted(() => {
   siteConfigStore.init()
-  refreshCaptcha()
 })
 
 const loading = ref(false)
@@ -202,13 +230,22 @@ const changePwdError = ref('')
 
 const handleLogin = async () => {
   error.value = ''
+  // 风控预检：未显示验证码时先判定。可信设备/近期无失败 → 免验证码；否则显示验证码让用户填写后再提交。
+  if (!needCaptcha.value) {
+    await ensureCaptchaIfNeeded()
+    if (needCaptcha.value && !form.captcha_code) {
+      error.value = '请输入验证码'
+      return
+    }
+  }
   loading.value = true
   try {
     const response = await authStore.login({
       username: form.username,
       password: form.password,
-      captcha_id: captchaId.value,
-      captcha_code: form.captcha_code,
+      captcha_id: needCaptcha.value ? captchaId.value : undefined,
+      captcha_code: needCaptcha.value ? form.captcha_code : undefined,
+      device_id: deviceId,
     })
     if (response.need_change_password) {
       showChangePassword.value = true
@@ -219,8 +256,10 @@ const handleLogin = async () => {
     }
   } catch (err: any) {
     error.value = err.message || '登录失败，请检查用户名和密码'
+    // 失败后重新预检：失败次数累加可能触发验证码要求
     form.captcha_code = ''
-    refreshCaptcha()
+    await ensureCaptchaIfNeeded()
+    if (needCaptcha.value) await refreshCaptcha()
   } finally {
     loading.value = false
   }

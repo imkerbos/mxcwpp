@@ -125,6 +125,7 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	authHandler := api.NewAuthHandler(db, logger, []byte(jwtSecret))
 	apiV1.GET("/auth/captcha", authHandler.GetCaptcha)
 	apiV1.POST("/auth/login", authHandler.Login)
+	apiV1.POST("/auth/login-precheck", authHandler.LoginPrecheck)
 	apiV1.POST("/auth/logout", authHandler.Logout)
 	apiV1.GET("/auth/me", authHandler.GetCurrentUser)
 	apiV1.POST("/auth/change-password", authHandler.AuthMiddleware(), authHandler.ChangePassword)
