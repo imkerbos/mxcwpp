@@ -24,18 +24,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+
+	"github.com/imkerbos/mxsec-platform/internal/server/common/tenant"
 )
 
 // KeyFunc 自定义 rate-limit key (默认按 tenant+route).
 type KeyFunc func(c *gin.Context) string
 
 // KeyByTenant 按 tenant_id + route 作 key.
+// 租户身份由 AuthMiddleware 经 tenant.SetIdentity 写入 gin context (key "tenant.identity"),
+// 不是裸 "tenant_id", 故必须经 tenant.GetIdentity 读取, 否则永远落 anon 桶.
 func KeyByTenant(c *gin.Context) string {
 	tid := "anon"
-	if v, ok := c.Get("tenant_id"); ok {
-		if s, ok2 := v.(string); ok2 && s != "" {
-			tid = s
-		}
+	if id := tenant.GetIdentity(c); id.ID != "" {
+		tid = id.ID
 	}
 	return "rl:t:" + tid + ":" + c.FullPath()
 }
