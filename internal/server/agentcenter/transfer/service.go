@@ -294,7 +294,7 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 
 	// 检查并下发证书（首次连接时）。已持有匹配 CN 单机证书的连接无需重复下发。
 	alreadyEnrolled := hasClientCert && leafCert.Subject.CommonName == agentID
-	if err := s.sendCertificateBundleIfNeeded(ctx, conn, alreadyEnrolled); err != nil {
+	if err := s.sendCertificateBundleIfNeeded(ctx, conn, hasClientCert, alreadyEnrolled); err != nil {
 		s.logger.Error("下发证书包失败", zap.Error(err), zap.String("agent_id", agentID))
 		// 证书下发失败不影响连接，继续处理
 	}
@@ -1891,13 +1891,13 @@ func (s *Service) resolveAgentOfflineAlert(agentID string) {
 //
 // PerAgentCert 开启时：为每台 agent 按 AgentID 在线签发独立证书（一机一证），取代下发全网共享证书。
 // alreadyEnrolled=true（已持有 CN 匹配的单机证书）则跳过，避免每次重连重复签发。
-func (s *Service) sendCertificateBundleIfNeeded(ctx context.Context, conn *Connection, alreadyEnrolled bool) error {
+func (s *Service) sendCertificateBundleIfNeeded(ctx context.Context, conn *Connection, hasClientCert, alreadyEnrolled bool) error {
 	if s.cfg.MTLS.PerAgentCert {
 		if alreadyEnrolled {
 			s.logger.Debug("Agent 已持有单机证书，跳过下发", zap.String("agent_id", conn.AgentID))
 			return nil
 		}
-		return s.signAndSendAgentCert(ctx, conn)
+		return s.signAndSendAgentCert(ctx, conn, hasClientCert)
 	}
 
 	// 读取Server端的证书文件

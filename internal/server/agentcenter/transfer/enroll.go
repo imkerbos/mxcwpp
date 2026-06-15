@@ -67,9 +67,18 @@ func (s *Service) isRevokedSerial(serial *big.Int) bool {
 
 // signAndSendAgentCert 校验 enroll 令牌后，用 CA 给当前 agent 签发单机证书（CN=AgentID）并下发。
 // 一机一证：失陷主机可单独吊销，私钥泄露不影响他机。
-func (s *Service) signAndSendAgentCert(ctx context.Context, conn *Connection) error {
+func (s *Service) signAndSendAgentCert(ctx context.Context, conn *Connection, hasClientCert bool) error {
 	if !s.enrollTokenValid(enrollTokenFromCtx(conn.ctx)) {
-		return fmt.Errorf("enroll 令牌无效，拒绝为 %s 签发单机证书", conn.AgentID)
+		// 迁移期：legacy agent 已持有(共享)证书但未配 enroll 令牌 → 保持现状，安静跳过（Debug）。
+		// 全新 agent 无任何证书却无有效令牌 → 安装配置问题，Warn 提示但不刷 ERROR/不阻断。
+		if hasClientCert {
+			s.logger.Debug("跳过单机证书签发：未配 enroll 令牌，沿用现有证书（迁移期正常）",
+				zap.String("agent_id", conn.AgentID))
+		} else {
+			s.logger.Warn("无法签发单机证书：agent 无客户端证书且 enroll 令牌无效，请检查安装配置（ca_fingerprint/enroll_token）",
+				zap.String("agent_id", conn.AgentID))
+		}
+		return nil
 	}
 
 	caCertPEM, err := os.ReadFile(s.cfg.MTLS.CACert)
