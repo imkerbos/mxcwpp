@@ -88,10 +88,6 @@
           </a-form-item>
         </a-form>
 
-        <div v-if="error" class="error-message">
-          <a-alert :message="error" type="error" show-icon />
-        </div>
-
         <!-- 强制修改密码弹窗 -->
         <a-modal
           v-model:open="showChangePassword"
@@ -101,13 +97,6 @@
           :footer="null"
         >
           <p style="color: var(--mxsec-text-3); margin-bottom: 16px;">为确保账户安全，请设置新密码（至少 8 位）</p>
-          <a-alert
-            v-if="changePwdError"
-            :message="changePwdError"
-            type="error"
-            show-icon
-            style="margin-bottom: 16px;"
-          />
           <a-form layout="vertical">
             <a-form-item label="新密码" required>
               <a-input-password
@@ -205,7 +194,6 @@ onMounted(() => {
 })
 
 const loading = ref(false)
-const error = ref('')
 
 const form = reactive({
   username: '',
@@ -226,15 +214,13 @@ const changePasswordForm = reactive({
   confirm_password: '',
 })
 const changePwdLoading = ref(false)
-const changePwdError = ref('')
 
 const handleLogin = async () => {
-  error.value = ''
   // 风控预检：未显示验证码时先判定。可信设备/近期无失败 → 免验证码；否则显示验证码让用户填写后再提交。
   if (!needCaptcha.value) {
     await ensureCaptchaIfNeeded()
     if (needCaptcha.value && !form.captcha_code) {
-      error.value = '请输入验证码'
+      message.warning('请输入验证码')
       return
     }
   }
@@ -250,13 +236,11 @@ const handleLogin = async () => {
     if (response.need_change_password) {
       showChangePassword.value = true
       changePasswordForm.old_password = form.password
-      changePwdError.value = ''
     } else {
       router.push('/')
     }
-  } catch (err: any) {
-    error.value = err.message || '登录失败，请检查用户名和密码'
-    // 失败后重新预检：失败次数累加可能触发验证码要求
+  } catch {
+    // 具体错误已由全局拦截器统一弹窗提示，这里只做失败后的验证码刷新
     form.captcha_code = ''
     await ensureCaptchaIfNeeded()
     if (needCaptcha.value) await refreshCaptcha()
@@ -267,13 +251,12 @@ const handleLogin = async () => {
 
 const handleChangePassword = async () => {
   if (changePwdLoading.value) return
-  changePwdError.value = ''
   if (changePasswordForm.new_password !== changePasswordForm.confirm_password) {
-    changePwdError.value = '两次输入的密码不一致'
+    message.error('两次输入的密码不一致')
     return
   }
   if (changePasswordForm.new_password.length < 8) {
-    changePwdError.value = '新密码长度至少 8 位'
+    message.error('新密码长度至少 8 位')
     return
   }
   changePwdLoading.value = true
@@ -285,8 +268,8 @@ const handleChangePassword = async () => {
     message.success('密码修改成功')
     showChangePassword.value = false
     router.push('/')
-  } catch (err: any) {
-    changePwdError.value = err.message || '修改密码失败'
+  } catch {
+    // 错误由全局拦截器统一弹窗提示
   } finally {
     changePwdLoading.value = false
   }
@@ -579,10 +562,6 @@ const handleChangePassword = async () => {
   font-size: 13px;
   cursor: pointer;
   flex-shrink: 0;
-}
-
-.error-message {
-  margin-top: 16px;
 }
 
 /* ===== 页脚 ===== */

@@ -89,44 +89,51 @@ axiosInstance.interceptors.response.use(
     return res.data ?? { message: res.message }
   },
   (error) => {
+    const reqUrl: string = error.config?.url || ''
+    const isLoginRequest = reqUrl.includes('/auth/login')
+    // 后端业务消息优先；统一通过 message 弹窗提示，且 reject 携带友好消息（绝不暴露 "status code 4xx"）
+    const backendMsg: string = error.response?.data?.message || ''
+
     // 处理 HTTP 错误
     if (error.response?.status === 401) {
       // 打印路由 (Gotenberg 拉取) 不要跳登录页，否则 PDF 渲染出登录页
       if (window.location.pathname.startsWith('/print/')) {
-        return Promise.reject(error)
+        return Promise.reject(new Error(backendMsg || '未授权'))
       }
-      // 未授权，清除认证信息并跳转到登录页
+      // 登录请求本身的 401 = 账号/密码错误，不是会话过期，提示具体原因、不跳转
+      if (isLoginRequest) {
+        const msg = backendMsg || '用户名或密码错误'
+        message.error(msg)
+        return Promise.reject(new Error(msg))
+      }
+      // 已登录会话过期：清除认证信息并跳转登录页
       localStorage.removeItem('mxcsec_token')
       localStorage.removeItem('mxcsec_user')
       message.warning('登录已过期，请重新登录')
       window.location.href = '/login'
-      return Promise.reject(error)
+      return Promise.reject(new Error('登录已过期，请重新登录'))
     }
 
     // 处理网络错误
     if (!error.response) {
-      message.error('网络错误，请检查网络连接')
+      const msg = '网络错误，请检查网络连接'
+      message.error(msg)
       console.error('Network Error:', error)
-      return Promise.reject(error)
+      return Promise.reject(new Error(msg))
     }
 
-    // 处理其他 HTTP 错误
+    // 处理其他 HTTP 错误：统一弹窗提示具体业务消息，不暴露状态码
     const status = error.response.status
-    const errorMessage = error.response?.data?.message || `请求失败 (${status})`
-
-    // 根据状态码显示不同的错误提示
-    if (status >= 500) {
-      message.error('服务器错误，请稍后重试')
-    } else if (status === 404) {
-      message.error('请求的资源不存在')
-    } else if (status === 403) {
-      message.error('没有权限执行此操作')
-    } else {
-      message.error(errorMessage)
+    let msg = backendMsg
+    if (!msg) {
+      if (status >= 500) msg = '服务器错误，请稍后重试'
+      else if (status === 404) msg = '请求的资源不存在'
+      else if (status === 403) msg = '没有权限执行此操作'
+      else msg = '请求失败'
     }
-
+    message.error(msg)
     console.error('HTTP Error:', error)
-    return Promise.reject(error)
+    return Promise.reject(new Error(msg))
   }
 )
 
