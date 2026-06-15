@@ -232,7 +232,6 @@ const passCount = computed(() => stats.value.pass)
 const failCount = computed(() => stats.value.fail)
 const errorCount = computed(() => stats.value.error)
 
-const failedResults = computed(() => stats.value.failed)
 const criticalCount = computed(() => stats.value.critical)
 const highCount = computed(() => stats.value.high)
 const mediumCount = computed(() => stats.value.medium)

@@ -436,8 +436,8 @@ async function handleScanHost(record: Host) {
       host_ids: [record.host_id],
       reconcile_stale: true,
     })
-    message.success(`扫描已启动: ${resp.data.task_id.slice(0, 8)}...`)
-    router.push({ path: '/vulnerabilities', query: { task_id: resp.data.task_id } })
+    message.success(`扫描已启动: ${resp.task_id.slice(0, 8)}...`)
+    router.push({ path: '/vulnerabilities', query: { task_id: resp.task_id } })
   } catch (error) {
     console.error('触发扫描失败:', error)
   }
@@ -572,7 +572,7 @@ const OS_COLORS = ['#5B8FF9', '#5AD8A6', '#5D7092', '#F6BD16', '#E8684A', '#6DC8
 const osDistributionData = computed(() => {
   const m = new Map<string, number>()
   for (const h of hosts.value) {
-    const os = h.os_family || h.osFamily || h.os || '未知'
+    const os = h.os_family || '未知'
     m.set(os, (m.get(os) || 0) + 1)
   }
   return Array.from(m.entries()).map(([name, value], i) => ({
