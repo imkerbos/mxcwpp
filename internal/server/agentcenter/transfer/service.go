@@ -103,6 +103,15 @@ type Service struct {
 	notifyCtx    context.Context
 	notifyCancel context.CancelFunc
 	notifySem    chan struct{}
+
+	// per_agent_cert 在线签发限并发：RSA-4096 keygen CPU 尖峰，500 台首装并发会打满核心。
+	// 信号量把并发签发压到 ~NumCPU，多余请求排队。首次签发时 lazy init。
+	signOnce sync.Once
+	signSem  chan struct{}
+
+	// 吊销序列号 set：首次查询时由 cfg.MTLS.RevokedSerials 构一次，避免每连接 O(n) 线性扫描。
+	revokedOnce sync.Once
+	revokedSet  map[string]struct{}
 }
 
 // initAsyncNotify P1-3: 启动时调一次, 后续 SpawnNotify 用 notifyCtx 接管 dangling goroutine.
@@ -252,7 +261,9 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 			return status.Errorf(codes.Unauthenticated, "缺少有效客户端证书，且 enroll 令牌无效")
 		}
 	} else if hasClientCert && leafCert.Subject.CommonName != agentID {
-		s.logger.Warn("观察模式：客户端证书 CN 与上报 AgentID 不符（迁移期允许，强制后将拒绝）",
+		// 观察模式降 Debug：迁移期 500 台重连会高频命中，Warn 会刷屏。
+		// 真正该拦截的场景由强制模式（EnforceAgentID=true）的 Warn + 拒绝兜底。
+		s.logger.Debug("观察模式：客户端证书 CN 与上报 AgentID 不符（迁移期允许，强制后将拒绝）",
 			zap.String("cert_cn", leafCert.Subject.CommonName),
 			zap.String("agent_id", agentID),
 		)

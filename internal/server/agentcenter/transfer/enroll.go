@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"slices"
+	"runtime"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc/credentials"
@@ -58,11 +58,42 @@ func (s *Service) enrollTokenValid(token string) bool {
 }
 
 // isRevokedSerial 判断证书序列号是否在吊销名单内。
+// 吊销名单首次访问时构 map set，避免每连接 O(n) 线性扫描（500 台重连会高频命中此路径）。
 func (s *Service) isRevokedSerial(serial *big.Int) bool {
 	if serial == nil {
 		return false
 	}
-	return slices.Contains(s.cfg.MTLS.RevokedSerials, serial.String())
+	s.revokedOnce.Do(func() {
+		serials := s.cfg.MTLS.RevokedSerials
+		if len(serials) == 0 {
+			return
+		}
+		set := make(map[string]struct{}, len(serials))
+		for _, x := range serials {
+			if x != "" {
+				set[x] = struct{}{}
+			}
+		}
+		s.revokedSet = set
+	})
+	_, ok := s.revokedSet[serial.String()]
+	return ok
+}
+
+// acquireSignSlot 取一个在线签发槽位，限制并发签发数。
+// RSA-4096 keygen 是 CPU 尖峰：500 台首装同时 enroll 会瞬间打满全部核心。
+// 信号量把并发签发压到 ~NumCPU，多余请求排队（而非 OOM/CPU 饿死），平滑突发。
+// 返回的 release 必须在签发完成后调用以归还槽位。
+func (s *Service) acquireSignSlot(ctx context.Context) (release func(), err error) {
+	s.signOnce.Do(func() {
+		s.signSem = make(chan struct{}, max(runtime.NumCPU(), 2))
+	})
+	select {
+	case s.signSem <- struct{}{}:
+		return func() { <-s.signSem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // signAndSendAgentCert 校验 enroll 令牌后，用 CA 给当前 agent 签发单机证书（CN=AgentID）并下发。
@@ -90,7 +121,13 @@ func (s *Service) signAndSendAgentCert(ctx context.Context, conn *Connection, ha
 		return fmt.Errorf("读取 CA 私钥失败（per_agent_cert 需配置 mtls.ca_key）: %w", err)
 	}
 
+	// 限并发签发：RSA-4096 keygen 占满一核，突发首装时排队而非饿死 CPU。
+	release, err := s.acquireSignSlot(ctx)
+	if err != nil {
+		return fmt.Errorf("等待签发槽位被取消: %w", err)
+	}
 	certPEM, keyPEM, err := certissue.SignAgentCert(caCertPEM, caKeyPEM, conn.AgentID, certissue.DefaultAgentCertValidity)
+	release()
 	if err != nil {
 		return fmt.Errorf("签发单机证书失败: %w", err)
 	}
