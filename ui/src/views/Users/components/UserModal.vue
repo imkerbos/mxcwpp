@@ -167,7 +167,7 @@ const handleSubmit = async () => {
       // 表单验证错误
       return
     }
-    message.error('操作失败: ' + (error.message || '未知错误'))
+    console.error('保存用户失败:', error)
   } finally {
     loading.value = false
   }

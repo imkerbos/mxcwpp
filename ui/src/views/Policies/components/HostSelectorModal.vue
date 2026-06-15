@@ -320,7 +320,6 @@ const loadHosts = async () => {
     calculateMatchedHostCount()
   } catch (error) {
     console.error('加载主机列表失败:', error)
-    message.error('加载主机列表失败')
   } finally {
     hostsLoading.value = false
   }
