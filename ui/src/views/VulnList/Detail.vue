@@ -241,8 +241,8 @@ const loadVuln = async () => {
   loading.value = true
   try {
     vuln.value = await vulnerabilitiesApi.get(id)
-  } catch {
-    message.error('获取漏洞详情失败')
+  } catch (error) {
+    console.error('获取漏洞详情失败:', error)
   } finally {
     loading.value = false
   }
@@ -253,8 +253,8 @@ const loadAdvice = async () => {
   adviceLoading.value = true
   try {
     adviceData.value = await vulnerabilitiesApi.getAdvice(vuln.value.id)
-  } catch {
-    message.error('获取修复建议失败')
+  } catch (error) {
+    console.error('获取修复建议失败:', error)
     adviceData.value = null
   } finally {
     adviceLoading.value = false
@@ -267,8 +267,8 @@ const handlePatch = async () => {
     await vulnerabilitiesApi.patch(vuln.value.id)
     message.success('已标记为修复')
     loadVuln()
-  } catch {
-    message.error('操作失败')
+  } catch (error) {
+    console.error('标记修复失败:', error)
   }
 }
 
@@ -284,8 +284,8 @@ const handleCreateTask = async () => {
     const hostIds = hosts.map(h => h.hostId)
     const res = await remediationTasksApi.create(vuln.value.id, hostIds)
     message.success(`已为 ${res.created} 台主机创建修复任务，请前往修复任务页面确认执行`)
-  } catch {
-    message.error('创建修复任务失败')
+  } catch (error) {
+    console.error('创建修复任务失败:', error)
   } finally {
     createTaskLoading.value = false
   }

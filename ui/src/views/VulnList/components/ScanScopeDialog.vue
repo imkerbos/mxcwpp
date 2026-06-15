@@ -150,8 +150,8 @@ async function handleSubmit() {
     message.success(`扫描已启动，任务 ID: ${data.task_id.slice(0, 8)}...，预计 ${data.estimated_seconds}s`)
     emit('success', data.task_id)
     emit('update:open', false)
-  } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || '触发失败')
+  } catch (error) {
+    console.error('触发扫描失败:', error)
   } finally {
     submitting.value = false
   }

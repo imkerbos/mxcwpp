@@ -109,10 +109,10 @@ func RateLimit(rdb *redis.Client, cfg RateLimitConfig) gin.HandlerFunc {
 		if res == 0 {
 			c.Header("Retry-After", strconv.Itoa(1))
 			c.Header("X-RateLimit-Limit", strconv.Itoa(capacity))
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"code":    429,
-				"message": "rate limit exceeded",
-				"data":    nil,
+			// 业务接口统一 HTTP 200 + 业务码（42900=请求过于频繁，见 manager/api/respcode.go）
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				"code":    42900,
+				"message": "请求过于频繁，请稍后再试",
 			})
 			return
 		}

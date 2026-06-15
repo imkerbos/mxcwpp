@@ -453,11 +453,6 @@ const handleSubmit = async () => {
       return
     }
     console.error('保存规则失败:', error)
-    if (error.response?.status === 409) {
-      message.error('规则 ID 已存在')
-    } else {
-      message.error('保存规则失败')
-    }
   } finally {
     loading.value = false
   }
