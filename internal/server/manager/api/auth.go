@@ -3,6 +3,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -25,8 +26,13 @@ const (
 	jwtIssuer = "mxsec-platform"
 
 	// 登录安全策略
-	maxLoginFailCount = 5                // 最大连续失败次数
+	maxLoginFailCount = 5                // 最大连续失败次数（达到即锁定，硬底线）
 	lockDuration      = 15 * time.Minute // 锁定时长
+
+	// 登录风控（自适应验证码 + 可信设备）
+	captchaFailThreshold = 2                   // 连续失败 ≥ 此值且非可信设备才要求验证码
+	deviceTrustThreshold = 3                   // 同设备成功登录 ≥ 此值即视为可信设备
+	deviceTrustTTL       = 30 * 24 * time.Hour // 可信设备有效期
 )
 
 // AuthHandler 是认证 API 处理器
@@ -46,11 +52,13 @@ func NewAuthHandler(db *gorm.DB, logger *zap.Logger, secret []byte) *AuthHandler
 }
 
 // LoginRequest 登录请求
+// CaptchaID/CaptchaCode 改为可选：仅在风控判定需要验证码时才校验。
 type LoginRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Password    string `json:"password" binding:"required"`
-	CaptchaID   string `json:"captcha_id" binding:"required"`
-	CaptchaCode string `json:"captcha_code" binding:"required"`
+	CaptchaID   string `json:"captcha_id"`
+	CaptchaCode string `json:"captcha_code"`
+	DeviceID    string `json:"device_id"` // 浏览器本地生成的设备标识，用于可信设备判定
 }
 
 // LoginResponse 登录响应
@@ -101,10 +109,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 校验验证码（Verify 内部会自动删除已使用的验证码，防止重放）
-	if !captchaStore.Verify(req.CaptchaID, req.CaptchaCode, true) {
-		BadRequest(c, "验证码错误或已过期")
-		return
+	// 风控：可信设备或近期无失败时免验证码；非可信设备且连续失败达阈值才要求验证码。
+	if h.loginNeedsCaptcha(req.Username, req.DeviceID) {
+		if !captchaStore.Verify(req.CaptchaID, req.CaptchaCode, true) {
+			// need_captcha 标志告知前端展示验证码框
+			c.JSON(http.StatusBadRequest, gin.H{"code": 1, "message": "验证码错误或已过期", "data": gin.H{"need_captcha": true}})
+			return
+		}
 	}
 
 	// 从数据库查询用户
@@ -152,6 +163,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err := h.db.Select("login_fail_count", "locked_until", "last_login").Save(&user).Error; err != nil {
 		h.logger.Warn("更新登录状态失败", zap.Error(err))
 	}
+
+	// 记录可信设备：累加该设备成功登录次数（达阈值后免验证码）
+	h.recordDeviceSuccess(user.Username, req.DeviceID)
 
 	// 生成 JWT Token
 	now := time.Now()
