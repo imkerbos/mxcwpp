@@ -255,6 +255,21 @@ type MTLSConfig struct {
 	CACert     string `mapstructure:"ca_cert"`
 	ServerCert string `mapstructure:"server_cert"`
 	ServerKey  string `mapstructure:"server_key"`
+
+	// --- Agent↔AC 信任链改造（默认全关，兼容现网；逐步灰度开启）---
+
+	// CAKey 是 CA 私钥路径。开启 PerAgentCert 后，AC 用它按 AgentID 在线签发单机证书。
+	CAKey string `mapstructure:"ca_key"`
+	// EnrollToken 是 agent enroll 引导令牌。非空时，agent 必须经 gRPC metadata 上报匹配的令牌才会被签发单机证书。
+	// 空表示迁移期不校验令牌（仅适用于受控内网）。
+	EnrollToken string `mapstructure:"enroll_token"`
+	// PerAgentCert 开启后，AC 在 agent 首连时签发一机一证（CN=AgentID），取代下发全网共享证书。
+	PerAgentCert bool `mapstructure:"per_agent_cert"`
+	// EnforceAgentID 是步骤 6 强制开关：开启后 Transfer 要求客户端证书已验证且 CN==上报 AgentID，
+	// 无证书连接仅允许完成 enroll（签发后即断开，要求带证书重连）。关闭时为观察模式（只告警不拒绝）。
+	EnforceAgentID bool `mapstructure:"enforce_agent_id"`
+	// RevokedSerials 是已吊销的证书序列号（十进制字符串）列表，握手期拒绝。
+	RevokedSerials []string `mapstructure:"revoked_serials"`
 }
 
 // LogConfig 是日志配置
