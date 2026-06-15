@@ -137,6 +137,11 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV1Auth := apiV1.Group("")
 	apiV1Auth.Use(authHandler.AuthMiddleware())
 	apiV1Auth.Use(middleware.AuditLogWithCH(db, chConn, logger))
+	// RBAC：让 role_permissions 表参与放行——对写操作按所属模块校验权限（纵向越权防护）。
+	// 读操作放行；admin 角色恒通过；user 默认无写权。
+	permResolver := api.NewPermissionResolver(db, logger)
+	api.SetGlobalResolver(permResolver)
+	apiV1Auth.Use(permResolver.EnforceWritePermissions())
 
 	// 服务发现查询（需要认证，运维 / 前端监控页面调用）
 	apiV1Auth.GET("/discovery/agentcenter", discoveryHandler.ListACInstances)
