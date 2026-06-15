@@ -116,10 +116,33 @@ func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, err
 		// P2-4: 大消息上限提到 16MB (默认 4MB), 防 SBOM / 漏洞情报 / 包文件传输被截
 		grpc.MaxRecvMsgSize(16*1024*1024),
 		grpc.MaxSendMsgSize(16*1024*1024),
-		// 服务端指标：暴露 mxsec_ac_grpc_handled_total / duration_seconds 给 Prometheus 抓取
-		grpc.UnaryInterceptor(acmetrics.UnaryServerInterceptor()),
-		grpc.StreamInterceptor(acmetrics.StreamServerInterceptor()),
 	)
+
+	// 批4 抗 DoS：panic recovery 始终在拦截器链首（保护后续拦截器与 handler），
+	// 之后接指标拦截器；per_ip_rps>0 时再插入单 IP 令牌桶限流。
+	antiDoS := cfg.Server.GRPC.AntiDoS
+	unaryChain := []grpc.UnaryServerInterceptor{recoveryUnaryInterceptor(logger)}
+	streamChain := []grpc.StreamServerInterceptor{recoveryStreamInterceptor(logger)}
+	if antiDoS.PerIPRPS > 0 {
+		ipLimiter := newIPRateLimiter(antiDoS.PerIPRPS, antiDoS.PerIPBurst)
+		unaryChain = append(unaryChain, ipLimiter.unaryInterceptor())
+		streamChain = append(streamChain, ipLimiter.streamInterceptor())
+		logger.Info("AC gRPC 单 IP 限流已启用",
+			zap.Int("per_ip_rps", antiDoS.PerIPRPS), zap.Int("per_ip_burst", antiDoS.PerIPBurst))
+	}
+	// 服务端指标：暴露 mxsec_ac_grpc_handled_total / duration_seconds 给 Prometheus 抓取
+	unaryChain = append(unaryChain, acmetrics.UnaryServerInterceptor())
+	streamChain = append(streamChain, acmetrics.StreamServerInterceptor())
+	opts = append(opts,
+		grpc.ChainUnaryInterceptor(unaryChain...),
+		grpc.ChainStreamInterceptor(streamChain...),
+	)
+
+	// 每连接最大并发流上限：防单个 agent 连接开海量流耗尽服务端资源。
+	if antiDoS.MaxConcurrentStreams > 0 {
+		opts = append(opts, grpc.MaxConcurrentStreams(antiDoS.MaxConcurrentStreams))
+		logger.Info("AC gRPC MaxConcurrentStreams 已设置", zap.Uint32("max", antiDoS.MaxConcurrentStreams))
+	}
 
 	logger.Info("gRPC Server keepalive 配置",
 		zap.Duration("server_keepalive_time", keepaliveParams.Time),
