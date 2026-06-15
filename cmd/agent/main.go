@@ -62,6 +62,8 @@ var (
 	buildVersion  string // 构建版本（构建时嵌入）
 	buildTime     string // 构建时间（构建时嵌入）
 	signPublicKey string // Plugin 签名验证公钥（base64，构建时嵌入）
+	caFingerprint string // AC CA 证书 SHA256 指纹（构建时嵌入，首连 pin AC 防中间人）
+	enrollToken   string // enroll 引导令牌（构建时嵌入，换取单机证书）
 )
 
 func main() {
@@ -159,6 +161,19 @@ func main() {
 	}
 	// 设置构建时嵌入的插件签名公钥
 	cfg.SignPublicKey = signPublicKey
+
+	// Agent↔AC 信任链：CA 指纹 + enroll 令牌。
+	// 环境变量优先（便于安装脚本按机注入），其次构建时嵌入。
+	if v := os.Getenv("MXSEC_CA_FINGERPRINT"); v != "" {
+		cfg.Local.TLS.CAFingerprint = v
+	} else if caFingerprint != "" {
+		cfg.Local.TLS.CAFingerprint = caFingerprint
+	}
+	if v := os.Getenv("MXSEC_ENROLL_TOKEN"); v != "" {
+		cfg.Local.TLS.EnrollToken = v
+	} else if enrollToken != "" {
+		cfg.Local.TLS.EnrollToken = enrollToken
+	}
 
 	// 3. 初始化日志（默认配置：按天轮转，保留7天）
 	log, err := logger.Init(logger.LogConfig{
