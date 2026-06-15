@@ -188,27 +188,6 @@ const statusTextMap: Record<string, string> = {
   false_positive: '误报',
 }
 
-// 状态机扩展（targeted scan v1）
-const statusIconMap: Record<string, string> = {
-  unpatched: '🔴',
-  patched: '🟢',
-  vanished: '⚪',
-  resurfaced: '🟡',
-  ignored: '🚫',
-  false_positive: '🤷',
-}
-
-const patchedReasonMap: Record<string, string> = {
-  auto_version_match: '版本自动匹配',
-  package_removed: '包消失',
-  manual: '手动确认',
-  remediation_task: '修复任务',
-}
-
-function patchedReasonLabel(reason: string): string {
-  return patchedReasonMap[reason] || reason
-}
-
 const hostColumns = [
   { title: '主机', key: 'host', width: 180 },
   { title: 'IP', dataIndex: 'ip', key: 'ip', width: 140 },
@@ -223,10 +202,6 @@ const statusColor = (status: string) => {
   if (status === 'ignored') return 'default'
   if (status === 'false_positive') return 'default'
   return 'red'
-}
-
-function statusIcon(status: string): string {
-  return statusIconMap[status] || '❓'
 }
 
 const cvssClass = (score: number) => {
