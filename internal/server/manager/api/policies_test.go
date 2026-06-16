@@ -114,6 +114,14 @@ func seedScanTask(t *testing.T, db *gorm.DB, taskID, policyID, status string) {
 		taskID, policyID, status)
 }
 
+// parseRespCode 解析统一响应体中的业务 code（JSON 数字解码为 float64）
+func parseRespCode(w *httptest.ResponseRecorder) float64 {
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	code, _ := resp["code"].(float64)
+	return code
+}
+
 // ===== DeletePolicy 测试 =====
 
 func TestDeletePolicy_NoActiveTasks(t *testing.T) {
@@ -130,6 +138,7 @@ func TestDeletePolicy_NoActiveTasks(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(0), parseRespCode(w))
 
 	// 验证策略被删除
 	var count int64
@@ -148,11 +157,13 @@ func TestDeletePolicy_WithPendingTask(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusConflict, w.Code)
+	// 统一响应：业务错误 HTTP 200 + body code
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	// 验证响应包含冲突信息
 	var resp map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, float64(CodeConflict), resp["code"])
 	assert.Contains(t, resp["message"], "活跃任务")
 
 	// 验证策略未被删除
@@ -172,7 +183,8 @@ func TestDeletePolicy_WithRunningTask(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(CodeConflict), parseRespCode(w))
 
 	var count int64
 	db.Model(&model.Policy{}).Where("id = ?", "pol-003").Count(&count)
@@ -187,7 +199,8 @@ func TestDeletePolicy_NotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(CodeNotFound), parseRespCode(w))
 }
 
 func TestDeletePolicy_WithPolicyIDsLike(t *testing.T) {
@@ -203,7 +216,8 @@ func TestDeletePolicy_WithPolicyIDsLike(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(CodeConflict), parseRespCode(w))
 
 	var count int64
 	db.Model(&model.Policy{}).Where("id = ?", "pol-004").Count(&count)
@@ -225,6 +239,7 @@ func TestDeletePolicy_CompletedAndCancelledTasks(t *testing.T) {
 
 	// 所有任务都是终态，应允许删除
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(0), parseRespCode(w))
 
 	var count int64
 	db.Model(&model.Policy{}).Where("id = ?", "pol-005").Count(&count)
@@ -251,6 +266,7 @@ func TestBatchDelete_NoActiveTasks(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(0), parseRespCode(w))
 
 	var count int64
 	db.Model(&model.Policy{}).Where("id IN ?", []string{"bp-001", "bp-002"}).Count(&count)
@@ -275,7 +291,8 @@ func TestBatchDelete_PartialActiveTasks(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	// 部分策略有活跃任务，整批拒绝
-	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(CodeConflict), parseRespCode(w))
 
 	// 两个策略都不应被删除
 	var count int64
@@ -293,7 +310,8 @@ func TestBatchDelete_InvalidRequest(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(CodeInvalidParam), parseRespCode(w))
 }
 
 func TestBatchDelete_CascadeDeleteRules(t *testing.T) {
@@ -315,6 +333,7 @@ func TestBatchDelete_CascadeDeleteRules(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(0), parseRespCode(w))
 
 	// 验证策略已删除
 	var policyCount int64
