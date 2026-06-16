@@ -1,8 +1,8 @@
 {
   "id": "LINUX_CIS_CENTOS",
-  "name": "CentOS 基线 (CIS + 等保 2.0, 借鉴 Elkeid)",
+  "name": "CentOS \u57fa\u7ebf (CIS + \u7b49\u4fdd 2.0, \u501f\u9274 Elkeid)",
   "version": "1.0",
-  "description": "字节跳动最佳实践-centos基线检查 / bytedance Standard-centos Security Baseline Check\n借鉴 Elkeid baseline (Apache 2.0, https://github.com/bytedance/Elkeid).",
+  "description": "\u5b57\u8282\u8df3\u52a8\u6700\u4f73\u5b9e\u8df5-centos\u57fa\u7ebf\u68c0\u67e5 / bytedance Standard-centos Security Baseline Check\n\u501f\u9274 Elkeid baseline (Apache 2.0, https://github.com/bytedance/Elkeid).",
   "os_family": [
     "centos",
     "rocky",
@@ -14,9 +14,9 @@
   "rules": [
     {
       "rule_id": "LINUX_CIS_CENTOS_0001",
-      "category": "身份鉴别",
-      "title": "设置密码失效时间\u003c=90天 / Ensure password expiration is 180 days or less",
-      "description": "请设置密码失效时间，定期修改密码策略，减少密码被泄漏和猜测风险，使用非密码登陆方式(如密钥对)请忽略此项。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u8bbe\u7f6e\u5bc6\u7801\u5931\u6548\u65f6\u95f4<=90\u5929 / Ensure password expiration is 180 days or less",
+      "description": "\u8bf7\u8bbe\u7f6e\u5bc6\u7801\u5931\u6548\u65f6\u95f4\uff0c\u5b9a\u671f\u4fee\u6539\u5bc6\u7801\u7b56\u7565\uff0c\u51cf\u5c11\u5bc6\u7801\u88ab\u6cc4\u6f0f\u548c\u731c\u6d4b\u98ce\u9669\uff0c\u4f7f\u7528\u975e\u5bc6\u7801\u767b\u9646\u65b9\u5f0f(\u5982\u5bc6\u94a5\u5bf9)\u8bf7\u5ffd\u7565\u6b64\u9879\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -27,19 +27,20 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_MAX_DAYS\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)90"
+            "result": "$(<=)90"
           }
         ]
       },
       "fix": {
-        "suggestion": "使用非密码登陆方式如密钥对，请忽略此项。\n采用root权限登录系统;\n输入:\n在 /etc/login.defs;\n将 PASS_MAX_DAYS 参数设置\u003c=90"
+        "suggestion": "\u4f7f\u7528\u975e\u5bc6\u7801\u767b\u9646\u65b9\u5f0f\u5982\u5bc6\u94a5\u5bf9\uff0c\u8bf7\u5ffd\u7565\u6b64\u9879\u3002\n\u91c7\u7528root\u6743\u9650\u767b\u5f55\u7cfb\u7edf;\n\u8f93\u5165:\n\u5728 /etc/login.defs;\n\u5c06 PASS_MAX_DAYS \u53c2\u6570\u8bbe\u7f6e<=90",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_MAX_DAYS[ \\t]' /etc/login.defs && sed -ri 's|^\\s*PASS_MAX_DAYS[ \\t].*|PASS_MAX_DAYS 90|' /etc/login.defs || echo 'PASS_MAX_DAYS 90' >> /etc/login.defs)"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0002",
-      "category": "身份鉴别",
-      "title": "密码修改最短周期\u003e=2天 / Ensure minimum days between password changes is 2 or more",
-      "description": "设置密码修改最小间隔时间，限制密码更改过于频繁。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u5bc6\u7801\u4fee\u6539\u6700\u77ed\u5468\u671f>=2\u5929 / Ensure minimum days between password changes is 2 or more",
+      "description": "\u8bbe\u7f6e\u5bc6\u7801\u4fee\u6539\u6700\u5c0f\u95f4\u9694\u65f6\u95f4\uff0c\u9650\u5236\u5bc6\u7801\u66f4\u6539\u8fc7\u4e8e\u9891\u7e41\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -50,19 +51,20 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_MIN_DAYS\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)2"
+            "result": "$(>=)2"
           }
         ]
       },
       "fix": {
-        "suggestion": "在 /etc/login.defs 中将 PASS_MIN_DAYS 参数设置为 \u003e=2。"
+        "suggestion": "\u5728 /etc/login.defs \u4e2d\u5c06 PASS_MIN_DAYS \u53c2\u6570\u8bbe\u7f6e\u4e3a >=2\u3002",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_MIN_DAYS[ \\t]' /etc/login.defs && sed -ri 's|^\\s*PASS_MIN_DAYS[ \\t].*|PASS_MIN_DAYS 2|' /etc/login.defs || echo 'PASS_MIN_DAYS 2' >> /etc/login.defs)"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0003",
-      "category": "身份鉴别",
-      "title": "密码到期时间警告\u003e=7天 / Ensure password expiration warning days is 7 or more",
-      "description": "确保密码到期警告天数为7或更多。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u5bc6\u7801\u5230\u671f\u65f6\u95f4\u8b66\u544a>=7\u5929 / Ensure password expiration warning days is 7 or more",
+      "description": "\u786e\u4fdd\u5bc6\u7801\u5230\u671f\u8b66\u544a\u5929\u6570\u4e3a7\u6216\u66f4\u591a\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -73,19 +75,20 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_WARN_AGE\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)7"
+            "result": "$(>=)7"
           }
         ]
       },
       "fix": {
-        "suggestion": "在 /etc/login.defs 中将 PASS_WARN_AGE 参数设置为 \u003e=7。"
+        "suggestion": "\u5728 /etc/login.defs \u4e2d\u5c06 PASS_WARN_AGE \u53c2\u6570\u8bbe\u7f6e\u4e3a >=7\u3002",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_WARN_AGE[ \\t]' /etc/login.defs && sed -ri 's|^\\s*PASS_WARN_AGE[ \\t].*|PASS_WARN_AGE 7|' /etc/login.defs || echo 'PASS_WARN_AGE 7' >> /etc/login.defs)"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0004",
-      "category": "身份鉴别",
-      "title": "密码复杂性检查 / Ensure password creation requirements are configured",
-      "description": "检查密码长度和密码是否使用多种字符类型。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u5bc6\u7801\u590d\u6742\u6027\u68c0\u67e5 / Ensure password creation requirements are configured",
+      "description": "\u68c0\u67e5\u5bc6\u7801\u957f\u5ea6\u548c\u5bc6\u7801\u662f\u5426\u4f7f\u7528\u591a\u79cd\u5b57\u7b26\u7c7b\u578b\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -96,7 +99,7 @@
               "/etc/security/pwquality.conf",
               "^\\s*minclass\\s+\\t*=\\s+\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)3"
+            "result": "$(>=)3"
           },
           {
             "type": "file_line_expr",
@@ -104,7 +107,7 @@
               "/etc/security/pwquality.conf",
               "^\\s*minlen\\s+\\t*=\\s+\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)8"
+            "result": "$(>=)8"
           },
           {
             "type": "file_line_expr",
@@ -112,7 +115,7 @@
               "/etc/pam.d/password-auth",
               "try_first_pass.*retry=(\\d+)"
             ],
-            "result": "$(\u003c=)3"
+            "result": "$(<=)3"
           },
           {
             "type": "file_line_expr",
@@ -120,19 +123,20 @@
               "/etc/pam.d/system-auth",
               "try_first_pass.*retry=(\\d+)"
             ],
-            "result": "$(\u003c=)3"
+            "result": "$(<=)3"
           }
         ]
       },
       "fix": {
-        "suggestion": "1.编辑/etc/security/pwquality.conf文件，将minlen设置为\u003e=8的值。\n2.编辑/etc/security/pwquality.conf文件，将minclass设置为\u003e=3的值。\n3.编辑/etc/pam.d/password-auth和/etc/pam.d/system-auth 将pam_pwquality.so这一行的try_first_pass后边的retry=设置为\u003c=3。"
+        "suggestion": "1.\u7f16\u8f91/etc/security/pwquality.conf\u6587\u4ef6\uff0c\u5c06minlen\u8bbe\u7f6e\u4e3a>=8\u7684\u503c\u3002\n2.\u7f16\u8f91/etc/security/pwquality.conf\u6587\u4ef6\uff0c\u5c06minclass\u8bbe\u7f6e\u4e3a>=3\u7684\u503c\u3002\n3.\u7f16\u8f91/etc/pam.d/password-auth\u548c/etc/pam.d/system-auth \u5c06pam_pwquality.so\u8fd9\u4e00\u884c\u7684try_first_pass\u540e\u8fb9\u7684retry=\u8bbe\u7f6e\u4e3a<=3\u3002",
+        "command": "F=/etc/security/pwquality.conf; cp $F $F.mxbak; (grep -qE '^\\s*minlen' $F && sed -ri 's|^\\s*#?\\s*minlen.*|minlen = 8|' $F || echo 'minlen = 8' >> $F); (grep -qE '^\\s*minclass' $F && sed -ri 's|^\\s*#?\\s*minclass.*|minclass = 3|' $F || echo 'minclass = 3' >> $F); for P in /etc/pam.d/password-auth /etc/pam.d/system-auth; do cp $P $P.mxbak; if grep -qE 'pam_pwquality.so.*retry=[0-9]+' $P; then sed -ri 's|(pam_pwquality.so[^\\n]*retry=)[0-9]+|\\13|' $P; elif grep -q 'pam_pwquality.so' $P; then sed -ri 's|(pam_pwquality.so.*)|\\1 retry=3|' $P; fi; done"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0005",
-      "category": "身份鉴别",
-      "title": "确保root是唯一UID为0的用户 / Ensure root is the only UID 0 account",
-      "description": "除root以外其他UID为0的用户都应该删除，或者为其分配新的UID。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u786e\u4fddroot\u662f\u552f\u4e00UID\u4e3a0\u7684\u7528\u6237 / Ensure root is the only UID 0 account",
+      "description": "\u9664root\u4ee5\u5916\u5176\u4ed6UID\u4e3a0\u7684\u7528\u6237\u90fd\u5e94\u8be5\u5220\u9664\uff0c\u6216\u8005\u4e3a\u5176\u5206\u914d\u65b0\u7684UID\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -142,19 +146,19 @@
             "param": [
               "/etc/passwd"
             ],
-            "result": "$(not)^root:$(\u0026\u0026)^\\w+:\\w+:0:"
+            "result": "$(not)^root:$(&&)^\\w+:\\w+:0:"
           }
         ]
       },
       "fix": {
-        "suggestion": "除root以外其他UID为0的用户(查看命令cat /etc/passwd | awk -F: '($3 == 0) { print $1 }'|grep -v '^root$' )都应该删除，或者为其分配新的UID。"
+        "suggestion": "\u9664root\u4ee5\u5916\u5176\u4ed6UID\u4e3a0\u7684\u7528\u6237(\u67e5\u770b\u547d\u4ee4cat /etc/passwd | awk -F: '($3 == 0) { print $1 }'|grep -v '^root$' )\u90fd\u5e94\u8be5\u5220\u9664\uff0c\u6216\u8005\u4e3a\u5176\u5206\u914d\u65b0\u7684UID\u3002"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0006",
-      "category": "身份鉴别",
-      "title": "检查是否限制密码重用 / Ensure password reuse is limited",
-      "description": "应限制用户之间重用密码的行为，降低密码泄漏的风险。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u68c0\u67e5\u662f\u5426\u9650\u5236\u5bc6\u7801\u91cd\u7528 / Ensure password reuse is limited",
+      "description": "\u5e94\u9650\u5236\u7528\u6237\u4e4b\u95f4\u91cd\u7528\u5bc6\u7801\u7684\u884c\u4e3a\uff0c\u964d\u4f4e\u5bc6\u7801\u6cc4\u6f0f\u7684\u98ce\u9669\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -165,7 +169,7 @@
               "/etc/pam.d/password-auth",
               "^password\\s+sufficient\\s+pam_unix.so.*remember=(\\d+)"
             ],
-            "result": "$(\u003e=)5"
+            "result": "$(>=)5"
           },
           {
             "type": "file_line_expr",
@@ -173,19 +177,20 @@
               "/etc/pam.d/system-auth",
               "^password\\s+sufficient\\s+pam_unix.so.*remember=(\\d+)"
             ],
-            "result": "$(\u003e=)5"
+            "result": "$(>=)5"
           }
         ]
       },
       "fix": {
-        "suggestion": "在/etc/pam.d/password-auth和/etc/pam.d/system-auth中password sufficient pam_unix.so 这行插入配置remember设置为\u003e=5的值，建议为5，即在行末尾加上参数remember=5。"
+        "suggestion": "\u5728/etc/pam.d/password-auth\u548c/etc/pam.d/system-auth\u4e2dpassword sufficient pam_unix.so \u8fd9\u884c\u63d2\u5165\u914d\u7f6eremember\u8bbe\u7f6e\u4e3a>=5\u7684\u503c\uff0c\u5efa\u8bae\u4e3a5\uff0c\u5373\u5728\u884c\u672b\u5c3e\u52a0\u4e0a\u53c2\u6570remember=5\u3002",
+        "command": "for P in /etc/pam.d/password-auth /etc/pam.d/system-auth; do cp $P $P.mxbak; if grep -qE '^password\\s+sufficient\\s+pam_unix.so.*remember=[0-9]+' $P; then sed -ri 's|(^password\\s+sufficient\\s+pam_unix.so[^\\n]*remember=)[0-9]+|\\15|' $P; elif grep -qE '^password\\s+sufficient\\s+pam_unix.so' $P; then sed -ri 's|(^password\\s+sufficient\\s+pam_unix.so.*)|\\1 remember=5|' $P; fi; done"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0007",
-      "category": "身份鉴别",
-      "title": "空口令账户检测 / Ensure password fields are not empty",
-      "description": "检查系统空密码账户。",
+      "category": "\u8eab\u4efd\u9274\u522b",
+      "title": "\u7a7a\u53e3\u4ee4\u8d26\u6237\u68c0\u6d4b / Ensure password fields are not empty",
+      "description": "\u68c0\u67e5\u7cfb\u7edf\u7a7a\u5bc6\u7801\u8d26\u6237\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -200,14 +205,14 @@
         ]
       },
       "fix": {
-        "suggestion": "为空口令的用户设置安全密码，或者执行passwd -l \u003cusername\u003e锁定用户。"
+        "suggestion": "\u4e3a\u7a7a\u53e3\u4ee4\u7684\u7528\u6237\u8bbe\u7f6e\u5b89\u5168\u5bc6\u7801\uff0c\u6216\u8005\u6267\u884cpasswd -l <username>\u9501\u5b9a\u7528\u6237\u3002"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0008",
-      "category": "SSH检测",
-      "title": "SSH空密码检测 / Ensure SSH PermitEmptyPasswords is disabled",
-      "description": "禁止SSH空密码用户登录。",
+      "category": "SSH\u68c0\u6d4b",
+      "title": "SSH\u7a7a\u5bc6\u7801\u68c0\u6d4b / Ensure SSH PermitEmptyPasswords is disabled",
+      "description": "\u7981\u6b62SSH\u7a7a\u5bc6\u7801\u7528\u6237\u767b\u5f55\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -222,14 +227,18 @@
         ]
       },
       "fix": {
-        "suggestion": "编辑文件/etc/ssh/sshd_config，将PermitEmptyPasswords配置为no。"
+        "suggestion": "\u7f16\u8f91\u6587\u4ef6/etc/ssh/sshd_config\uff0c\u5c06PermitEmptyPasswords\u914d\u7f6e\u4e3ano\u3002",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qiE '^\\s*#?\\s*PermitEmptyPasswords' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*PermitEmptyPasswords.*|PermitEmptyPasswords no|I' /etc/ssh/sshd_config || echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config); if sshd -t; then systemctl restart sshd; else mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": [
+          "sshd"
+        ]
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0009",
-      "category": "SSH检测",
-      "title": "SSH失败尝试次数\u003c5 / Ensure SSH MaxAuthTries is set to 5 or less",
-      "description": "设置较低的Max AuthTrimes参数将降低SSH服务器被暴力攻击成功的风险。",
+      "category": "SSH\u68c0\u6d4b",
+      "title": "SSH\u5931\u8d25\u5c1d\u8bd5\u6b21\u6570<5 / Ensure SSH MaxAuthTries is set to 5 or less",
+      "description": "\u8bbe\u7f6e\u8f83\u4f4e\u7684Max AuthTrimes\u53c2\u6570\u5c06\u964d\u4f4eSSH\u670d\u52a1\u5668\u88ab\u66b4\u529b\u653b\u51fb\u6210\u529f\u7684\u98ce\u9669\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -240,19 +249,23 @@
               "/etc/ssh/sshd_config",
               "^MaxAuthTries\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c)5"
+            "result": "$(<)5"
           }
         ]
       },
       "fix": {
-        "suggestion": "在/etc/ssh/sshd_config中取消MaxAuthTries注释符号#，设置最大密码尝试失败次数小于5。"
+        "suggestion": "\u5728/etc/ssh/sshd_config\u4e2d\u53d6\u6d88MaxAuthTries\u6ce8\u91ca\u7b26\u53f7#\uff0c\u8bbe\u7f6e\u6700\u5927\u5bc6\u7801\u5c1d\u8bd5\u5931\u8d25\u6b21\u6570\u5c0f\u4e8e5\u3002",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qiE '^\\s*#?\\s*MaxAuthTries' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*MaxAuthTries.*|MaxAuthTries 4|I' /etc/ssh/sshd_config || echo 'MaxAuthTries 4' >> /etc/ssh/sshd_config); if sshd -t; then systemctl restart sshd; else mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": [
+          "sshd"
+        ]
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0010",
-      "category": "安全审计",
-      "title": "确保开启日志守护进程(auditd) / Ensure auditd Service is enabled",
-      "description": "确保auditd服务已启用，记录日志用于审计。",
+      "category": "\u5b89\u5168\u5ba1\u8ba1",
+      "title": "\u786e\u4fdd\u5f00\u542f\u65e5\u5fd7\u5b88\u62a4\u8fdb\u7a0b(auditd) / Ensure auditd Service is enabled",
+      "description": "\u786e\u4fddauditd\u670d\u52a1\u5df2\u542f\u7528\uff0c\u8bb0\u5f55\u65e5\u5fd7\u7528\u4e8e\u5ba1\u8ba1\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -274,14 +287,15 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下命令启用auditd服务：\nsystemctl --now enable auditd"
+        "suggestion": "\u8fd0\u884c\u4ee5\u4e0b\u547d\u4ee4\u542f\u7528auditd\u670d\u52a1\uff1a\nsystemctl --now enable auditd",
+        "command": "systemctl enable --now auditd"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0011",
-      "category": "SSH检测",
-      "title": "减少空闲超时退出时间 / Ensure SSH Idle Timeout Interval is configured",
-      "description": "设置SSH空闲超时退出时间,可降低未授权用户访问其他用户ssh会话的风险。",
+      "category": "SSH\u68c0\u6d4b",
+      "title": "\u51cf\u5c11\u7a7a\u95f2\u8d85\u65f6\u9000\u51fa\u65f6\u95f4 / Ensure SSH Idle Timeout Interval is configured",
+      "description": "\u8bbe\u7f6eSSH\u7a7a\u95f2\u8d85\u65f6\u9000\u51fa\u65f6\u95f4,\u53ef\u964d\u4f4e\u672a\u6388\u6743\u7528\u6237\u8bbf\u95ee\u5176\u4ed6\u7528\u6237ssh\u4f1a\u8bdd\u7684\u98ce\u9669\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -292,7 +306,7 @@
               "/etc/ssh/sshd_config",
               "ClientAliveInterval\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)900"
+            "result": "$(<=)900"
           },
           {
             "type": "file_line_expr",
@@ -300,19 +314,23 @@
               "/etc/ssh/sshd_config",
               "ClientAliveCountMax\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)3"
+            "result": "$(<=)3"
           }
         ]
       },
       "fix": {
-        "suggestion": "编辑/etc/ssh/sshd_config，将ClientAliveInterval 设置为\u003c=900(15分钟)，将ClientAliveCountMax设置为0-3之间。"
+        "suggestion": "\u7f16\u8f91/etc/ssh/sshd_config\uff0c\u5c06ClientAliveInterval \u8bbe\u7f6e\u4e3a<=900(15\u5206\u949f)\uff0c\u5c06ClientAliveCountMax\u8bbe\u7f6e\u4e3a0-3\u4e4b\u95f4\u3002",
+        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak; (grep -qiE '^\\s*#?\\s*ClientAliveInterval' $F && sed -ri 's|^\\s*#?\\s*ClientAliveInterval.*|ClientAliveInterval 300|I' $F || echo 'ClientAliveInterval 300' >> $F); (grep -qiE '^\\s*#?\\s*ClientAliveCountMax' $F && sed -ri 's|^\\s*#?\\s*ClientAliveCountMax.*|ClientAliveCountMax 3|I' $F || echo 'ClientAliveCountMax 3' >> $F); if sshd -t; then systemctl restart sshd; else mv $F.mxbak $F; exit 1; fi",
+        "restart_services": [
+          "sshd"
+        ]
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0012",
-      "category": "SSH检测",
-      "title": "确保log level为info / Ensure SSH LogLevel is set to INFO",
-      "description": "确保SSH LogLevel设置为INFO,记录登录和注销活动。",
+      "category": "SSH\u68c0\u6d4b",
+      "title": "\u786e\u4fddlog level\u4e3ainfo / Ensure SSH LogLevel is set to INFO",
+      "description": "\u786e\u4fddSSH LogLevel\u8bbe\u7f6e\u4e3aINFO,\u8bb0\u5f55\u767b\u5f55\u548c\u6ce8\u9500\u6d3b\u52a8\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -327,14 +345,18 @@
         ]
       },
       "fix": {
-        "suggestion": "编辑 /etc/ssh/sshd_config 文件以按如下方式设置参数(取消注释):\nLogLevel INFO"
+        "suggestion": "\u7f16\u8f91 /etc/ssh/sshd_config \u6587\u4ef6\u4ee5\u6309\u5982\u4e0b\u65b9\u5f0f\u8bbe\u7f6e\u53c2\u6570(\u53d6\u6d88\u6ce8\u91ca):\nLogLevel INFO",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qiE '^\\s*#?\\s*LogLevel' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*LogLevel.*|LogLevel INFO|I' /etc/ssh/sshd_config || echo 'LogLevel INFO' >> /etc/ssh/sshd_config); if sshd -t; then systemctl restart sshd; else mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; fi",
+        "restart_services": [
+          "sshd"
+        ]
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0014",
-      "category": "安全审计",
-      "title": "确保开启日志守护进程(rsyslog) / Ensure rsyslog Service is enabled",
-      "description": "确保rsyslog服务已启用，记录日志用于审计。",
+      "category": "\u5b89\u5168\u5ba1\u8ba1",
+      "title": "\u786e\u4fdd\u5f00\u542f\u65e5\u5fd7\u5b88\u62a4\u8fdb\u7a0b(rsyslog) / Ensure rsyslog Service is enabled",
+      "description": "\u786e\u4fddrsyslog\u670d\u52a1\u5df2\u542f\u7528\uff0c\u8bb0\u5f55\u65e5\u5fd7\u7528\u4e8e\u5ba1\u8ba1\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -356,14 +378,15 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下命令启用rsyslog服务：\nsystemctl --now enable rsyslog"
+        "suggestion": "\u8fd0\u884c\u4ee5\u4e0b\u547d\u4ee4\u542f\u7528rsyslog\u670d\u52a1\uff1a\nsystemctl --now enable rsyslog",
+        "command": "systemctl enable --now rsyslog"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0015",
-      "category": "入侵防范",
-      "title": "开启地址随机化(ASLR) / Ensure address space layout randomization (ASLR) is enabled",
-      "description": "它将进程的内存空间地址随机化来增大入侵者预测目的地址难度，从而降低进程被成功入侵的风险。",
+      "category": "\u5165\u4fb5\u9632\u8303",
+      "title": "\u5f00\u542f\u5730\u5740\u968f\u673a\u5316(ASLR) / Ensure address space layout randomization (ASLR) is enabled",
+      "description": "\u5b83\u5c06\u8fdb\u7a0b\u7684\u5185\u5b58\u7a7a\u95f4\u5730\u5740\u968f\u673a\u5316\u6765\u589e\u5927\u5165\u4fb5\u8005\u9884\u6d4b\u76ee\u7684\u5730\u5740\u96be\u5ea6\uff0c\u4ece\u800c\u964d\u4f4e\u8fdb\u7a0b\u88ab\u6210\u529f\u5165\u4fb5\u7684\u98ce\u9669\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -385,14 +408,15 @@
         ]
       },
       "fix": {
-        "suggestion": "在/etc/sysctl.conf文件中设置以下参数： \nkernel.randomize_va_space = 2 \n执行命令： \nsysctl -w kernel.randomize_va_space=2"
+        "suggestion": "\u5728/etc/sysctl.conf\u6587\u4ef6\u4e2d\u8bbe\u7f6e\u4ee5\u4e0b\u53c2\u6570\uff1a \nkernel.randomize_va_space = 2 \n\u6267\u884c\u547d\u4ee4\uff1a \nsysctl -w kernel.randomize_va_space=2",
+        "command": "sysctl -w kernel.randomize_va_space=2 && (grep -q '^kernel.randomize_va_space' /etc/sysctl.d/90-mxsec-baseline.conf 2>/dev/null && sed -ri 's|^kernel.randomize_va_space.*|kernel.randomize_va_space = 2|' /etc/sysctl.d/90-mxsec-baseline.conf || echo 'kernel.randomize_va_space = 2' >> /etc/sysctl.d/90-mxsec-baseline.conf)"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0016",
-      "category": "文件权限",
-      "title": "确保配置文件的安全性 / Ensure permissions on files",
-      "description": "为了保证系统的安全性，请确保配置文件的安全性和唯一性，限制未授权用户对配置文件的一切操作，包括访问、读写、删除等。",
+      "category": "\u6587\u4ef6\u6743\u9650",
+      "title": "\u786e\u4fdd\u914d\u7f6e\u6587\u4ef6\u7684\u5b89\u5168\u6027 / Ensure permissions on files",
+      "description": "\u4e3a\u4e86\u4fdd\u8bc1\u7cfb\u7edf\u7684\u5b89\u5168\u6027\uff0c\u8bf7\u786e\u4fdd\u914d\u7f6e\u6587\u4ef6\u7684\u5b89\u5168\u6027\u548c\u552f\u4e00\u6027\uff0c\u9650\u5236\u672a\u6388\u6743\u7528\u6237\u5bf9\u914d\u7f6e\u6587\u4ef6\u7684\u4e00\u5207\u64cd\u4f5c\uff0c\u5305\u62ec\u8bbf\u95ee\u3001\u8bfb\u5199\u3001\u5220\u9664\u7b49\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -428,14 +452,15 @@
         ]
       },
       "fix": {
-        "suggestion": "执行以下5条命令\nchown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow\nchmod 0644 /etc/group\nchmod 0644 /etc/passwd\nchmod 0400 /etc/shadow\nchmod 0400 /etc/gshadow"
+        "suggestion": "\u6267\u884c\u4ee5\u4e0b5\u6761\u547d\u4ee4\nchown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow\nchmod 0644 /etc/group\nchmod 0644 /etc/passwd\nchmod 0400 /etc/shadow\nchmod 0400 /etc/gshadow",
+        "command": "chown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow && chmod 0644 /etc/passwd /etc/group && chmod 0400 /etc/shadow /etc/gshadow"
       }
     },
     {
       "rule_id": "LINUX_CIS_CENTOS_0017",
-      "category": "设置用户访问配置文件的权限",
-      "title": "设置用户访问配置文件的权限 / Verify permissions on files",
-      "description": "设置用户访问配置文件的权限。",
+      "category": "\u8bbe\u7f6e\u7528\u6237\u8bbf\u95ee\u914d\u7f6e\u6587\u4ef6\u7684\u6743\u9650",
+      "title": "\u8bbe\u7f6e\u7528\u6237\u8bbf\u95ee\u914d\u7f6e\u6587\u4ef6\u7684\u6743\u9650 / Verify permissions on files",
+      "description": "\u8bbe\u7f6e\u7528\u6237\u8bbf\u95ee\u914d\u7f6e\u6587\u4ef6\u7684\u6743\u9650\u3002",
       "severity": "high",
       "check": {
         "condition": "all",
@@ -457,7 +482,8 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下4条命令：\nchown root:root /etc/hosts.allow\nchown root:root /etc/hosts.deny\nchmod 644 /etc/hosts.allow\nchmod 644 /etc/hosts.deny"
+        "suggestion": "\u8fd0\u884c\u4ee5\u4e0b4\u6761\u547d\u4ee4\uff1a\nchown root:root /etc/hosts.allow\nchown root:root /etc/hosts.deny\nchmod 644 /etc/hosts.allow\nchmod 644 /etc/hosts.deny",
+        "command": "touch /etc/hosts.allow /etc/hosts.deny && chown root:root /etc/hosts.allow /etc/hosts.deny && chmod 644 /etc/hosts.allow /etc/hosts.deny"
       }
     }
   ]

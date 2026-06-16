@@ -11,7 +11,7 @@
     {
       "rule_id": "LINUX_CIS_UBUNTU_0001",
       "category": "身份鉴别",
-      "title": "设置密码失效时间\u003c=90天 / Ensure password expiration is 180 days or less",
+      "title": "设置密码失效时间<=90天 / Ensure password expiration is 180 days or less",
       "description": "请设置密码失效时间，定期修改密码策略，减少密码被泄漏和猜测风险，使用非密码登陆方式(如密钥对)请忽略此项。",
       "severity": "high",
       "check": {
@@ -23,18 +23,19 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_MAX_DAYS\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)90"
+            "result": "$(<=)90"
           }
         ]
       },
       "fix": {
-        "suggestion": "使用非密码登陆方式如密钥对，请忽略此项。\n采用root权限登录系统;\n输入:\n在 /etc/login.defs;\n将 PASS_MAX_DAYS 参数设置\u003c=90"
+        "suggestion": "使用非密码登陆方式如密钥对，请忽略此项。\n采用root权限登录系统;\n输入:\n在 /etc/login.defs;\n将 PASS_MAX_DAYS 参数设置<=90",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_MAX_DAYS' /etc/login.defs && sed -ri 's|^\\s*#?\\s*PASS_MAX_DAYS.*|PASS_MAX_DAYS\\t90|' /etc/login.defs || printf 'PASS_MAX_DAYS\\t90\\n' >> /etc/login.defs)"
       }
     },
     {
       "rule_id": "LINUX_CIS_UBUNTU_0002",
       "category": "身份鉴别",
-      "title": "密码修改最短周期\u003e=2天 / Ensure minimum days between password changes is 2 or more",
+      "title": "密码修改最短周期>=2天 / Ensure minimum days between password changes is 2 or more",
       "description": "设置密码修改最小间隔时间，限制密码更改过于频繁。",
       "severity": "high",
       "check": {
@@ -46,18 +47,19 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_MIN_DAYS\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)2"
+            "result": "$(>=)2"
           }
         ]
       },
       "fix": {
-        "suggestion": "在 /etc/login.defs 中将 PASS_MIN_DAYS 参数设置为 \u003e=2。"
+        "suggestion": "在 /etc/login.defs 中将 PASS_MIN_DAYS 参数设置为 >=2。",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_MIN_DAYS' /etc/login.defs && sed -ri 's|^\\s*#?\\s*PASS_MIN_DAYS.*|PASS_MIN_DAYS\\t2|' /etc/login.defs || printf 'PASS_MIN_DAYS\\t2\\n' >> /etc/login.defs)"
       }
     },
     {
       "rule_id": "LINUX_CIS_UBUNTU_0003",
       "category": "身份鉴别",
-      "title": "密码到期时间警告\u003e=7天 / Ensure password expiration warning days is 7 or more",
+      "title": "密码到期时间警告>=7天 / Ensure password expiration warning days is 7 or more",
       "description": "确保密码到期警告天数为7或更多。",
       "severity": "high",
       "check": {
@@ -69,12 +71,13 @@
               "/etc/login.defs",
               "\\s*\\t*PASS_WARN_AGE\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003e=)7"
+            "result": "$(>=)7"
           }
         ]
       },
       "fix": {
-        "suggestion": "在 /etc/login.defs 中将 PASS_WARN_AGE 参数设置为 \u003e=7。"
+        "suggestion": "在 /etc/login.defs 中将 PASS_WARN_AGE 参数设置为 >=7。",
+        "command": "cp /etc/login.defs /etc/login.defs.mxbak && (grep -qE '^\\s*PASS_WARN_AGE' /etc/login.defs && sed -ri 's|^\\s*#?\\s*PASS_WARN_AGE.*|PASS_WARN_AGE\\t7|' /etc/login.defs || printf 'PASS_WARN_AGE\\t7\\n' >> /etc/login.defs)"
       }
     },
     {
@@ -98,19 +101,19 @@
             "param": [
               "/etc/pam.d/common-password"
             ],
-            "result": "$(not)^#$(\u0026\u0026)password\\s*\\t*requisite\\s*\\t*pam_cracklib.so.*minlen=8"
+            "result": "$(not)^#$(&&)password\\s*\\t*requisite\\s*\\t*pam_cracklib.so.*minlen=8"
           },
           {
             "type": "file_line_expr",
             "param": [
               "/etc/pam.d/common-password"
             ],
-            "result": "$(not)^#$(\u0026\u0026)password\\s*\\t*requisite\\s*\\t*pam_cracklib.so.*minclass=3"
+            "result": "$(not)^#$(&&)password\\s*\\t*requisite\\s*\\t*pam_cracklib.so.*minclass=3"
           }
         ]
       },
       "fix": {
-        "suggestion": "1.安装libpam-cracklib: apt-get update \u0026\u0026 apt-get install libpam-cracklib。\n2.编辑/etc/pam.d/common-password，在password requisite pam_cracklib.so开头的这一行配置:minclass=3(至少包含小写字母、大写字母、数字、特殊字符等4类字符中的3类)以及minlen=8(长度八位以上)。"
+        "suggestion": "1.安装libpam-cracklib: apt-get update && apt-get install libpam-cracklib。\n2.编辑/etc/pam.d/common-password，在password requisite pam_cracklib.so开头的这一行配置:minclass=3(至少包含小写字母、大写字母、数字、特殊字符等4类字符中的3类)以及minlen=8(长度八位以上)。"
       }
     },
     {
@@ -127,7 +130,7 @@
             "param": [
               "/etc/passwd"
             ],
-            "result": "$(not)^root:$(\u0026\u0026)^\\w+:\\w+:0:"
+            "result": "$(not)^root:$(&&)^\\w+:\\w+:0:"
           }
         ]
       },
@@ -150,19 +153,19 @@
               "/etc/pam.d/common-password",
               "remember\\s*\\t*=\\s*\\t*(\\d+)"
             ],
-            "result": "password.*pam_unix.so$(\u0026\u0026)$(\u003c)5"
+            "result": "password.*pam_unix.so$(&&)$(<)5"
           },
           {
             "type": "file_line_expr",
             "param": [
               "/etc/pam.d/common-password"
             ],
-            "result": "password.*pam_unix.so$(\u0026\u0026)$(not)remember"
+            "result": "password.*pam_unix.so$(&&)$(not)remember"
           }
         ]
       },
       "fix": {
-        "suggestion": "编辑/etc/pam.d/common-password，在password [success=1 default=ignore] pam_unix.so开头的行插入配置remember\u003e=5的值，建议为5，即在行末尾加上参数remember=5。"
+        "suggestion": "编辑/etc/pam.d/common-password，在password [success=1 default=ignore] pam_unix.so开头的行插入配置remember>=5的值，建议为5，即在行末尾加上参数remember=5。"
       }
     },
     {
@@ -184,7 +187,7 @@
         ]
       },
       "fix": {
-        "suggestion": "为空口令的用户设置安全密码，或者执行passwd -l \u003cusername\u003e锁定用户。"
+        "suggestion": "为空口令的用户设置安全密码，或者执行passwd -l <username>锁定用户。"
       }
     },
     {
@@ -207,13 +210,17 @@
         ]
       },
       "fix": {
-        "suggestion": "编辑文件/etc/ssh/sshd_config，将PermitEmptyPasswords配置为no。"
+        "suggestion": "编辑文件/etc/ssh/sshd_config，将PermitEmptyPasswords配置为no。",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qE '^\\s*PermitEmptyPasswords\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*PermitEmptyPasswords\\s+.*|PermitEmptyPasswords no|' /etc/ssh/sshd_config || printf 'PermitEmptyPasswords no\\n' >> /etc/ssh/sshd_config) && (sshd -t && { systemctl reload ssh 2>/dev/null || systemctl restart ssh; } || { mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; })",
+        "restart_services": [
+          "ssh"
+        ]
       }
     },
     {
       "rule_id": "LINUX_CIS_UBUNTU_0009",
       "category": "SSH检测",
-      "title": "SSH失败尝试次数\u003c5 / Ensure SSH MaxAuthTries is set to 5 or less",
+      "title": "SSH失败尝试次数<5 / Ensure SSH MaxAuthTries is set to 5 or less",
       "description": "设置较低的Max AuthTrimes参数将降低SSH服务器被暴力攻击成功的风险。",
       "severity": "high",
       "check": {
@@ -225,12 +232,16 @@
               "/etc/ssh/sshd_config",
               "^\\s*MaxAuthTries\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c)5"
+            "result": "$(<)5"
           }
         ]
       },
       "fix": {
-        "suggestion": "在/etc/ssh/sshd_config中取消MaxAuthTries注释符号#，设置最大密码尝试失败次数小于5。"
+        "suggestion": "在/etc/ssh/sshd_config中取消MaxAuthTries注释符号#，设置最大密码尝试失败次数小于5。",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qE '^\\s*MaxAuthTries\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*MaxAuthTries\\s+.*|MaxAuthTries 4|' /etc/ssh/sshd_config || printf 'MaxAuthTries 4\\n' >> /etc/ssh/sshd_config) && (sshd -t && { systemctl reload ssh 2>/dev/null || systemctl restart ssh; } || { mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; })",
+        "restart_services": [
+          "ssh"
+        ]
       }
     },
     {
@@ -259,7 +270,8 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下命令启用auditd服务：\nservice auditd start"
+        "suggestion": "运行以下命令启用auditd服务：\nservice auditd start",
+        "command": "systemctl enable --now auditd"
       }
     },
     {
@@ -277,7 +289,7 @@
               "/etc/ssh/sshd_config",
               "ClientAliveInterval\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)900"
+            "result": "$(<=)900"
           },
           {
             "type": "file_line_expr",
@@ -285,12 +297,16 @@
               "/etc/ssh/sshd_config",
               "ClientAliveCountMax\\s*\\t*(\\d+)"
             ],
-            "result": "$(\u003c=)3"
+            "result": "$(<=)3"
           }
         ]
       },
       "fix": {
-        "suggestion": "编辑/etc/ssh/sshd_config，将ClientAliveInterval 设置为\u003c=900(15分钟)，将ClientAliveCountMax设置为0-3之间。"
+        "suggestion": "编辑/etc/ssh/sshd_config，将ClientAliveInterval 设置为<=900(15分钟)，将ClientAliveCountMax设置为0-3之间。",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qE '^\\s*ClientAliveInterval\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*ClientAliveInterval\\s+.*|ClientAliveInterval 900|' /etc/ssh/sshd_config || printf 'ClientAliveInterval 900\\n' >> /etc/ssh/sshd_config) && (grep -qE '^\\s*ClientAliveCountMax\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*ClientAliveCountMax\\s+.*|ClientAliveCountMax 3|' /etc/ssh/sshd_config || printf 'ClientAliveCountMax 3\\n' >> /etc/ssh/sshd_config) && (sshd -t && { systemctl reload ssh 2>/dev/null || systemctl restart ssh; } || { mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; })",
+        "restart_services": [
+          "ssh"
+        ]
       }
     },
     {
@@ -313,7 +329,11 @@
         ]
       },
       "fix": {
-        "suggestion": "编辑 /etc/ssh/sshd_config 文件以按如下方式设置参数(取消注释):\nLogLevel INFO"
+        "suggestion": "编辑 /etc/ssh/sshd_config 文件以按如下方式设置参数(取消注释):\nLogLevel INFO",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qE '^\\s*LogLevel\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*LogLevel\\s+.*|LogLevel INFO|' /etc/ssh/sshd_config || printf 'LogLevel INFO\\n' >> /etc/ssh/sshd_config) && (sshd -t && { systemctl reload ssh 2>/dev/null || systemctl restart ssh; } || { mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; })",
+        "restart_services": [
+          "ssh"
+        ]
       }
     },
     {
@@ -336,7 +356,11 @@
         ]
       },
       "fix": {
-        "suggestion": "编辑 /etc/ssh/sshd_config 文件以按如下方式设置参数:\nProtocol 2"
+        "suggestion": "编辑 /etc/ssh/sshd_config 文件以按如下方式设置参数:\nProtocol 2",
+        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak && (grep -qE '^\\s*Protocol\\b' /etc/ssh/sshd_config && sed -ri 's|^\\s*#?\\s*Protocol\\s+.*|Protocol 2|' /etc/ssh/sshd_config || printf 'Protocol 2\\n' >> /etc/ssh/sshd_config) && (sshd -t && { systemctl reload ssh 2>/dev/null || systemctl restart ssh; } || { mv /etc/ssh/sshd_config.mxbak /etc/ssh/sshd_config; exit 1; })",
+        "restart_services": [
+          "ssh"
+        ]
       }
     },
     {
@@ -365,7 +389,8 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下命令启用rsyslog服务：\nservice rsyslog start"
+        "suggestion": "运行以下命令启用rsyslog服务：\nservice rsyslog start",
+        "command": "systemctl enable --now rsyslog"
       }
     },
     {
@@ -394,7 +419,8 @@
         ]
       },
       "fix": {
-        "suggestion": "在/etc/sysctl.conf或/etc/sysctl.d/*文件中设置以下参数： \nkernel.randomize_va_space = 2 \n执行命令： \nsysctl -w kernel.randomize_va_space=2"
+        "suggestion": "在/etc/sysctl.conf或/etc/sysctl.d/*文件中设置以下参数： \nkernel.randomize_va_space = 2 \n执行命令： \nsysctl -w kernel.randomize_va_space=2",
+        "command": "sysctl -w kernel.randomize_va_space=2 && touch /etc/sysctl.d/90-mxsec-baseline.conf && (grep -qE '^\\s*kernel.randomize_va_space' /etc/sysctl.d/90-mxsec-baseline.conf && sed -ri 's|^\\s*kernel.randomize_va_space.*|kernel.randomize_va_space = 2|' /etc/sysctl.d/90-mxsec-baseline.conf || printf 'kernel.randomize_va_space = 2\\n' >> /etc/sysctl.d/90-mxsec-baseline.conf)"
       }
     },
     {
@@ -437,7 +463,8 @@
         ]
       },
       "fix": {
-        "suggestion": "执行以下5条命令\nchown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow\nchmod 0644 /etc/group\nchmod 0644 /etc/passwd\nchmod 0400 /etc/shadow\nchmod 0400 /etc/gshadow"
+        "suggestion": "执行以下5条命令\nchown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow\nchmod 0644 /etc/group\nchmod 0644 /etc/passwd\nchmod 0400 /etc/shadow\nchmod 0400 /etc/gshadow",
+        "command": "chown root:root /etc/passwd /etc/shadow /etc/group /etc/gshadow && chmod 0644 /etc/passwd && chmod 0644 /etc/group && chmod 0400 /etc/shadow && chmod 0400 /etc/gshadow"
       }
     },
     {
@@ -466,7 +493,8 @@
         ]
       },
       "fix": {
-        "suggestion": "运行以下4条命令：\nchown root:root /etc/hosts.allow\nchown root:root /etc/hosts.deny\nchmod 644 /etc/hosts.allow\nchmod 644 /etc/hosts.deny"
+        "suggestion": "运行以下4条命令：\nchown root:root /etc/hosts.allow\nchown root:root /etc/hosts.deny\nchmod 644 /etc/hosts.allow\nchmod 644 /etc/hosts.deny",
+        "command": "chown root:root /etc/hosts.allow /etc/hosts.deny && chmod 0644 /etc/hosts.allow && chmod 0644 /etc/hosts.deny"
       }
     }
   ]
