@@ -40,11 +40,14 @@
 - **入口**: UI `Baseline` `Inspection` | API `/baseline` `/baseline-rules` `/baseline-alerts` `/baseline-score-trend` | 后端 `plugins/baseline/` `manager/biz`(kube_baseline)
 - **状态**: ✅ 引擎(10 checker)、file_line_expr、K8s 80 func、并发 worker 池；✅ 规则库 **549 条**全量入库(递归加载 config 全树，去信创6 OS)；✅ 内置/自定义隔离(builtin 字段，启动同步永不覆盖用户规则)；✅ OS 规则修复命令全补 + VM 实测自动可修规则 100% 生效
 - **入库机制**: 每次启动幂等 upsert(新增 JSON 重启即入库) + reconcile(JSON 移除的内置规则自动删) + 一次性 builtin 回填；删整个策略文件需配 DB 清理(无整策略 reconcile)
-- **VM 验证(2026-06-16)**: rocky9(rhel)+ubuntu24 实测 break→fix→rescan 闭环——dengbao-rhel 38/40、cis-rhel8 37/40、cis-centos 33/34、dengbao-ubuntu 29/30、cis-ubuntu 23/24；剩余 fail 全为分区类(manual 不可命令修)+故意排除(X卸载/PAM 锁死风险)
+- **VM 验证(2026-06-16)**: rocky9(rhel)+ubuntu24 实测 break→fix→rescan 闭环
+  - OS: dengbao-rhel 38/40、cis-rhel8 37/40、cis-centos 33/34、dengbao-ubuntu 29/30、cis-ubuntu 23/24
+  - 中间件(rocky9 部署实例实测): nginx 12/12、postgresql 10/10、mysql 13/14、apache 11/12、tomcat 10/12、redis 8/10、kafka 5/10、mongodb 8/10
+  - 剩余 fail 全为：分区/挂载类(manual)、TLS/SASL/ACL/证书/业务判断(需 PKI 或集群设置)、故意排除(X卸载/PAM 锁死)——安全可自动修规则全生效
+- **范围调整**: 砍信创 6 OS + oracle/sqlserver(商业)，只做 CentOS/RHEL/Ubuntu/Rocky + 开源中间件；cis/ 独立重写去 Elkeid 衍生(自有 CIS_* 规则组)
 - **待清理**:
-  - 🟡 cis/ 已独立重写去 Elkeid 衍生(自有 CIS_* 规则组)；intl/examples 修复命令已补但未 VM 验证
-  - 🟡 中间件 110 条修复命令需运行实例验证(待部署)；分区/挂载类规则保留 suggestion 标 manual
-  - ❌ 修复完整链已通(VM 实测)、等保 docx 导出、5000 台性能验收
+  - 🟡 intl/examples 修复命令已补但未 VM 验证；apache/tomcat 规则做了 OS 双路径(httpd/apache2)
+  - ❌ 等保 docx 导出、5000 台性能验收
 
 ## 4. 漏洞管理系统
 - **范围**: 漏洞情报同步、扫描、状态机、修复闭环、SBOM、NPatch、PoC
