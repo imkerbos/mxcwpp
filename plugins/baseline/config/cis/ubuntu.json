@@ -29,7 +29,7 @@
       },
       "fix": {
         "suggestion": "在 /etc/modprobe.d/cramfs.conf 中写入 install cramfs /bin/true 禁止加载该模块。",
-        "command": "[ -f /etc/modprobe.d/cramfs.conf ] && cp /etc/modprobe.d/cramfs.conf /etc/modprobe.d/cramfs.conf.mxbak 2>/dev/null; if grep -qE '^\\s*install\\s+cramfs' /etc/modprobe.d/cramfs.conf 2>/dev/null; then sed -ri 's|^\\s*install\\s+cramfs.*|install cramfs /bin/true|' /etc/modprobe.d/cramfs.conf; else echo 'install cramfs /bin/true' >> /etc/modprobe.d/cramfs.conf; fi"
+        "command": "F=/etc/modprobe.d/cramfs.conf; mkdir -p \"$(dirname \"$F\")\"; if grep -qsE '^\\s*install\\s+cramfs\\b' \"$F\"; then sed -ri 's|^\\s*install\\s+cramfs\\b.*|install cramfs /bin/false|' \"$F\"; else echo 'install cramfs /bin/false' >> \"$F\"; fi; grep -qsF 'blacklist cramfs' \"$F\" || echo 'blacklist cramfs' >> \"$F\"; rmmod cramfs 2>/dev/null; true"
       }
     },
     {
@@ -53,7 +53,7 @@
       },
       "fix": {
         "suggestion": "在 /etc/modprobe.d/squashfs.conf 中写入 install squashfs /bin/true。注意若使用 snap 则需保留该模块。",
-        "command": "[ -f /etc/modprobe.d/squashfs.conf ] && cp /etc/modprobe.d/squashfs.conf /etc/modprobe.d/squashfs.conf.mxbak 2>/dev/null; if grep -qE '^\\s*install\\s+squashfs' /etc/modprobe.d/squashfs.conf 2>/dev/null; then sed -ri 's|^\\s*install\\s+squashfs.*|install squashfs /bin/true|' /etc/modprobe.d/squashfs.conf; else echo 'install squashfs /bin/true' >> /etc/modprobe.d/squashfs.conf; fi"
+        "command": "F=/etc/modprobe.d/squashfs.conf; mkdir -p \"$(dirname \"$F\")\"; if grep -qsE '^\\s*install\\s+squashfs\\b' \"$F\"; then sed -ri 's|^\\s*install\\s+squashfs\\b.*|install squashfs /bin/false|' \"$F\"; else echo 'install squashfs /bin/false' >> \"$F\"; fi; rmmod squashfs 2>/dev/null; true"
       }
     },
     {
@@ -121,7 +121,7 @@
       },
       "fix": {
         "suggestion": "停止并禁用 avahi-daemon 服务。",
-        "command": "systemctl stop avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl disable avahi-daemon.socket avahi-daemon.service 2>/dev/null; true"
+        "command": "systemctl stop avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl disable avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl mask avahi-daemon.socket avahi-daemon.service 2>/dev/null; true"
       }
     },
     {
@@ -243,7 +243,7 @@
       },
       "fix": {
         "suggestion": "在 sshd_config 中设置 PermitRootLogin no，确保已有可提权的普通账户后再应用。",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak.009 2>/dev/null; if grep -qiE '^\\s*#?\\s*PermitRootLogin' /etc/ssh/sshd_config; then sed -ri 's|^\\s*#?\\s*PermitRootLogin.*|PermitRootLogin no|I' /etc/ssh/sshd_config; else echo 'PermitRootLogin no' >> /etc/ssh/sshd_config; fi; sshd -t || { mv /etc/ssh/sshd_config.mxbak.009 /etc/ssh/sshd_config; exit 1; }",
+        "command": "F=/etc/ssh/sshd_config; cp \"$F\" \"$F.mxbak.009\" 2>/dev/null; sed -ri '/^\\s*#?\\s*PermitRootLogin\\b/Id' \"$F\"; echo 'PermitRootLogin no' >> \"$F\"; sshd -t 2>/dev/null || { mv \"$F.mxbak.009\" \"$F\"; exit 1; }; rm -f \"$F.mxbak.009\"",
         "restart_services": [
           "ssh"
         ]
@@ -270,7 +270,7 @@
       },
       "fix": {
         "suggestion": "在 sshd_config 中设置 MaxAuthTries 4。",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak.010 2>/dev/null; if grep -qiE '^\\s*#?\\s*MaxAuthTries' /etc/ssh/sshd_config; then sed -ri 's|^\\s*#?\\s*MaxAuthTries.*|MaxAuthTries 4|I' /etc/ssh/sshd_config; else echo 'MaxAuthTries 4' >> /etc/ssh/sshd_config; fi; sshd -t || { mv /etc/ssh/sshd_config.mxbak.010 /etc/ssh/sshd_config; exit 1; }",
+        "command": "F=/etc/ssh/sshd_config; cp \"$F\" \"$F.mxbak.010\" 2>/dev/null; sed -ri '/^\\s*#?\\s*MaxAuthTries\\b/Id' \"$F\"; echo 'MaxAuthTries 4' >> \"$F\"; sshd -t 2>/dev/null || { mv \"$F.mxbak.010\" \"$F\"; exit 1; }; rm -f \"$F.mxbak.010\"",
         "restart_services": [
           "ssh"
         ]
@@ -297,7 +297,7 @@
       },
       "fix": {
         "suggestion": "在 sshd_config 中设置 X11Forwarding no。",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak.011 2>/dev/null; if grep -qiE '^\\s*#?\\s*X11Forwarding' /etc/ssh/sshd_config; then sed -ri 's|^\\s*#?\\s*X11Forwarding.*|X11Forwarding no|I' /etc/ssh/sshd_config; else echo 'X11Forwarding no' >> /etc/ssh/sshd_config; fi; sshd -t || { mv /etc/ssh/sshd_config.mxbak.011 /etc/ssh/sshd_config; exit 1; }",
+        "command": "F=/etc/ssh/sshd_config; cp \"$F\" \"$F.mxbak.011\" 2>/dev/null; sed -ri '/^\\s*#?\\s*X11Forwarding\\b/Id' \"$F\"; echo 'X11Forwarding no' >> \"$F\"; sshd -t 2>/dev/null || { mv \"$F.mxbak.011\" \"$F\"; exit 1; }; rm -f \"$F.mxbak.011\"",
         "restart_services": [
           "ssh"
         ]
@@ -324,7 +324,7 @@
       },
       "fix": {
         "suggestion": "在 sshd_config 中设置 PermitEmptyPasswords no。",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak.012 2>/dev/null; if grep -qiE '^\\s*#?\\s*PermitEmptyPasswords' /etc/ssh/sshd_config; then sed -ri 's|^\\s*#?\\s*PermitEmptyPasswords.*|PermitEmptyPasswords no|I' /etc/ssh/sshd_config; else echo 'PermitEmptyPasswords no' >> /etc/ssh/sshd_config; fi; sshd -t || { mv /etc/ssh/sshd_config.mxbak.012 /etc/ssh/sshd_config; exit 1; }",
+        "command": "F=/etc/ssh/sshd_config; cp \"$F\" \"$F.mxbak.012\" 2>/dev/null; sed -ri '/^\\s*#?\\s*PermitEmptyPasswords\\b/Id' \"$F\"; echo 'PermitEmptyPasswords no' >> \"$F\"; sshd -t 2>/dev/null || { mv \"$F.mxbak.012\" \"$F\"; exit 1; }; rm -f \"$F.mxbak.012\"",
         "restart_services": [
           "ssh"
         ]
@@ -351,7 +351,7 @@
       },
       "fix": {
         "suggestion": "在 sshd_config 中设置 Ciphers 为 chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes128-ctr。",
-        "command": "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.mxbak.013 2>/dev/null; CIPH='Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes128-ctr'; if grep -qiE '^\\s*#?\\s*Ciphers' /etc/ssh/sshd_config; then sed -ri \"s|^\\s*#?\\s*Ciphers.*|$CIPH|I\" /etc/ssh/sshd_config; else echo \"$CIPH\" >> /etc/ssh/sshd_config; fi; sshd -t || { mv /etc/ssh/sshd_config.mxbak.013 /etc/ssh/sshd_config; exit 1; }",
+        "command": "F=/etc/ssh/sshd_config; cp \"$F\" \"$F.mxbak.013\" 2>/dev/null; sed -ri '/^\\s*#?\\s*Ciphers\\b/Id' \"$F\"; echo 'Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes128-ctr' >> \"$F\"; sshd -t 2>/dev/null || { mv \"$F.mxbak.013\" \"$F\"; exit 1; }; rm -f \"$F.mxbak.013\"",
         "restart_services": [
           "ssh"
         ]
@@ -630,7 +630,7 @@
       },
       "fix": {
         "suggestion": "设置 net.ipv4.conf.all.rp_filter = 1。",
-        "command": "sysctl -w net.ipv4.conf.all.rp_filter=1; if grep -q '^net.ipv4.conf.all.rp_filter' /etc/sysctl.d/90-mxsec-baseline.conf 2>/dev/null; then sed -ri 's|^net.ipv4.conf.all.rp_filter.*|net.ipv4.conf.all.rp_filter = 1|' /etc/sysctl.d/90-mxsec-baseline.conf; else echo 'net.ipv4.conf.all.rp_filter = 1' >> /etc/sysctl.d/90-mxsec-baseline.conf; fi"
+        "command": "C=/etc/sysctl.d/90-mxsec-baseline.conf; mkdir -p \"$(dirname \"$C\")\"; for K in net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter; do if grep -qE \"^\\s*$K\\b\" \"$C\" 2>/dev/null; then sed -ri \"s|^\\s*$K\\b.*|$K = 1|\" \"$C\"; else echo \"$K = 1\" >> \"$C\"; fi; done; for IF in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 1 > \"$IF\" 2>/dev/null; done; sysctl -w net.ipv4.conf.default.rp_filter=1 net.ipv4.conf.all.rp_filter=1"
       }
     },
     {

@@ -193,7 +193,7 @@
       },
       "fix": {
         "suggestion": "PermitRootLogin no",
-        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak && (grep -qiE '^\\s*#?\\s*PermitRootLogin' $F && sed -ri 's|^\\s*#?\\s*PermitRootLogin.*|PermitRootLogin no|I' $F || echo 'PermitRootLogin no' >> $F) && (sshd -t || { mv $F.mxbak $F; exit 1; })",
+        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak; if grep -qiE '^\\s*PermitRootLogin\\b' $F; then sed -ri 's|^\\s*PermitRootLogin\\b.*|PermitRootLogin no|I' $F; else echo 'PermitRootLogin no' >> $F; fi; for d in /etc/ssh/sshd_config.d/*.conf; do [ -f \"$d\" ] && grep -qiE '^\\s*PermitRootLogin\\b' \"$d\" && sed -ri 's|^\\s*PermitRootLogin\\b.*|PermitRootLogin no|I' \"$d\"; done; sshd -t || { mv $F.mxbak $F; exit 1; }",
         "restart_services": [
           "ssh"
         ]
@@ -469,7 +469,7 @@
       },
       "fix": {
         "suggestion": "MaxAuthTries 4",
-        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak && (grep -qiE '^\\s*#?\\s*MaxAuthTries' $F && sed -ri 's|^\\s*#?\\s*MaxAuthTries.*|MaxAuthTries 4|I' $F || echo 'MaxAuthTries 4' >> $F) && (sshd -t || { mv $F.mxbak $F; exit 1; })",
+        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak; if grep -qiE '^\\s*MaxAuthTries\\b' $F; then sed -ri 's|^\\s*MaxAuthTries\\b.*|MaxAuthTries 4|I' $F; else echo 'MaxAuthTries 4' >> $F; fi; for d in /etc/ssh/sshd_config.d/*.conf; do [ -f \"$d\" ] && grep -qiE '^\\s*MaxAuthTries\\b' \"$d\" && sed -ri 's|^\\s*MaxAuthTries\\b.*|MaxAuthTries 4|I' \"$d\"; done; sshd -t || { mv $F.mxbak $F; exit 1; }",
         "restart_services": [
           "ssh"
         ]
@@ -496,7 +496,7 @@
       },
       "fix": {
         "suggestion": "X11Forwarding no",
-        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak && (grep -qiE '^\\s*#?\\s*X11Forwarding' $F && sed -ri 's|^\\s*#?\\s*X11Forwarding.*|X11Forwarding no|I' $F || echo 'X11Forwarding no' >> $F) && (sshd -t || { mv $F.mxbak $F; exit 1; })",
+        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak; if grep -qiE '^\\s*X11Forwarding\\b' $F; then sed -ri 's|^\\s*X11Forwarding\\b.*|X11Forwarding no|I' $F; else echo 'X11Forwarding no' >> $F; fi; for d in /etc/ssh/sshd_config.d/*.conf; do [ -f \"$d\" ] && grep -qiE '^\\s*X11Forwarding\\b' \"$d\" && sed -ri 's|^\\s*X11Forwarding\\b.*|X11Forwarding no|I' \"$d\"; done; sshd -t || { mv $F.mxbak $F; exit 1; }",
         "restart_services": [
           "ssh"
         ]
@@ -523,7 +523,7 @@
       },
       "fix": {
         "suggestion": "ClientAliveInterval 300",
-        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak && (grep -qiE '^\\s*#?\\s*ClientAliveInterval' $F && sed -ri 's|^\\s*#?\\s*ClientAliveInterval.*|ClientAliveInterval 300|I' $F || echo 'ClientAliveInterval 300' >> $F) && (sshd -t || { mv $F.mxbak $F; exit 1; })",
+        "command": "F=/etc/ssh/sshd_config; cp $F $F.mxbak; if grep -qiE '^\\s*ClientAliveInterval\\b' $F; then sed -ri 's|^\\s*ClientAliveInterval\\b.*|ClientAliveInterval 300|I' $F; else echo 'ClientAliveInterval 300' >> $F; fi; for d in /etc/ssh/sshd_config.d/*.conf; do [ -f \"$d\" ] && grep -qiE '^\\s*ClientAliveInterval\\b' \"$d\" && sed -ri 's|^\\s*ClientAliveInterval\\b.*|ClientAliveInterval 300|I' \"$d\"; done; sshd -t || { mv $F.mxbak $F; exit 1; }",
         "restart_services": [
           "ssh"
         ]
@@ -728,7 +728,7 @@
       },
       "fix": {
         "suggestion": "Ubuntu apt install aide 默认安装 /etc/cron.daily/aide",
-        "command": "[ -f /etc/cron.daily/aide ] || { apt-get update -qq && apt-get install -y aide-common; }"
+        "command": "dpkg -s aide-common >/dev/null 2>&1 || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y aide-common; }; F=/etc/cron.daily/aide; if [ ! -f \"$F\" ]; then mkdir -p /etc/cron.daily; printf '#!/bin/sh\\n# mxsec baseline: daily AIDE integrity check\\n[ -x /usr/bin/aide ] || exit 0\\n/usr/bin/aide --config=/etc/aide/aide.conf --check 2>&1 | logger -t aide\\n' > \"$F\"; chmod 755 \"$F\"; fi"
       }
     },
     {
