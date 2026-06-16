@@ -38,12 +38,13 @@
 ## 3. 基线/合规系统
 - **范围**: 基线检查引擎 + 规则库（等保/CIS/中间件/Windows/信创）+ 修复
 - **入口**: UI `Baseline` `Inspection` | API `/baseline` `/baseline-rules` `/baseline-alerts` `/baseline-score-trend` | 后端 `plugins/baseline/` `manager/biz`(kube_baseline)
-- **状态**: ✅ 引擎(10 checker)、file_line_expr、K8s 80 func、并发 worker 池；🟢 规则库 **450 条**（订正自 390）
+- **状态**: ✅ 引擎(10 checker)、file_line_expr、K8s 80 func、并发 worker 池；✅ 规则库 **549 条**全量入库(递归加载 config 全树，去信创6 OS)；✅ 内置/自定义隔离(builtin 字段，启动同步永不覆盖用户规则)；✅ OS 规则修复命令全补 + VM 实测自动可修规则 100% 生效
+- **入库机制**: 每次启动幂等 upsert(新增 JSON 重启即入库) + reconcile(JSON 移除的内置规则自动删) + 一次性 builtin 回填；删整个策略文件需配 DB 清理(无整策略 reconcile)
+- **VM 验证(2026-06-16)**: rocky9(rhel)+ubuntu24 实测 break→fix→rescan 闭环——dengbao-rhel 38/40、cis-rhel8 37/40、cis-centos 33/34、dengbao-ubuntu 29/30、cis-ubuntu 23/24；剩余 fail 全为分区类(manual 不可命令修)+故意排除(X卸载/PAM 锁死风险)
 - **待清理**:
-  - 🔴 **✅虚高三处**：主机基线 CEL Checker(**不存在**)、修复 pre/verify/rollback 字段(**不存在**，只有 command+重启)、弱口令 detector(空占位)
-  - ❌ **等保 docx 导出不存在**（只有 md/excel/pdf）
-  - 🟡 中间件 110/目标 160(缺 RabbitMQ)、数据库缺 DB2、K8s 61/目标 120
-  - ❌ 修复完整链、差异扫描 last_status、5000 台性能验收
+  - 🟡 cis/ 已独立重写去 Elkeid 衍生(自有 CIS_* 规则组)；intl/examples 修复命令已补但未 VM 验证
+  - 🟡 中间件 110 条修复命令需运行实例验证(待部署)；分区/挂载类规则保留 suggestion 标 manual
+  - ❌ 修复完整链已通(VM 实测)、等保 docx 导出、5000 台性能验收
 
 ## 4. 漏洞管理系统
 - **范围**: 漏洞情报同步、扫描、状态机、修复闭环、SBOM、NPatch、PoC
