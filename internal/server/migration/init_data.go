@@ -440,6 +440,24 @@ func savePolicyToDB(db *gorm.DB, policy *engine.Policy, groupID string, logger *
 		count++
 	}
 
+	// reconcile：删除该策略下已从 JSON 移除的内置规则（用户自定义 builtin=false 不动）
+	jsonRuleIDs := make([]string, 0, len(policy.Rules))
+	for _, r := range policy.Rules {
+		jsonRuleIDs = append(jsonRuleIDs, r.RuleID)
+	}
+	if len(jsonRuleIDs) > 0 {
+		del := db.Where("policy_id = ? AND builtin = ? AND rule_id NOT IN ?", policy.ID, true, jsonRuleIDs).
+			Delete(&model.Rule{})
+		if del.Error != nil {
+			return count, fmt.Errorf("清理策略 %s 过期内置规则失败: %w", policy.ID, del.Error)
+		}
+		if del.RowsAffected > 0 {
+			logger.Info("清理过期内置规则",
+				zap.String("policy_id", policy.ID),
+				zap.Int64("removed", del.RowsAffected))
+		}
+	}
+
 	return count, nil
 }
 
