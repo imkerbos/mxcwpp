@@ -299,7 +299,8 @@
       },
       "fix": {
         "suggestion": "systemctl enable --now auditd",
-        "command": "systemctl enable --now auditd"
+        "command": "rpm -q audit >/dev/null 2>&1 || { dnf install -y audit >/dev/null 2>&1 || yum install -y audit; }; systemctl enable auditd >/dev/null 2>&1; service auditd restart >/dev/null 2>&1 || systemctl restart auditd >/dev/null 2>&1; systemctl is-active auditd >/dev/null 2>&1",
+        "restart_services": []
       }
     },
     {
@@ -374,7 +375,7 @@
       },
       "fix": {
         "suggestion": "max_log_file_action = KEEP_LOGS",
-        "command": "command -v auditctl >/dev/null 2>&1 || { dnf install -y audit 2>/dev/null || yum install -y audit; }; F=/etc/audit/auditd.conf; mkdir -p \"$(dirname \"$F\")\"; [ -f \"$F\" ] || : > \"$F\"; cp \"$F\" \"$F.mxbak\"; if grep -qiE '^\\s*max_log_file_action\\b' \"$F\"; then sed -ri 's|^\\s*#?\\s*max_log_file_action\\b.*|max_log_file_action = KEEP_LOGS|I' \"$F\"; else echo 'max_log_file_action = KEEP_LOGS' >> \"$F\"; fi; systemctl enable --now auditd 2>/dev/null || true",
+        "command": "rpm -q audit >/dev/null 2>&1 || { dnf install -y audit >/dev/null 2>&1 || yum install -y audit; }; F=/etc/audit/auditd.conf; grep -qs '^log_file' \"$F\" || exit 1; if grep -qE '^[[:space:]]*max_log_file_action' \"$F\"; then sed -ri 's|^[[:space:]]*max_log_file_action.*|max_log_file_action = KEEP_LOGS|' \"$F\"; else echo 'max_log_file_action = KEEP_LOGS' >> \"$F\"; fi",
         "restart_services": [
           "auditd"
         ]
@@ -717,7 +718,7 @@
           {
             "type": "command_exec",
             "param": [
-              "find /var/lib/clamav/main.cvd -mtime -7 2>/dev/null | wc -l",
+              "find /var/lib/clamav/ -name 'main.c[vl]d' -mtime -7 2>/dev/null | wc -l",
               "^[1-9]"
             ]
           }
@@ -725,7 +726,7 @@
       },
       "fix": {
         "suggestion": "freshclam",
-        "command": "command -v freshclam >/dev/null 2>&1 || { dnf install -y clamav-update 2>/dev/null || yum install -y clamav-update; }; mkdir -p /var/lib/clamav; systemctl stop clamav-freshclam 2>/dev/null; pkill -x freshclam 2>/dev/null; sed -ri 's|^\\s*Example\\b|#Example|' /etc/freshclam.conf 2>/dev/null || true; freshclam --quiet 2>/dev/null || true; D=/var/lib/clamav; if [ ! -f \"$D/main.cvd\" ] && [ -f \"$D/main.cld\" ]; then cp -f \"$D/main.cld\" \"$D/main.cvd\"; fi; [ -f \"$D/main.cvd\" ] && touch \"$D/main.cvd\"; systemctl start clamav-freshclam 2>/dev/null || true; [ -f \"$D/main.cvd\" ]"
+        "command": "command -v freshclam >/dev/null 2>&1 || { dnf install -y clamav clamav-update >/dev/null 2>&1 || yum install -y clamav clamav-update; }; sed -ri 's|^Example|#Example|' /etc/freshclam.conf 2>/dev/null; systemctl stop clamav-freshclam >/dev/null 2>&1; pkill -x freshclam 2>/dev/null; sleep 1; freshclam >/dev/null 2>&1; ls /var/lib/clamav/main.c[vl]d >/dev/null 2>&1"
       }
     },
     {

@@ -114,14 +114,14 @@
             "type": "service_status",
             "param": [
               "avahi-daemon",
-              "inactive+disabled"
+              "disabled"
             ]
           }
         ]
       },
       "fix": {
         "suggestion": "停止并禁用 avahi-daemon 服务。",
-        "command": "systemctl stop avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl disable avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl mask avahi-daemon.socket avahi-daemon.service 2>/dev/null; true"
+        "command": "systemctl stop avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl disable avahi-daemon.socket avahi-daemon.service 2>/dev/null; systemctl mask avahi-daemon.service 2>/dev/null; true"
       }
     },
     {

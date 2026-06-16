@@ -728,7 +728,7 @@
       },
       "fix": {
         "suggestion": "Ubuntu apt install aide 默认安装 /etc/cron.daily/aide",
-        "command": "dpkg -s aide-common >/dev/null 2>&1 || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y aide-common; }; F=/etc/cron.daily/aide; if [ ! -f \"$F\" ]; then mkdir -p /etc/cron.daily; printf '#!/bin/sh\\n# mxsec baseline: daily AIDE integrity check\\n[ -x /usr/bin/aide ] || exit 0\\n/usr/bin/aide --config=/etc/aide/aide.conf --check 2>&1 | logger -t aide\\n' > \"$F\"; chmod 755 \"$F\"; fi"
+        "command": "dpkg -s aide-common >/dev/null 2>&1 || { apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y aide-common; }; [ -f /etc/cron.daily/aide ] || { printf '#!/bin/sh\\n[ -x /usr/bin/aide.wrapper ] && /usr/bin/aide.wrapper --check >/dev/null 2>&1 || /usr/sbin/aide --check >/dev/null 2>&1\\nexit 0\\n' > /etc/cron.daily/aide; chmod 755 /etc/cron.daily/aide; }"
       }
     },
     {
