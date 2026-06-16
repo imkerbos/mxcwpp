@@ -164,6 +164,10 @@ func TestExportAssets_InvalidFormat(t *testing.T) {
 	if resp.Code != CodeInvalidParam {
 		t.Errorf("code = %d, want %d (CodeInvalidParam)", resp.Code, CodeInvalidParam)
 	}
+	// 错误响应不应带附件下载头（格式校验在设头之前）。
+	if cd := w.Header().Get("Content-Disposition"); cd != "" {
+		t.Errorf("error response should not set Content-Disposition, got %q", cd)
+	}
 }
 
 func TestExportAssets_WithData_CSV(t *testing.T) {

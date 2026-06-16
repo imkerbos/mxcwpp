@@ -224,6 +224,29 @@ func TestDeletePolicy_WithPolicyIDsLike(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+// TestDeletePolicy_PolicyIDsNoSubstringFalseMatch 回归：policy_ids 用 JSON 引号精确匹配，
+// 删 pol-004 不应被仅引用 pol-0040 的活跃任务误阻（裸子串 LIKE 的历史 bug）。
+func TestDeletePolicy_PolicyIDsNoSubstringFalseMatch(t *testing.T) {
+	db := setupPoliciesDB(t)
+	r, _ := setupPoliciesRouter(db)
+
+	seedPolicy(t, db, "pol-004", "测试策略4")
+	// 活跃任务只引用 pol-0040（pol-004 的子串超集），不应命中 pol-004。
+	db.Exec(`INSERT INTO scan_tasks (task_id, policy_id, policy_ids, status) VALUES (?, ?, ?, ?)`,
+		"task-6", "", `["pol-0040","pol-005"]`, "running")
+
+	req := httptest.NewRequest("DELETE", "/api/v1/policies/pol-004", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, float64(0), parseRespCode(w)) // 未被误阻，删除成功
+
+	var count int64
+	db.Model(&model.Policy{}).Where("id = ?", "pol-004").Count(&count)
+	assert.Equal(t, int64(0), count) // pol-004 已删
+}
+
 func TestDeletePolicy_CompletedAndCancelledTasks(t *testing.T) {
 	db := setupPoliciesDB(t)
 	r, _ := setupPoliciesRouter(db)
