@@ -781,7 +781,7 @@ rules:
   # ==================== TA0001 初始访问 (Initial Access) 补强 ====================
 
   - name: "初始访问 - 外部 RDP 端口暴露"
-    expression: 'dst_port == "3389" && !is_private_addr(src_addr)'
+    expression: 'remote_port == "3389" && !is_private_ip(remote_addr)'
     severity: high
     category: initial_access
     mitre_id: "T1133"
@@ -789,7 +789,7 @@ rules:
     description: "公网入向 RDP (3389), 外部远程服务初始访问入口"
 
   - name: "初始访问 - 暴露 Redis 未授权"
-    expression: 'dst_port == "6379" && !is_private_addr(src_addr)'
+    expression: 'remote_port == "6379" && !is_private_ip(remote_addr)'
     severity: critical
     category: initial_access
     mitre_id: "T1190"
@@ -797,7 +797,7 @@ rules:
     description: "Redis 端口暴露公网, 历史多次未授权访问漏洞利用入口"
 
   - name: "初始访问 - MongoDB 未授权"
-    expression: 'dst_port == "27017" && !is_private_addr(src_addr)'
+    expression: 'remote_port == "27017" && !is_private_ip(remote_addr)'
     severity: critical
     category: initial_access
     mitre_id: "T1190"
@@ -805,7 +805,7 @@ rules:
     description: "MongoDB 端口暴露公网"
 
   - name: "初始访问 - Elasticsearch 未授权"
-    expression: 'dst_port == "9200" && !is_private_addr(src_addr)'
+    expression: 'remote_port == "9200" && !is_private_ip(remote_addr)'
     severity: high
     category: initial_access
     mitre_id: "T1190"
@@ -813,7 +813,7 @@ rules:
     description: "Elasticsearch HTTP 端口暴露公网"
 
   - name: "初始访问 - Docker API 暴露"
-    expression: '(dst_port == "2375" || dst_port == "2376") && !is_private_addr(src_addr)'
+    expression: '(remote_port == "2375" || remote_port == "2376") && !is_private_ip(remote_addr)'
     severity: critical
     category: initial_access
     mitre_id: "T1190"
@@ -821,7 +821,7 @@ rules:
     description: "Docker Daemon API 公网暴露, 直接 RCE 入口"
 
   - name: "初始访问 - Kubernetes API 8080 未授权"
-    expression: 'dst_port == "8080" && cmdline.contains("kube-apiserver") && !is_private_addr(src_addr)'
+    expression: 'remote_port == "8080" && cmdline.contains("kube-apiserver") && !is_private_ip(remote_addr)'
     severity: critical
     category: initial_access
     mitre_id: "T1190"
@@ -905,7 +905,7 @@ rules:
     description: "curl/wget 上传文件到外部 (POST/multipart)"
 
   - name: "外渗 - scp/rsync 出向"
-    expression: '(exe.contains("scp") || exe.contains("rsync")) && cmdline.contains("@") && !is_private_addr(cmdline)'
+    expression: '(exe.contains("scp") || exe.contains("rsync")) && cmdline.contains("@") && !is_private_ip(cmdline)'
     severity: medium
     category: exfiltration
     mitre_id: "T1048"
@@ -929,7 +929,7 @@ rules:
     description: "向 pastebin/ix.io/transfer.sh 等公共粘贴服务上传"
 
   - name: "外渗 - SMTP 大量出站"
-    expression: 'dst_port == "25" || dst_port == "465" || dst_port == "587"'
+    expression: 'remote_port == "25" || remote_port == "465" || remote_port == "587"'
     severity: low
     category: exfiltration
     mitre_id: "T1048.003"
@@ -1191,7 +1191,7 @@ rules:
     description: "Sliver C2 framework binary"
 
   - name: "C2 - DNS over HTTPS (DoH) C2"
-    expression: '(dst_port == "443" && cmdline.contains("cloudflare-dns.com")) || cmdline.contains("dns.google/resolve") || cmdline.contains("dns.quad9.net")'
+    expression: '(remote_port == "443" && cmdline.contains("cloudflare-dns.com")) || cmdline.contains("dns.google/resolve") || cmdline.contains("dns.quad9.net")'
     severity: high
     category: c2_communication
     mitre_id: "T1071.004"
@@ -1619,7 +1619,7 @@ rules:
     description: "短时间大量目标 IP (内网横向扫描)"
 
   - name: "网络 - Tor 节点连接"
-    expression: 'dst_port == "9001" || dst_port == "9030" || dst_port == "9050" || dst_port == "9051" || dst_port == "9150"'
+    expression: 'remote_port == "9001" || remote_port == "9030" || remote_port == "9050" || remote_port == "9051" || remote_port == "9150"'
     severity: high
     category: c2_communication
     mitre_id: "T1090.003"
@@ -1627,7 +1627,7 @@ rules:
     description: "Tor 节点端口连接 (9001/9030/9050/9051/9150)"
 
   - name: "网络 - 已知恶意 C2 IP"
-    expression: 'remote_addr_in_ioc_list'
+    expression: 'ioc_match == "true"'
     severity: critical
     category: c2_communication
     mitre_id: "T1071"
@@ -1720,7 +1720,7 @@ rules:
     description: "bash $@ 替换混淆"
 
   - name: "凭证窃取 - /etc/shadow 读"
-    expression: 'event_type == "file_read" && file_path == "/etc/shadow" && uid != 0'
+    expression: 'event_type == "file_read" && file_path == "/etc/shadow" && uid != "0"'
     severity: critical
     category: credential_access
     mitre_id: "T1003.008"
@@ -2032,7 +2032,7 @@ rules:
     description: "Sliver C2 默认 callback URI"
 
   - name: "C2 - Tor 端口连接"
-    expression: 'event_type == "network_connect" && (dst_port == 9001 || dst_port == 9030 || dst_port == 9050)'
+    expression: 'event_type == "network_connect" && (remote_port == "9001" || remote_port == "9030" || remote_port == "9050")'
     severity: medium
     category: command_and_control
     mitre_id: "T1090.003"

@@ -13,8 +13,9 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/notify"
+	"github.com/matrixplusio/mxcwpp/internal/server/remediation"
 )
 
 // MySQLWriter 将 MQMessage 解码后幂等写入 MySQL
@@ -187,8 +188,8 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 			if w.db.Select("ipv4").First(&host, "host_id = ?", e.HostID).Error == nil && len(host.IPv4) > 0 {
 				ip = host.IPv4[0]
 			}
-			ns := biz.NewNotificationService(w.db, w.logger)
-			if err := ns.SendFIMAlertNotification(&biz.FIMAlertData{
+			ns := notify.NewNotificationService(w.db, w.logger)
+			if err := ns.SendFIMAlertNotification(&notify.FIMAlertData{
 				HostID:     e.HostID,
 				Hostname:   e.Hostname,
 				IP:         ip,
@@ -505,7 +506,7 @@ func (w *MySQLWriter) WriteRemediationResult(msg *kafka.MQMessage) error {
 		return fmt.Errorf("解析修复结果失败: %w", err)
 	}
 
-	executor := biz.NewRemediationExecutor(w.db, w.logger)
+	executor := remediation.NewRemediationExecutor(w.db, w.logger)
 	return executor.HandleResult(msg.AgentID, fields)
 }
 
@@ -520,9 +521,9 @@ func (w *MySQLWriter) WriteRemediationProgress(msg *kafka.MQMessage) error {
 	}
 	switch fields["kind"] {
 	case "precheck_result":
-		return biz.NewPreCheckResultHandler(w.db, w.logger).HandleResult(msg.AgentID, fields)
+		return remediation.NewPreCheckResultHandler(w.db, w.logger).HandleResult(msg.AgentID, fields)
 	default:
-		return biz.NewRemediationExecutor(w.db, w.logger).HandleProgress(msg.AgentID, fields)
+		return remediation.NewRemediationExecutor(w.db, w.logger).HandleProgress(msg.AgentID, fields)
 	}
 }
 
@@ -565,8 +566,8 @@ func (w *MySQLWriter) WriteScanResult(msg *kafka.MQMessage) error {
 	// 异步发送病毒查杀告警通知 (P1-2 限并发)
 	w.runAsyncNotify("virus", func() {
 		r := result
-		ns := biz.NewNotificationService(w.db, w.logger)
-		if err := ns.SendVirusAlertNotification(&biz.VirusAlertData{
+		ns := notify.NewNotificationService(w.db, w.logger)
+		if err := ns.SendVirusAlertNotification(&notify.VirusAlertData{
 			HostID:     r.HostID,
 			Hostname:   r.Hostname,
 			IP:         r.IP,

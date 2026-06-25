@@ -1,5 +1,5 @@
-// Package biz 提供业务逻辑层
-package biz
+// Package notify 提供告警/事件通知派发（邮件/Webhook/Lark），跨服务共享。
+package notify
 
 import (
 	"bytes"
@@ -52,11 +52,19 @@ func (s *NotificationService) resolveFrontendURL(notificationURL string) string 
 }
 
 // loadSiteDomain 从 system_configs.site_config 读 site_domain；失败返空（不阻塞通知发送）。
+// siteConfigRow 解析 system_configs 表中的 site_config 行（仅本包内部用）。
+type siteConfigRow struct {
+	Key   string `gorm:"column:key"`
+	Value string `gorm:"column:value"`
+}
+
+func (siteConfigRow) TableName() string { return "system_configs" }
+
 func (s *NotificationService) loadSiteDomain() string {
 	if s.db == nil {
 		return ""
 	}
-	var row systemConfigRow
+	var row siteConfigRow
 	if err := s.db.Where("`key` = ? AND category = ?", "site_config", "site").Take(&row).Error; err != nil {
 		return ""
 	}

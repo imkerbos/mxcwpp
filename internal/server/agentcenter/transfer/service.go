@@ -28,8 +28,9 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/notify"
+	"github.com/matrixplusio/mxcwpp/internal/server/remediation"
 )
 
 // Connection 表示一个 Agent 连接
@@ -1354,7 +1355,7 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 		}
 
 		// 构建恢复数据
-		resolvedData := &biz.AlertResolvedData{
+		resolvedData := &notify.AlertResolvedData{
 			HostID:      existingAlert.HostID,
 			Hostname:    host.Hostname,
 			IP:          hostIP,
@@ -1370,7 +1371,7 @@ func (s *Service) resolveAlertIfExists(scanResult *model.ScanResult, conn *Conne
 			ResultID:    existingAlert.ResultID,
 		}
 
-		notificationService := biz.NewNotificationService(s.db, s.logger)
+		notificationService := notify.NewNotificationService(s.db, s.logger)
 		if err := notificationService.SendAlertResolvedNotification(resolvedData); err != nil {
 			s.logger.Warn("发送告警恢复通知失败",
 				zap.Uint("alert_id", existingAlert.ID),
@@ -1569,7 +1570,7 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 	}
 
 	// 构建告警数据
-	alertData := &biz.AlertData{
+	alertData := &notify.AlertData{
 		HostID:        alert.HostID,
 		Hostname:      host.Hostname,
 		IP:            hostIP,
@@ -1593,7 +1594,7 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 
 	// 发送通知（异步，不阻塞）
 	go func() {
-		notificationService := biz.NewNotificationService(s.db, s.logger)
+		notificationService := notify.NewNotificationService(s.db, s.logger)
 		sent, err := notificationService.SendAlertNotification(alertData)
 		if err != nil {
 			s.logger.Warn("发送告警通知失败",
@@ -1728,7 +1729,7 @@ func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Conn
 	}
 
 	// 构建上线数据
-	onlineData := &biz.AgentOnlineData{
+	onlineData := &notify.AgentOnlineData{
 		HostID:       agentID,
 		Hostname:     host.Hostname,
 		IP:           hostIP,
@@ -1739,7 +1740,7 @@ func (s *Service) checkAndSendAgentOnlineNotification(agentID string, conn *Conn
 	}
 
 	// 发送上线恢复通知
-	notificationService := biz.NewNotificationService(s.db, s.logger)
+	notificationService := notify.NewNotificationService(s.db, s.logger)
 	if err := notificationService.SendAgentOnlineNotification(onlineData); err != nil {
 		s.logger.Warn("发送 Agent 上线恢复通知失败",
 			zap.String("agent_id", agentID),
@@ -1789,7 +1790,7 @@ func (s *Service) unregisterConnection(agentID string, connToRemove *Connection)
 				hostIP = strings.Join(currentConn.IPv4, ",")
 			}
 
-			offlineData := &biz.AgentOfflineData{
+			offlineData := &notify.AgentOfflineData{
 				HostID:       host.HostID,
 				Hostname:     host.Hostname,
 				IP:           hostIP,
@@ -1799,7 +1800,7 @@ func (s *Service) unregisterConnection(agentID string, connToRemove *Connection)
 				OfflineAt:    time.Now(),
 			}
 
-			notificationService := biz.NewNotificationService(s.db, s.logger)
+			notificationService := notify.NewNotificationService(s.db, s.logger)
 			if err := notificationService.SendAgentOfflineNotification(offlineData); err != nil {
 				s.logger.Warn("发送 Agent 离线通知失败",
 					zap.String("agent_id", agentID),
@@ -3181,7 +3182,7 @@ func (s *Service) handleRemediationResult(_ context.Context, record *grpcProto.E
 	}
 	fields := bridgeRecord.Data.Fields
 
-	executor := biz.NewRemediationExecutor(s.db, s.logger)
+	executor := remediation.NewRemediationExecutor(s.db, s.logger)
 	return executor.HandleResult(conn.AgentID, fields)
 }
 

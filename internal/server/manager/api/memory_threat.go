@@ -48,7 +48,7 @@ func (h *MemoryThreatHandler) ListMemoryThreats(c *gin.Context) {
 		return
 	}
 
-	page, pageSize := parsePagination(c)
+	page, pageSize := ParsePagination(c)
 	var threats []model.MemoryThreat
 	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&threats).Error; err != nil {
 		InternalError(c, "查询内存威胁失败")

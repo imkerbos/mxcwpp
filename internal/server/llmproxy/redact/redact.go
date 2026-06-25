@@ -64,6 +64,8 @@ func (d *Desensitizer) Redact(s string) string {
 
 // IsLocalURL 判断目标端点是否为本地/内网模型（无需脱敏、不算数据出境）。
 // 覆盖 localhost / 回环 / 私有网段 / 内网域名后缀。
+// 注意：链路本地段（169.254.0.0/16，含云元数据 169.254.169.254）不视为合法本地模型，
+// 避免被当作"本地"而放行对元数据端点的 SSRF。
 func IsLocalURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
@@ -79,7 +81,7 @@ func IsLocalURL(raw string) bool {
 		}
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+		return ip.IsLoopback() || ip.IsPrivate()
 	}
 	return false
 }

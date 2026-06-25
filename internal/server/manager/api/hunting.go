@@ -143,7 +143,7 @@ func (h *HuntingHandler) ListSavedQueries(c *gin.Context) {
 	var total int64
 	query.Count(&total)
 
-	page, pageSize := parsePagination(c)
+	page, pageSize := ParsePagination(c)
 	var queries []model.HuntQuery
 	query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&queries)
 

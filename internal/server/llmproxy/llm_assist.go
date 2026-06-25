@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/common/ssrf"
 	"github.com/matrixplusio/mxcwpp/internal/server/llmproxy/redact"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -99,6 +100,15 @@ func (l *LLMAssist) AnalyzeAlert(alertID uint) (*AnalysisResult, error) {
 	return result, nil
 }
 
+// truncateForErr 截断上游响应体，避免错误信息携带过长/敏感内容。
+func truncateForErr(s string) string {
+	const maxLen = 512
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "...[truncated]"
+}
+
 // scrub 按脱敏策略处理外发文本（policy.Desensitizer 为 nil 时原样返回）。
 func (l *LLMAssist) scrub(s string) string {
 	if l.policy.Desensitizer == nil {
@@ -114,8 +124,16 @@ func (l *LLMAssist) callLLM(systemPrompt, userData string) (*AnalysisResult, err
 	}
 
 	// 数据出境管控：未开启出境时，只允许本地/内网模型，拒绝外发第三方。
-	if !l.policy.AllowDataEgress && !redact.IsLocalURL(l.apiURL) {
+	isLocal := redact.IsLocalURL(l.apiURL)
+	if !isLocal && !l.policy.AllowDataEgress {
 		return nil, fmt.Errorf("数据出境未开启（allow_data_egress=false），拒绝将告警发往外部 LLM；请改用本地模型或显式开启出境")
+	}
+	// 外发第三方端点须过 SSRF 校验：拒绝回环/内网/链路本地（含云元数据 169.254.169.254），
+	// 防止管理员误配或被诱导把 LLM 端点指向内网服务/元数据接口造成信息读取。
+	if !isLocal {
+		if err := ssrf.ValidateURL(l.apiURL); err != nil {
+			return nil, fmt.Errorf("LLM 端点地址校验失败: %w", err)
+		}
 	}
 
 	reqBody := map[string]any{
@@ -135,7 +153,12 @@ func (l *LLMAssist) callLLM(systemPrompt, userData string) (*AnalysisResult, err
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", l.apiKey)
 
+	// 外发端点用带 SSRF 防护的客户端（建连复查 IP + 重定向逐跳校验，防 DNS rebinding）；
+	// 本地模型用普通客户端（SafeClient 会拦回环/内网，无法连本地模型）。
 	client := &http.Client{Timeout: 30 * time.Second}
+	if !isLocal {
+		client = ssrf.NewSafeClient(30 * time.Second)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("调用 LLM API 失败: %w", err)
@@ -144,7 +167,8 @@ func (l *LLMAssist) callLLM(systemPrompt, userData string) (*AnalysisResult, err
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("LLM API 返回 %d: %s", resp.StatusCode, string(respBody))
+		// 截断响应体，避免把上游返回的大段/敏感内容原样带入错误链与日志。
+		return nil, fmt.Errorf("LLM API 返回 %d: %s", resp.StatusCode, truncateForErr(string(respBody)))
 	}
 
 	// 解析响应（适配 Claude/OpenAI 格式）

@@ -300,8 +300,8 @@ func (s *AgentCenterServices) StartBackgroundServices() {
 	// (manager/scheduler.StartAlertScheduler),AC 不再启动。
 	// 见 internal/server/engine/scheduler/README.md §3 PR3
 
-	// 启动漏洞通报升级调度器（SLA 检查、升级通知、自动关闭）
-	go scheduler.StartBulletinEscalationScheduler(s.DB, s.Logger)
+	// 漏洞通报升级调度器（SLA 检查、升级通知、自动关闭）属 Manager 漏洞域，
+	// 已迁至 manager/scheduler.StartBulletinEscalationScheduler，AC 不再启动。
 
 	// 启动插件更新调度器（检查插件配置更新并广播）
 	go s.PluginUpdateScheduler.Start(s.StatusCtx)

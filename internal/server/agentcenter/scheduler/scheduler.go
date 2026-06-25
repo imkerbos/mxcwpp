@@ -9,7 +9,7 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/transfer"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
+	"github.com/matrixplusio/mxcwpp/internal/server/remediation"
 )
 
 // taskDispatchInterval 是任务调度器的轮询间隔
@@ -22,7 +22,7 @@ func StartTaskScheduler(taskService *service.TaskService, transferService *trans
 
 	logger.Info("任务调度器已启动", zap.Duration("interval", taskDispatchInterval))
 
-	remExecutor := biz.NewRemediationExecutor(db, logger)
+	remExecutor := remediation.NewRemediationExecutor(db, logger)
 
 	// 立即执行一次
 	dispatchAllPendingTasks(taskService, transferService, remExecutor, logger)
@@ -34,7 +34,7 @@ func StartTaskScheduler(taskService *service.TaskService, transferService *trans
 }
 
 // dispatchAllPendingTasks 分发所有待执行任务（检查任务、修复任务、FIM 任务、漏洞修复任务）
-func dispatchAllPendingTasks(taskService *service.TaskService, transferService *transfer.Service, remExecutor *biz.RemediationExecutor, logger *zap.Logger) {
+func dispatchAllPendingTasks(taskService *service.TaskService, transferService *transfer.Service, remExecutor *remediation.RemediationExecutor, logger *zap.Logger) {
 	// 分发基线检查任务
 	if err := taskService.DispatchPendingTasks(transferService); err != nil {
 		logger.Error("分发检查任务失败", zap.Error(err))

@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/remediation"
 )
 
 // RemediationService 漏洞修复服务
@@ -423,57 +424,7 @@ func (s *RemediationService) GetRemediationTrend(days int) ([]DailyTrend, error)
 	return trend, nil
 }
 
-// PatchVulnerability 标记漏洞已修复
+// PatchVulnerability 标记漏洞已修复（委托到中立 remediation 包，逻辑跨服务共享）。
 func (s *RemediationService) PatchVulnerability(vulnID uint, hostIDs []string) error {
-	now := model.Now()
-
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if len(hostIDs) > 0 {
-			// 标记指定主机上的漏洞为已修复
-			if err := tx.Model(&model.HostVulnerability{}).
-				Where("vuln_id = ? AND host_id IN ? AND status = ?", vulnID, hostIDs, "unpatched").
-				Updates(map[string]any{
-					"status":     "patched",
-					"patched_at": now,
-				}).Error; err != nil {
-				return err
-			}
-		} else {
-			// 标记该漏洞所有主机为已修复
-			if err := tx.Model(&model.HostVulnerability{}).
-				Where("vuln_id = ? AND status = ?", vulnID, "unpatched").
-				Updates(map[string]any{
-					"status":     "patched",
-					"patched_at": now,
-				}).Error; err != nil {
-				return err
-			}
-		}
-
-		// 统计已修复主机数
-		var patchedCount int64
-		tx.Model(&model.HostVulnerability{}).
-			Where("vuln_id = ? AND status = ?", vulnID, "patched").
-			Count(&patchedCount)
-
-		// 检查是否所有主机都已修复
-		var unpatchedCount int64
-		tx.Model(&model.HostVulnerability{}).
-			Where("vuln_id = ? AND status = ?", vulnID, "unpatched").
-			Count(&unpatchedCount)
-
-		updates := map[string]any{
-			"patched_hosts": patchedCount,
-		}
-		if unpatchedCount == 0 {
-			updates["status"] = "patched"
-			updates["patched_at"] = now
-		}
-
-		if err := tx.Model(&model.Vulnerability{}).Where("id = ?", vulnID).Updates(updates).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
+	return remediation.PatchVulnerability(s.db, vulnID, hostIDs)
 }

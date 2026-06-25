@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -131,6 +132,15 @@ func (h *Handler) handleFileGet(req Request) *Response {
 		resp.Error = "file path is required"
 		return resp
 	}
+
+	// 规范化并要求绝对路径：消除 ".." 穿越歧义，强制服务端显式指定目标。
+	// 取证是经 mTLS 认证 + 审计的管理动作，按设计可读任意文件，故此处只做路径卫生而非白名单。
+	cleanPath := filepath.Clean(req.Path)
+	if !filepath.IsAbs(cleanPath) {
+		resp.Error = "file path must be absolute"
+		return resp
+	}
+	req.Path = cleanPath
 
 	info, err := os.Stat(req.Path)
 	if err != nil {

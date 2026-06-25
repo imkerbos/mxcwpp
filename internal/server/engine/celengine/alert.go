@@ -11,8 +11,8 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/sanitize"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/siem"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/notify"
 )
 
 // notifyThrottleWindow 通知节流窗口：同一告警在此时间内不重复发送通知
@@ -210,8 +210,8 @@ func (g *AlertGenerator) sendNotification(alert *model.Alert) {
 				ip = host.IPv4[0]
 			}
 		}
-		ns := biz.NewNotificationService(g.db, g.log)
-		if err := ns.SendDetectionAlertNotification(&biz.DetectionAlertData{
+		ns := notify.NewNotificationService(g.db, g.log)
+		if err := ns.SendDetectionAlertNotification(&notify.DetectionAlertData{
 			HostID:      a.HostID,
 			Hostname:    hostname,
 			IP:          ip,

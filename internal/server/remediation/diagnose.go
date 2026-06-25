@@ -1,4 +1,4 @@
-package biz
+package remediation
 
 import (
 	"strings"

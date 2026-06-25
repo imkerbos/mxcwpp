@@ -69,6 +69,8 @@ func main() {
 
 	// Sprint 2 PR16: 启动定期告警调度器 (从 AC 迁过来,业务调度归 Manager)
 	go managerscheduler.StartAlertScheduler(services.DB, services.Logger)
+	// 漏洞通报升级调度器 (SLA 检查/升级通知/自动关闭),业务调度归 Manager
+	go managerscheduler.StartBulletinEscalationScheduler(services.DB, services.Logger)
 
 	// 启动漏洞扫描定时调度器
 	vulnScanner := biz.NewVulnScanner(services.DB, services.Logger)

@@ -437,7 +437,7 @@ func TestScenario_Remediation_TaskTimeout(t *testing.T) {
 	})
 
 	executor := NewRemediationExecutor(db, log)
-	executor.timeoutRunningTasks()
+	executor.SweepTimeouts()
 
 	// 验证：超时任务 → failed
 	var timedOut model.RemediationTask

@@ -1,8 +1,8 @@
-// Package biz — host_vulnerability pre-check 结果回写。
+// Package remediation — host_vulnerability pre-check 结果回写。
 //
 // agent 上报 DataType 9201 (kind=precheck_result)，agentcenter Service 路由到这里，
 // 写回 host_vulnerabilities.precheck_*。
-package biz
+package remediation
 
 import (
 	"fmt"
@@ -130,8 +130,7 @@ func (h *PreCheckResultHandler) applyVerifyResult(hvID uint, precheckStatus, pre
 	if result.RowsAffected > 0 {
 		// verified 的 task 同时更新 vulnerabilities patched_hosts（复用 remediation service）
 		if finalTaskStatus == model.RemTaskMainVerified {
-			remSvc := NewRemediationService(h.db, h.logger)
-			if err := remSvc.PatchVulnerability(hv.VulnID, []string{hv.HostID}); err != nil {
+			if err := PatchVulnerability(h.db, hv.VulnID, []string{hv.HostID}); err != nil {
 				h.logger.Warn("[VERIFY] PatchVulnerability 失败",
 					zap.Uint("host_vuln_id", hvID), zap.Error(err))
 			}

@@ -70,7 +70,7 @@ func (h *StorylineHandler) ListStorylines(c *gin.Context) {
 		return
 	}
 
-	page, pageSize := parsePagination(c)
+	page, pageSize := ParsePagination(c)
 	var stories []model.Storyline
 	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&stories).Error; err != nil {
 		InternalError(c, "查询故事线失败")

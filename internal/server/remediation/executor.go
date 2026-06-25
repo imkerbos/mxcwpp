@@ -1,4 +1,5 @@
-package biz
+// Package remediation 提供漏洞修复任务派发与 Agent 结果/进度处理，跨服务共享。
+package remediation
 
 import (
 	"encoding/json"
@@ -56,9 +57,7 @@ func (e *RemediationExecutor) DispatchConfirmedTasks(transferService interface {
 	SendCommand(agentID string, cmd *grpcProto.Command) error
 }) error {
 	// 超时处理
-	e.timeoutPendingTasks()
-	e.timeoutConfirmedTasks()
-	e.timeoutRunningTasks()
+	e.SweepTimeouts()
 
 	// 查询已确认待执行的任务
 	var tasks []model.RemediationTask
@@ -84,6 +83,14 @@ func (e *RemediationExecutor) DispatchConfirmedTasks(transferService interface {
 	}
 
 	return nil
+}
+
+// SweepTimeouts 推进所有修复任务的超时状态转移（pending 取消 / confirmed / running 置失败）。
+// 由 DispatchConfirmedTasks 每轮调度前调用；亦作为可被独立触发的公开入口。
+func (e *RemediationExecutor) SweepTimeouts() {
+	e.timeoutPendingTasks()
+	e.timeoutConfirmedTasks()
+	e.timeoutRunningTasks()
 }
 
 // timeoutPendingTasks 将超时的 pending 任务自动取消

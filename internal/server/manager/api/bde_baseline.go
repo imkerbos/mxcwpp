@@ -1,8 +1,6 @@
 package api
 
 import (
-	"strconv"
-
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -42,7 +40,7 @@ func (h *BDEBaselineHandler) ListBaselineStates(c *gin.Context) {
 		return
 	}
 
-	page, pageSize := parsePagination(c)
+	page, pageSize := ParsePagination(c)
 	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&states).Error; err != nil {
 		InternalError(c, "查询基线状态失败")
 		return
@@ -96,7 +94,7 @@ func (h *BDEBaselineHandler) ListBehaviorAlerts(c *gin.Context) {
 		return
 	}
 
-	page, pageSize := parsePagination(c)
+	page, pageSize := ParsePagination(c)
 	var alerts []model.BehaviorAlert
 	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&alerts).Error; err != nil {
 		InternalError(c, "查询行为告警失败")
@@ -104,26 +102,4 @@ func (h *BDEBaselineHandler) ListBehaviorAlerts(c *gin.Context) {
 	}
 
 	SuccessPaginated(c, total, alerts)
-}
-
-// parsePagination extracts page and page_size from query params with defaults.
-func parsePagination(c *gin.Context) (page, pageSize int) {
-	page = 1
-	pageSize = 20
-	if v := c.Query("page"); v != "" {
-		if p := parseIntParam(v); p > 0 {
-			page = p
-		}
-	}
-	if v := c.Query("page_size"); v != "" {
-		if ps := parseIntParam(v); ps > 0 && ps <= 100 {
-			pageSize = ps
-		}
-	}
-	return
-}
-
-func parseIntParam(s string) int {
-	v, _ := strconv.Atoi(s)
-	return v
 }

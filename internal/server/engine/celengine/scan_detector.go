@@ -16,8 +16,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/notify"
 )
 
 const (
@@ -246,8 +246,8 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 				ip = host.IPv4[0]
 			}
 		}
-		ns := biz.NewNotificationService(d.db, d.logger)
-		if err := ns.SendDetectionAlertNotification(&biz.DetectionAlertData{
+		ns := notify.NewNotificationService(d.db, d.logger)
+		if err := ns.SendDetectionAlertNotification(&notify.DetectionAlertData{
 			HostID:      hostID,
 			Hostname:    hostname,
 			IP:          ip,

@@ -172,6 +172,9 @@ func newCELEnv() (*cel.Env, error) {
 		// 文件相关
 		cel.Variable("file_path", cel.StringType),
 		cel.Variable("file_action", cel.StringType),
+		// file_mode：chmod 事件的目标权限位（setuid/setgid 检测）。
+		// 暂无 Agent 上报源，先声明占位，待 FIM 采集补字段后规则自动生效。
+		cel.Variable("file_mode", cel.StringType),
 
 		// 网络相关
 		cel.Variable("remote_addr", cel.StringType),
@@ -180,6 +183,9 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("local_port", cel.StringType),
 		cel.Variable("protocol", cel.StringType),
 		cel.Variable("dns_server", cel.StringType),
+		// http_url：出站 HTTP 请求 URL（C2 beacon 检测）。
+		// 暂无 Agent 上报源，先声明占位，待 http_out 事件采集补字段后规则自动生效。
+		cel.Variable("http_url", cel.StringType),
 
 		// 安全相关
 		cel.Variable("severity", cel.StringType),
@@ -209,6 +215,9 @@ func newCELEnv() (*cel.Env, error) {
 		cel.Variable("recent_exe_count", cel.IntType),
 		cel.Variable("recent_remote_addr_count", cel.IntType),
 		cel.Variable("recent_file_path_count", cel.IntType),
+		// recent_event_count：同类事件滑动窗口计数（批量文件重命名=勒索检测）。
+		// 暂无对应计数源，先声明占位（默认 0，规则不误报），待 EventTracker 扩展后生效。
+		cel.Variable("recent_event_count", cel.IntType),
 
 		// EventTracker 预计算变量：首次出现标记
 		cel.Variable("first_seen_exe", cel.BoolType),
@@ -440,8 +449,8 @@ func buildActivation(dataType int32, fields map[string]string) map[string]any {
 	stringVars := []string{
 		"agent_id", "hostname",
 		"event_type", "pid", "ppid", "exe", "cmdline", "parent_exe", "comm", "uid", "username", "cwd",
-		"file_path", "file_action",
-		"remote_addr", "remote_port", "local_addr", "local_port", "protocol", "dns_server",
+		"file_path", "file_action", "file_mode",
+		"remote_addr", "remote_port", "local_addr", "local_port", "protocol", "dns_server", "http_url",
 		"severity", "threat_name",
 		"ioc_match", "ioc_type", "ioc_value",
 		"agent_match", "agent_rule_id", "agent_severity",
@@ -462,6 +471,9 @@ func buildActivation(dataType int32, fields map[string]string) map[string]any {
 			activation[name] = ""
 		}
 	}
+
+	// recent_event_count 为 int 占位（暂无计数源，默认 0），保证引用它的规则可求值。
+	activation["recent_event_count"] = int64(0)
 
 	return activation
 }
