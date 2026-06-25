@@ -1041,13 +1041,9 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 			ACID:         s.cfg.Server.InstanceID,
 		}
 		topic := kafka.RouteDataType(record.DataType, s.cfg.Kafka.TopicPrefix)
-		if err := s.kafkaProducer.Send(topic, conn.AgentID, msg); err != nil {
-			s.logger.Warn("Kafka 发送失败，消息已入降级队列或丢弃",
-				zap.String("agent_id", conn.AgentID),
-				zap.Int32("data_type", record.DataType),
-				zap.Error(err),
-			)
-		}
+		// Send 失败（队列满/丢弃）已由 producer 内部聚合计数并周期汇总，
+		// 此处不再逐条记录——高频 eBPF 事件逐条打日志会撑爆磁盘（prod 实测 ~130GB/天）。
+		_ = s.kafkaProducer.Send(topic, conn.AgentID, msg)
 		return nil
 	}
 

@@ -48,6 +48,10 @@ type AsyncProducer struct {
 	// 降级队列：Kafka 不可用时暂存，容量 10000
 	fallback    chan *pendingMsg
 	fallbackLen int64 // atomic counter
+	// dropped 累计被丢弃的消息数（队列满/重试耗尽），由 dropSummaryLoop 周期汇总后清零。
+	// Kafka 不可用时丢弃可达每秒数千条，逐条打日志会撑爆磁盘（prod 实测 ~130GB/天），
+	// 故只累加计数，按固定间隔汇总成一行。
+	dropped int64 // atomic counter
 
 	// 对象池：复用 ProducerMessage 减少 GC
 	msgPool sync.Pool
@@ -107,6 +111,8 @@ func NewAsyncProducer(cfg config.KafkaConfig, logger *zap.Logger) (*AsyncProduce
 	go p.errorLoop()
 	// 后台重放降级队列
 	go p.replayLoop()
+	// 周期汇总丢弃计数（替代逐条日志，防磁盘被刷爆）
+	go p.dropSummaryLoop()
 
 	return p, nil
 }
@@ -144,12 +150,8 @@ func (p *AsyncProducer) enqueueToFallback(topic, key string, msg *MQMessage) err
 // enqueueToFallbackWithRetry 写入降级内存队列（含重试计数）
 func (p *AsyncProducer) enqueueToFallbackWithRetry(topic, key string, msg *MQMessage, retryCount int) error {
 	if retryCount >= fallbackMaxRetries {
-		p.logger.Warn("Kafka 降级队列消息超过最大重试次数，丢弃",
-			zap.String("topic", topic),
-			zap.Int32("data_type", msg.DataType),
-			zap.String("agent_id", msg.AgentID),
-			zap.Int("retry_count", retryCount),
-		)
+		// 只累加计数，由 dropSummaryLoop 周期汇总（逐条打日志会撑爆磁盘）。
+		atomic.AddInt64(&p.dropped, 1)
 		return fmt.Errorf("kafka fallback max retries exceeded, message dropped")
 	}
 
@@ -158,12 +160,32 @@ func (p *AsyncProducer) enqueueToFallbackWithRetry(topic, key string, msg *MQMes
 		atomic.AddInt64(&p.fallbackLen, 1)
 		return nil
 	default:
-		p.logger.Warn("Kafka 降级队列已满，消息丢弃",
-			zap.String("topic", topic),
-			zap.Int32("data_type", msg.DataType),
-			zap.String("agent_id", msg.AgentID),
-		)
+		// 只累加计数，由 dropSummaryLoop 周期汇总（逐条打日志会撑爆磁盘）。
+		atomic.AddInt64(&p.dropped, 1)
 		return fmt.Errorf("kafka fallback queue full, message dropped")
+	}
+}
+
+// dropSummaryLoop 周期汇总被丢弃的消息数为一行日志，替代逐条 Warn。
+// Kafka 不可用时丢弃速率极高（prod 实测 ~130GB/天日志），逐条记录会撑爆磁盘。
+func (p *AsyncProducer) dropSummaryLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.closed:
+			if n := atomic.SwapInt64(&p.dropped, 0); n > 0 {
+				p.logger.Warn("Kafka 降级队列丢弃消息（退出前汇总）", zap.Int64("dropped", n))
+			}
+			return
+		case <-ticker.C:
+			if n := atomic.SwapInt64(&p.dropped, 0); n > 0 {
+				p.logger.Warn("Kafka 降级队列丢弃消息汇总",
+					zap.Int64("dropped_last_30s", n),
+					zap.Int64("fallback_len", atomic.LoadInt64(&p.fallbackLen)),
+				)
+			}
+		}
 	}
 }
 

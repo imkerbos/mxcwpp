@@ -55,6 +55,15 @@ main() {
       ;;
   esac
 
+  # 配置 docker 容器日志轮转（全局默认）：防止任一容器 stdout 无限增长撑满磁盘。
+  # 历史教训：Kafka 不可用时 agentcenter 高频刷 WARN，单容器 json 日志涨到 89G 撑爆根盘。
+  # 仅在不存在时写入，避免覆盖运维自定义配置。
+  if [ ! -f /etc/docker/daemon.json ]; then
+    $SUDO mkdir -p /etc/docker
+    printf '%s\n' '{' '  "log-driver": "json-file",' '  "log-opts": { "max-size": "100m", "max-file": "5" }' '}' | $SUDO tee /etc/docker/daemon.json >/dev/null
+    log "已写入 /etc/docker/daemon.json（容器日志 100m x 5 轮转）"
+  fi
+
   $SUDO systemctl enable --now docker
   log "依赖安装完成"
   docker --version

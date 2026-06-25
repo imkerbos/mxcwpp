@@ -25,6 +25,8 @@ services:
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 72
+      # 按大小保留(每分区上限): 高频 eBPF 仅靠时间保留会在 72h 内撑满磁盘, 加 1GB/分区 上限
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
       KAFKA_MESSAGE_MAX_BYTES: 10485760
       TZ: {{ .Timezone }}
     volumes:
@@ -60,6 +62,8 @@ services:
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 72
+      # 按大小保留(每分区上限): 高频 eBPF 仅靠时间保留会在 72h 内撑满磁盘, 加 1GB/分区 上限
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
       KAFKA_MESSAGE_MAX_BYTES: 10485760
       TZ: {{ .Timezone }}
     volumes:
@@ -95,6 +99,8 @@ services:
       KAFKA_NUM_PARTITIONS: 6
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 72
+      # 按大小保留(每分区上限): 高频 eBPF 仅靠时间保留会在 72h 内撑满磁盘, 加 1GB/分区 上限
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
       KAFKA_MESSAGE_MAX_BYTES: 10485760
       TZ: {{ .Timezone }}
     volumes:
