@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Server, Wifi, WifiOff } from "lucide-react";
@@ -12,7 +13,6 @@ import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
-import { Drawer } from "@/components/ui/Drawer";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Button } from "@/components/ui/Button";
@@ -34,17 +34,9 @@ const osFamilies: { label: string; value: string }[] = [
 ];
 const osLabelMap: Record<string, string> = Object.fromEntries(osFamilies.map((o) => [o.value, o.label]));
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex gap-3 text-sm">
-      <span className="w-24 shrink-0 text-muted">{label}</span>
-      <span className="min-w-0 break-all text-ink">{value}</span>
-    </div>
-  );
-}
-
 export default function HostsPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const queryClient = useQueryClient();
 
   const osLabel = (f: string) => osLabelMap[(f || "").toLowerCase()] ?? (f || t("assets.hosts.unknown"));
@@ -209,13 +201,6 @@ export default function HostsPage() {
   const [tagsOpen, setTagsOpen] = useState(false);
   const [tagsValue, setTagsValue] = useState("");
 
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const { data: detail } = useQuery({
-    queryKey: ["host", detailId],
-    queryFn: () => hostsApi.get(detailId as string),
-    enabled: !!detailId,
-  });
-
   const totalHosts = statusDist
     ? statusDist.running + statusDist.abnormal + statusDist.offline + statusDist.not_installed + statusDist.uninstalled
     : (data?.total ?? 0);
@@ -359,7 +344,7 @@ export default function HostsPage() {
             rowKey={(r) => r.host_id}
             loading={isLoading}
             emptyText={t("assets.hosts.empty")}
-            onRowClick={(r) => setDetailId(r.host_id)}
+            onRowClick={(r) => router.push(`/assets/hosts/detail?id=${encodeURIComponent(r.host_id)}`)}
             selectable
             selectedKeys={selected}
             onToggleRow={(key) => toggleRow(key)}
@@ -446,52 +431,6 @@ export default function HostsPage() {
           />
         </div>
       </Modal>
-
-      <Drawer open={!!detailId} onClose={() => setDetailId(null)} title={t("assets.hosts.detailTitle")} width={560}>
-        {detail && (
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <h2 className="text-lg font-bold text-ink">{detail.hostname}</h2>
-              <div className="flex items-center gap-2">
-                <StatusTag tone={statusMeta(detail.status).tone}>{statusMeta(detail.status).label}</StatusTag>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Field label={t("assets.hosts.fieldHostId")} value={<span className="font-mono text-xs">{detail.host_id}</span>} />
-              <Field label="IPv4" value={detail.ipv4?.join(", ") || "—"} />
-              <Field label="IPv6" value={detail.ipv6?.join(", ") || "—"} />
-              <Field label={t("assets.hosts.colOs")} value={`${detail.os_family} ${detail.os_version}`.trim() || "—"} />
-              <Field label={t("assets.hosts.fieldArch")} value={detail.arch || "—"} />
-              {detail.kernel_version && <Field label={t("assets.hosts.fieldKernel")} value={detail.kernel_version} />}
-              <Field label={t("assets.hosts.colBusinessLine")} value={detail.business_line || "—"} />
-              <Field
-                label={t("assets.hosts.colAgentVersion")}
-                value={<span className="font-mono text-xs">{detail.agent_version || "—"}</span>}
-              />
-              <Field label={t("assets.hosts.fieldCpuUsage")} value={detail.cpu_usage ? `${detail.cpu_usage}%` : "—"} />
-              <Field label={t("assets.hosts.fieldMemUsage")} value={detail.memory_usage ? `${detail.memory_usage}%` : "—"} />
-              <Field
-                label={t("assets.hosts.colLastHeartbeat")}
-                value={<span className="tabular-nums">{detail.last_heartbeat || "—"}</span>}
-              />
-            </div>
-
-            {detail.tags && detail.tags.length > 0 && (
-              <div>
-                <div className="mb-1.5 text-sm font-medium text-ink">{t("assets.hosts.fieldTags")}</div>
-                <div className="flex flex-wrap gap-2">
-                  {detail.tags.map((t) => (
-                    <StatusTag key={t} tone="neutral">
-                      {t}
-                    </StatusTag>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Drawer>
     </>
   );
 }
