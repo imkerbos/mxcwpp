@@ -14,6 +14,7 @@ import {
   Boxes,
   ShieldAlert,
   Bug,
+  Copy,
 } from "lucide-react";
 import { hostsApi } from "@/lib/api/assets";
 import { alertsApi } from "@/lib/api/alerts";
@@ -24,6 +25,7 @@ import { monitorApi } from "@/lib/api/monitoring";
 import { assetsApi } from "@/lib/api/assets";
 import type {
   Host,
+  HostPlugin,
   Alert,
   Vulnerability,
   BaselineFixItem,
@@ -54,6 +56,7 @@ import { Drawer } from "@/components/ui/Drawer";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SeverityTag, StatusTag } from "@/components/ui/Tag";
 import { toast } from "@/components/ui/toast";
+import { copyText } from "@/lib/utils/clipboard";
 import { chartColors, baseGrid, axisStyle, softTooltip, legendStyle } from "@/lib/echartsTheme";
 
 const dash = (v: string | number | undefined | null) =>
@@ -77,67 +80,115 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+// Click-to-copy value: shows the value (optionally a truncated display) with a
+// hover copy icon and the full text in a native tooltip.
+function CopyValue({
+  value,
+  display,
+  label,
+  className,
+}: {
+  value: string | undefined | null;
+  display?: React.ReactNode;
+  label: string;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  if (!value) return <span className="text-sm text-ink">—</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => copyText(value, label)}
+      title={`${value}\n${t("common.clickToCopy")}`}
+      className={`group inline-flex max-w-full items-center gap-1.5 text-left text-sm text-ink hover:text-primary ${className ?? ""}`}
+    >
+      <span className="min-w-0 break-all">{display ?? value}</span>
+      <Copy size={13} className="shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />
+    </button>
+  );
+}
+
+// host_id is a 64-char sha256; show a short prefix and keep the full value for copy/tooltip.
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 12)}…` : id;
+}
+
 /* ============================ Overview tab ============================ */
 
 function OverviewTab({ host }: { host: Host }) {
   const { t } = useTranslation();
   const statusTone = host.status === "online" ? "success" : "neutral";
   const statusLabel = host.status === "online" ? t("common.online") : t("common.offline");
+  const os = `${host.os_family} ${host.os_version}`.trim();
 
   return (
     <div className="space-y-5">
       <Card className="p-5">
         <h3 className="mb-4 text-sm font-semibold text-ink">{t("assets.hostDetail.sectionBasic")}</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label={t("assets.hosts.colHostname")} value={host.hostname} />
-          <Field label={t("assets.hosts.fieldHostId")} value={<span className="font-mono text-xs">{host.host_id}</span>} />
+          <Field label={t("assets.hosts.colHostname")} value={<CopyValue value={host.hostname} label={t("assets.hosts.colHostname")} />} />
+          <Field
+            label={t("assets.hosts.fieldHostId")}
+            value={<CopyValue value={host.host_id} display={shortId(host.host_id)} label={t("assets.hosts.fieldHostId")} className="font-mono text-xs" />}
+          />
           <Field
             label={t("common.status")}
             value={<StatusTag tone={statusTone}>{statusLabel}</StatusTag>}
           />
-          <Field label={t("assets.hosts.colOs")} value={`${host.os_family} ${host.os_version}`.trim() || "—"} />
-          <Field label={t("assets.hosts.fieldKernel")} value={dash(host.kernel_version)} />
-          <Field label={t("assets.hosts.fieldArch")} value={dash(host.arch)} />
-          <Field label="IPv4" value={host.ipv4?.length ? host.ipv4.join(", ") : "—"} />
-          <Field label="IPv6" value={host.ipv6?.length ? host.ipv6.join(", ") : "—"} />
-          <Field label={t("assets.hosts.colBusinessLine")} value={dash(host.business_line)} />
+          <Field label={t("assets.hosts.colOs")} value={os ? <CopyValue value={os} label={t("assets.hosts.colOs")} /> : "—"} />
+          <Field label={t("assets.hosts.fieldKernel")} value={<CopyValue value={host.kernel_version} label={t("assets.hosts.fieldKernel")} />} />
+          <Field label={t("assets.hosts.fieldArch")} value={<CopyValue value={host.arch} label={t("assets.hosts.fieldArch")} />} />
+          <Field
+            label="IPv4"
+            value={host.ipv4?.length ? <CopyValue value={host.ipv4.join(", ")} label="IPv4" /> : "—"}
+          />
+          <Field
+            label="IPv6"
+            value={host.ipv6?.length ? <CopyValue value={host.ipv6.join(", ")} label="IPv6" /> : "—"}
+          />
+          <Field
+            label={t("assets.hosts.colBusinessLine")}
+            value={host.business_line ? <CopyValue value={host.business_line} label={t("assets.hosts.colBusinessLine")} /> : "—"}
+          />
           <Field
             label={t("assets.hostDetail.fieldRuntime")}
             value={host.runtime_type ? t(`assets.hosts.runtime${cap(host.runtime_type)}`) : "—"}
           />
           <Field
             label={t("assets.hosts.fieldCpuUsage")}
-            value={host.cpu_usage ? `${host.cpu_usage}%` : "—"}
+            value={host.cpu_usage ? <CopyValue value={`${host.cpu_usage}%`} label={t("assets.hosts.fieldCpuUsage")} /> : "—"}
           />
           <Field
             label={t("assets.hosts.fieldMemUsage")}
-            value={host.memory_usage ? `${host.memory_usage}%` : "—"}
+            value={host.memory_usage ? <CopyValue value={`${host.memory_usage}%`} label={t("assets.hosts.fieldMemUsage")} /> : "—"}
           />
           <Field
             label={t("assets.hosts.colAgentVersion")}
-            value={<span className="font-mono text-xs">{dash(host.agent_version)}</span>}
+            value={<CopyValue value={host.agent_version} label={t("assets.hosts.colAgentVersion")} className="font-mono text-xs" />}
           />
           <Field
             label={t("assets.hosts.colLastHeartbeat")}
-            value={<span className="tabular-nums">{dash(host.last_heartbeat)}</span>}
+            value={<CopyValue value={host.last_heartbeat} label={t("assets.hosts.colLastHeartbeat")} className="tabular-nums" />}
           />
           <Field
             label={t("assets.hostDetail.fieldBootTime")}
-            value={<span className="tabular-nums">{dash(host.system_boot_time)}</span>}
+            value={<CopyValue value={host.system_boot_time} label={t("assets.hostDetail.fieldBootTime")} className="tabular-nums" />}
           />
           <Field
             label={t("assets.hostDetail.fieldAgentStart")}
-            value={<span className="tabular-nums">{dash(host.agent_start_time)}</span>}
+            value={<CopyValue value={host.agent_start_time} label={t("assets.hostDetail.fieldAgentStart")} className="tabular-nums" />}
           />
           <Field
             label={t("assets.hostDetail.fieldCreatedAt")}
-            value={<span className="tabular-nums">{dash(host.created_at)}</span>}
+            value={<CopyValue value={host.created_at} label={t("assets.hostDetail.fieldCreatedAt")} className="tabular-nums" />}
           />
           {host.is_container && (
-            <Field label={t("assets.hostDetail.fieldContainerId")} value={<span className="font-mono text-xs">{dash(host.container_id)}</span>} />
+            <Field label={t("assets.hostDetail.fieldContainerId")} value={<CopyValue value={host.container_id} label={t("assets.hostDetail.fieldContainerId")} className="font-mono text-xs" />} />
           )}
         </div>
       </Card>
+
+      <ComponentVersions host={host} />
 
       <Card className="p-5">
         <h3 className="mb-4 text-sm font-semibold text-ink">{t("assets.hostDetail.sectionBaseline")}</h3>
@@ -171,6 +222,111 @@ function OverviewTab({ host }: { host: Host }) {
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* ===================== Component versions (overview) ===================== */
+
+interface ComponentRow {
+  kind: "agent" | "plugin";
+  name: string;
+  version: string;
+  status: string;
+  needUpdate: boolean;
+  latestVersion?: string;
+}
+
+function componentStatusTone(status: string): "success" | "warning" | "danger" | "neutral" {
+  switch (status) {
+    case "running":
+    case "active":
+      return "success";
+    case "error":
+      return "danger";
+    case "stopped":
+    case "not_installed":
+      return "neutral";
+    default:
+      return "warning";
+  }
+}
+
+function ComponentVersions({ host }: { host: Host }) {
+  const { t } = useTranslation();
+  const { data: plugins, isLoading } = useQuery({
+    queryKey: ["host-plugins", host.host_id],
+    queryFn: () => hostsApi.plugins(host.host_id),
+    enabled: !!host.host_id,
+  });
+
+  const rows: ComponentRow[] = [
+    {
+      kind: "agent",
+      name: "Agent",
+      version: host.agent_version || "—",
+      status: host.status === "online" ? "running" : "stopped",
+      needUpdate: false,
+    },
+    ...(plugins ?? []).map<ComponentRow>((p) => ({
+      kind: "plugin",
+      name: p.name,
+      version: p.version,
+      status: p.status,
+      needUpdate: p.need_update,
+      latestVersion: p.latest_version,
+    })),
+  ];
+
+  const columns: Column<ComponentRow>[] = [
+    {
+      key: "name",
+      title: t("assets.hostDetail.colComponent"),
+      render: (r) => (
+        <div className="flex items-center gap-2">
+          <StatusTag tone={r.kind === "agent" ? "info" : "neutral"}>
+            {r.kind === "agent" ? "Agent" : t("assets.hostDetail.componentPlugin")}
+          </StatusTag>
+          <span className="font-medium text-ink">{r.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: "version",
+      title: t("assets.hostDetail.colCurrentVersion"),
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-xs text-ink">{dash(r.version)}</span>
+          {r.needUpdate && <StatusTag tone="warning">{t("assets.hostDetail.componentUpdatable")}</StatusTag>}
+        </span>
+      ),
+    },
+    {
+      key: "latest",
+      title: t("assets.hostDetail.colLatestVersion"),
+      render: (r) => <span className="font-mono text-xs text-muted">{dash(r.latestVersion)}</span>,
+    },
+    {
+      key: "status",
+      title: t("common.status"),
+      render: (r) => (
+        <StatusTag tone={componentStatusTone(r.status)}>
+          {t(`assets.hostDetail.componentStatus.${r.status}`, r.status)}
+        </StatusTag>
+      ),
+    },
+  ];
+
+  return (
+    <Card className="p-5">
+      <h3 className="mb-4 text-sm font-semibold text-ink">{t("assets.hostDetail.sectionComponents")}</h3>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => `${r.kind}-${r.name}`}
+        loading={isLoading}
+        emptyText={t("common.noData")}
+      />
+    </Card>
+  );
 }
 
 /* ============================ Alerts tab ============================ */

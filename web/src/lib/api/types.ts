@@ -267,6 +267,18 @@ export interface Host {
   memory_usage?: string;
 }
 
+// 主机插件/组件版本（GET /hosts/:host_id/plugins）
+export interface HostPlugin {
+  id: number;
+  name: string;
+  version: string;
+  status: string; // running / stopped / error / not_installed / ...
+  start_time?: string;
+  updated_at: string;
+  latest_version: string;
+  need_update: boolean;
+}
+
 export interface HostStatusDistribution {
   running: number;
   abnormal: number;

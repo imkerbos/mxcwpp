@@ -2,6 +2,7 @@ import { get, post, put, del } from "./client";
 import type {
   Paged,
   Host,
+  HostPlugin,
   HostStatusDistribution,
   HostRiskDistribution,
   AssetOverview,
@@ -33,6 +34,7 @@ export const hostsApi = {
     search?: string;
   }) => get<Paged<Host>>("/hosts", params),
   get: (hostId: string) => get<Host>(`/hosts/${hostId}`),
+  plugins: (hostId: string) => get<HostPlugin[]>(`/hosts/${hostId}/plugins`),
   statusDistribution: () => get<HostStatusDistribution>("/hosts/status-distribution"),
   riskDistribution: () => get<HostRiskDistribution>("/hosts/risk-distribution"),
   updateTags: (hostId: string, tags: string[]) => put<void>(`/hosts/${hostId}/tags`, { tags }),
