@@ -2,7 +2,7 @@ export interface LoginRequest {
   username: string; password: string;
   captcha_id?: string; captcha_code?: string; device_id?: string;
 }
-export interface LoginUser { username: string; role: string; }
+export interface LoginUser { username: string; role: string; permissions?: string[]; read_only?: boolean; }
 export interface LoginResponse { token: string; user: LoginUser; need_change_password?: boolean; }
 
 export type Severity = "critical" | "high" | "medium" | "low";
@@ -75,11 +75,14 @@ export interface AlertWhitelist {
 
 export interface User {
   id: number; username: string; email: string;
-  role: "admin" | "user"; status: "active" | "inactive";
+  role: string; status: "active" | "inactive";
   last_login?: string; created_at: string; updated_at: string;
 }
 export interface Permission { id: number; code: string; name: string; module: string; }
-export interface Role { code: string; name: string; permissions: string[]; }
+// 「模块 × 动作」权限矩阵：每模块含其支持的动作，动作码为 "module:action"。
+export interface PermAction { code: string; name: string; }
+export interface PermModule { code: string; name: string; actions: PermAction[]; }
+export interface Role { code: string; name: string; permissions: string[]; read_only?: boolean; builtin?: boolean; }
 export interface Notification {
   id: number; name: string; description?: string;
   notify_category: string; enabled: boolean;
@@ -92,10 +95,15 @@ export interface SiteConfig { site_name: string; site_logo: string; site_domain:
 export interface RetentionPolicy { id: number; ch_table: string; display_name: string; description: string; retention_days: number; updated_by: string; updated_at: string; }
 export interface FeatureFlag { id: number; key: string; value: string; default_value: string; description: string; updated_by: string; updated_at: string; }
 
+export type AuditActorType = "user" | "system" | "agent";
+export type AuditOutcome = "success" | "failure";
+
 export interface AuditLog {
-  id: number; username: string; action: string;
-  resource_type: string; resource_id: string;
-  path: string; ip: string; status_code: number; created_at: string;
+  id: number; actor_type: AuditActorType; username: string; action: string;
+  outcome: AuditOutcome;
+  resource_type: string; resource_id: string; target_name: string;
+  path: string; ip: string; detail: string; change_detail: string;
+  status_code: number; created_at: string;
 }
 
 // ===== 运维中心（operations）=====
