@@ -79,7 +79,10 @@ export interface User {
   last_login?: string; created_at: string; updated_at: string;
 }
 export interface Permission { id: number; code: string; name: string; module: string; }
-export interface Role { code: string; name: string; permissions: string[]; }
+// 「模块 × 动作」权限矩阵：每模块含其支持的动作，动作码为 "module:action"。
+export interface PermAction { code: string; name: string; }
+export interface PermModule { code: string; name: string; actions: PermAction[]; }
+export interface Role { code: string; name: string; permissions: string[]; read_only?: boolean; builtin?: boolean; }
 export interface Notification {
   id: number; name: string; description?: string;
   notify_category: string; enabled: boolean;
