@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -13,7 +14,6 @@ import { FilterBar } from "@/components/ui/FilterBar";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
-import { Drawer } from "@/components/ui/Drawer";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { StatCard } from "@/components/ui/StatCard";
 import { StatusTag, SeverityTag } from "@/components/ui/Tag";
@@ -59,18 +59,11 @@ const buildAssetTypeOptions = (t: TFunction) => [
   { label: t("vuln.list.assetTypeMiddleware"), value: "middleware" },
 ];
 
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex gap-3 text-sm">
-      <span className="w-20 shrink-0 text-muted">{label}</span>
-      <span className="text-ink break-all">{value}</span>
-    </div>
-  );
-}
-
 export default function VulnListPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const queryClient = useQueryClient();
+  const openDetail = (id: number) => router.push(`/vuln-management/list/detail?id=${id}`);
   const statusMeta = buildStatusMeta(t);
   const statusTag = (status: string) => {
     const meta = statusMeta[status] ?? { tone: "neutral" as Tone, label: status || "—" };
@@ -102,15 +95,8 @@ export default function VulnListPage() {
   });
   const stats = data?.stats;
 
-  const [detailId, setDetailId] = useState<number | null>(null);
   const [ignoring, setIgnoring] = useState<Vulnerability | null>(null);
   const [unignoring, setUnignoring] = useState<Vulnerability | null>(null);
-
-  const { data: detail } = useQuery({
-    queryKey: ["vuln-detail", detailId],
-    queryFn: () => vulnApi.getVuln(detailId as number),
-    enabled: detailId != null,
-  });
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["vuln-list"] });
@@ -167,7 +153,7 @@ export default function VulnListPage() {
               {t("vuln.list.actionIgnore")}
             </Button>
           )}
-          <Button variant="ghost" className="h-8 px-3" onClick={() => setDetailId(r.id)}>
+          <Button variant="ghost" className="h-8 px-3" onClick={() => openDetail(r.id)}>
             {t("common.details")}
           </Button>
         </div>
@@ -202,7 +188,7 @@ export default function VulnListPage() {
             rowKey={(r) => r.id}
             loading={isLoading}
             emptyText={t("vuln.list.empty")}
-            onRowClick={(r) => setDetailId(r.id)}
+            onRowClick={(r) => openDetail(r.id)}
           />
           <Pagination
             page={params.page}
@@ -212,61 +198,6 @@ export default function VulnListPage() {
           />
         </Card>
       </div>
-
-      <Drawer
-        open={detailId != null}
-        onClose={() => setDetailId(null)}
-        title={t("vuln.list.detailTitle")}
-        width={560}
-        footer={
-          detail && detail.status !== "ignored" ? (
-            <Button onClick={() => setIgnoring(detail)}>{t("vuln.list.actionIgnore")}</Button>
-          ) : undefined
-        }
-      >
-        {detail && (
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <h2 className="text-lg font-bold font-mono text-ink">{detail.cveId}</h2>
-              <div className="flex items-center gap-2">
-                {isSeverity(detail.severity) ? <SeverityTag level={detail.severity} /> : <StatusTag tone="neutral">{detail.severity}</StatusTag>}
-                {statusTag(detail.status)}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Field label="CVSS" value={<span className="tabular-nums">{detail.cvssScore?.toFixed(1) ?? "—"}</span>} />
-              <Field label={t("vuln.list.fieldComponent")} value={detail.component || "—"} />
-              <Field label={t("vuln.list.fieldCurrentVersion")} value={<span className="font-mono">{detail.currentVersion || "—"}</span>} />
-              <Field label={t("vuln.list.fieldFixedVersion")} value={<span className="font-mono">{detail.fixedVersion || "—"}</span>} />
-              <Field label={t("vuln.list.fieldAffectedHosts")} value={<span className="tabular-nums">{detail.affectedHosts ?? 0}</span>} />
-            </div>
-
-            {detail.description && (
-              <div>
-                <div className="mb-1.5 text-sm font-medium text-ink">{t("vuln.list.fieldDescription")}</div>
-                <p className="text-sm leading-relaxed text-muted">{detail.description}</p>
-              </div>
-            )}
-
-            <div>
-              <div className="mb-1.5 text-sm font-medium text-ink">{t("vuln.list.affectedHostsTitle")}</div>
-              {detail.hosts && detail.hosts.length > 0 ? (
-                <div className="divide-y divide-border rounded-control border border-border">
-                  {detail.hosts.map((h) => (
-                    <div key={h.hostId} className="flex items-center justify-between px-3 py-2 text-sm">
-                      <span className="text-ink">{h.hostname || h.hostId}</span>
-                      <span className="text-faint tabular-nums">{h.ip}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-faint">{t("vuln.list.noAffectedHosts")}</p>
-              )}
-            </div>
-          </div>
-        )}
-      </Drawer>
 
       <ConfirmDialog
         open={!!ignoring}
