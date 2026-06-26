@@ -154,7 +154,14 @@ export default function AlertsPage() {
     {
       key: "host",
       title: t("alerts.list.colHost"),
-      render: (r) => <span className="text-faint">{r.host?.hostname ?? r.host_id}</span>,
+      render: (r) => {
+        const h = r.host?.hostname ?? r.host_id;
+        return (
+          <span className="block max-w-[220px] truncate text-faint" title={h}>
+            {h}
+          </span>
+        );
+      },
     },
     {
       key: "status",
@@ -174,7 +181,7 @@ export default function AlertsPage() {
         <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
           <Button
             variant="ghost"
-            className="h-8 px-3"
+            className="h-8 whitespace-nowrap px-3"
             disabled={r.status !== "active"}
             onClick={() => openResolve(r)}
           >
@@ -182,7 +189,7 @@ export default function AlertsPage() {
           </Button>
           <Button
             variant="ghost"
-            className="h-8 px-3"
+            className="h-8 whitespace-nowrap px-3"
             disabled={r.status !== "active"}
             onClick={() => setIgnoring(r)}
           >
