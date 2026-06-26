@@ -433,7 +433,47 @@ func (h *VulnerabilitiesHandler) GetVulnerability(c *gin.Context) {
 		return
 	}
 
+	h.fillHostInfo(vuln.Hosts)
+
 	Success(c, vuln)
+}
+
+// fillHostInfo 用 hosts 表的当前 hostname / ip 回填受影响主机信息。
+// host_vulnerabilities.hostname/ip 是扫描期冗余副本，常为空；以 hosts 表为准（空才保留副本）。
+func (h *VulnerabilitiesHandler) fillHostInfo(hosts []model.HostVulnerability) {
+	if len(hosts) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(hosts))
+	for _, hv := range hosts {
+		ids = append(ids, hv.HostID)
+	}
+	var rows []model.Host
+	if err := h.db.Select("host_id, hostname, ipv4").Where("host_id IN ?", ids).Find(&rows).Error; err != nil {
+		h.logger.Warn("回填受影响主机信息失败", zap.Error(err))
+		return
+	}
+	type info struct {
+		name string
+		ip   string
+	}
+	infoMap := make(map[string]info, len(rows))
+	for _, r := range rows {
+		ip := ""
+		if len(r.IPv4) > 0 {
+			ip = r.IPv4[0]
+		}
+		infoMap[r.HostID] = info{name: r.Hostname, ip: ip}
+	}
+	for i := range hosts {
+		v := infoMap[hosts[i].HostID]
+		if v.name != "" {
+			hosts[i].Hostname = v.name
+		}
+		if v.ip != "" {
+			hosts[i].IP = v.ip
+		}
+	}
 }
 
 // IgnoreVulnerability 忽略漏洞

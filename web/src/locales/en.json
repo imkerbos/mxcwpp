@@ -499,6 +499,7 @@
       "fieldAffectedHosts": "Affected Hosts",
       "fieldDescription": "Description",
       "affectedHostsTitle": "Affected Hosts",
+      "colAffectedHostName": "Host",
       "noAffectedHosts": "No affected hosts",
       "ignoreTitle": "Ignore Vulnerability",
       "ignoreConfirmDesc": "Ignore vulnerability \"{{cve}}\"?",

@@ -499,6 +499,7 @@
       "fieldAffectedHosts": "影响主机",
       "fieldDescription": "描述",
       "affectedHostsTitle": "受影响主机",
+      "colAffectedHostName": "主机",
       "noAffectedHosts": "暂无受影响主机",
       "ignoreTitle": "忽略漏洞",
       "ignoreConfirmDesc": "确认忽略漏洞「{{cve}}」？",
