@@ -15,9 +15,10 @@ export function Sidebar() {
   const logo = useSiteStore((s) => s.logo);
   const perms = useAuthStore((s) => s.user?.permissions);
 
-  // 按当前用户权限过滤菜单：菜单声明的 perms 任一命中即显示。
+  // 按当前用户权限过滤菜单：用户拥有该模块任一 view 权限即显示。
+  // 权限码为 "module:action"；菜单声明的 perms 为模块码，命中其 ":view" 即可见。
   // perms 未知（旧会话/未登录态）时全显示，避免空菜单。
-  const menus = MENUS.filter((m) => !perms || m.perms.length === 0 || m.perms.some((p) => perms.includes(p)));
+  const menus = MENUS.filter((m) => !perms || m.perms.length === 0 || m.perms.some((mod) => perms.includes(`${mod}:view`)));
 
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-surface">
