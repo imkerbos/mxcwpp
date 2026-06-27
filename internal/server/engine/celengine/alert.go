@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -33,15 +34,21 @@ type AlertGenerator struct {
 	log           *zap.Logger
 	siemForwarder *siem.Forwarder // SIEM 转发器（可选）
 	throttler     *HitThrottler   // (host, rule) 频率限制器
+	// dbWhitelist 是 alert_whitelists 表中 exe/cmdline/host 维度条目的原子快照，
+	// 由 StartWhitelistReload 周期刷新；热路径零锁读，承接 P2-B 自动调优采纳的 exception。
+	dbWhitelist atomic.Pointer[[]model.AlertWhitelist]
 }
 
 // NewAlertGenerator 创建 AlertGenerator
 func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
-	return &AlertGenerator{
+	g := &AlertGenerator{
 		db:        db,
 		log:       logger,
 		throttler: NewHitThrottler(defaultHitBurstThreshold, defaultHitRefillWindow, defaultHitThrottleCapacity),
 	}
+	// 启动时立即加载一次，后续由 StartWhitelistReload 周期刷新
+	g.reloadDBWhitelist()
+	return g
 }
 
 // SetSIEMForwarder 设置 SIEM 转发器
@@ -56,12 +63,25 @@ func (g *AlertGenerator) SetSIEMForwarder(f *siem.Forwarder) {
 // 避免 nginx → backend:8888 这种业务流量被 C2 规则刷屏。
 func (g *AlertGenerator) Generate(hostID string, matchedRules []model.DetectionRule, fields map[string]string) {
 	now := time.Now()
+	// 主机上线观察期只取决于主机本身，每次 Generate 查一次即可（单主机），避免在规则循环里重复查。
+	hostGraced := g.hostInGrace(hostID, now)
 	for i := range matchedRules {
 		rule := &matchedRules[i]
 		// 低保真单信号规则降级为 indicator：不独立出告警(否则在繁忙业务负载上刷屏,
 		// 实测高频外连/DNS/枚举类单条 hit 数十万)。事件仍经 anomaly/storyline 关联,
 		// 多信号关联命中才升级为告警(CrowdStrike IOA 模型)。
 		if rule.IsLowFidelity() {
+			continue
+		}
+		// detect-only 上线观察期：新增非内置规则 / 新上线主机的命中降级 indicator 不告警,
+		// 给环境留调 exception 的窗口(critical 规则豁免,真威胁不等)。见 detectonly.go。
+		if inGrace, dim := graceDecision(rule, hostGraced, now); inGrace {
+			g.log.Debug("CEL 告警处于上线观察期已降级 indicator",
+				zap.Uint("rule_id", rule.ID),
+				zap.String("rule_name", rule.Name),
+				zap.String("host_id", hostID),
+				zap.String("grace_dim", dim),
+			)
 			continue
 		}
 		if ok, reason := IsAlertWhitelisted(rule, fields); ok {
@@ -72,6 +92,18 @@ func (g *AlertGenerator) Generate(hostID string, matchedRules []model.DetectionR
 				zap.String("reason", reason),
 				zap.String("exe", fields["exe"]),
 				zap.String("dst_ip", fields["dst_ip"]),
+			)
+			continue
+		}
+		// DB 白名单(exe/cmdline/host 维度)：P2-B 自动调优经人审采纳的 exception。
+		// 与编译内置白名单同语义(命中即抑制)，但运行时可增删,经原子快照零锁读热路径。
+		if ok, reason := g.matchDBWhitelist(fmt.Sprintf("cel-%d", rule.ID), hostID, categorize(rule), rule.Severity, fields); ok {
+			g.log.Debug("CEL 告警命中 DB 白名单已抑制(自动调优采纳)",
+				zap.Uint("rule_id", rule.ID),
+				zap.String("rule_name", rule.Name),
+				zap.String("host_id", hostID),
+				zap.String("reason", reason),
+				zap.String("exe", fields["exe"]),
 			)
 			continue
 		}
