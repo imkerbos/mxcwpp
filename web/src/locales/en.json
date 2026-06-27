@@ -829,6 +829,7 @@
       "statusPending": "Pending",
       "statusRunning": "Running",
       "statusCompleted": "Completed",
+      "statusPartial": "Partial",
       "statusFailed": "Failed",
       "statusCancelled": "Cancelled",
       "colName": "Task Name",

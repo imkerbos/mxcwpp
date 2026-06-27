@@ -1181,6 +1181,7 @@ func (s *Service) handleBaselineResult(ctx context.Context, record *grpcProto.En
 	}).Create(scanResult).Error; err != nil {
 		return fmt.Errorf("保存检测结果失败: %w", err)
 	}
+	metrics.IncBaselineResultReceived()
 
 	s.logger.Debug("检测结果已保存",
 		zap.String("agent_id", conn.AgentID),
@@ -1490,6 +1491,7 @@ func (s *Service) handleTaskCompletion(ctx context.Context, record *grpcProto.En
 		Update("completed_host_count", gorm.Expr("completed_host_count + 1")).Error; err != nil {
 		s.logger.Error("递增 completed_host_count 失败", zap.String("task_id", taskID), zap.Error(err))
 	}
+	metrics.IncBaselineHostCompleted()
 
 	// 3. 重新查询任务以获取最新的完成主机数
 	if err := s.db.Where("task_id = ?", taskID).First(&task).Error; err != nil {

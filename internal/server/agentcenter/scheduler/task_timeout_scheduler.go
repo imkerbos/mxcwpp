@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -211,6 +212,7 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			"status":       model.TaskStatusCompleted,
 			"completed_at": &completedAt,
 		})
+		metrics.IncBaselineTaskOutcome(metrics.BaselineOutcomeCompleted)
 		return
 	}
 
@@ -230,6 +232,7 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			"executed_at":   &now, // 重置超时窗口，重排后重新计时
 			"failed_reason": "",
 		})
+		metrics.IncBaselineTaskOutcome(metrics.BaselineOutcomeRetried)
 		return
 	}
 
@@ -251,6 +254,7 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 			"failed_reason": "任务执行超时：没有收到任何主机的结果",
 			"completed_at":  &completedAt,
 		})
+		metrics.IncBaselineTaskOutcome(metrics.BaselineOutcomeFailed)
 		return
 	}
 
@@ -266,6 +270,7 @@ func handleRunningTaskTimeout(db *gorm.DB, logger *zap.Logger, task *model.ScanT
 		"failed_reason": fmt.Sprintf("任务执行超时：%d 台主机未返回结果（已接受部分结果）", failedHostCount),
 		"completed_at":  &completedAt,
 	})
+	metrics.IncBaselineTaskOutcome(metrics.BaselineOutcomePartial)
 }
 
 // fixTaskTimeoutMinutes 修复任务超时时间（分钟）
