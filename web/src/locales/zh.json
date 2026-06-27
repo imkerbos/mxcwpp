@@ -829,6 +829,7 @@
       "statusPending": "等待",
       "statusRunning": "运行中",
       "statusCompleted": "已完成",
+      "statusPartial": "部分完成",
       "statusFailed": "失败",
       "statusCancelled": "已取消",
       "colName": "任务名称",

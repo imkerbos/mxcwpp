@@ -1096,8 +1096,10 @@ export interface BaselineTask {
   policy_id: string;
   policy_ids?: string[];
   rule_ids?: string[] | null;
-  status: "created" | "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "created" | "pending" | "running" | "completed" | "partial" | "failed" | "cancelled";
   timeout_minutes?: number;
+  retry_count?: number;
+  max_retries?: number;
   matched_host_count?: number;
   total_host_count?: number;
   dispatched_host_count?: number;
