@@ -821,6 +821,7 @@ func setupKubeAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, alar
 	router.POST("/kube/baseline/detect", baselineHandler.RunBaselineCheck)
 	router.GET("/kube/baseline-tasks", baselineHandler.ListBaselineTasks)
 	router.GET("/kube/baseline-tasks/:id", baselineHandler.GetBaselineTaskDetail)
+	router.GET("/kube/baseline/trend", baselineHandler.GetBaselineTrend)
 
 	// 基线规则管理
 	rulesHandler := api.NewKubeBaselineRulesHandler(db, logger, baselineChecker, ruleEngine)

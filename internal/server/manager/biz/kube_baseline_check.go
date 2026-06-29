@@ -53,8 +53,48 @@ func (c *KubeBaselineChecker) Start(ctx context.Context) {
 		Where("status = ?", model.BaselineTaskRunning).
 		Updates(map[string]any{"status": model.BaselineTaskFailed, "error_msg": "进程重启，任务中断"})
 	go c.worker(ctx)
+	go c.scheduleLoop(ctx)
 	// 启动时先排空可能遗留的 pending
 	c.signal()
+}
+
+// baselineScheduleInterval 定时全量重扫间隔（持续合规：周期性刷新各集群基线，防数据过期）
+const baselineScheduleInterval = 24 * time.Hour
+
+// scheduleLoop 周期性为所有集群入队基线检查；跳过已有 pending/running 任务的集群防堆积。
+func (c *KubeBaselineChecker) scheduleLoop(ctx context.Context) {
+	ticker := time.NewTicker(baselineScheduleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.enqueueAllClusters()
+		}
+	}
+}
+
+// enqueueAllClusters 为每个集群入队一次检查（已有未完成任务的集群跳过）
+func (c *KubeBaselineChecker) enqueueAllClusters() {
+	var clusters []model.KubeCluster
+	if err := c.db.Find(&clusters).Error; err != nil {
+		c.logger.Error("定时基线：读取集群列表失败", zap.Error(err))
+		return
+	}
+	for _, cl := range clusters {
+		var inflight int64
+		c.db.Model(&model.KubeBaselineTask{}).
+			Where("cluster_id = ? AND status IN ?", cl.ID,
+				[]model.KubeBaselineTaskStatus{model.BaselineTaskPending, model.BaselineTaskRunning}).
+			Count(&inflight)
+		if inflight > 0 {
+			continue
+		}
+		if _, err := c.EnqueueCheck(cl.ID); err != nil {
+			c.logger.Warn("定时基线：入队失败", zap.Uint("cluster_id", cl.ID), zap.Error(err))
+		}
+	}
 }
 
 // signal 非阻塞唤醒 worker
@@ -532,20 +572,54 @@ func (c *KubeBaselineChecker) runTask(parent context.Context, task model.KubeBas
 	if len(results) > 0 {
 		rate = float64(passed) / float64(len(results)) * 100
 	}
+	weighted := weightedComplianceScore(results)
 	fin := model.LocalTime(time.Now())
 	c.db.Model(&task).Updates(map[string]any{
-		"status":      model.BaselineTaskDone,
-		"total":       len(results),
-		"passed":      passed,
-		"failed":      failed,
-		"error_cnt":   errCnt,
-		"pass_rate":   rate,
-		"finished_at": fin,
+		"status":         model.BaselineTaskDone,
+		"total":          len(results),
+		"passed":         passed,
+		"failed":         failed,
+		"error_cnt":      errCnt,
+		"pass_rate":      rate,
+		"weighted_score": weighted,
+		"finished_at":    fin,
 	})
 	c.pruneOldTasks(clusterID, 10)
 
-	c.updateHealthScore(clusterID, results)
+	// 集群健康分用加权合规分（critical 失败惩罚更重，比扁平通过率更贴近风险）
+	c.db.Model(&model.KubeCluster{}).Where("id = ?", clusterID).Update("health_score", weighted)
 	c.syncBaselineAlerts(clusterID, cluster.Name, results)
+}
+
+// severityWeight 严重度权重：critical 失败对合规分影响远大于 low
+func severityWeight(severity string) int {
+	switch severity {
+	case "critical":
+		return 10
+	case "high":
+		return 5
+	case "medium":
+		return 2
+	default: // low / 其它
+		return 1
+	}
+}
+
+// weightedComplianceScore 严重度加权合规分(0-100)：通过项权重和 / 全部项权重和。
+// error 项按其严重度计入分母但不计入分子（视为未通过），避免拉取失败被当作合规。
+func weightedComplianceScore(results []model.KubeBaseline) int {
+	totalW, passW := 0, 0
+	for _, r := range results {
+		w := severityWeight(r.Severity)
+		totalW += w
+		if r.Result == "pass" {
+			passW += w
+		}
+	}
+	if totalW == 0 {
+		return 100
+	}
+	return passW * 100 / totalW
 }
 
 // pruneOldTasks 仅保留每集群最近 keep 个任务，删除更早的任务及其结果行
@@ -616,20 +690,6 @@ func (c *KubeBaselineChecker) syncBaselineAlerts(clusterID uint, clusterName str
 				})
 		}
 	}
-}
-
-func (c *KubeBaselineChecker) updateHealthScore(clusterID uint, results []model.KubeBaseline) {
-	if len(results) == 0 {
-		return
-	}
-	passed := 0
-	for _, r := range results {
-		if r.Result == "pass" {
-			passed++
-		}
-	}
-	score := passed * 100 / len(results)
-	c.db.Model(&model.KubeCluster{}).Where("id = ?", clusterID).Update("health_score", score)
 }
 
 // getLastClient 获取当前检查集群的客户端
