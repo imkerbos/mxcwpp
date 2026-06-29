@@ -545,6 +545,7 @@ func (c *KubeBaselineChecker) runTask(parent context.Context, task model.KubeBas
 			Result:            result,
 			Remediation:       rule.Remediation,
 			Benchmark:         rule.Benchmark,
+			ControlRef:        rule.ControlRef,
 			AffectedResources: affected,
 			CheckedAt:         now,
 		}

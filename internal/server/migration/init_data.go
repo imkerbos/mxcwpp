@@ -1360,6 +1360,35 @@ func builtinCheckConfigs() map[string]*model.KubeCheckConfig {
 
 // initKubeBaselineRules 初始化内置容器基线检查规则
 // 增量导入：按 check_id 去重，已存在的跳过
+// kubeControlRefByCategory 把规则类别映射到合规框架条款（分类粒度，准确无臆造编号）：
+// CIS Kubernetes/GKE Benchmark 章节 + Pod Security Standards + NSA/CISA K8s 加固指南。
+func kubeControlRefByCategory(category string) string {
+	switch category {
+	case "RBAC":
+		return "CIS K8s §5.1 RBAC; NSA/CISA: Authentication & Authorization"
+	case "Pod Security":
+		return "Pod Security Standards (Restricted); CIS K8s §5.2; NSA/CISA: Pod Security"
+	case "Network":
+		return "CIS K8s §5.3 Network Policies; NSA/CISA: Network Hardening"
+	case "Secrets & Config":
+		return "CIS K8s §5.4 Secrets Management; NSA/CISA: Secrets Management"
+	case "Supply Chain":
+		return "CIS K8s §5.5 Image Provenance; NSA/CISA: Supply Chain"
+	case "Workload":
+		return "CIS K8s §5.7 General Policies; NSA/CISA: Pod Security"
+	case "Node":
+		return "CIS K8s §5.7 General Policies; NSA/CISA: System Hardening"
+	case "Cluster Config":
+		return "CIS K8s §5.7 General Policies; NSA/CISA: Audit & Threat Detection"
+	case "Runtime":
+		return "NSA/CISA: Threat Detection & Incident Response"
+	case "GKE 加固":
+		return "CIS GKE Benchmark §5 Managed Cluster Hardening"
+	default:
+		return ""
+	}
+}
+
 func initKubeBaselineRules(db *gorm.DB, logger *zap.Logger) error {
 	builtinRules := []model.KubeBaselineRule{
 		// ===== RBAC 安全 =====
@@ -1588,6 +1617,7 @@ func initKubeBaselineRules(db *gorm.DB, logger *zap.Logger) error {
 		if cfg, ok := configs[builtinRules[i].CheckID]; ok {
 			builtinRules[i].CheckConfig = cfg
 		}
+		builtinRules[i].ControlRef = kubeControlRefByCategory(builtinRules[i].Category)
 		if err := db.Create(&builtinRules[i]).Error; err != nil {
 			logger.Warn("导入内置容器基线规则失败", zap.String("check_id", builtinRules[i].CheckID), zap.Error(err))
 			continue
@@ -1597,6 +1627,14 @@ func initKubeBaselineRules(db *gorm.DB, logger *zap.Logger) error {
 
 	if imported > 0 {
 		logger.Info("内置容器基线规则导入完成", zap.Int("new", imported), zap.Int("existing", len(existingIDs)))
+	}
+
+	// 回填已有规则的框架条款映射（control_ref 为空的按类别补；幂等）
+	for _, cat := range []string{"RBAC", "Pod Security", "Network", "Secrets & Config",
+		"Supply Chain", "Workload", "Node", "Cluster Config", "Runtime", "GKE 加固"} {
+		db.Model(&model.KubeBaselineRule{}).
+			Where("category = ? AND (control_ref IS NULL OR control_ref = '')", cat).
+			Update("control_ref", kubeControlRefByCategory(cat))
 	}
 
 	// 回填已有规则的 CheckConfig（仅更新 builtin=true 且 check_config IS NULL 的记录）
