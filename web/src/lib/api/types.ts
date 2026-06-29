@@ -812,6 +812,8 @@ export interface KubeCluster {
   gcpEnabled?: boolean;
   gcpProjectId?: string;
   gcpSubscription?: string;
+  gcpLocation?: string;
+  gcpClusterName?: string;
   createdAt: string;
   // getCluster 详情额外返回（列表接口无）
   summary?: { nodes: number; pods: number; namespaces: number; deployments: number; services: number; alarms: number };
