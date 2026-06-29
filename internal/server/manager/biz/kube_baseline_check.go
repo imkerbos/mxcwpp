@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,9 +26,10 @@ type KubeBaselineChecker struct {
 	kubeClient     *KubeClientManager
 	ruleEngine     *kube.KubeRuleEngine
 	checkFuncs     map[string]CheckFunc
-	mu             sync.Mutex // 保护 currentCluster：worker 串行执行单个 task，防 currentCluster 竞态
+	mu             sync.Mutex // 保护 currentCluster/gkeResults：worker 串行执行单个 task
 	currentCluster uint
-	notify         chan struct{} // 入队后唤醒 worker（缓冲 1，非阻塞）
+	notify         chan struct{}     // 入队后唤醒 worker（缓冲 1，非阻塞）
+	gkeResults     map[string]string // 当前 task 的 GKE 托管层检查结果（checkID -> pass/fail），run 内有效
 }
 
 // NewKubeBaselineChecker 创建基线检查器
@@ -111,6 +113,26 @@ func (c *KubeBaselineChecker) EnqueueCheck(clusterID uint) (uint, error) {
 	}
 	c.signal()
 	return task.ID, nil
+}
+
+// evalGKE 拉取并评估 GKE 托管层配置（Container API）；无 GCP 坐标或拉取失败时返回 nil，
+// 对应 CIS-GKE-* 检查记为 error（需为集群配置 GCP project/location + 具 container.clusters.get 的 SA）。
+func (c *KubeBaselineChecker) evalGKE(ctx context.Context, cluster model.KubeCluster) map[string]string {
+	if cluster.GCPProjectID == "" || cluster.GCPLocation == "" {
+		c.logger.Info("跳过 GKE 托管层检查：未配置 GCP 坐标", zap.Uint("cluster_id", cluster.ID))
+		return nil
+	}
+	name := cluster.GCPClusterName
+	if name == "" {
+		name = cluster.Name
+	}
+	cfg, err := kube.FetchGKECluster(ctx, cluster.GCPProjectID, cluster.GCPLocation, name, cluster.GCPCredentialsJSON)
+	if err != nil {
+		c.logger.Warn("拉取 GKE 集群配置失败，托管层检查记为 error",
+			zap.Uint("cluster_id", cluster.ID), zap.Error(err))
+		return nil
+	}
+	return kube.EvaluateGKEChecks(cfg)
 }
 
 // isSystemNamespace 判断是否为系统 Namespace
@@ -436,6 +458,9 @@ func (c *KubeBaselineChecker) runTask(parent context.Context, task model.KubeBas
 	ctx, cancel := context.WithTimeout(parent, 180*time.Second)
 	defer cancel()
 
+	// GKE 托管层检查：一次拉取集群 GCP 配置，结果在本 run 内复用
+	c.gkeResults = c.evalGKE(ctx, cluster)
+
 	now := model.LocalTime(time.Now())
 	var results []model.KubeBaseline
 
@@ -444,7 +469,14 @@ func (c *KubeBaselineChecker) runTask(parent context.Context, task model.KubeBas
 		var affected model.AffectedResources
 
 		runFunc, exists := c.checkFuncs[rule.CheckID]
-		if exists {
+		if strings.HasPrefix(rule.CheckID, "CIS-GKE-") {
+			// GKE 托管层规则：读 GCP Container API 评估结果；配置不可用记为 error
+			if r, ok := c.gkeResults[rule.CheckID]; ok {
+				result = r
+			} else {
+				result = "error"
+			}
+		} else if exists {
 			// 内置规则：用硬编码函数
 			result, affected = runFunc(ctx, c)
 		} else if rule.CheckConfig != nil && c.ruleEngine != nil {
