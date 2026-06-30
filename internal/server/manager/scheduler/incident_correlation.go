@@ -42,6 +42,17 @@ type incidentAlert struct {
 	Category    string
 }
 
+// distinctCategoryCount 统计成员告警的不同分类数，作为攻击阶段数的回退度量。
+func distinctCategoryCount(alerts []incidentAlert) int {
+	seen := map[string]struct{}{}
+	for _, a := range alerts {
+		if a.Category != "" {
+			seen[a.Category] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
 // hasAttackChain 成员中是否含攻击链(多步关联)命中 —— 单条即视为强 IOA 信号。
 func hasAttackChain(alerts []incidentAlert) bool {
 	for _, a := range alerts {
@@ -199,7 +210,15 @@ func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutof
 
 	now := model.ToLocalTime(time.Now())
 	risk := aggregateRisk(maxRisk, len(tactics), chain)
-	title := fmt.Sprintf("主机 %s 检测到 %d 阶段攻击链(%d 告警)", hostnameOr(hostname, hostID), len(tactics), len(rows))
+	// 阶段数优先用 ATT&CK 战术数；战术为空时回退用告警分类种类数（更可靠地反映攻击面）
+	stageCount := len(tactics)
+	if stageCount == 0 {
+		stageCount = distinctCategoryCount(rows)
+	}
+	title := fmt.Sprintf("主机 %s 检测到 %d 阶段攻击(%d 告警)", hostnameOr(hostname, hostID), stageCount, len(rows))
+	if chain {
+		title += "·含攻击链"
+	}
 
 	var existing model.Incident
 	err := db.Where("host_id = ? AND status = ?", hostID, model.IncidentStatusActive).First(&existing).Error
