@@ -17,6 +17,31 @@ import { CopyButton } from "@/components/ui/CopyButton";
 
 const isSeverity = (v: string): v is Severity => ["critical", "high", "medium", "low"].includes(v);
 
+// 分类 → 攻击阶段含义 + 处置建议(研判依据)
+const CATEGORY_META: Record<string, { name: string; meaning: string; action: string }> = {
+  attack_chain: { name: "多步攻击链", meaning: "多个步骤按 kill-chain 顺序串联命中,高置信攻击。", action: "立即隔离主机,溯源完整链路,封禁外联。" },
+  initial_access: { name: "初始访问", meaning: "疑似通过 Web/服务入口获得立足点。", action: "排查入口利用与 Webshell,检查可疑上传。" },
+  execution: { name: "执行", meaning: "执行了可疑进程/命令。", action: "核对命令行与父进程血缘是否合法。" },
+  webshell: { name: "Webshell", meaning: "检测到 Web 后门特征。", action: "定位清除 Webshell,审计 Web 目录写入。" },
+  reverse_shell: { name: "反弹Shell", meaning: "进程对外建立交互式 shell。", action: "立即隔离,阻断外联,溯源来源。" },
+  persistence: { name: "持久化", meaning: "向 cron/systemd/authorized_keys 等位置写入,意图常驻。", action: "检查并清除持久化项。" },
+  privilege_escalation: { name: "权限提升", meaning: "疑似提权(sudo/setuid/内核漏洞)。", action: "核查提权痕迹,修补漏洞。" },
+  defense_evasion: { name: "防御规避", meaning: "rootkit/日志篡改/无文件执行等规避行为。", action: "做完整性校验,排查规避手法。" },
+  credential_access: { name: "凭证访问", meaning: "读取 shadow/ssh key/云凭证等敏感凭证。", action: "立即轮换受影响凭证,排查泄露范围。" },
+  discovery: { name: "发现/侦察", meaning: "短时探测系统/网络信息。", action: "确认是否合法运维。" },
+  lateral_movement: { name: "横向移动", meaning: "向内网其他主机移动。", action: "隔离主机,核查横移凭证。" },
+  network_scan: { name: "网络扫描", meaning: "对端口/主机批量扫描。", action: "封禁扫描源,核查暴露面。" },
+  collection: { name: "数据收集", meaning: "访问/打包敏感数据。", action: "排查数据访问范围。" },
+  command_and_control: { name: "命令与控制", meaning: "疑似 C2 外联/信标。", action: "封禁外联 IP/域名,隔离主机。" },
+  c2_communication: { name: "命令与控制", meaning: "疑似 C2 外联/信标。", action: "封禁外联 IP/域名,隔离主机。" },
+  exfiltration: { name: "数据渗出", meaning: "向外传输数据。", action: "阻断外传,评估泄露。" },
+  cryptomining: { name: "挖矿", meaning: "启动挖矿程序/连接矿池。", action: "终止进程,清持久化,查入口。" },
+  ransomware: { name: "勒索", meaning: "短时大量文件加密/改名。", action: "立即隔离,停止加密,启动备份恢复。" },
+  impact: { name: "影响/破坏", meaning: "破坏性行为。", action: "隔离,评估业务影响,应急恢复。" },
+  ioc_hit: { name: "威胁情报命中", meaning: "命中已知恶意 IOC。", action: "核查命中上下文,封禁指标。" },
+};
+const catMeta = (c: string) => CATEGORY_META[c] ?? { name: c || "未分类", meaning: "检测到可疑行为。", action: "核查该主机近期行为是否合法。" };
+
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex gap-3 text-sm">
@@ -143,11 +168,29 @@ export default function ThreatAlertsPage() {
 
       <Drawer open={!!detail} onClose={() => setDetail(null)} title={t("detection.threatAlerts.detailTitle")} width={560}>
         {detail && (
-          <div className="space-y-2">
-            <div className="mb-2 flex items-center gap-2">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
               {detail.category === "attack_chain" && <StatusTag tone="danger">{t("detection.threatAlerts.chainTag")}</StatusTag>}
               {isSeverity(detail.severity) && <SeverityTag level={detail.severity} />}
             </div>
+
+            {/* 研判结论(这是什么 / 为什么是威胁 / 怎么处置) */}
+            {(() => {
+              const m = catMeta(detail.category);
+              const why = detail.description && detail.description.length > 0 ? detail.description : m.meaning;
+              return (
+                <div className="rounded-md border border-line bg-surface-muted p-4">
+                  <div className="text-sm font-semibold text-ink">{t("detection.threatAlerts.verdict")}</div>
+                  <p className="mt-1 text-sm leading-relaxed text-ink">
+                    {detail.host?.hostname || detail.host_id} 上检测到{m.name}:{detail.title}。{why}
+                  </p>
+                  <div className="mt-3 text-sm font-semibold text-ink">{t("detection.threatAlerts.recommendation")}</div>
+                  <p className="mt-1 text-sm leading-relaxed text-muted">{m.action}</p>
+                </div>
+              );
+            })()}
+
+            <div className="space-y-2">
             <Field label={t("detection.threatAlerts.colTitle")} value={detail.title} />
             <Field label={t("detection.threatAlerts.colCategory")} value={detail.category || "—"} />
             <Field label={t("detection.threatAlerts.colHost")} value={<span className="inline-flex items-center gap-1.5">{detail.host?.hostname || detail.host_id}<CopyButton text={detail.host_id} /></span>} />
@@ -162,6 +205,7 @@ export default function ThreatAlertsPage() {
                 <pre className="overflow-x-auto rounded-control bg-surface-muted p-3 font-mono text-xs text-ink whitespace-pre-wrap break-all">{detail.actual}</pre>
               </div>
             )}
+            </div>
           </div>
         )}
       </Drawer>

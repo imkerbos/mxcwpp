@@ -1612,6 +1612,8 @@
       "colHitCount": "Hits",
       "empty": "No detections",
       "detailTitle": "Detection Detail",
+      "verdict": "Verdict",
+      "recommendation": "Recommendation",
       "firstSeen": "First Seen",
       "lastSeen": "Last Seen",
       "desc": "Description",

@@ -1612,6 +1612,8 @@
       "colHitCount": "命中次数",
       "empty": "暂无研判结果",
       "detailTitle": "威胁研判详情",
+      "verdict": "研判结论",
+      "recommendation": "处置建议",
       "firstSeen": "首次发现",
       "lastSeen": "最近发现",
       "desc": "描述",
