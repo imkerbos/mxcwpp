@@ -13,9 +13,11 @@ import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
+import { Input } from "@/components/ui/Input";
 import { Drawer } from "@/components/ui/Drawer";
 import { StatCard } from "@/components/ui/StatCard";
 import { StatusTag } from "@/components/ui/Tag";
+import { CopyButton } from "@/components/ui/CopyButton";
 
 interface ListParams {
   page: number;
@@ -23,7 +25,14 @@ interface ListParams {
   keyword: string;
   data_type: string;
   host_id: string;
+  exe: string;
+  event_type: string;
 }
+
+const EVENT_TYPE_OPTIONS = [
+  "", "process_exec", "process_exit", "file_open", "file_write", "file_rename", "file_unlink", "file_chmod",
+  "tcp_connect", "tcp_accept", "udp_send", "dns_query", "memfd_exec", "anonymous_exec",
+];
 
 const buildDataTypeLabel = (t: TFunction): Record<number, string> => ({
   3000: t("detection.edrEvents.typeProcess"),
@@ -63,7 +72,13 @@ export default function EdrEventsPage() {
     keyword: "",
     data_type: "",
     host_id: "",
+    exe: "",
+    event_type: "",
   });
+  const eventTypeOptions = EVENT_TYPE_OPTIONS.map((v) => ({
+    label: v === "" ? t("common.allType") : v,
+    value: v,
+  }));
 
   const { data: stats } = useQuery({
     queryKey: ["edr-stats"],
@@ -79,6 +94,8 @@ export default function EdrEventsPage() {
         keyword: params.keyword || undefined,
         data_type: params.data_type ? Number(params.data_type) : undefined,
         host_id: params.host_id || undefined,
+        exe: params.exe || undefined,
+        event_type: params.event_type || undefined,
       }),
   });
 
@@ -90,7 +107,26 @@ export default function EdrEventsPage() {
       title: t("detection.edrEvents.colTime"),
       render: (r) => <span className="text-faint tabular-nums">{r.timestamp}</span>,
     },
-    { key: "hostname", title: t("detection.edrEvents.colHost"), render: (r) => <span className="font-medium text-ink">{r.hostname || r.host_id}</span> },
+    {
+      key: "hostname",
+      title: t("detection.edrEvents.colHost"),
+      render: (r) => (
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className="font-medium text-ink transition-colors hover:text-primary"
+            title={t("detection.edrEvents.filterByThisHost")}
+            onClick={(e) => {
+              e.stopPropagation();
+              setParams((p) => ({ ...p, host_id: r.host_id, page: 1 }));
+            }}
+          >
+            {r.hostname || r.host_id}
+          </button>
+          <CopyButton text={r.host_id} />
+        </div>
+      ),
+    },
     { key: "event_type", title: t("detection.edrEvents.colEventType"), render: (r) => <StatusTag tone="neutral">{r.event_type}</StatusTag> },
     {
       key: "exe",
@@ -125,6 +161,23 @@ export default function EdrEventsPage() {
             onChange={(v) => setParams((p) => ({ ...p, keyword: v, page: 1 }))}
             placeholder={t("detection.edrEvents.searchPlaceholder")}
           />
+          <Input
+            value={params.host_id}
+            onChange={(e) => setParams((p) => ({ ...p, host_id: e.target.value, page: 1 }))}
+            placeholder={t("detection.edrEvents.filterHostId")}
+            className="w-56"
+          />
+          <Input
+            value={params.exe}
+            onChange={(e) => setParams((p) => ({ ...p, exe: e.target.value, page: 1 }))}
+            placeholder={t("detection.edrEvents.filterExe")}
+            className="w-44"
+          />
+          <Select
+            value={params.event_type}
+            onChange={(v) => setParams((p) => ({ ...p, event_type: v, page: 1 }))}
+            options={eventTypeOptions}
+          />
           <Select
             value={params.data_type}
             onChange={(v) => setParams((p) => ({ ...p, data_type: v, page: 1 }))}
@@ -155,7 +208,7 @@ export default function EdrEventsPage() {
             <div className="space-y-2">
               <Field label={t("detection.edrEvents.fieldTime")} value={<span className="tabular-nums">{detail.timestamp}</span>} />
               <Field label={t("detection.edrEvents.fieldHost")} value={detail.hostname || detail.host_id} />
-              <Field label={t("detection.edrEvents.fieldHostId")} value={detail.host_id} mono />
+              <Field label={t("detection.edrEvents.fieldHostId")} value={<span className="inline-flex items-center gap-1.5">{detail.host_id}<CopyButton text={detail.host_id} /></span>} mono />
               <Field label={t("detection.edrEvents.fieldEventType")} value={<StatusTag tone="neutral">{detail.event_type}</StatusTag>} />
               <Field label={t("detection.edrEvents.fieldDataType")} value={`${detail.data_type} ${DATA_TYPE_LABEL[detail.data_type] ?? ""}`.trim()} />
               <Field label={t("detection.edrEvents.fieldPid")} value={dash(detail.pid)} mono />

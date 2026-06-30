@@ -12,6 +12,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { Select } from "@/components/ui/Select";
+import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -24,6 +25,7 @@ interface ListParams {
   page_size: number;
   severity: string;
   status: string;
+  host_id: string;
 }
 
 type Tone = "success" | "warning" | "danger" | "info" | "neutral";
@@ -85,6 +87,7 @@ export default function StorylinesPage() {
     page_size: 20,
     severity: "",
     status: "",
+    host_id: "",
   });
 
   const { data: stats } = useQuery({
@@ -100,6 +103,7 @@ export default function StorylinesPage() {
         page_size: params.page_size,
         severity: params.severity || undefined,
         status: params.status || undefined,
+        host_id: params.host_id || undefined,
       }),
   });
 
@@ -173,6 +177,12 @@ export default function StorylinesPage() {
             value={params.status}
             onChange={(v) => setParams((p) => ({ ...p, status: v, page: 1 }))}
             options={statusOptions}
+          />
+          <Input
+            value={params.host_id}
+            onChange={(e) => setParams((p) => ({ ...p, host_id: e.target.value, page: 1 }))}
+            placeholder={t("detection.storylines.filterHostId")}
+            className="w-56"
           />
         </FilterBar>
         <Card>
