@@ -784,6 +784,7 @@
     "loadError": "Failed to load data, please retry",
     "policies": {
       "allOs": "All Systems",
+      "backToGroups": "Back to Groups",
       "create": "New Baseline",
       "colName": "Baseline Name",
       "colOs": "Applicable Systems",

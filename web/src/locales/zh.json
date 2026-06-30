@@ -784,6 +784,7 @@
     "loadError": "数据加载失败，请重试",
     "policies": {
       "allOs": "全部系统",
+      "backToGroups": "返回策略组",
       "create": "新建基线",
       "colName": "基线名称",
       "colOs": "适用系统",

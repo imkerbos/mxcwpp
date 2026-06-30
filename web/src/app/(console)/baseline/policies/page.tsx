@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -42,19 +43,30 @@ interface PolicyForm {
 }
 const emptyForm: PolicyForm = { name: "", version: "", description: "", os_version: "", enabled: true };
 
-export default function BaselinePoliciesPage() {
+function BaselinePoliciesContent() {
   const { t } = useTranslation();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const groupId = searchParams.get("group_id") || "";
   const queryClient = useQueryClient();
   const osFamilyOptions = buildOsFamilyOptions(t);
   const enabledOptions = buildEnabledOptions(t);
   const [filters, setFilters] = useState<ListFilters>({ os_family: "", enabled: "" });
 
+  // 组钻取上下文：展示组名 + 返回链接，并把新建策略归入该组
+  const { data: group } = useQuery({
+    queryKey: ["bl-group", groupId],
+    queryFn: () => baselineApi.getGroup(groupId),
+    enabled: !!groupId,
+  });
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["bl-policies", filters],
+    queryKey: ["bl-policies", filters, groupId],
     queryFn: () =>
       baselineApi.listPolicies({
         os_family: filters.os_family || undefined,
         enabled: filters.enabled === "" ? undefined : filters.enabled === "true",
+        group_id: groupId || undefined,
       }),
   });
   const rows = data?.items ?? [];
@@ -92,6 +104,7 @@ export default function BaselinePoliciesPage() {
         os_version: form.os_version,
         enabled: form.enabled,
       };
+      if (!editing && groupId) body.group_id = groupId;
       return editing ? baselineApi.updatePolicy(editing.id, body) : baselineApi.createPolicy(body);
     },
     onSuccess: () => {
@@ -189,6 +202,16 @@ export default function BaselinePoliciesPage() {
   return (
     <>
       <div className="space-y-4">
+        {groupId && (
+          <button
+            type="button"
+            className="text-sm text-muted transition-colors hover:text-ink"
+            onClick={() => router.push("/baseline/groups")}
+          >
+            ← {t("baseline.policies.backToGroups")}
+            {group?.name ? `：${group.name}` : ""}
+          </button>
+        )}
         <FilterBar extra={<Button onClick={openCreate}>{t("baseline.policies.create")}</Button>}>
           <Select
             value={filters.os_family}
@@ -260,5 +283,13 @@ export default function BaselinePoliciesPage() {
         onCancel={() => setDeleting(null)}
       />
     </>
+  );
+}
+
+export default function BaselinePoliciesPage() {
+  return (
+    <Suspense fallback={null}>
+      <BaselinePoliciesContent />
+    </Suspense>
   );
 }
