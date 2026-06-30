@@ -123,9 +123,12 @@ func main() {
 					// 周期 reload 主机 created_at 快照,消除 hostInGrace 每事件 DB 查(engine CPU 高根因)
 					alertGen.StartHostGraceReload(ctx)
 					stages = append(stages, engine.NewCelRuleStage(celEng, logger).WithAlertGenerator(alertGen))
-					stages = append(stages, engine.NewSequenceStage(
-						celengine.NewSequenceDetector(celEng, db, nil, logger.Named("seq")),
-						logger))
+					seqDetector := celengine.NewSequenceDetector(celEng, db, nil, logger.Named("seq"))
+					if err := seqDetector.ReloadRules(); err != nil {
+						logger.Warn("序列规则加载失败", zap.Error(err))
+					}
+					seqDetector.StartReload(ctx)
+					stages = append(stages, engine.NewSequenceStage(seqDetector, logger))
 				}
 				storyEng := storyline.NewEngine(db, logger.Named("story"))
 				stages = append(stages, engine.NewStorylineStage(storyEng, logger))
