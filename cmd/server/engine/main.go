@@ -128,7 +128,7 @@ func main() {
 						logger.Warn("序列规则加载失败", zap.Error(err))
 					}
 					seqDetector.StartReload(ctx)
-					stages = append(stages, engine.NewSequenceStage(seqDetector, logger))
+					stages = append(stages, engine.NewSequenceStage(seqDetector, logger).WithAlertGenerator(alertGen))
 				}
 				storyEng := storyline.NewEngine(db, logger.Named("story"))
 				stages = append(stages, engine.NewStorylineStage(storyEng, logger))

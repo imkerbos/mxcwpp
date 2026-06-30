@@ -292,6 +292,87 @@ func (g *AlertGenerator) forwardToSIEM(alert *model.Alert, fields map[string]str
 	})
 }
 
+// AttackChainCategory 攻击链(序列)命中的告警分类，供 incident 关联识别为强信号
+const AttackChainCategory = "attack_chain"
+
+// sequenceRiskScore 攻击链命中风险分：多步关联=高置信，按严重度给高基线分
+func sequenceRiskScore(severity string) int {
+	switch severity {
+	case "critical":
+		return 90
+	case "high":
+		return 78
+	case "medium":
+		return 62
+	default:
+		return 50
+	}
+}
+
+// GenerateFromSequence 为攻击链(序列)命中生成/更新告警并落 alerts 表。
+// 攻击链是多步关联的高置信检测，绕过白名单/灰度(不像单事件规则需降噪)，
+// 以 category=attack_chain 标记，供 incident 关联识别为强 IOA 信号。
+func (g *AlertGenerator) GenerateFromSequence(hostID string, rule model.SequenceRule, fields map[string]string) {
+	masked := make(map[string]string, len(fields))
+	for k, v := range fields {
+		masked[k] = v
+	}
+	sanitize.Fields(masked)
+	detail, _ := json.Marshal(masked)
+
+	resultID := fmt.Sprintf("seq-%d-%s", rule.ID, hostID)
+	now := model.ToLocalTime(time.Now())
+
+	var existing model.Alert
+	err := g.db.Where("result_id = ?", resultID).First(&existing).Error
+	if err == nil {
+		_ = g.refreshExistingAlert(&existing, now, string(detail), masked)
+		return
+	}
+	if err != gorm.ErrRecordNotFound {
+		g.log.Warn("查询攻击链告警失败", zap.String("result_id", resultID), zap.Error(err))
+		return
+	}
+
+	alert := model.Alert{
+		ResultID:       resultID,
+		HostID:         hostID,
+		RuleID:         fmt.Sprintf("seq-%d", rule.ID),
+		Source:         model.AlertSourceDetection,
+		Severity:       rule.Severity,
+		RiskScore:      sequenceRiskScore(rule.Severity),
+		Category:       AttackChainCategory,
+		ATTCKTechnique: rule.MitreID,
+		Title:          rule.Name,
+		Description:    rule.Description,
+		Actual:         string(detail),
+		Status:         model.AlertStatusActive,
+		HitCount:       1,
+		FirstSeenAt:    now,
+		LastSeenAt:     now,
+	}
+	if err := g.db.Create(&alert).Error; err != nil {
+		if isDuplicateKeyErr(err) {
+			var raced model.Alert
+			if e := g.db.Where("result_id = ?", resultID).First(&raced).Error; e == nil {
+				_ = g.refreshExistingAlert(&raced, now, string(detail), masked)
+			}
+			return
+		}
+		g.log.Warn("写入攻击链告警失败", zap.String("result_id", resultID), zap.Error(err))
+		return
+	}
+
+	g.log.Info("攻击链告警生成",
+		zap.Uint("rule_id", rule.ID),
+		zap.String("rule_name", rule.Name),
+		zap.String("host_id", hostID),
+		zap.String("severity", rule.Severity),
+	)
+	g.sendNotification(&alert)
+	g.forwardToSIEM(&alert, masked)
+}
+
 // categorize 根据规则信息确定告警分类
 func categorize(rule *model.DetectionRule) string {
 	if rule.Category != "" {
