@@ -311,9 +311,16 @@ func sequenceRiskScore(severity string) int {
 }
 
 // GenerateFromSequence 为攻击链(序列)命中生成/更新告警并落 alerts 表。
-// 攻击链是多步关联的高置信检测，绕过白名单/灰度(不像单事件规则需降噪)，
-// 以 category=attack_chain 标记，供 incident 关联识别为强 IOA 信号。
+// 攻击链是多步关联的高置信检测，以 category=attack_chain 标记，供 incident 关联识别为强 IOA 信号。
+// 仍尊重用户研判/调优学到的 DB 白名单(同规则+主机被判误报)→ 命中即抑制，使研判学习对攻击链同样闭环。
 func (g *AlertGenerator) GenerateFromSequence(hostID string, rule model.SequenceRule, fields map[string]string) {
+	seqRuleID := fmt.Sprintf("seq-%d", rule.ID)
+	if ok, reason := g.matchDBWhitelist(seqRuleID, hostID, AttackChainCategory, rule.Severity, fields); ok {
+		g.log.Debug("攻击链告警命中白名单已抑制(用户研判/调优学习)",
+			zap.String("rule", rule.Name), zap.String("host_id", hostID), zap.String("reason", reason))
+		return
+	}
+
 	masked := make(map[string]string, len(fields))
 	for k, v := range fields {
 		masked[k] = v
