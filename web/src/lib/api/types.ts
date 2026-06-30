@@ -1048,6 +1048,13 @@ export interface ServiceAlertList { items: ServiceAlert[]; total: number; stats:
 // 注：字段名镜像后端（snake_case）。/policies 返回 { items }（无 total）；其余列表为 Paged<T>{ items, total }。
 
 // 基线检查策略
+// 详细 OS 版本要求：每个 OS 族各自的版本区间
+export interface OSRequirement {
+  os_family: string;
+  min_version?: string;
+  max_version?: string;
+}
+
 export interface BaselinePolicy {
   id: string;
   name: string;
@@ -1055,6 +1062,7 @@ export interface BaselinePolicy {
   description: string;
   os_family: string[];
   os_version: string;
+  os_requirements?: OSRequirement[];
   enabled: boolean;
   group_id?: string;
   runtime_types?: RuntimeType[];

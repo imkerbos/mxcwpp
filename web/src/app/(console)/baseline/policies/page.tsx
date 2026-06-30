@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { baselineApi } from "@/lib/api/baseline";
-import type { BaselinePolicy } from "@/lib/api/types";
+import type { BaselinePolicy, OSRequirement } from "@/lib/api/types";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { FilterBar } from "@/components/ui/FilterBar";
@@ -38,10 +38,18 @@ interface PolicyForm {
   name: string;
   version: string;
   description: string;
-  os_version: string;
+  osRequirements: OSRequirement[];
   enabled: boolean;
 }
-const emptyForm: PolicyForm = { name: "", version: "", description: "", os_version: "", enabled: true };
+const emptyForm: PolicyForm = { name: "", version: "", description: "", osRequirements: [], enabled: true };
+
+// 旧策略只有单串 os_version + os_family 列表时，合成 per-family 要求供编辑
+function legacyToRequirements(p: BaselinePolicy): OSRequirement[] {
+  if (p.os_requirements?.length) return p.os_requirements;
+  const families = p.os_family ?? [];
+  const minV = (p.os_version || "").replace(/[^0-9.]/g, ""); // ">=7" → "7"
+  return families.map((f) => ({ os_family: f, min_version: minV || undefined }));
+}
 
 function BaselinePoliciesContent() {
   const { t } = useTranslation();
@@ -83,25 +91,41 @@ function BaselinePoliciesContent() {
     setForm(emptyForm);
     setDrawerOpen(true);
   };
-  const openEdit = (p: BaselinePolicy) => {
+  const openEdit = async (p: BaselinePolicy) => {
     setEditing(p);
+    // 列表接口不返回 os_requirements，需单查完整策略
+    let full = p;
+    try {
+      full = await baselineApi.getPolicy(p.id);
+    } catch {
+      /* 退回列表数据 */
+    }
     setForm({
-      name: p.name,
-      version: p.version,
-      description: p.description,
-      os_version: p.os_version,
-      enabled: p.enabled,
+      name: full.name,
+      version: full.version,
+      description: full.description,
+      osRequirements: legacyToRequirements(full),
+      enabled: full.enabled,
     });
     setDrawerOpen(true);
   };
 
   const saveMutation = useMutation({
     mutationFn: () => {
+      const reqs = form.osRequirements
+        .map((r) => ({
+          os_family: r.os_family.trim(),
+          min_version: r.min_version?.trim() || undefined,
+          max_version: r.max_version?.trim() || undefined,
+        }))
+        .filter((r) => r.os_family);
       const body: Partial<BaselinePolicy> = {
         name: form.name,
         version: form.version,
         description: form.description,
-        os_version: form.os_version,
+        os_requirements: reqs,
+        // os_family 用于派发过滤，从详细要求派生保持同步
+        os_family: Array.from(new Set(reqs.map((r) => r.os_family))),
         enabled: form.enabled,
       };
       if (!editing && groupId) body.group_id = groupId;
@@ -274,8 +298,59 @@ function BaselinePoliciesContent() {
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             />
           </FormField>
-          <FormField label={t("baseline.policies.fieldOsVersion")}>
-            <Input value={form.os_version} onChange={(e) => setForm((f) => ({ ...f, os_version: e.target.value }))} />
+          <FormField label={t("baseline.policies.fieldOsRequirements")}>
+            <div className="space-y-2">
+              {form.osRequirements.length === 0 && (
+                <p className="text-xs text-faint">{t("baseline.policies.osReqEmpty")}</p>
+              )}
+              {form.osRequirements.map((req, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <Input
+                    value={req.os_family}
+                    placeholder={t("baseline.policies.osReqFamily")}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        osRequirements: f.osRequirements.map((r, i) => (i === idx ? { ...r, os_family: e.target.value } : r)),
+                      }))
+                    }
+                  />
+                  <Input
+                    value={req.min_version ?? ""}
+                    placeholder={t("baseline.policies.osReqMin")}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        osRequirements: f.osRequirements.map((r, i) => (i === idx ? { ...r, min_version: e.target.value } : r)),
+                      }))
+                    }
+                  />
+                  <Input
+                    value={req.max_version ?? ""}
+                    placeholder={t("baseline.policies.osReqMax")}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        osRequirements: f.osRequirements.map((r, i) => (i === idx ? { ...r, max_version: e.target.value } : r)),
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 text-sm text-danger transition-colors hover:opacity-80"
+                    onClick={() => setForm((f) => ({ ...f, osRequirements: f.osRequirements.filter((_, i) => i !== idx) }))}
+                  >
+                    {t("common.delete")}
+                  </button>
+                </div>
+              ))}
+              <Button
+                variant="ghost"
+                onClick={() => setForm((f) => ({ ...f, osRequirements: [...f.osRequirements, { os_family: "" }] }))}
+              >
+                {t("baseline.policies.osReqAdd")}
+              </Button>
+            </div>
           </FormField>
           <FormField label={t("baseline.policies.fieldEnabled")}>
             <Switch checked={form.enabled} onChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
