@@ -1559,6 +1559,7 @@
     "desc": "运行时威胁与 ATT&CK 检测",
     "tab": {
       "edrEvents": "EDR 事件",
+      "threatAlerts": "威胁研判",
       "rules": "检测规则",
       "threatIntel": "威胁情报",
       "intelSchedules": "情报同步计划",
@@ -1592,6 +1593,29 @@
       "triggered": "已触发同步",
       "deleteTitle": "删除同步计划",
       "deleteConfirmDesc": "确认删除同步计划「{{name}}」？"
+    },
+    "threatAlerts": {
+      "intro": "本模块检测引擎产出的告警:单事件规则命中 + 多步攻击链(IOA)。跨来源全量告警见告警中心。",
+      "allStatus": "全部状态",
+      "allSeverity": "全部级别",
+      "allKind": "全部类型",
+      "onlyChain": "仅攻击链",
+      "statusActive": "活跃",
+      "statusResolved": "已解决",
+      "statusIgnored": "已忽略",
+      "filterHostId": "按主机 ID 过滤",
+      "chainTag": "攻击链",
+      "colTime": "时间",
+      "colTitle": "告警",
+      "colCategory": "分类",
+      "colHost": "主机",
+      "colHitCount": "命中次数",
+      "empty": "暂无研判结果",
+      "detailTitle": "威胁研判详情",
+      "firstSeen": "首次发现",
+      "lastSeen": "最近发现",
+      "desc": "描述",
+      "matched": "命中字段"
     },
     "edrEvents": {
       "statTotal": "总事件",

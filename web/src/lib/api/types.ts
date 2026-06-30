@@ -44,6 +44,7 @@ export interface Alert {
   expected?: string;
   fix_suggestion?: string;
   status: "active" | "resolved" | "ignored";
+  hit_count?: number;
   first_seen_at: string;
   last_seen_at: string;
   resolved_at?: string;

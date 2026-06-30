@@ -10,6 +10,7 @@ export default function DetectionLayout({ children }: { children: React.ReactNod
 
   const navItems = [
     { key: "edr-events", label: t("detection.tab.edrEvents"), href: "/detection/edr-events" },
+    { key: "threat-alerts", label: t("detection.tab.threatAlerts"), href: "/detection/threat-alerts" },
     { key: "rules", label: t("detection.tab.rules"), href: "/detection/rules" },
     { key: "threat-intel", label: t("detection.tab.threatIntel"), href: "/detection/threat-intel" },
     { key: "intel-schedules", label: t("detection.tab.intelSchedules"), href: "/detection/intel-schedules" },

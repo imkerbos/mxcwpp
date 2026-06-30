@@ -1559,6 +1559,7 @@
     "desc": "Runtime threats and ATT&CK detection",
     "tab": {
       "edrEvents": "EDR Events",
+      "threatAlerts": "Threat Analysis",
       "rules": "Detection Rules",
       "threatIntel": "Threat Intelligence",
       "intelSchedules": "Intel Sync Plans",
@@ -1592,6 +1593,29 @@
       "triggered": "Sync triggered",
       "deleteTitle": "Delete Sync Plan",
       "deleteConfirmDesc": "Delete sync plan \"{{name}}\"?"
+    },
+    "threatAlerts": {
+      "intro": "Detections produced by this module's engine: single-event rule hits + multi-step attack chains (IOA). See Alert Center for all-source alerts.",
+      "allStatus": "All Status",
+      "allSeverity": "All Severities",
+      "allKind": "All Kinds",
+      "onlyChain": "Attack Chains Only",
+      "statusActive": "Active",
+      "statusResolved": "Resolved",
+      "statusIgnored": "Ignored",
+      "filterHostId": "Filter by host ID",
+      "chainTag": "Chain",
+      "colTime": "Time",
+      "colTitle": "Detection",
+      "colCategory": "Category",
+      "colHost": "Host",
+      "colHitCount": "Hits",
+      "empty": "No detections",
+      "detailTitle": "Detection Detail",
+      "firstSeen": "First Seen",
+      "lastSeen": "Last Seen",
+      "desc": "Description",
+      "matched": "Matched Fields"
     },
     "edrEvents": {
       "statTotal": "Total Events",
