@@ -108,6 +108,8 @@ export default function EdrEventsPage() {
         host_id: detail!.host_id,
         timestamp: detail!.timestamp,
         pid: detail!.pid || undefined,
+        event_type: detail!.event_type || undefined,
+        file_path: detail!.file_path || undefined,
       }),
     enabled: !!detail,
   });

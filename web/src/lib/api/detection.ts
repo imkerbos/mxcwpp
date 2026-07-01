@@ -45,7 +45,7 @@ export const detectionApi = {
   }) => get<Paged<EdrEvent>>("/edr/events", params),
   edrEventStats: (hours?: number) => get<EdrEventStats>("/edr/events/stats", { hours }),
   // 单条完整详情(含 FIM 上下文:username/login_user/parent_exe/content_hash);列表走 lite 精简列
-  edrEventDetail: (params: { host_id: string; timestamp: string; pid?: string }) =>
+  edrEventDetail: (params: { host_id: string; timestamp: string; pid?: string; event_type?: string; file_path?: string }) =>
     get<EdrEvent>("/edr/events/detail", params),
 
   // 检测规则

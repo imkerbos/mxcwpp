@@ -395,6 +395,8 @@ func (h *EDREventsHandler) GetEDREventDetail(c *gin.Context) {
 	hostID := c.Query("host_id")
 	timestamp := c.Query("timestamp")
 	pid := c.Query("pid")
+	eventType := c.Query("event_type")
+	filePath := c.Query("file_path")
 	if hostID == "" || timestamp == "" {
 		BadRequest(c, "host_id 与 timestamp 必填")
 		return
@@ -417,6 +419,16 @@ func (h *EDREventsHandler) GetEDREventDetail(c *gin.Context) {
 	if pid != "" {
 		sql += " AND pid = ?"
 		args = append(args, pid)
+	}
+	// 同一 host+timestamp(ms)+pid 可能有多行(如 process_exec 与 file_open 同刻),
+	// 用 event_type / file_path 消歧,避免详情命中错行导致 FIM 上下文丢失。
+	if eventType != "" {
+		sql += " AND event_type = ?"
+		args = append(args, eventType)
+	}
+	if filePath != "" {
+		sql += " AND file_path = ?"
+		args = append(args, filePath)
 	}
 	sql += " LIMIT 1"
 
