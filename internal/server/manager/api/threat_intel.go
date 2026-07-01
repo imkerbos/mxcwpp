@@ -118,6 +118,11 @@ func (h *ThreatIntelHandler) TriggerSync(c *gin.Context) {
 	SuccessMessage(c, "IOC 同步已触发")
 }
 
+// GetLocalIOCStats 自有情报按类型统计
+func (h *ThreatIntelHandler) GetLocalIOCStats(c *gin.Context) {
+	Success(c, h.service.LocalIOCStats())
+}
+
 // ListLocalIOCs 列出自有情报
 func (h *ThreatIntelHandler) ListLocalIOCs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))

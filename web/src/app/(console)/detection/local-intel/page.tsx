@@ -2,10 +2,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Network, Hash, Globe, Link2, Database } from "lucide-react";
 import { useUrlState } from "@/hooks/useUrlState";
 import { detectionApi } from "@/lib/api/detection";
 import type { LocalIOC } from "@/lib/api/types";
 import { Card } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/StatCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
@@ -32,11 +34,15 @@ export default function LocalIntelPage() {
 
   const typeOptions = [{ label: t("detection.localIntel.allType"), value: "" }, ...IOC_TYPES.map((v) => ({ label: v, value: v }))];
 
+  const { data: stats } = useQuery({ queryKey: ["local-iocs-stats"], queryFn: () => detectionApi.localIocStats() });
   const { data, isLoading } = useQuery({
     queryKey: ["local-iocs", params],
     queryFn: () => detectionApi.listLocalIocs({ type: params.type || undefined, page: params.page, page_size: params.page_size }),
   });
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["local-iocs"] });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["local-iocs"] });
+    queryClient.invalidateQueries({ queryKey: ["local-iocs-stats"] });
+  };
 
   const addMutation = useMutation({
     mutationFn: () => detectionApi.createLocalIoc(form),
@@ -89,6 +95,14 @@ export default function LocalIntelPage() {
 
   return (
     <>
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <StatCard compact label={t("detection.threatIntel.statIp")} value={stats?.ip ?? 0} icon={Network} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statHash")} value={stats?.hash ?? 0} icon={Hash} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statDomain")} value={stats?.domain ?? 0} icon={Globe} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statUrl")} value={stats?.url ?? 0} icon={Link2} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statTotal")} value={stats?.total ?? 0} icon={Database} tone="success" />
+      </div>
+
       <div className="space-y-4">
         <p className="text-sm text-muted">{t("detection.localIntel.intro")}</p>
         <FilterBar extra={<Button onClick={() => setAddOpen(true)}>{t("detection.localIntel.add")}</Button>}>

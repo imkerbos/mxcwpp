@@ -104,6 +104,23 @@ func (t *ThreatIntel) ListLocalIOCs(iocType string, page, pageSize int) ([]model
 	return out, total, err
 }
 
+// LocalIOCStats 自有情报按类型统计
+func (t *ThreatIntel) LocalIOCStats() map[string]int64 {
+	type row struct {
+		IOCType string
+		N       int64
+	}
+	var rows []row
+	t.db.Model(&model.LocalIOC{}).Where("enabled = ?", true).
+		Select("ioc_type, COUNT(*) as n").Group("ioc_type").Scan(&rows)
+	out := map[string]int64{"ip": 0, "hash": 0, "domain": 0, "url": 0, "total": 0}
+	for _, r := range rows {
+		out[r.IOCType] = r.N
+		out["total"] += r.N
+	}
+	return out
+}
+
 // DeleteLocalIOC 删除一条自有情报 + 从 Redis 移除
 func (t *ThreatIntel) DeleteLocalIOC(ctx context.Context, id uint) error {
 	var ioc model.LocalIOC
