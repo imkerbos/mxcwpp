@@ -100,6 +100,20 @@ export default function EdrEventsPage() {
   });
 
   const [detail, setDetail] = useState<EdrEvent | null>(null);
+  // 列表是 lite(缺 parent_exe/uid/FIM 上下文),点开后按 host_id+timestamp+pid 拉完整详情
+  const { data: fullDetail } = useQuery({
+    queryKey: ["edr-event-detail", detail?.host_id, detail?.timestamp, detail?.pid],
+    queryFn: () =>
+      detectionApi.edrEventDetail({
+        host_id: detail!.host_id,
+        timestamp: detail!.timestamp,
+        pid: detail!.pid || undefined,
+        event_type: detail!.event_type || undefined,
+        file_path: detail!.file_path || undefined,
+      }),
+    enabled: !!detail,
+  });
+  const d = fullDetail ?? detail;
 
   const columns: Column<EdrEvent>[] = [
     {
@@ -203,19 +217,32 @@ export default function EdrEventsPage() {
       </div>
 
       <Drawer open={!!detail} onClose={() => setDetail(null)} title={t("detection.edrEvents.detailTitle")} width={560}>
-        {detail && (
+        {d && (
           <div className="space-y-5">
             <div className="space-y-2">
-              <Field label={t("detection.edrEvents.fieldTime")} value={<span className="tabular-nums">{detail.timestamp}</span>} />
-              <Field label={t("detection.edrEvents.fieldHost")} value={detail.hostname || detail.host_id} />
-              <Field label={t("detection.edrEvents.fieldHostId")} value={<span className="inline-flex items-center gap-1.5">{detail.host_id}<CopyButton text={detail.host_id} /></span>} mono />
-              <Field label={t("detection.edrEvents.fieldEventType")} value={<StatusTag tone="neutral">{detail.event_type}</StatusTag>} />
-              <Field label={t("detection.edrEvents.fieldDataType")} value={`${detail.data_type} ${DATA_TYPE_LABEL[detail.data_type] ?? ""}`.trim()} />
-              <Field label={t("detection.edrEvents.fieldPid")} value={dash(detail.pid)} mono />
-              <Field label={t("detection.edrEvents.fieldExe")} value={dash(detail.exe)} mono />
-              <Field label={t("detection.edrEvents.fieldFilePath")} value={dash(detail.file_path)} mono />
-              <Field label={t("detection.edrEvents.fieldRemoteAddr")} value={dash(detail.remote_addr)} mono />
+              <Field label={t("detection.edrEvents.fieldTime")} value={<span className="tabular-nums">{d.timestamp}</span>} />
+              <Field label={t("detection.edrEvents.fieldHost")} value={d.hostname || d.host_id} />
+              <Field label={t("detection.edrEvents.fieldHostId")} value={<span className="inline-flex items-center gap-1.5">{d.host_id}<CopyButton text={d.host_id} /></span>} mono />
+              <Field label={t("detection.edrEvents.fieldEventType")} value={<StatusTag tone="neutral">{d.event_type}</StatusTag>} />
+              <Field label={t("detection.edrEvents.fieldDataType")} value={`${d.data_type} ${DATA_TYPE_LABEL[d.data_type] ?? ""}`.trim()} />
+              <Field label={t("detection.edrEvents.fieldPid")} value={dash(d.pid)} mono />
+              <Field label={t("detection.edrEvents.fieldExe")} value={dash(d.exe)} mono />
+              {d.cmdline && <Field label={t("detection.edrEvents.fieldCmdline")} value={d.cmdline} mono />}
+              <Field label={t("detection.edrEvents.fieldFilePath")} value={dash(d.file_path)} mono />
+              <Field label={t("detection.edrEvents.fieldRemoteAddr")} value={dash(d.remote_addr)} mono />
             </div>
+
+            {/* FIM 上下文:谁改的 / 谁登录的 / 改了什么 —— 文件事件溯源 */}
+            {(d.username || d.login_user || d.login_uid || d.parent_exe || d.content_hash) && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-ink">{t("detection.edrEvents.sectionFimContext")}</div>
+                <Field label={t("detection.edrEvents.fieldActor")} value={d.username ? `${d.username} (uid=${dash(d.uid)})` : dash(d.uid)} mono />
+                <Field label={t("detection.edrEvents.fieldLoginUser")} value={d.login_user ? `${d.login_user} (loginuid=${d.login_uid})` : dash(d.login_uid)} mono />
+                <Field label={t("detection.edrEvents.fieldParentExe")} value={dash(d.parent_exe)} mono />
+                {d.content_hash && <Field label={t("detection.edrEvents.fieldContentHash")} value={<span className="inline-flex items-center gap-1.5 break-all">{d.content_hash}<CopyButton text={d.content_hash} /></span>} mono />}
+                {d.file_size && <Field label={t("detection.edrEvents.fieldFileSize")} value={`${d.file_size} bytes`} mono />}
+              </div>
+            )}
           </div>
         )}
       </Drawer>

@@ -91,7 +91,7 @@ export interface AlertWhitelistSuggestion {
   confidence: number;
   sample_alert_ids: string[] | null;
   resolve_reason_sample: string;
-  status: "pending" | "adopted" | "dismissed";
+  status: "pending" | "adopted" | "dismissed" | "revoked";
   decided_by: string;
   decided_at: string | null;
   whitelist_id: number;
@@ -213,7 +213,7 @@ export interface InspectionSummary {
   total_hosts: number; online_hosts: number; offline_hosts: number;
   agent_outdated_count: number; plugin_error_count: number; plugin_outdated_count: number;
 }
-export interface InspectionHostPlugin { name: string; version: string; status: string; }
+export interface InspectionHostPlugin { name: string; version: string; status: string; need_update?: boolean; }
 export interface InspectionHostItem {
   host_id: string; hostname: string; ipv4: string[];
   status: string; agent_version: string;
@@ -1479,6 +1479,12 @@ export interface EdrEvent {
   uid?: string;
   gid?: string;
   return_code?: string;
+  // FIM 上下文:谁改的(username)/谁登录的(login_uid/login_user)/改了什么(敏感文件 content_hash/file_size)
+  username?: string;
+  login_uid?: string;
+  login_user?: string;
+  content_hash?: string;
+  file_size?: string;
 }
 export interface EdrEventStats {
   total: number;
