@@ -1599,6 +1599,7 @@
       "intro": "Self-owned threat intel (independent of external sync): auto-extracted from confirmed-threat verdicts + manual entries, merged into agent match set.",
       "allType": "All Types",
       "add": "Add IOC",
+      "searchPlaceholder": "Search value/description/source",
       "addTitle": "Add Self-owned IOC",
       "added": "Added",
       "deleted": "Deleted",

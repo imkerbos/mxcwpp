@@ -91,11 +91,15 @@ func (t *ThreatIntel) loadLocalIOCsToRedis(ctx context.Context) int {
 	return n
 }
 
-// ListLocalIOCs 分页列出自有情报
-func (t *ThreatIntel) ListLocalIOCs(iocType string, page, pageSize int) ([]model.LocalIOC, int64, error) {
+// ListLocalIOCs 分页列出自有情报(支持类型 + 值/描述关键词)
+func (t *ThreatIntel) ListLocalIOCs(iocType, keyword string, page, pageSize int) ([]model.LocalIOC, int64, error) {
 	q := t.db.Model(&model.LocalIOC{})
 	if it := normalizeIOCType(iocType); it != "" {
 		q = q.Where("ioc_type = ?", it)
+	}
+	if kw := strings.TrimSpace(keyword); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("value LIKE ? OR description LIKE ? OR ref_id LIKE ?", like, like, like)
 	}
 	var total int64
 	q.Count(&total)

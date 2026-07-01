@@ -133,7 +133,7 @@ func (h *ThreatIntelHandler) ListLocalIOCs(c *gin.Context) {
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 20
 	}
-	items, total, err := h.service.ListLocalIOCs(c.Query("type"), page, pageSize)
+	items, total, err := h.service.ListLocalIOCs(c.Query("type"), c.Query("keyword"), page, pageSize)
 	if err != nil {
 		InternalError(c, "查询自有情报失败")
 		return

@@ -11,6 +11,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
+import { SearchInput } from "@/components/ui/SearchInput";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
@@ -27,7 +28,7 @@ const sourceLabel = (s: string) => (s === "tp_extract" ? "研判提取" : s === 
 export default function LocalIntelPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [params, setParams] = useUrlState({ page: 1, page_size: 20, type: "" });
+  const [params, setParams] = useUrlState({ page: 1, page_size: 20, type: "", keyword: "" });
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ ioc_type: "ip", value: "", severity: "high", description: "" });
   const [deleting, setDeleting] = useState<LocalIOC | null>(null);
@@ -37,7 +38,7 @@ export default function LocalIntelPage() {
   const { data: stats } = useQuery({ queryKey: ["local-iocs-stats"], queryFn: () => detectionApi.localIocStats() });
   const { data, isLoading } = useQuery({
     queryKey: ["local-iocs", params],
-    queryFn: () => detectionApi.listLocalIocs({ type: params.type || undefined, page: params.page, page_size: params.page_size }),
+    queryFn: () => detectionApi.listLocalIocs({ type: params.type || undefined, keyword: params.keyword || undefined, page: params.page, page_size: params.page_size }),
   });
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["local-iocs"] });
@@ -106,6 +107,11 @@ export default function LocalIntelPage() {
       <div className="space-y-4">
         <p className="text-sm text-muted">{t("detection.localIntel.intro")}</p>
         <FilterBar extra={<Button onClick={() => setAddOpen(true)}>{t("detection.localIntel.add")}</Button>}>
+          <SearchInput
+            value={params.keyword}
+            onChange={(v) => setParams((p) => ({ ...p, keyword: v, page: 1 }))}
+            placeholder={t("detection.localIntel.searchPlaceholder")}
+          />
           <Select value={params.type} onChange={(v) => setParams((p) => ({ ...p, type: v, page: 1 }))} options={typeOptions} />
         </FilterBar>
         <Card>

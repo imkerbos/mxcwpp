@@ -63,7 +63,7 @@ export const detectionApi = {
   syncThreatIntel: () => post<{ message: string }>("/threat-intel/sync"),
   // 自有情报库(独立于外部同步)
   localIocStats: () => get<ThreatIntelStats>("/threat-intel/local-iocs/stats"),
-  listLocalIocs: (params: { type?: string; page: number; page_size: number }) => get<Paged<LocalIOC>>("/threat-intel/local-iocs", params),
+  listLocalIocs: (params: { type?: string; keyword?: string; page: number; page_size: number }) => get<Paged<LocalIOC>>("/threat-intel/local-iocs", params),
   createLocalIoc: (body: { ioc_type: string; value: string; severity?: string; description?: string }) => post<void>("/threat-intel/local-iocs", body),
   deleteLocalIoc: (id: number) => del<void>(`/threat-intel/local-iocs/${id}`),
   // 真实威胁研判:解决告警 + 提取 IOC 入自有情报
