@@ -13,6 +13,7 @@ export default function DetectionLayout({ children }: { children: React.ReactNod
     { key: "threat-alerts", label: t("detection.tab.threatAlerts"), href: "/detection/threat-alerts" },
     { key: "rules", label: t("detection.tab.rules"), href: "/detection/rules" },
     { key: "threat-intel", label: t("detection.tab.threatIntel"), href: "/detection/threat-intel" },
+    { key: "local-intel", label: t("detection.tab.localIntel"), href: "/detection/local-intel" },
     { key: "intel-schedules", label: t("detection.tab.intelSchedules"), href: "/detection/intel-schedules" },
     { key: "storylines", label: t("detection.tab.storylines"), href: "/detection/storylines" },
     { key: "hunting", label: t("detection.tab.hunting"), href: "/detection/hunting" },

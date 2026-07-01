@@ -1562,6 +1562,7 @@
       "threatAlerts": "威胁研判",
       "rules": "检测规则",
       "threatIntel": "威胁情报",
+      "localIntel": "自有情报",
       "intelSchedules": "情报同步计划",
       "storylines": "攻击故事线",
       "hunting": "威胁狩猎",
@@ -1593,6 +1594,23 @@
       "triggered": "已触发同步",
       "deleteTitle": "删除同步计划",
       "deleteConfirmDesc": "确认删除同步计划「{{name}}」？"
+    },
+    "localIntel": {
+      "intro": "自有威胁情报库(独立于外部同步):真实威胁研判自动提取 + 人工录入,合并进 agent 匹配集,一处研判全网受益。",
+      "allType": "全部类型",
+      "add": "录入情报",
+      "addTitle": "录入自有情报",
+      "added": "已录入",
+      "deleted": "已删除",
+      "empty": "暂无自有情报",
+      "colType": "类型",
+      "colValue": "值",
+      "colSource": "来源",
+      "colDesc": "描述",
+      "colRef": "来源告警",
+      "colTime": "录入时间",
+      "deleteTitle": "删除情报",
+      "deleteDesc": "确认删除情报「{{value}}」?将同时从 agent 匹配集移除。"
     },
     "threatAlerts": {
       "intro": "本模块检测引擎产出的告警:单事件规则命中 + 多步攻击链(IOA)。跨来源全量告警见告警中心。",

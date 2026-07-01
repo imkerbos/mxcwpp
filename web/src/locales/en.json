@@ -1562,6 +1562,7 @@
       "threatAlerts": "Threat Analysis",
       "rules": "Detection Rules",
       "threatIntel": "Threat Intelligence",
+      "localIntel": "Self Intel",
       "intelSchedules": "Intel Sync Plans",
       "storylines": "Attack Storylines",
       "hunting": "Threat Hunting",
@@ -1593,6 +1594,23 @@
       "triggered": "Sync triggered",
       "deleteTitle": "Delete Sync Plan",
       "deleteConfirmDesc": "Delete sync plan \"{{name}}\"?"
+    },
+    "localIntel": {
+      "intro": "Self-owned threat intel (independent of external sync): auto-extracted from confirmed-threat verdicts + manual entries, merged into agent match set.",
+      "allType": "All Types",
+      "add": "Add IOC",
+      "addTitle": "Add Self-owned IOC",
+      "added": "Added",
+      "deleted": "Deleted",
+      "empty": "No self-owned IOCs",
+      "colType": "Type",
+      "colValue": "Value",
+      "colSource": "Source",
+      "colDesc": "Description",
+      "colRef": "Source Alert",
+      "colTime": "Added",
+      "deleteTitle": "Delete IOC",
+      "deleteDesc": "Delete IOC \"{{value}}\"? It will be removed from the agent match set."
     },
     "threatAlerts": {
       "intro": "Detections produced by this module's engine: single-event rule hits + multi-step attack chains (IOA). See Alert Center for all-source alerts.",
