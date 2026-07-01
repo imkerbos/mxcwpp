@@ -464,6 +464,7 @@
       "statusPending": "待审",
       "statusAdopted": "已采纳",
       "statusDismissed": "已驳回",
+      "statusRevoked": "已撤销",
       "colRule": "规则",
       "colExe": "进程",
       "colScope": "范围",
@@ -479,7 +480,11 @@
       "adoptTitle": "采纳建议",
       "adoptConfirmDesc": "将为进程 {{exe}} 在规则「{{rule}}」上创建告警白名单豁免，检测引擎将不再为该模式产生告警。确认采纳？",
       "dismissTitle": "驳回建议",
-      "dismissConfirmDesc": "驳回进程 {{exe}} 的白名单建议，后续聚合不再复现该建议。确认驳回？"
+      "dismissConfirmDesc": "驳回进程 {{exe}} 的白名单建议，后续聚合不再复现该建议。确认驳回？",
+      "revoke": "撤销",
+      "revoked": "已撤销，对应白名单已删除",
+      "revokeTitle": "撤销采纳",
+      "revokeConfirmDesc": "撤销进程 {{exe}} 的白名单采纳并删除对应豁免，检测引擎将恢复对该模式告警。确认撤销？"
     },
     "incident": {
       "intro": "把同主机、近 24h 内的多源信号(CEL 告警 + 行为异常 + 故事线)关联成攻击链事件,按 ATT&CK 战术阶段排列。",
@@ -1686,8 +1691,15 @@
       "fieldDataType": "数据类型",
       "fieldPid": "PID",
       "fieldExe": "可执行文件",
+      "fieldCmdline": "命令行",
       "fieldFilePath": "文件路径",
-      "fieldRemoteAddr": "远端地址"
+      "fieldRemoteAddr": "远端地址",
+      "sectionFimContext": "文件变更溯源",
+      "fieldActor": "操作用户",
+      "fieldLoginUser": "登录用户",
+      "fieldParentExe": "父进程",
+      "fieldContentHash": "内容哈希",
+      "fieldFileSize": "文件大小"
     },
     "storylines": {
       "filterHostId": "按主机 ID 过滤",
@@ -1978,6 +1990,7 @@
       "agentAll": "全部 Agent 版本",
       "agentOutdated": "Agent 待升级",
       "agentLatest": "Agent 最新",
+      "allPlugins": "全部插件",
       "restartAgent": "重启 Agent",
       "pluginCount": "{{n}} 个插件",
       "empty": "暂无主机",
