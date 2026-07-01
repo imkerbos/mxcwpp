@@ -213,7 +213,7 @@ export interface InspectionSummary {
   total_hosts: number; online_hosts: number; offline_hosts: number;
   agent_outdated_count: number; plugin_error_count: number; plugin_outdated_count: number;
 }
-export interface InspectionHostPlugin { name: string; version: string; status: string; }
+export interface InspectionHostPlugin { name: string; version: string; status: string; need_update?: boolean; }
 export interface InspectionHostItem {
   host_id: string; hostname: string; ipv4: string[];
   status: string; agent_version: string;

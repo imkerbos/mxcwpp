@@ -54,14 +54,11 @@ export default function InspectionPage() {
     ];
   }, [allHosts, t]);
 
-  const pluginOptions = useMemo(() => {
-    const set = new Set<string>();
-    allHosts.forEach((h) => h.plugins?.forEach((p) => p.name && set.add(p.name)));
-    return [
-      { label: t("operations.inspection.allPlugins"), value: "" },
-      ...Array.from(set).sort().map((name) => ({ label: name, value: name })),
-    ];
-  }, [allHosts, t]);
+  const pluginOptions = [
+    { label: t("operations.inspection.pluginAll"), value: "" },
+    { label: t("operations.inspection.pluginError"), value: "error" },
+    { label: t("operations.inspection.pluginOutdated"), value: "outdated" },
+  ];
 
   const hosts = useMemo(() => {
     const kw = search.trim().toLowerCase();
@@ -70,7 +67,8 @@ export default function InspectionPage() {
       if (blFilter && h.business_line !== blFilter) return false;
       if (agentFilter === "outdated" && !(h.agent_version && latestAgentVersion && h.agent_version !== latestAgentVersion)) return false;
       if (agentFilter === "latest" && h.agent_version !== latestAgentVersion) return false;
-      if (pluginFilter && !h.plugins?.some((p) => p.name === pluginFilter)) return false;
+      if (pluginFilter === "error" && !h.plugins?.some((p) => p.status === "error" || p.status === "stopped")) return false;
+      if (pluginFilter === "outdated" && !h.plugins?.some((p) => p.need_update)) return false;
       if (kw) {
         const hay = `${h.hostname} ${h.host_id} ${h.ipv4?.join(" ") ?? ""}`.toLowerCase();
         if (!hay.includes(kw)) return false;
