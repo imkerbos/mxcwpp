@@ -36,6 +36,10 @@ type vulnerabilityListFilter struct {
 	Component     string
 	ExploitStatus string // has_exploit / in_kev / none
 	Ecosystem     string // OS / Go / npm / PyPI / Maven / Cargo
+	// PackageType 包类型维度: os(系统/rpm/dnf/yum/apt 发行版包) / app(应用依赖 golang/maven/npm/pypi) / all(全部)
+	// 判别源 vulnerabilities.source: osv 聚合源=应用依赖, 其余(rhsa/debian-tracker/alpine/rocky-apollo/usn)=OS 发行版通告。
+	// 默认 os: 系统只显示 OS 包漏洞, 屏蔽应用依赖噪声。
+	PackageType   string
 	Priority      string // high / medium-high / medium / low
 	VulnCategory  string // P5.1: kernel/critical_shared_lib/shared_lib/system_daemon/cli_tool/web_service/db_service/container_runtime/virtualization/language_dep/other
 	RestartAction string // P5.5: reboot_host/restart_dependent_services/restart_specific_service/no_action/rebuild_app/unknown
@@ -55,8 +59,22 @@ type vulnerabilityListFilter struct {
 	Sort    string // priority_score / cvss_score
 }
 
+// applyPackageType 按包类型维度过滤: os=发行版 OS 包(rpm/dnf/yum/apt) / app=应用依赖 / 其余=全部不过滤。
+// 判别 vulnerabilities.source: osv 是应用依赖(golang/maven/npm/pypi)聚合源, 其余均为 OS 发行版通告。
+func applyPackageType(query *gorm.DB, packageType string) *gorm.DB {
+	switch packageType {
+	case "os":
+		return query.Where("vulnerabilities.source <> ?", "osv")
+	case "app":
+		return query.Where("vulnerabilities.source = ?", "osv")
+	}
+	return query
+}
+
 func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityListFilter) *gorm.DB {
 	query := h.db.Model(&model.Vulnerability{})
+
+	query = applyPackageType(query, filter.PackageType)
 
 	if filter.HostID != "" {
 		query = query.Joins("JOIN host_vulnerabilities hv ON hv.vuln_id = vulnerabilities.id")
@@ -199,6 +217,8 @@ func (h *VulnerabilitiesHandler) countAffectedHosts(filter vulnerabilityListFilt
 		Joins("JOIN vulnerabilities ON vulnerabilities.id = hv.vuln_id").
 		Distinct("hv.host_id")
 
+	query = applyPackageType(query, filter.PackageType)
+
 	if filter.Search != "" {
 		pattern := "%" + filter.Search + "%"
 		query = query.Where(
@@ -264,6 +284,11 @@ func (h *VulnerabilitiesHandler) UpdateCategoryOverride(c *gin.Context) {
 func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	// 包类型默认 os: 系统只显示 OS/rpm/dnf/yum/apt 发行版包漏洞, 应用依赖需显式 package_type=app|all。
+	packageType := strings.TrimSpace(c.Query("package_type"))
+	if packageType == "" {
+		packageType = "os"
+	}
 	filter := vulnerabilityListFilter{
 		HostID:        strings.TrimSpace(c.Query("host_id")),
 		Search:        strings.TrimSpace(c.Query("search")),
@@ -281,6 +306,7 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		CWECategory:   strings.TrimSpace(c.Query("cwe_category")),
 		ShowAll:       c.Query("show_all") == "true",
 		Sort:          strings.TrimSpace(c.Query("sort")),
+		PackageType:   packageType,
 	}
 	if page <= 0 {
 		page = 1

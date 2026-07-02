@@ -35,6 +35,8 @@ export const vulnApi = {
     fix_owner?: string;
     show_all?: boolean;
     sort?: string;
+    // 包类型: os(系统/rpm/dnf/yum/apt) / app(应用依赖) / all。默认 os(系统只显示 OS 包漏洞)。
+    package_type?: string;
   }) => get<VulnerabilityListResult>("/vulnerabilities", params),
   getVuln: (id: number) => get<Vulnerability>(`/vulnerabilities/${id}`),
   ignoreVuln: (id: number) => post<void>(`/vulnerabilities/${id}/ignore`),
