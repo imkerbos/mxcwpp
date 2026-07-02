@@ -155,7 +155,7 @@ export function OverviewReport({ range }: Props) {
             type: "line",
             yAxisIndex: 1,
             smooth: true,
-            data: scoreTrend.passRates.map((v) => +(v * 100).toFixed(1)),
+            data: scoreTrend.passRates.map((v) => +v.toFixed(1)),
             itemStyle: { color: "#22C55E" },
             areaStyle: { color: "rgba(34,197,94,0.06)" },
           },
