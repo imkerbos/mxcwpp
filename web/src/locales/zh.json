@@ -534,7 +534,7 @@
       "ignored": "已忽略"
     },
     "list": {
-      "statTotal": "漏洞总数",
+      "statTotal": "漏洞种类",
       "statCritical": "严重",
       "statHigh": "高危",
       "statAffectedHosts": "影响主机",
@@ -637,9 +637,9 @@
     },
     "remediation": {
       "loadError": "暂无修复数据",
-      "statTotalVulns": "漏洞总数",
-      "statPatched": "已修复",
-      "statUnpatched": "未修复",
+      "statTotalVulns": "主机漏洞实例",
+      "statPatched": "已修复实例",
+      "statUnpatched": "未修复实例",
       "statRate": "修复率",
       "statMttr": "平均修复时长",
       "sevNone": "无",
@@ -653,9 +653,13 @@
       "countItems": "{{n}} 个",
       "topUnpatchedTitle": "未修复 Top 主机",
       "emptyTopUnpatched": "暂无未修复主机",
-      "colTotal": "漏洞总数",
+      "colTotal": "漏洞实例数",
       "colPatched": "已修复",
-      "colUnpatched": "未修复"
+      "colUnpatched": "未修复",
+      "trendTitle": "每日检出 / 修复趋势（主机实例）",
+      "trendDiscovered": "检出",
+      "trendPatched": "修复",
+      "emptyTrend": "暂无趋势数据"
     },
     "remediationTasks": {
       "statTotal": "总任务",

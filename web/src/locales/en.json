@@ -534,7 +534,7 @@
       "ignored": "Ignored"
     },
     "list": {
-      "statTotal": "Total Vulnerabilities",
+      "statTotal": "Vulnerability Types",
       "statCritical": "Critical",
       "statHigh": "High",
       "statAffectedHosts": "Affected Hosts",
@@ -637,9 +637,9 @@
     },
     "remediation": {
       "loadError": "No remediation data",
-      "statTotalVulns": "Total Vulnerabilities",
-      "statPatched": "Patched",
-      "statUnpatched": "Unpatched",
+      "statTotalVulns": "Host Vuln Instances",
+      "statPatched": "Patched Instances",
+      "statUnpatched": "Unpatched Instances",
       "statRate": "Remediation Rate",
       "statMttr": "Avg. Remediation Time",
       "sevNone": "None",
@@ -653,9 +653,13 @@
       "countItems": "{{n}}",
       "topUnpatchedTitle": "Top Unpatched Hosts",
       "emptyTopUnpatched": "No unpatched hosts",
-      "colTotal": "Total",
+      "colTotal": "Instances",
       "colPatched": "Patched",
-      "colUnpatched": "Unpatched"
+      "colUnpatched": "Unpatched",
+      "trendTitle": "Daily Detected / Patched (Host Instances)",
+      "trendDiscovered": "Detected",
+      "trendPatched": "Patched",
+      "emptyTrend": "No trend data"
     },
     "remediationTasks": {
       "statTotal": "Total Tasks",

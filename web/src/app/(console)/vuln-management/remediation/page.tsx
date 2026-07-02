@@ -36,6 +36,10 @@ export default function RemediationPage() {
     queryKey: ["vuln-remediation-stats"],
     queryFn: () => vulnApi.remediationReport(),
   });
+  const { data: trend } = useQuery({
+    queryKey: ["vuln-remediation-trend"],
+    queryFn: () => vulnApi.remediationTrend(30),
+  });
 
   if (isLoading) {
     return <Card className="p-10 text-center text-muted">{t("common.loading")}</Card>;
@@ -58,6 +62,20 @@ export default function RemediationPage() {
       { name: t("vuln.remediation.legendUnpatched"), type: "bar", stack: "total", data: bySeverity.map((s) => s.unpatched), itemStyle: { color: "#EF4444" } },
     ],
   };
+
+  const trendData = trend ?? [];
+  const trendOption = {
+    tooltip: { trigger: "axis" },
+    legend: { data: [t("vuln.remediation.trendDiscovered"), t("vuln.remediation.trendPatched")], bottom: 0 },
+    grid: { left: "3%", right: "4%", top: 16, bottom: 36, containLabel: true },
+    xAxis: { type: "category", boundaryGap: false, data: trendData.map((d) => d.date.slice(5)) },
+    yAxis: { type: "value" },
+    series: [
+      { name: t("vuln.remediation.trendDiscovered"), type: "line", smooth: true, showSymbol: false, data: trendData.map((d) => d.discovered), itemStyle: { color: "#EF4444" }, areaStyle: { opacity: 0.08 } },
+      { name: t("vuln.remediation.trendPatched"), type: "line", smooth: true, showSymbol: false, data: trendData.map((d) => d.patched), itemStyle: { color: "#22C55E" }, areaStyle: { opacity: 0.08 } },
+    ],
+  };
+  const hasTrend = trendData.some((d) => d.discovered > 0 || d.patched > 0);
 
   const topColumns: Column<RemediationHostStat>[] = [
     { key: "hostname", title: t("common.host"), render: (r) => <span className="font-medium text-ink">{r.hostname || r.hostId}</span> },
@@ -129,6 +147,16 @@ export default function RemediationPage() {
           </Card>
         )}
       </div>
+
+      {/* 每日检出/修复趋势（实例级，与顶部卡片同源） */}
+      {hasTrend ? (
+        <ChartCard title={t("vuln.remediation.trendTitle")} option={trendOption} />
+      ) : (
+        <Card>
+          <CardHeader title={t("vuln.remediation.trendTitle")} />
+          <EmptyState title={t("vuln.remediation.emptyTrend")} desc="" />
+        </Card>
+      )}
 
       {/* 未修复 TopN */}
       <Card>

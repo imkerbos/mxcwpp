@@ -375,7 +375,8 @@ type DailyTrend struct {
 	Discovered int64  `json:"discovered"`
 }
 
-// GetRemediationTrend 获取近 N 天修复趋势
+// GetRemediationTrend 获取近 N 天主机漏洞实例的每日检出/修复趋势（实例级口径，
+// 与 GetRemediationStats 顶部卡片同源，切勿混用 vulnerabilities 表的 CVE 级字段）。
 func (s *RemediationService) GetRemediationTrend(days int) ([]DailyTrend, error) {
 	if days <= 0 {
 		days = 30
@@ -383,23 +384,27 @@ func (s *RemediationService) GetRemediationTrend(days int) ([]DailyTrend, error)
 
 	startDate := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 
-	// 每日新发现漏洞数
+	// 统计口径 = host_vulnerabilities（主机漏洞实例），与 GetRemediationStats 同源。
+	// 禁用 vulnerabilities 表：其 discovered_at = advisory 发布日（与主机无关）、
+	// status/patched_at 是 CVE 级 rollup（全部主机修好才置 patched），拿来算每日趋势
+	// 会得到与卡片实例级口径打架的数（发现线错、修复线恒 0）。发现时间用 host_vuln
+	// 无 discovered_at 故取 created_at（主机首次检出），与 MTTR 口径一致。
 	var discoveredRows []struct {
 		Date  string `gorm:"column:date"`
 		Count int64  `gorm:"column:count"`
 	}
-	s.db.Model(&model.Vulnerability{}).
-		Select("DATE(discovered_at) as date, COUNT(*) as count").
-		Where("discovered_at >= ?", startDate).
-		Group("DATE(discovered_at)").
+	s.db.Model(&model.HostVulnerability{}).
+		Select("DATE(created_at) as date, COUNT(*) as count").
+		Where("created_at >= ?", startDate).
+		Group("DATE(created_at)").
 		Scan(&discoveredRows)
 
-	// 每日修复漏洞数
+	// 每日修复主机漏洞实例数（host_vuln.status=patched，单主机单漏洞修好即计）
 	var patchedRows []struct {
 		Date  string `gorm:"column:date"`
 		Count int64  `gorm:"column:count"`
 	}
-	s.db.Model(&model.Vulnerability{}).
+	s.db.Model(&model.HostVulnerability{}).
 		Select("DATE(patched_at) as date, COUNT(*) as count").
 		Where("patched_at >= ? AND status = ?", startDate, "patched").
 		Group("DATE(patched_at)").
