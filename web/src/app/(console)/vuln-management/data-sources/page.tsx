@@ -140,7 +140,8 @@ export default function DataSourcesPage() {
       title: t("vuln.dataSources.colLastStatus"),
       render: (r) => <StatusTag tone={statusTone(r.lastStatus)}>{STATUS_LABEL[r.lastStatus] ?? r.lastStatus}</StatusTag>,
     },
-    { key: "lastCount", title: t("vuln.dataSources.colLastCount"), render: (r) => <span className="tabular-nums text-ink">{r.lastCount}</span> },
+    { key: "lastCount", title: t("vuln.dataSources.colLastCount"), render: (r) => <span className="tabular-nums text-muted">{r.lastCount}</span> },
+    { key: "vulnCount", title: t("vuln.dataSources.colVulnCount"), render: (r) => <span className="tabular-nums text-ink">{r.vulnCount ?? 0}</span> },
     {
       key: "actions",
       title: t("common.actions"),

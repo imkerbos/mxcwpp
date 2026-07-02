@@ -284,6 +284,50 @@ func (s *dbWatermarkStore) Save(source string, t time.Time) error {
 		Update("advisory_watermark", &lt).Error
 }
 
+// MarkRunning / MarkSuccess / MarkFailed 实现 vulnsync.SyncStatusReporter：回写 source 同步状态，
+// 让 manager UI 正确显示 OS advisory 源（rhsa/rocky-apollo 等）的同步状态/时间/条数，
+// 修复"搬到 VulnSync 后只回写 watermark、状态停在 never/0 条"的显示 bug。
+// 直连 DB 更新（VulnSync 独立进程，不反向依赖 manager/biz）。
+
+func (s *dbWatermarkStore) MarkRunning(source string) {
+	now := model.LocalTime(time.Now())
+	s.db.Model(&model.VulnDataSource{}).Where("name = ?", source).
+		Updates(map[string]any{
+			"last_status":  model.VulnSourceStatusRunning,
+			"last_sync_at": &now,
+			"last_error":   "",
+		})
+}
+
+func (s *dbWatermarkStore) MarkSuccess(source string, count int64, duration time.Duration) {
+	now := model.LocalTime(time.Now())
+	s.db.Model(&model.VulnDataSource{}).Where("name = ?", source).
+		Updates(map[string]any{
+			"last_status":      model.VulnSourceStatusSuccess,
+			"last_sync_at":     &now,
+			"last_count":       count,
+			"last_duration_ms": duration.Milliseconds(),
+			"last_error":       "",
+		})
+}
+
+func (s *dbWatermarkStore) MarkFailed(source string, err error) {
+	if err == nil {
+		return
+	}
+	now := model.LocalTime(time.Now())
+	msg := err.Error()
+	if len(msg) > 2000 {
+		msg = msg[:2000]
+	}
+	s.db.Model(&model.VulnDataSource{}).Where("name = ?", source).
+		Updates(map[string]any{
+			"last_status":  model.VulnSourceStatusFailed,
+			"last_sync_at": &now,
+			"last_error":   msg,
+		})
+}
+
 // buildAdvisorySources 构造 OS 厂商 advisory 源池。
 //
 // 优先级：显式 -sources(enabled) 命中 → 直接启用（人工覆盖）；否则走 fleet-aware 门控——

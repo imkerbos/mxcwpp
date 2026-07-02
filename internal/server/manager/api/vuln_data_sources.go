@@ -42,6 +42,25 @@ func (h *VulnDataSourcesHandler) List(c *gin.Context) {
 		InternalError(c, "查询漏洞数据源失败")
 		return
 	}
+	// 补每个 source 当前在库(未删)漏洞数：last_count 只是"上次同步 delta"(静默期为 0)，
+	// vulnCount 反映真实库存，避免 UI 误显 "0 条"。
+	type srcCount struct {
+		Source string `gorm:"column:source"`
+		N      int64  `gorm:"column:n"`
+	}
+	var counts []srcCount
+	h.db.Table("vulnerabilities").
+		Select("source, COUNT(*) AS n").
+		Where("deleted_at IS NULL").
+		Group("source").
+		Scan(&counts)
+	countMap := make(map[string]int64, len(counts))
+	for _, sc := range counts {
+		countMap[sc.Source] = sc.N
+	}
+	for i := range rows {
+		rows[i].VulnCount = countMap[rows[i].Name]
+	}
 	Success(c, rows)
 }
 
