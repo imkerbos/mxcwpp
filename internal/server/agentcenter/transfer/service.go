@@ -306,6 +306,11 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	s.registerConnection(agentID, conn)
 	defer s.unregisterConnection(agentID, conn)
 
+	// 无条件解除离线告警：连接建立即代表 agent 已恢复。幂等(只 resolve 存在的 active offline 告警)，
+	// 且不依赖 host.LastHeartbeat 判断——重连自身的心跳会把 LastHeartbeat 刷成 now，导致
+	// checkAndSendAgentOnlineNotification 的"<3min 视为未离线"判定误跳过解除，离线告警残留(read-after-write 竞态)。
+	go s.resolveAgentOfflineAlert(agentID)
+
 	// 检查并发送 Agent 上线恢复通知（如果之前离线）
 	go s.checkAndSendAgentOnlineNotification(agentID, conn)
 
