@@ -6,6 +6,10 @@ ARG VERSION=dev
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 
+# 国内/香港构建走 goproxy.cn，避免默认 proxy.golang.org 拉不动卡死
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=off
+
 RUN apk add --no-cache git protobuf protobuf-dev && \
     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
