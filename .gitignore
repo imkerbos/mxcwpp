@@ -199,3 +199,6 @@ local-reports/
 
 # 内网专用文档（本地保留，禁止上 github）
 docs/internal/
+
+# openssl CA serial artifact (generated)
+deploy/certs/*.srl
