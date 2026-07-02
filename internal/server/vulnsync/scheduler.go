@@ -26,6 +26,17 @@ type WatermarkStore interface {
 	Save(source string, t time.Time) error
 }
 
+// SyncStatusReporter 可选：回写各 source 的同步状态（running/success/failed）+ 本轮条数 + 耗时到持久层，
+// 供 UI 展示"上次同步状态/时间/条数"。store 实现此接口则回写，否则静默跳过（测试 / 无 DB 态）。
+//
+// 背景：架构解耦后 rhsa/rocky-apollo 等 OS advisory 源的拉取搬到 VulnSync，之前只回写
+// advisory_watermark，未回写 last_status/last_count，导致 manager UI 显示 "never / 0 条" 误导运维。
+type SyncStatusReporter interface {
+	MarkRunning(source string)
+	MarkSuccess(source string, count int64, duration time.Duration)
+	MarkFailed(source string, err error)
+}
+
 // Scheduler 统一编排 advisory.Source 拉源 → Publisher 推送富 advisory。
 //
 // Leader 在线时启动抓取, 失去 leader 立即停止。每个 advisory 包装成
@@ -151,6 +162,10 @@ func (s *Scheduler) fetchDueSources(ctx context.Context) {
 // 持久化（仅成功推进，失败不推进，避免漏拉）。
 func (s *Scheduler) fetchOne(ctx context.Context, src advisory.Source, since, fetchStart time.Time) {
 	name := src.Name()
+	reporter, _ := s.store.(SyncStatusReporter) // store 未实现则为 nil，回写静默跳过
+	if reporter != nil {
+		reporter.MarkRunning(name)
+	}
 	s.logger.Info("vulnsync 开始 fetch",
 		zap.String("source", name),
 		zap.Time("since", since))
@@ -160,6 +175,9 @@ func (s *Scheduler) fetchOne(ctx context.Context, src advisory.Source, since, fe
 		s.logger.Error("vulnsync fetch 失败",
 			zap.String("source", name),
 			zap.Error(err))
+		if reporter != nil {
+			reporter.MarkFailed(name, err)
+		}
 		return
 	}
 
@@ -186,11 +204,17 @@ func (s *Scheduler) fetchOne(ctx context.Context, src advisory.Source, since, fe
 			zap.String("source", name),
 			zap.Int("succeeded", succ),
 			zap.Error(err))
+		if reporter != nil {
+			reporter.MarkFailed(name, err)
+		}
 		return
 	}
 	s.logger.Info("vulnsync publish 完成",
 		zap.String("source", name),
 		zap.Int("succeeded", succ))
+	if reporter != nil {
+		reporter.MarkSuccess(name, int64(succ), time.Since(fetchStart))
+	}
 
 	// 成功后推进 watermark（内存 + 持久层）：下轮/重启后按此 since 增量拉取，不再全量。
 	s.mu.Lock()
