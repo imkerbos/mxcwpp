@@ -2308,7 +2308,28 @@
       "edrTactic": "ATT&CK 战术分布",
       "edrTopRules": "Top 命中规则",
       "edrEmptyRules": "暂无规则命中",
-      "countTimes": "{{count}} 次"
+      "countTimes": "{{count}} 次",
+      "execReport": {
+        "back": "返回列表",
+        "exportPdf": "导出 PDF",
+        "exporting": "导出中…",
+        "recommendation": "结论与建议",
+        "suggestions": "改进建议",
+        "appendixText": "本报告由矩阵云安全平台自动生成，仅供参考。数据截止时间以报告周期为准。"
+      },
+      "savedReports": {
+        "colTitle": "标题",
+        "colReportId": "报告编号",
+        "colPeriod": "报告周期",
+        "colCreatedAt": "生成时间",
+        "colActions": "操作",
+        "actionView": "查看",
+        "actionDelete": "删除",
+        "deleteTitle": "删除报告",
+        "deleteDesc": "确定要删除此报告吗？此操作不可撤销。",
+        "deleteSuccess": "报告已删除",
+        "empty": "暂无已保存报告"
+      }
     },
     "install": {
       "tabRpm": "RPM (CentOS/RHEL/Rocky)",
