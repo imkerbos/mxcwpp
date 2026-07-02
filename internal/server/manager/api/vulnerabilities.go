@@ -375,20 +375,23 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 			vulnIDs[i] = v.ID
 		}
 		type aggRow struct {
-			VulnID         uint   `gorm:"column:vuln_id"`
-			AssetType      string `gorm:"column:asset_type"`
-			Subscope       string `gorm:"column:subscope"`
-			FixOwner       string `gorm:"column:fix_owner"`
-			HostBinaryPath string `gorm:"column:host_binary_path"`
+			VulnID           uint   `gorm:"column:vuln_id"`
+			AssetType        string `gorm:"column:asset_type"`
+			Subscope         string `gorm:"column:subscope"`
+			FixOwner         string `gorm:"column:fix_owner"`
+			HostBinaryPath   string `gorm:"column:host_binary_path"`
+			MatchedComponent string `gorm:"column:matched_component"`
 		}
 		var aggs []aggRow
 		// 用 MAX() 取任一非 unknown 值,subscope/binary_path 同理(UI 提示性,非精确性要求)
+		// matched_component 取任一非空真实包名,让 UI 显示主机真实装的包而非 advisory 错标子包名
 		h.db.Raw(`
 SELECT vuln_id,
   COALESCE(MAX(CASE WHEN asset_type<>'unknown' AND asset_type<>'' THEN asset_type END), 'unknown') AS asset_type,
   COALESCE(MAX(CASE WHEN subscope<>'unknown' AND subscope<>'' THEN subscope END), 'unknown') AS subscope,
   COALESCE(MAX(CASE WHEN fix_owner<>'unknown' AND fix_owner<>'' THEN fix_owner END), 'unknown') AS fix_owner,
-  COALESCE(MAX(CASE WHEN host_binary_path<>'' THEN host_binary_path END), '') AS host_binary_path
+  COALESCE(MAX(CASE WHEN host_binary_path<>'' THEN host_binary_path END), '') AS host_binary_path,
+  COALESCE(MAX(CASE WHEN matched_component<>'' THEN matched_component END), '') AS matched_component
 FROM host_vulnerabilities WHERE vuln_id IN ?
 GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 		aggMap := make(map[uint]aggRow, len(aggs))
@@ -401,6 +404,7 @@ GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 				vulns[i].Subscope = a.Subscope
 				vulns[i].FixOwner = a.FixOwner
 				vulns[i].HostBinaryPath = a.HostBinaryPath
+				vulns[i].MatchedComponent = a.MatchedComponent
 			}
 		}
 	}

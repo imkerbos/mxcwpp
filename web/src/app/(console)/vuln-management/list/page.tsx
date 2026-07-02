@@ -139,7 +139,7 @@ export default function VulnListPage() {
       render: (r) => (isSeverity(r.severity) ? <SeverityTag level={r.severity} /> : <StatusTag tone="neutral">{r.severity || "—"}</StatusTag>),
     },
     { key: "cvssScore", title: "CVSS", render: (r) => <span className="tabular-nums">{r.cvssScore?.toFixed(1) ?? "—"}</span> },
-    { key: "component", title: t("vuln.list.colComponent"), render: (r) => <span className="text-muted">{r.component || "—"}</span> },
+    { key: "component", title: t("vuln.list.colComponent"), render: (r) => <span className="text-muted">{r.matchedComponent || r.component || "—"}</span> },
     { key: "affectedHosts", title: t("vuln.list.colAffectedHosts"), render: (r) => <span className="tabular-nums">{r.affectedHosts ?? 0}</span> },
     { key: "status", title: t("common.status"), render: (r) => statusTag(r.status) },
     {

@@ -1052,6 +1052,8 @@ export interface Vulnerability {
   subscope?: string;
   fixOwner?: string;
   hostBinaryPath?: string;
+  // matchedComponent 主机实际匹配到的真实包名；优先于 component 展示(component 常是 advisory 错标子包名)
+  matchedComponent?: string;
   createdAt?: string;
   updatedAt?: string;
   hosts?: VulnerabilityHostRef[];
