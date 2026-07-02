@@ -2223,7 +2223,6 @@
       "edrEventsByHour": "Hourly Trend",
       "edrTopHostsByEvent": "Top Hosts (Event Volume)",
       "edrTopExe": "Top Processes (Event Volume)",
-      "edrColEventType": "Event Type",
       "edrColExe": "Process Path",
       "edrAutoResponseTitle": "Auto-Response Statistics",
       "edrNetworkBlocks": "IP Blocks",
@@ -2246,7 +2245,17 @@
       "edrColAlertCount": "Alerts",
       "edrColRiskScore": "Risk Score",
       "edrSuppressionTitle": "False-Positive Suppression",
-      "edrColReason": "Ignore Reason"
+      "edrColReason": "Ignore Reason",
+      "edrEnabledRules": "Enabled Rules",
+      "edrTotalRules": "Total Rules",
+      "edrTotalAlerts": "Total Alerts",
+      "edrActive": "Active Alerts",
+      "edrTotalStories": "Attack Stories",
+      "edrHighRiskStories": "High-Risk Stories",
+      "edrTactic": "ATT&CK Tactic Distribution",
+      "edrTopRules": "Top Hit Rules",
+      "edrHitRules": "Hit Rules",
+      "edrHitRate": "Rule Hit Rate"
     },
     "taskReport": {
       "tabAntivirus": "Antivirus",

@@ -2223,7 +2223,6 @@
       "edrEventsByHour": "小时趋势",
       "edrTopHostsByEvent": "Top 主机（事件量）",
       "edrTopExe": "Top 进程（事件量）",
-      "edrColEventType": "事件类型",
       "edrColExe": "进程路径",
       "edrAutoResponseTitle": "自动响应统计",
       "edrNetworkBlocks": "IP 封禁",
@@ -2246,7 +2245,17 @@
       "edrColAlertCount": "告警数",
       "edrColRiskScore": "风险评分",
       "edrSuppressionTitle": "误报抑制统计",
-      "edrColReason": "忽略原因"
+      "edrColReason": "忽略原因",
+      "edrEnabledRules": "启用规则",
+      "edrTotalRules": "规则总数",
+      "edrTotalAlerts": "告警总数",
+      "edrActive": "活跃告警",
+      "edrTotalStories": "攻击故事",
+      "edrHighRiskStories": "高危故事",
+      "edrTactic": "ATT&CK 战术分布",
+      "edrTopRules": "Top 命中规则",
+      "edrHitRules": "命中规则",
+      "edrHitRate": "规则命中率"
     },
     "taskReport": {
       "tabAntivirus": "病毒查杀",
