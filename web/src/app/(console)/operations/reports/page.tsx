@@ -9,6 +9,8 @@ import { RangePicker, lastNDays } from "@/components/ui/RangePicker";
 import type { DateRange } from "@/components/ui/RangePicker";
 import { useUrlState } from "@/hooks/useUrlState";
 import { OverviewReport } from "./_views/OverviewReport";
+import { AntivirusReport } from "./_views/AntivirusReport";
+import { VulnerabilityReport } from "./_views/VulnerabilityReport";
 
 const TAB_KEYS = ["overview", "antivirus", "vuln", "kube", "edr"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -46,9 +48,9 @@ export default function ReportsPage() {
       case "overview":
         return <OverviewReport key={refreshKey} range={range} />;
       case "antivirus":
-        return <ComingSoonPlaceholder label={t("operations.reports.comingSoon")} />;
+        return <AntivirusReport key={refreshKey} range={range} />;
       case "vuln":
-        return <ComingSoonPlaceholder label={t("operations.reports.comingSoon")} />;
+        return <VulnerabilityReport key={refreshKey} range={range} />;
       case "kube":
         return <ComingSoonPlaceholder label={t("operations.reports.comingSoon")} />;
       case "edr":
