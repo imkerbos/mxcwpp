@@ -530,6 +530,7 @@
     "status": {
       "unpatched": "Unpatched",
       "patched": "Patched",
+      "fixed": "Fixed",
       "ignored": "Ignored"
     },
     "list": {

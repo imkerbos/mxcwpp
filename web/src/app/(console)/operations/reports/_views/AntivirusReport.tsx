@@ -101,7 +101,7 @@ export function AntivirusReport({ range }: Props) {
         type: "pie",
         radius: "65%",
         data: threatTypeEntries.map(([name, value]) => ({
-          name: t(`virus.threatType.${name}`) || name,
+          name: t(`virus.threatType.${name}`, { defaultValue: name }),
           value,
         })),
       },

@@ -530,6 +530,7 @@
     "status": {
       "unpatched": "未修复",
       "patched": "已修复",
+      "fixed": "已修复",
       "ignored": "已忽略"
     },
     "list": {

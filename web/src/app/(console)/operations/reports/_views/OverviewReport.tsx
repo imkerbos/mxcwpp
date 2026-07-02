@@ -55,8 +55,6 @@ export function OverviewReport({ range }: Props) {
     queryFn: () => reportsApi.topRiskHosts(10),
   });
 
-  const overallLoading = statsLoading || scoreTrendLoading || checkTrendLoading || rulesLoading || hostsLoading;
-
   if (statsLoading && !statsData) {
     return (
       <Card className="p-10 text-center text-muted">{t("operations.reports.loading")}</Card>
