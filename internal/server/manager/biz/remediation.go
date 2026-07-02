@@ -260,7 +260,19 @@ type RemediationStats struct {
 	RemediationRate float64                `json:"remediationRate"` // 百分比
 	MTTR            float64                `json:"mttr"`            // 平均修复时间（小时）
 	BySeverity      []SeverityStats        `json:"bySeverity"`
-	TopUnpatched    []HostRemediationStats `json:"topUnpatched"` // Top 10 未修复最多的主机
+	TopUnpatched    []HostRemediationStats `json:"topUnpatched"`  // Top 10 未修复最多的主机
+	RecentPatched   []PatchedInstance      `json:"recentPatched"` // 最近已修复的主机漏洞实例明细
+}
+
+// PatchedInstance 已修复的主机漏洞实例明细
+type PatchedInstance struct {
+	CveID     string           `json:"cveId"`
+	Severity  string           `json:"severity"`
+	HostID    string           `json:"hostId"`
+	Hostname  string           `json:"hostname"`
+	IP        string           `json:"ip"`
+	Component string           `json:"component"`
+	PatchedAt *model.LocalTime `json:"patchedAt"`
 }
 
 // SeverityStats 按严重级别统计
@@ -364,6 +376,16 @@ func (s *RemediationService) GetRemediationStats() (*RemediationStats, error) {
 			Patched:  row.Patched,
 		})
 	}
+
+	// 最近已修复实例明细（让"已修复"计数可下钻，看到修了哪个 CVE/主机）
+	stats.RecentPatched = []PatchedInstance{}
+	s.db.Table("host_vulnerabilities AS hv").
+		Select("v.cve_id AS cve_id, v.severity AS severity, hv.host_id AS host_id, hv.hostname AS hostname, hv.ip AS ip, COALESCE(NULLIF(hv.matched_component, ''), v.component) AS component, hv.patched_at AS patched_at").
+		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+		Where("hv.status = ?", "patched").
+		Order("hv.patched_at DESC").
+		Limit(50).
+		Scan(&stats.RecentPatched)
 
 	return stats, nil
 }

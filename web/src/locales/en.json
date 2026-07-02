@@ -23,7 +23,8 @@
       "critical": "Critical",
       "high": "High",
       "medium": "Medium",
-      "low": "Low"
+      "low": "Low",
+      "label": "Severity"
     },
     "level": "Severity",
     "time": "Time",
@@ -659,7 +660,12 @@
       "trendTitle": "Daily Detected / Patched (Host Instances)",
       "trendDiscovered": "Detected",
       "trendPatched": "Patched",
-      "emptyTrend": "No trend data"
+      "emptyTrend": "No trend data",
+      "patchedDetailTitle": "Patched Details",
+      "emptyPatched": "No patched records",
+      "colCve": "CVE",
+      "colComponent": "Component",
+      "colPatchedAt": "Patched At"
     },
     "remediationTasks": {
       "statTotal": "Total Tasks",

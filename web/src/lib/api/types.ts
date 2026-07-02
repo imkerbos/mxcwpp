@@ -1136,6 +1136,16 @@ export interface RemediationReport {
   mttr: number;
   bySeverity: RemediationSeverityStat[];
   topUnpatched: RemediationHostStat[] | null;
+  recentPatched: RemediationPatchedInstance[] | null;
+}
+export interface RemediationPatchedInstance {
+  cveId: string;
+  severity: string;
+  hostId: string;
+  hostname: string;
+  ip: string;
+  component: string;
+  patchedAt: string | null;
 }
 export interface RemediationTrendItem { date: string; patched: number; discovered: number; }
 

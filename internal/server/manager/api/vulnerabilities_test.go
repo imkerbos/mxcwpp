@@ -111,3 +111,59 @@ func TestListVulnerabilitiesWithHostFilter(t *testing.T) {
 		t.Fatalf("unexpected stats: %+v", response.Data.Stats)
 	}
 }
+
+// TestListVulnerabilities_PatchedFilterInstanceLevel 验证列表页"已修复"筛选走实例级。
+// CVE 级 vulnerabilities.status 停在 unpatched（只 1 台主机修好，未全队列修复），
+// 旧实现按 vulnerabilities.status='patched' 筛会返回空 —— 修复页显示已修 >0 但列表筛已修看不到。
+// 新实现按 EXISTS host_vulnerabilities.status='patched' 命中，能看到该 CVE。
+func TestListVulnerabilities_PatchedFilterInstanceLevel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupTestDB(t)
+	now := model.LocalTime(time.Now())
+
+	if err := db.Create(&model.Vulnerability{
+		ID: 1, CveID: "CVE-2026-9001", Severity: "high", Component: "vim",
+		Status: "unpatched", DiscoveredAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create vuln: %v", err)
+	}
+	// 同一 CVE：host-1 已修、host-2 未修（CVE 级仍 unpatched）
+	if err := db.Create(&model.HostVulnerability{
+		ID: 1, VulnID: 1, HostID: "host-1", Hostname: "web-01", Status: "patched", PatchedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create hv1: %v", err)
+	}
+	if err := db.Create(&model.HostVulnerability{
+		ID: 2, VulnID: 1, HostID: "host-2", Hostname: "web-02", Status: "unpatched", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create hv2: %v", err)
+	}
+
+	handler := NewVulnerabilitiesHandler(db, zap.NewNop())
+	router := gin.New()
+	router.GET("/vulnerabilities", handler.ListVulnerabilities)
+
+	recorder := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/vulnerabilities?status=patched", nil)
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Data struct {
+			Total int                   `json:"total"`
+			Items []model.Vulnerability `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if response.Data.Total != 1 || len(response.Data.Items) != 1 {
+		t.Fatalf("patched filter total=%d items=%d, want 1/1 (instance-level, not CVE-level)", response.Data.Total, len(response.Data.Items))
+	}
+	// 展示状态应与筛选口径一致
+	if response.Data.Items[0].Status != "patched" {
+		t.Fatalf("displayed status = %q, want patched", response.Data.Items[0].Status)
+	}
+}

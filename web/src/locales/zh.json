@@ -23,7 +23,8 @@
       "critical": "严重",
       "high": "高危",
       "medium": "中危",
-      "low": "低危"
+      "low": "低危",
+      "label": "级别"
     },
     "level": "级别",
     "time": "时间",
@@ -659,7 +660,12 @@
       "trendTitle": "每日检出 / 修复趋势（主机实例）",
       "trendDiscovered": "检出",
       "trendPatched": "修复",
-      "emptyTrend": "暂无趋势数据"
+      "emptyTrend": "暂无趋势数据",
+      "patchedDetailTitle": "已修复明细",
+      "emptyPatched": "暂无已修复记录",
+      "colCve": "CVE",
+      "colComponent": "组件",
+      "colPatchedAt": "修复时间"
     },
     "remediationTasks": {
       "statTotal": "总任务",

@@ -18,7 +18,8 @@
 |---|---|---|---|
 | **漏洞种类** | `COUNT(DISTINCT vulnerabilities.id)` WHERE `EXISTS host_vulnerabilities`(命中主机的 CVE 去重数) | 漏洞列表页顶部卡片 | ❌ `vulnerabilities` 全表 COUNT(含 orphan 库存) |
 | **主机漏洞实例** | `COUNT(*) FROM host_vulnerabilities WHERE status != 'ignored'` | 修复页顶部卡片 | ❌ `vulnerabilities.affected_hosts` 求和(stale) |
-| **已修复实例** | `COUNT(*) FROM host_vulnerabilities WHERE status = 'patched'` | 修复页 + 趋势图 | ❌ `vulnerabilities.status='patched'` |
+| **已修复实例** | `COUNT(*) FROM host_vulnerabilities WHERE status = 'patched'` | 修复页卡片 + 趋势图 + 修复页"已修复明细"表 | ❌ `vulnerabilities.status='patched'` |
+| **列表页状态筛选** | `EXISTS host_vulnerabilities WHERE vuln_id=… AND status=?`(该 CVE 有此状态的实例即命中) | 漏洞列表页"已修复/未修复"筛选 | ❌ `vulnerabilities.status=?`(CVE 级,漏掉部分修复) |
 | **修复率** | 已修复实例 / (主机漏洞实例)  | 修复页 | ❌ CVE 级派生 |
 | **MTTR** | `AVG(TIMESTAMPDIFF(HOUR, created_at, patched_at))` on `host_vulnerabilities` WHERE `patched` | 修复页 | — |
 | **每日检出趋势** | `host_vulnerabilities` 按 `DATE(created_at)` 分组(主机首次检出) | 修复页趋势图 | ❌ `vulnerabilities.discovered_at`(= advisory 发布日，与主机无关) |

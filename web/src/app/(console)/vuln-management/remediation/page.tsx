@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { SeverityTag } from "@/components/ui/Tag";
 import type { Severity } from "@/lib/api/types";
-import type { RemediationHostStat } from "@/lib/api/types";
+import type { RemediationHostStat, RemediationPatchedInstance } from "@/lib/api/types";
 
 const KNOWN_SEV: Severity[] = ["critical", "high", "medium", "low"];
 
@@ -50,6 +50,7 @@ export default function RemediationPage() {
 
   const bySeverity = data.bySeverity ?? [];
   const topUnpatched = data.topUnpatched ?? [];
+  const recentPatched = data.recentPatched ?? [];
 
   const severityOption = {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
@@ -87,6 +88,14 @@ export default function RemediationPage() {
       title: t("vuln.remediation.colUnpatched"),
       render: (r) => <span className="tabular-nums text-danger">{r.total - r.patched}</span>,
     },
+  ];
+
+  const patchedColumns: Column<RemediationPatchedInstance>[] = [
+    { key: "cveId", title: t("vuln.remediation.colCve"), render: (r) => <span className="font-mono text-xs text-ink">{r.cveId}</span> },
+    { key: "severity", title: t("common.severity.label"), render: (r) => (KNOWN_SEV.includes(r.severity as Severity) ? <SeverityTag level={r.severity as Severity} /> : <span className="text-muted">{SEV_LABEL[r.severity] ?? r.severity}</span>) },
+    { key: "host", title: t("common.host"), render: (r) => <span className="text-ink">{r.hostname || r.hostId.slice(0, 12)}</span> },
+    { key: "component", title: t("vuln.remediation.colComponent"), render: (r) => <span className="font-mono text-xs text-muted">{r.component || "—"}</span> },
+    { key: "patchedAt", title: t("vuln.remediation.colPatchedAt"), render: (r) => <span className="tabular-nums text-xs text-muted">{r.patchedAt ? r.patchedAt.replace("T", " ").slice(0, 19) : "—"}</span> },
   ];
 
   return (
@@ -166,6 +175,18 @@ export default function RemediationPage() {
             <EmptyState title={t("vuln.remediation.emptyTopUnpatched")} desc="" />
           ) : (
             <DataTable columns={topColumns} rows={topUnpatched} rowKey={(r) => r.hostId} />
+          )}
+        </div>
+      </Card>
+
+      {/* 已修复明细（实例级下钻） */}
+      <Card>
+        <CardHeader title={t("vuln.remediation.patchedDetailTitle")} />
+        <div className="px-1 pb-2">
+          {recentPatched.length === 0 ? (
+            <EmptyState title={t("vuln.remediation.emptyPatched")} desc="" />
+          ) : (
+            <DataTable columns={patchedColumns} rows={recentPatched} rowKey={(r) => `${r.cveId}-${r.hostId}`} />
           )}
         </div>
       </Card>

@@ -97,7 +97,13 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		if filter.HostID != "" {
 			query = query.Where("hv.status = ?", filter.Status)
 		} else {
-			query = query.Where("vulnerabilities.status = ?", filter.Status)
+			// 实例级口径:该 CVE 存在处于此状态的主机实例即命中。
+			// 禁用 vulnerabilities.status —— 它是 CVE 级 rollup,全部主机修好才置 patched,
+			// 用它筛"已修复"会漏掉"部分主机已修"的实例(如某 CVE 命中 3 台仅 1 台修好),
+			// 导致修复页显示已修数 >0 但列表筛已修返回空。详见 docs/vuln-stats-glossary.md。
+			query = query.Where(
+				"EXISTS (SELECT 1 FROM host_vulnerabilities WHERE host_vulnerabilities.vuln_id = vulnerabilities.id AND host_vulnerabilities.status = ?)",
+				filter.Status)
 		}
 	}
 
@@ -327,6 +333,11 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 	for i := range vulns {
 		if filter.HostID != "" {
 			vulns[i].AffectedHosts = len(vulns[i].Hosts)
+		}
+		// 按状态筛选时,状态列反映实例级筛选口径。vulnerabilities.status 是 CVE 级 rollup
+		// (全部主机修好才 patched),与"已修复实例"不一致,直接展示会让用户困惑。
+		if filter.Status != "" {
+			vulns[i].Status = filter.Status
 		}
 	}
 
