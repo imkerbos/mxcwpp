@@ -535,7 +535,7 @@
       "ignored": "已忽略"
     },
     "list": {
-      "statTotal": "漏洞种类",
+      "statTotal": "漏洞总数(种类)",
       "statCritical": "严重",
       "statHigh": "高危",
       "statAffectedHosts": "影响主机",
@@ -566,7 +566,11 @@
       "unignoreTitle": "取消忽略",
       "unignoreConfirmDesc": "确认取消忽略漏洞「{{cve}}」？",
       "ignored": "已忽略",
-      "unignored": "已取消忽略"
+      "unignored": "已取消忽略",
+      "statHostInstances": "主机漏洞总数",
+      "statPatched": "已修复",
+      "statUnpatched": "未修复",
+      "statRate": "修复率"
     },
     "bulletins": {
       "statActive": "活跃通报",

@@ -535,7 +535,7 @@
       "ignored": "Ignored"
     },
     "list": {
-      "statTotal": "Vulnerability Types",
+      "statTotal": "Vulnerabilities (Types)",
       "statCritical": "Critical",
       "statHigh": "High",
       "statAffectedHosts": "Affected Hosts",
@@ -566,7 +566,11 @@
       "unignoreTitle": "Unignore",
       "unignoreConfirmDesc": "Unignore vulnerability \"{{cve}}\"?",
       "ignored": "Ignored",
-      "unignored": "Unignored"
+      "unignored": "Unignored",
+      "statHostInstances": "Host Vuln Instances",
+      "statPatched": "Patched",
+      "statUnpatched": "Unpatched",
+      "statRate": "Remediation Rate"
     },
     "bulletins": {
       "statActive": "Active Bulletins",

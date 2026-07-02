@@ -412,14 +412,33 @@ GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 
 	affectedHosts := h.countAffectedHosts(statsFilter)
 
+	// 实例级统计（主机漏洞实例口径，与修复报告页同源）：在当前筛选的 vuln 集合上统计
+	// host_vulnerabilities。清掉状态约束以便按 patched/unpatched 拆分。CVE 级 total 是"漏洞种类"，
+	// 实例级是"主机×漏洞"，两者量纲不同、各自展示，见 docs/vuln-stats-glossary.md。
+	baseFilter := filter
+	baseFilter.Status = ""
+	vulnIDQuery := h.buildVulnerabilityQuery(baseFilter).Select("vulnerabilities.id")
+	var hostInstances, patchedInstances, unpatchedInstances int64
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status != ?", vulnIDQuery, "ignored").Count(&hostInstances)
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status = ?", vulnIDQuery, "patched").Count(&patchedInstances)
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status = ?", vulnIDQuery, "unpatched").Count(&unpatchedInstances)
+	var remediationRate float64
+	if hostInstances > 0 {
+		remediationRate = float64(patchedInstances) / float64(hostInstances) * 100
+	}
+
 	Success(c, gin.H{
 		"items": vulns,
 		"total": total,
 		"stats": gin.H{
-			"total":         statsTotal,
-			"critical":      critical,
-			"high":          high,
-			"affectedHosts": affectedHosts,
+			"total":           statsTotal, // 漏洞种类（CVE 去重）
+			"critical":        critical,
+			"high":            high,
+			"affectedHosts":   affectedHosts,
+			"hostInstances":   hostInstances,      // 主机漏洞总数（实例）
+			"patched":         patchedInstances,   // 已修复实例
+			"unpatched":       unpatchedInstances, // 未修复实例
+			"remediationRate": remediationRate,    // 修复率 %
 		},
 	})
 }
