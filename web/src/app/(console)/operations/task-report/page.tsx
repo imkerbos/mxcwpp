@@ -5,6 +5,9 @@ import { Tabs } from "@/components/ui/Tabs";
 import { useUrlState } from "@/hooks/useUrlState";
 import { BaselineTaskReport } from "./_views/BaselineTaskReport";
 import { AntivirusTaskReport } from "./_views/AntivirusTaskReport";
+import { VulnTaskReport } from "./_views/VulnTaskReport";
+import { RemediationTaskReport } from "./_views/RemediationTaskReport";
+import { KubeTaskReport } from "./_views/KubeTaskReport";
 
 const TAB_KEYS = [
   "baseline",
@@ -45,23 +48,11 @@ export default function TaskReportPage() {
       case "antivirus":
         return <AntivirusTaskReport />;
       case "vuln":
-        return (
-          <ComingSoonPlaceholder
-            label={t("operations.taskReport.tabVuln")}
-          />
-        );
+        return <VulnTaskReport />;
       case "remediation":
-        return (
-          <ComingSoonPlaceholder
-            label={t("operations.taskReport.tabRemediation")}
-          />
-        );
+        return <RemediationTaskReport />;
       case "container":
-        return (
-          <ComingSoonPlaceholder
-            label={t("operations.taskReport.tabContainer")}
-          />
-        );
+        return <KubeTaskReport />;
     }
   }
 
