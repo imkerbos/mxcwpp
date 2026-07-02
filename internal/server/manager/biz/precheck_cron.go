@@ -231,30 +231,60 @@ func (c *PreCheckCron) InvalidateCacheForVuln(vulnID uint) error {
 func (c *PreCheckCron) reconcileAlreadyPatched() {
 	closedStatuses := []string{model.PreCheckStatusNotInstalled, model.PreCheckStatusNotInRepo}
 
-	var affectedVulnIDs []uint
+	// 先收集待关闭 hv id（只读，不持锁）。
+	var ids []uint
 	c.db.Model(&model.HostVulnerability{}).
 		Where("status = ? AND precheck_status IN ?", model.HostVulnStatusUnpatched, closedStatuses).
-		Distinct("vuln_id").Pluck("vuln_id", &affectedVulnIDs)
-	if len(affectedVulnIDs) == 0 {
+		Pluck("id", &ids)
+	if len(ids) == 0 {
 		return
 	}
 
+	// 分块 UPDATE：大批量单条 UPDATE 会与 consumer 并发写 host_vulnerabilities 争锁死锁(Error 1213)。
+	// 小批 + 死锁重试 + 批间 sleep，既避免死锁又不饿死 consumer。
 	now := model.Now()
-	res := c.db.Model(&model.HostVulnerability{}).
-		Where("status = ? AND precheck_status IN ?", model.HostVulnStatusUnpatched, closedStatuses).
-		Updates(map[string]any{
-			"status":         model.HostVulnStatusPatched,
-			"prev_status":    model.HostVulnStatusUnpatched,
-			"patched_reason": model.PatchedReasonPreCheckVerified,
-			"patched_at":     &now,
-		})
-	if res.Error != nil {
-		c.logger.Warn("precheck 存量对账关闭失败", zap.Error(res.Error))
-		return
+	const chunk = 200
+	var totalClosed int64
+	affectedVulns := map[uint]struct{}{}
+	for start := 0; start < len(ids); start += chunk {
+		end := start + chunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+
+		var res *gorm.DB
+		for attempt := 0; attempt < 3; attempt++ {
+			res = c.db.Model(&model.HostVulnerability{}).
+				Where("id IN ? AND status = ?", batch, model.HostVulnStatusUnpatched).
+				Updates(map[string]any{
+					"status":         model.HostVulnStatusPatched,
+					"prev_status":    model.HostVulnStatusUnpatched,
+					"patched_reason": model.PatchedReasonPreCheckVerified,
+					"patched_at":     &now,
+				})
+			if res.Error == nil {
+				break
+			}
+			time.Sleep(300 * time.Millisecond) // 死锁/锁等待退避后重试
+		}
+		if res.Error != nil {
+			c.logger.Warn("precheck 存量对账分批关闭失败(跳过)", zap.Error(res.Error))
+			continue
+		}
+		totalClosed += res.RowsAffected
+
+		// 记录本批受影响 vuln_id 供后续重算 patched_hosts
+		var vids []uint
+		c.db.Model(&model.HostVulnerability{}).Where("id IN ?", batch).Distinct("vuln_id").Pluck("vuln_id", &vids)
+		for _, v := range vids {
+			affectedVulns[v] = struct{}{}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// 重算受影响 vuln 的 patched_hosts；若已无 unpatched 主机则整体置 patched。
-	for _, vid := range affectedVulnIDs {
+	for vid := range affectedVulns {
 		var patched, unpatched int64
 		c.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vid, model.HostVulnStatusPatched).Count(&patched)
 		c.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vid, model.HostVulnStatusUnpatched).Count(&unpatched)
@@ -266,8 +296,8 @@ func (c *PreCheckCron) reconcileAlreadyPatched() {
 		c.db.Model(&model.Vulnerability{}).Where("id = ?", vid).Updates(upd)
 	}
 
-	if res.RowsAffected > 0 {
+	if totalClosed > 0 {
 		c.logger.Info("precheck 存量对账：已打补丁漏洞关闭",
-			zap.Int64("closed", res.RowsAffected), zap.Int("vulns", len(affectedVulnIDs)))
+			zap.Int64("closed", totalClosed), zap.Int("vulns", len(affectedVulns)))
 	}
 }
