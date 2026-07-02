@@ -11,6 +11,7 @@ import { useUrlState } from "@/hooks/useUrlState";
 import { OverviewReport } from "./_views/OverviewReport";
 import { AntivirusReport } from "./_views/AntivirusReport";
 import { VulnerabilityReport } from "./_views/VulnerabilityReport";
+import { KubeReport } from "./_views/KubeReport";
 
 const TAB_KEYS = ["overview", "antivirus", "vuln", "kube", "edr"] as const;
 type TabKey = (typeof TAB_KEYS)[number];
@@ -52,7 +53,7 @@ export default function ReportsPage() {
       case "vuln":
         return <VulnerabilityReport key={refreshKey} range={range} />;
       case "kube":
-        return <ComingSoonPlaceholder label={t("operations.reports.comingSoon")} />;
+        return <KubeReport key={refreshKey} range={range} />;
       case "edr":
         return <ComingSoonPlaceholder label={t("operations.reports.comingSoon")} />;
     }
