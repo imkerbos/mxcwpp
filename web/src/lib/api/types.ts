@@ -1052,6 +1052,8 @@ export interface Vulnerability {
   subscope?: string;
   fixOwner?: string;
   hostBinaryPath?: string;
+  // matchedComponent 主机实际匹配到的真实包名；优先于 component 展示(component 常是 advisory 错标子包名)
+  matchedComponent?: string;
   createdAt?: string;
   updatedAt?: string;
   hosts?: VulnerabilityHostRef[];
@@ -1241,6 +1243,10 @@ export interface VulnDataSource {
   lastError?: string;
   lastCount: number;
   lastDurationMs: number;
+  // vulnCount 该源当前在库漏洞数(运行时聚合)。lastCount 是上次同步 delta(静默期为 0)，
+  // vulnCount 反映真实库存，OS 源(rhsa/rocky-apollo)同步由 VulnSync 负责时看这个更准。
+  vulnCount?: number;
+  advisoryWatermark?: string;
   createdAt: string;
   updatedAt: string;
 }

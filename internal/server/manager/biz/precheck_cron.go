@@ -67,6 +67,10 @@ func (c *PreCheckCron) Run(ctx context.Context) {
 
 // tickOnce 单轮巡检
 func (c *PreCheckCron) tickOnce(ctx context.Context) {
+	// 先用已有 pre-check 判定对账存量：把 pre-check 已确认"漏洞版本不在"(not_installed / not_in_repo=已装>=修复版)
+	// 却仍挂 unpatched 的 host_vuln 立即关闭。反应式 HandleResult 处理新结果，本步清历史积压，不必等 24h 重扫。
+	c.reconcileAlreadyPatched()
+
 	cutoff := time.Now().Add(-c.cacheTTL)
 	// 先按 host_id 分组找到 online + 有过期/未检 precheck 漏洞的 host
 	type hostBatch struct {
@@ -215,4 +219,55 @@ func (c *PreCheckCron) InvalidateCacheForVuln(vulnID uint) error {
 			"precheck_packages":   "",
 			"precheck_checked_at": nil,
 		}).Error
+}
+
+// reconcileAlreadyPatched 用已有的 pre-check 判定对账存量：把 pre-check 已确认"漏洞版本不在"
+// (not_installed=未装该漏洞版本 / not_in_repo=已装且版本>=修复版) 却仍挂 unpatched 的
+// host_vuln 立即关闭为 patched，并重算受影响 vuln 的 patched_hosts。
+//
+// 背景：agent 软件采集可能滞后(升级后仍报旧版)，致 CleanupAlreadyPatched(按 software 表比对)
+// 漏关；pre-check 走 agent 实时 rpm -q，判定权威。本方法直接采信 pre-check 结果对账，不依赖 software 表。
+// available / outdated_repo = 仍有洞，不关。
+func (c *PreCheckCron) reconcileAlreadyPatched() {
+	closedStatuses := []string{model.PreCheckStatusNotInstalled, model.PreCheckStatusNotInRepo}
+
+	var affectedVulnIDs []uint
+	c.db.Model(&model.HostVulnerability{}).
+		Where("status = ? AND precheck_status IN ?", model.HostVulnStatusUnpatched, closedStatuses).
+		Distinct("vuln_id").Pluck("vuln_id", &affectedVulnIDs)
+	if len(affectedVulnIDs) == 0 {
+		return
+	}
+
+	now := model.Now()
+	res := c.db.Model(&model.HostVulnerability{}).
+		Where("status = ? AND precheck_status IN ?", model.HostVulnStatusUnpatched, closedStatuses).
+		Updates(map[string]any{
+			"status":         model.HostVulnStatusPatched,
+			"prev_status":    model.HostVulnStatusUnpatched,
+			"patched_reason": model.PatchedReasonPreCheckVerified,
+			"patched_at":     &now,
+		})
+	if res.Error != nil {
+		c.logger.Warn("precheck 存量对账关闭失败", zap.Error(res.Error))
+		return
+	}
+
+	// 重算受影响 vuln 的 patched_hosts；若已无 unpatched 主机则整体置 patched。
+	for _, vid := range affectedVulnIDs {
+		var patched, unpatched int64
+		c.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vid, model.HostVulnStatusPatched).Count(&patched)
+		c.db.Model(&model.HostVulnerability{}).Where("vuln_id = ? AND status = ?", vid, model.HostVulnStatusUnpatched).Count(&unpatched)
+		upd := map[string]any{"patched_hosts": patched}
+		if unpatched == 0 {
+			upd["status"] = model.HostVulnStatusPatched
+			upd["patched_at"] = &now
+		}
+		c.db.Model(&model.Vulnerability{}).Where("id = ?", vid).Updates(upd)
+	}
+
+	if res.RowsAffected > 0 {
+		c.logger.Info("precheck 存量对账：已打补丁漏洞关闭",
+			zap.Int64("closed", res.RowsAffected), zap.Int("vulns", len(affectedVulnIDs)))
+	}
 }

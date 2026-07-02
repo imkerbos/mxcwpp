@@ -58,6 +58,12 @@ const buildAssetTypeOptions = (t: TFunction) => [
   { label: t("vuln.list.assetTypeApplication"), value: "application" },
   { label: t("vuln.list.assetTypeMiddleware"), value: "middleware" },
 ];
+// 包类型: 默认只看系统包(OS/rpm/dnf/yum/apt), 应用依赖(golang/maven/npm/pypi)默认隐藏。
+const buildPackageTypeOptions = (t: TFunction) => [
+  { label: t("vuln.list.packageTypeOs"), value: "os" },
+  { label: t("vuln.list.packageTypeApp"), value: "app" },
+  { label: t("vuln.list.packageTypeAll"), value: "all" },
+];
 
 export default function VulnListPage() {
   const { t } = useTranslation();
@@ -72,6 +78,7 @@ export default function VulnListPage() {
   const severityOptions = buildSeverityOptions(t);
   const statusOptions = buildStatusOptions(t);
   const assetTypeOptions = buildAssetTypeOptions(t);
+  const packageTypeOptions = buildPackageTypeOptions(t);
   const [params, setParams] = useUrlState({
     page: 1,
     page_size: 20,
@@ -79,6 +86,7 @@ export default function VulnListPage() {
     severity: "",
     status: "",
     asset_type: "",
+    package_type: "os",
   });
 
   const { data, isLoading } = useQuery({
@@ -91,6 +99,7 @@ export default function VulnListPage() {
         severity: params.severity || undefined,
         status: params.status || undefined,
         asset_type: params.asset_type || undefined,
+        package_type: params.package_type || undefined,
       }),
   });
   const stats = data?.stats;
@@ -130,7 +139,7 @@ export default function VulnListPage() {
       render: (r) => (isSeverity(r.severity) ? <SeverityTag level={r.severity} /> : <StatusTag tone="neutral">{r.severity || "—"}</StatusTag>),
     },
     { key: "cvssScore", title: "CVSS", render: (r) => <span className="tabular-nums">{r.cvssScore?.toFixed(1) ?? "—"}</span> },
-    { key: "component", title: t("vuln.list.colComponent"), render: (r) => <span className="text-muted">{r.component || "—"}</span> },
+    { key: "component", title: t("vuln.list.colComponent"), render: (r) => <span className="text-muted">{r.matchedComponent || r.component || "—"}</span> },
     { key: "affectedHosts", title: t("vuln.list.colAffectedHosts"), render: (r) => <span className="tabular-nums">{r.affectedHosts ?? 0}</span> },
     { key: "status", title: t("common.status"), render: (r) => statusTag(r.status) },
     {
@@ -183,6 +192,7 @@ export default function VulnListPage() {
             onChange={(v) => setParams((p) => ({ ...p, search: v, page: 1 }))}
             placeholder={t("vuln.list.searchPlaceholder")}
           />
+          <Select value={params.package_type} onChange={(v) => setParams((p) => ({ ...p, package_type: v, page: 1 }))} options={packageTypeOptions} />
           <Select value={params.severity} onChange={(v) => setParams((p) => ({ ...p, severity: v, page: 1 }))} options={severityOptions} />
           <Select value={params.status} onChange={(v) => setParams((p) => ({ ...p, status: v, page: 1 }))} options={statusOptions} />
           <Select value={params.asset_type} onChange={(v) => setParams((p) => ({ ...p, asset_type: v, page: 1 }))} options={assetTypeOptions} />
