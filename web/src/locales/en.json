@@ -65,7 +65,9 @@
       "building": "Under construction",
       "buildingDesc": "This feature will be available in a later phase"
     },
-    "poweredBy": "Powered by {{brand}}"
+    "poweredBy": "Powered by {{brand}}",
+    "refresh": "Refresh",
+    "ip": "IP Address"
   },
   "nav": {
     "section": "Navigation",
@@ -2132,7 +2134,28 @@
       "chartSeverity": "Baseline Severity Distribution",
       "chartOs": "OS Distribution",
       "categoryTitle": "Baseline Check Category Distribution",
-      "emptyCategory": "No category data"
+      "emptyCategory": "No category data",
+      "pageTitle": "Report Management",
+      "pageDesc": "Security posture overview and module reports",
+      "tabOverview": "Security Overview",
+      "tabAntivirus": "Antivirus",
+      "tabVuln": "Vulnerabilities",
+      "tabKube": "Container Security",
+      "tabEdr": "EDR Detection",
+      "comingSoon": "Coming soon",
+      "trendScore": "Baseline Score",
+      "trendPassRate": "Pass Rate",
+      "chartScoreTrend": "Baseline Score Trend",
+      "chartCheckTrend": "Check Result Trend",
+      "topFailedRules": "Top 10 Failed Checks",
+      "topRiskHosts": "Top 10 Risk Hosts",
+      "colRuleTitle": "Check Name",
+      "colSeverity": "Severity",
+      "colCategory": "Category",
+      "colAffectedHosts": "Affected Hosts",
+      "colHostname": "Hostname",
+      "colScore": "Score",
+      "colFailCount": "Failures"
     },
     "taskReport": {
       "tabAntivirus": "Antivirus",

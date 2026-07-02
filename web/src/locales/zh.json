@@ -65,7 +65,9 @@
       "building": "模块建设中",
       "buildingDesc": "该功能将在后续阶段上线"
     },
-    "poweredBy": "由 {{brand}} 提供"
+    "poweredBy": "由 {{brand}} 提供",
+    "refresh": "刷新",
+    "ip": "IP 地址"
   },
   "nav": {
     "section": "导航",
@@ -2132,7 +2134,28 @@
       "chartSeverity": "基线严重级别分布",
       "chartOs": "操作系统分布",
       "categoryTitle": "基线检查类别分布",
-      "emptyCategory": "暂无类别数据"
+      "emptyCategory": "暂无类别数据",
+      "pageTitle": "报告管理",
+      "pageDesc": "安全态势全览与各模块报表",
+      "tabOverview": "安全总览",
+      "tabAntivirus": "病毒查杀",
+      "tabVuln": "漏洞管理",
+      "tabKube": "容器安全",
+      "tabEdr": "EDR检测",
+      "comingSoon": "即将恢复",
+      "trendScore": "基线得分",
+      "trendPassRate": "通过率",
+      "chartScoreTrend": "基线得分趋势",
+      "chartCheckTrend": "检查结果趋势",
+      "topFailedRules": "Top10 失败检查项",
+      "topRiskHosts": "Top10 风险主机",
+      "colRuleTitle": "检查项名称",
+      "colSeverity": "严重级别",
+      "colCategory": "类别",
+      "colAffectedHosts": "受影响主机",
+      "colHostname": "主机名",
+      "colScore": "得分",
+      "colFailCount": "失败数"
     },
     "taskReport": {
       "tabAntivirus": "病毒查杀",
