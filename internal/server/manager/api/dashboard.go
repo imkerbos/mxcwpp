@@ -223,14 +223,25 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Distinct("host_id").Count(&alertHostCount)
 	totalHosts := hostCount + containerCount
 	if totalHosts > 0 {
-		stats["hostAlertPercent"] = float64(alertHostCount) / float64(totalHosts) * 100.0
+		// clamp 100：alertHostCount 可能含已下线/容器等非当前主机集，比例 >100 会让雷达该维越界塌陷
+		p := float64(alertHostCount) / float64(totalHosts) * 100.0
+		if p > 100 {
+			p = 100
+		}
+		stats["hostAlertPercent"] = math.Round(p*10) / 10
 	} else {
 		stats["hostAlertPercent"] = 0.0
 	}
+	// vulnHostCount 只算"真实可修 OS 漏洞"的受影响主机(dnf/apt 系统包+precheck 已装有修复)，
+	// 不是"有任意 unpatched 漏洞"——否则 osv 应用依赖 + 未核查项让几乎每台都命中，比例恒 ~100%、雷达恒 0。
 	var vulnHostCount int64
-	h.db.Model(&model.HostVulnerability{}).Where("status = ?", "unpatched").Distinct("host_id").Count(&vulnHostCount)
+	h.db.Table("host_vulnerabilities AS hv").
+		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+		Where("hv.status = ? AND v.source <> ? AND hv.precheck_status IN ?",
+			"unpatched", "osv", []string{"available", "outdated_repo"}).
+		Distinct("hv.host_id").Count(&vulnHostCount)
 	if totalHosts > 0 {
-		stats["vulnHostPercent"] = float64(vulnHostCount) / float64(totalHosts) * 100.0
+		stats["vulnHostPercent"] = math.Round(float64(vulnHostCount)/float64(totalHosts)*1000) / 10
 	} else {
 		stats["vulnHostPercent"] = 0.0
 	}
@@ -376,16 +387,21 @@ func (h *DashboardHandler) countAlertsBySeverity() (critical, high int64) {
 	return
 }
 
-// countVulnsBySeverity 按 severity 统计未修复漏洞数（仅 critical/high）
+// countVulnsBySeverity 按 severity 统计"真实可修 OS 漏洞"的唯一 CVE 数（仅 critical/high）。
+//
+// 只计 dnf/apt 系统包(source<>osv) 且 pre-check 确认主机已装+有修复(available/outdated_repo)的项，
+// 排除 osv 应用依赖、未适用(not_applicable)、已对账关闭项——否则评分被应用依赖 + 陈旧噪声拉爆恒为 0。
 func (h *DashboardHandler) countVulnsBySeverity() (critical, high int64) {
 	var rows []struct {
 		Severity string `gorm:"column:severity"`
 		Cnt      int64  `gorm:"column:cnt"`
 	}
-	h.db.Model(&model.Vulnerability{}).
-		Select("severity, COUNT(*) as cnt").
-		Where("status = ?", "unpatched").
-		Group("severity").
+	h.db.Table("host_vulnerabilities AS hv").
+		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+		Select("v.severity AS severity, COUNT(DISTINCT v.cve_id) AS cnt").
+		Where("hv.status = ? AND v.source <> ? AND hv.precheck_status IN ?",
+			"unpatched", "osv", []string{"available", "outdated_repo"}).
+		Group("v.severity").
 		Scan(&rows)
 	for _, r := range rows {
 		switch r.Severity {
