@@ -63,6 +63,14 @@ type nodeTemplateData struct {
 	KafkaPorts        []int
 	KafkaHost         string
 	KafkaClusterID    string
+	// Per-service presence booleans, derived from ExpandRoles(node.Roles).
+	HasManager     bool
+	HasAgentCenter bool
+	HasConsumer    bool
+	HasEngine      bool
+	HasVulnSync    bool
+	HasLLMProxy    bool
+	HasUI          bool
 }
 
 type serverConfigDoc struct {
@@ -247,6 +255,39 @@ func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
 	return result, nil
 }
 
+// Render is a convenience wrapper around RenderCluster that auto-discovers RepoRoot
+// and creates a temporary OutputDir when the options are not specified.
+func Render(cfg *Config, opts RenderOptions) (*RenderResult, error) {
+	if opts.RepoRoot == "" {
+		root, err := FindRepoRoot(".")
+		if err != nil {
+			return nil, fmt.Errorf("auto-detect RepoRoot failed: %w", err)
+		}
+		opts.RepoRoot = root
+	}
+	if opts.OutputDir == "" {
+		dir, err := os.MkdirTemp("", "cluster-render-")
+		if err != nil {
+			return nil, fmt.Errorf("create temp output dir: %w", err)
+		}
+		opts.OutputDir = dir
+	}
+	return RenderCluster(cfg, opts)
+}
+
+// expandRolesSet returns the expanded fine-grained role set for a node's roles.
+func expandRolesSet(roles []string) (map[string]bool, error) {
+	expanded, err := ExpandRoles(roles)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]bool, len(expanded))
+	for _, r := range expanded {
+		set[r] = true
+	}
+	return set, nil
+}
+
 func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *CertificateBundle, repoRoot, bundleDir string) error {
 	for _, dir := range []string{
 		bundleDir,
@@ -259,7 +300,18 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 			return err
 		}
 	}
-	if assignment.Node.HasRole(RoleControl) {
+
+	svcSet, err := expandRolesSet(assignment.Node.Roles)
+	if err != nil {
+		return fmt.Errorf("展开 roles 失败 node=%s: %w", assignment.Node.Name, err)
+	}
+
+	hasAnyApp := svcSet[RoleManager] || svcSet[RoleAgentCenter] || svcSet[RoleConsumer] ||
+		svcSet[RoleEngine] || svcSet[RoleVulnSync] || svcSet[RoleLLMProxy] || svcSet[RoleUI]
+	hasStorage := svcSet[RoleMySQL]
+	hasKafka := svcSet[RoleKafka]
+
+	if hasAnyApp {
 		if err := os.MkdirAll(filepath.Join(bundleDir, "certs"), 0o755); err != nil {
 			return err
 		}
@@ -298,13 +350,20 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		KafkaPorts:        cfg.Infrastructure.Kafka.BrokerPorts,
 		KafkaHost:         cfg.KafkaHost(),
 		KafkaClusterID:    kafkaClusterID(cfg),
+		HasManager:        svcSet[RoleManager],
+		HasAgentCenter:    svcSet[RoleAgentCenter],
+		HasConsumer:       svcSet[RoleConsumer],
+		HasEngine:         svcSet[RoleEngine],
+		HasVulnSync:       svcSet[RoleVulnSync],
+		HasLLMProxy:       svcSet[RoleLLMProxy],
+		HasUI:             svcSet[RoleUI],
 	}
 
 	installScript := filepath.Join(repoRoot, "scripts", "prod", "install-deps.sh")
 	if err := copyFile(installScript, filepath.Join(bundleDir, "scripts", "install-deps.sh"), 0o755); err != nil {
 		return err
 	}
-	if assignment.Node.HasRole(RoleStorage) {
+	if hasStorage {
 		if err := copyFile(filepath.Join(repoRoot, "deploy", "init.sql"), filepath.Join(bundleDir, "deploy", "init.sql"), 0o644); err != nil {
 			return err
 		}
@@ -323,7 +382,6 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 		if err := writePrometheusConfig(filepath.Join(bundleDir, "config", "prometheus.yml"), cfg); err != nil {
 			return err
 		}
-		// 告警规则 + Alertmanager 配置（告警经 webhook 进 manager 服务告警）
 		if err := copyFile(filepath.Join(repoRoot, "deploy", "config", "prometheus-rules.yml"), filepath.Join(bundleDir, "config", "rules.yml"), 0o644); err != nil {
 			return err
 		}
@@ -331,24 +389,32 @@ func renderNodeBundle(cfg *Config, assignment RoleAssignment, certs *Certificate
 			return err
 		}
 	}
-	if assignment.Node.HasRole(RoleKafka) {
+	if hasKafka {
 		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "docker-compose.kafka.yml.tmpl"), filepath.Join(bundleDir, "compose", "docker-compose.kafka.yml"), data, 0o644); err != nil {
 			return err
 		}
 	}
-	if assignment.Node.HasRole(RoleControl) {
+	if hasAnyApp {
 		if err := renderTemplateFile(filepath.Join(repoRoot, "deploy", "prod", "templates", "docker-compose.control.yml.tmpl"), filepath.Join(bundleDir, "compose", "docker-compose.control.yml"), data, 0o644); err != nil {
 			return err
 		}
-		if err := writeNginxConf(filepath.Join(bundleDir, "config", "nginx.conf"), cfg); err != nil {
-			return err
+		if svcSet[RoleUI] {
+			if err := writeNginxConf(filepath.Join(bundleDir, "config", "nginx.conf"), cfg); err != nil {
+				return err
+			}
 		}
-		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment, cfg.App.ManagerHTTPPort); err != nil {
-			return err
+		hasServerApp := svcSet[RoleManager] || svcSet[RoleConsumer] || svcSet[RoleEngine] ||
+			svcSet[RoleLLMProxy] || svcSet[RoleVulnSync]
+		if hasServerApp {
+			if err := writeServerConfig(filepath.Join(bundleDir, "config", "server.yaml"), cfg, assignment, cfg.App.ManagerHTTPPort); err != nil {
+				return err
+			}
 		}
 		// agentcenter 用独立配置，HTTP 端口避免与 manager 冲突
-		if err := writeServerConfig(filepath.Join(bundleDir, "config", "server-ac.yaml"), cfg.WithACHTTPPort(), assignment, cfg.App.ManagerHTTPPort); err != nil {
-			return err
+		if svcSet[RoleAgentCenter] {
+			if err := writeServerConfig(filepath.Join(bundleDir, "config", "server-ac.yaml"), cfg.WithACHTTPPort(), assignment, cfg.App.ManagerHTTPPort); err != nil {
+				return err
+			}
 		}
 		if err := writeControlCerts(bundleDir, certs); err != nil {
 			return err
@@ -630,15 +696,14 @@ server {
 //
 // 不部署 mysql/redis/kafka/clickhouse 外部 exporter（与 mxcwpp driver 端检查重复）。
 func writePrometheusConfig(dst string, cfg *Config) error {
-	// 收集所有 control 节点的 IP（manager + agentcenter + consumer 都在 control 节点）
-	var controlHosts []string
-	for _, node := range cfg.Nodes {
-		if node.HasRole(RoleControl) {
-			controlHosts = append(controlHosts, node.Host)
-		}
+	// 收集所有承载 manager 服务的节点 IP（兼容粗粒度 control 与细粒度 HA 角色）
+	managerNodes := cfg.NodesWithRole(RoleManager)
+	if len(managerNodes) == 0 {
+		return fmt.Errorf("未找到 manager 节点，无法生成 Prometheus 配置")
 	}
-	if len(controlHosts) == 0 {
-		return fmt.Errorf("未找到 control 节点，无法生成 Prometheus 配置")
+	var controlHosts []string
+	for _, node := range managerNodes {
+		controlHosts = append(controlHosts, node.Host)
 	}
 
 	const (
@@ -715,16 +780,12 @@ scrape_configs:
 // writeAlertmanagerConfig 渲染 Alertmanager 配置：所有告警经 webhook 推送到 manager
 // 的 /api/v1/internal/alerts/prometheus，入 alerts 表（category=service）→ 平台「系统监控-服务告警」。
 func writeAlertmanagerConfig(dst string, cfg *Config) error {
-	var controlHost string
-	for _, node := range cfg.Nodes {
-		if node.HasRole(RoleControl) {
-			controlHost = node.Host
-			break
-		}
+	// 取第一个承载 manager 服务的节点作为 alertmanager webhook 目标（兼容粗粒度 control 与细粒度 HA 角色）
+	managerNodes := cfg.NodesWithRole(RoleManager)
+	if len(managerNodes) == 0 {
+		return fmt.Errorf("未找到 manager 节点，无法生成 Alertmanager 配置")
 	}
-	if controlHost == "" {
-		return fmt.Errorf("未找到 control 节点，无法生成 Alertmanager 配置")
-	}
+	controlHost := managerNodes[0].Host
 	webhookURL := fmt.Sprintf("http://%s:%d/api/v1/internal/alerts/prometheus", controlHost, cfg.App.ManagerHTTPPort)
 
 	var buf strings.Builder
