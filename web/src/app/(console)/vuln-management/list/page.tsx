@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ShieldAlert, AlertOctagon, AlertTriangle, Server } from "lucide-react";
+import { ShieldAlert, AlertOctagon, AlertTriangle, Server, Layers, ShieldCheck, ShieldX, Percent } from "lucide-react";
 import { vulnApi } from "@/lib/api/vuln";
 import type { Severity, Vulnerability } from "@/lib/api/types";
 import { Card } from "@/components/ui/Card";
@@ -163,8 +163,14 @@ export default function VulnListPage() {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5 mb-3">
         <StatCard compact label={t("vuln.list.statTotal")} value={stats?.total ?? 0} icon={ShieldAlert} tone="default" />
+        <StatCard compact label={t("vuln.list.statHostInstances")} value={stats?.hostInstances ?? 0} icon={Layers} tone="default" />
+        <StatCard compact label={t("vuln.list.statPatched")} value={stats?.patched ?? 0} icon={ShieldCheck} tone="success" />
+        <StatCard compact label={t("vuln.list.statUnpatched")} value={stats?.unpatched ?? 0} icon={ShieldX} tone="danger" />
+        <StatCard compact label={t("vuln.list.statRate")} value={`${(stats?.remediationRate ?? 0).toFixed(1)}%`} icon={Percent} tone="success" />
+      </div>
+      <div className="grid grid-cols-3 gap-3 md:grid-cols-3 mb-5">
         <StatCard compact label={t("vuln.list.statCritical")} value={stats?.critical ?? 0} icon={AlertOctagon} tone="danger" />
         <StatCard compact label={t("vuln.list.statHigh")} value={stats?.high ?? 0} icon={AlertTriangle} tone="warning" />
         <StatCard compact label={t("vuln.list.statAffectedHosts")} value={stats?.affectedHosts ?? 0} icon={Server} tone="default" />
