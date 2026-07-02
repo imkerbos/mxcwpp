@@ -306,6 +306,25 @@ func (c *Config) ApplyDefaults() {
 func (c *Config) Validate() error {
 	c.ApplyDefaults()
 
+	if c.Metadata.Name == "" {
+		return fmt.Errorf("metadata.name 不能为空")
+	}
+	if c.Release.Version == "" {
+		return fmt.Errorf("release.version 不能为空")
+	}
+	if c.Network.UI.Host == "" {
+		return fmt.Errorf("network.ui.host 不能为空")
+	}
+	if c.Network.GRPC.Host == "" {
+		return fmt.Errorf("network.grpc.host 不能为空")
+	}
+	if c.App.JWTSecret == "" {
+		return fmt.Errorf("app.jwt_secret 不能为空")
+	}
+	if c.Infrastructure.MySQL.RootPassword == "" || c.Infrastructure.MySQL.Password == "" {
+		return fmt.Errorf("infrastructure.mysql.root_password 和 infrastructure.mysql.password 不能为空")
+	}
+
 	if len(c.Nodes) == 0 {
 		return fmt.Errorf("nodes 不能为空")
 	}

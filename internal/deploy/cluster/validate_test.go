@@ -10,6 +10,13 @@ func baseHA() *Config {
 		{Name: "n5", Host: "10.0.0.5", Roles: []string{"mysql", "redis", "clickhouse"}},
 		{Name: "n6", Host: "10.0.0.6", Roles: []string{"kafka"}},
 	}}
+	c.Metadata.Name = "test-cluster"
+	c.Release.Version = "1.0.0"
+	c.Network.UI.Host = "ui.example.com"
+	c.Network.GRPC.Host = "grpc.example.com"
+	c.App.JWTSecret = "test-jwt-secret"
+	c.Infrastructure.MySQL.RootPassword = "root-pass"
+	c.Infrastructure.MySQL.Password = "user-pass"
 	c.Infrastructure.Kafka.BrokerPorts = []int{9092, 9094, 9095}
 	return c
 }
@@ -50,6 +57,13 @@ func TestValidateCoarseRolesStillOK(t *testing.T) {
 		{Name: "n2", Host: "10.0.0.2", Roles: []string{"storage"}},
 		{Name: "n3", Host: "10.0.0.3", Roles: []string{"kafka"}},
 	}}
+	c.Metadata.Name = "test-cluster"
+	c.Release.Version = "1.0.0"
+	c.Network.UI.Host = "ui.example.com"
+	c.Network.GRPC.Host = "grpc.example.com"
+	c.App.JWTSecret = "test-jwt-secret"
+	c.Infrastructure.MySQL.RootPassword = "root-pass"
+	c.Infrastructure.MySQL.Password = "user-pass"
 	c.Infrastructure.Kafka.BrokerPorts = []int{9092, 9094, 9095}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("legacy coarse-role config must pass: %v", err)
