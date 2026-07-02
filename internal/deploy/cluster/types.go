@@ -13,19 +13,25 @@ const (
 	RoleKafka   = "kafka"
 )
 
+// ComponentSpec holds per-component overrides within a cluster config.
+type ComponentSpec struct {
+	Version string `yaml:"version"`
+}
+
 // Config 是 cluster.yaml 的顶层结构。
 type Config struct {
-	APIVersion     string         `yaml:"api_version"`
-	Kind           string         `yaml:"kind"`
-	Metadata       Metadata       `yaml:"metadata"`
-	Release        Release        `yaml:"release"`
-	Registry       Registry       `yaml:"registry"`
-	OS             OS             `yaml:"os"`
-	Network        Network        `yaml:"network"`
-	App            App            `yaml:"app"`
-	Infrastructure Infrastructure `yaml:"infrastructure"`
-	ControlPlane   ControlPlane   `yaml:"control_plane"`
-	Nodes          []Node         `yaml:"nodes"`
+	APIVersion     string                   `yaml:"api_version"`
+	Kind           string                   `yaml:"kind"`
+	Metadata       Metadata                 `yaml:"metadata"`
+	Release        Release                  `yaml:"release"`
+	Components     map[string]ComponentSpec `yaml:"components"`
+	Registry       Registry                 `yaml:"registry"`
+	OS             OS                       `yaml:"os"`
+	Network        Network                  `yaml:"network"`
+	App            App                      `yaml:"app"`
+	Infrastructure Infrastructure           `yaml:"infrastructure"`
+	ControlPlane   ControlPlane             `yaml:"control_plane"`
+	Nodes          []Node                   `yaml:"nodes"`
 }
 
 type Metadata struct {
@@ -429,6 +435,15 @@ func (n Node) HasRole(role string) bool {
 	return false
 }
 
+// ServiceVersion returns the pinned version for a given short service name
+// (e.g. "manager"), falling back to Release.Version when not set.
+func (c *Config) ServiceVersion(service string) string {
+	if spec, ok := c.Components[service]; ok && spec.Version != "" {
+		return spec.Version
+	}
+	return c.Release.Version
+}
+
 func (c *Config) ImageRef(name string) string {
 	parts := make([]string, 0, 3)
 	if c.Registry.Domain != "" {
@@ -438,7 +453,8 @@ func (c *Config) ImageRef(name string) string {
 		parts = append(parts, strings.Trim(c.Registry.Namespace, "/"))
 	}
 	parts = append(parts, name)
-	return strings.Join(parts, "/") + ":" + c.Release.Version
+	service := strings.TrimPrefix(name, "mxcwpp-")
+	return strings.Join(parts, "/") + ":" + c.ServiceVersion(service)
 }
 
 func (c *Config) PluginsBaseURL() string {
