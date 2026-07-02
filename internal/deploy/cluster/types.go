@@ -305,31 +305,14 @@ func (c *Config) ApplyDefaults() {
 
 func (c *Config) Validate() error {
 	c.ApplyDefaults()
-	if c.Metadata.Name == "" {
-		return fmt.Errorf("metadata.name 不能为空")
-	}
-	if c.Release.Version == "" {
-		return fmt.Errorf("release.version 不能为空")
-	}
-	if c.Network.UI.Host == "" {
-		return fmt.Errorf("network.ui.host 不能为空")
-	}
-	if c.Network.GRPC.Host == "" {
-		return fmt.Errorf("network.grpc.host 不能为空")
-	}
-	if c.App.JWTSecret == "" {
-		return fmt.Errorf("app.jwt_secret 不能为空")
-	}
-	if c.Infrastructure.MySQL.RootPassword == "" || c.Infrastructure.MySQL.Password == "" {
-		return fmt.Errorf("infrastructure.mysql.root_password 和 infrastructure.mysql.password 不能为空")
-	}
+
 	if len(c.Nodes) == 0 {
 		return fmt.Errorf("nodes 不能为空")
 	}
 
+	// Node name/host non-empty and uniqueness checks.
 	nameSet := make(map[string]struct{}, len(c.Nodes))
 	hostSet := make(map[string]struct{}, len(c.Nodes))
-	roleCount := map[string]int{}
 	for _, node := range c.Nodes {
 		if node.Name == "" || node.Host == "" {
 			return fmt.Errorf("所有 node 都必须配置 name 和 host")
@@ -345,55 +328,41 @@ func (c *Config) Validate() error {
 		if len(node.Roles) == 0 {
 			return fmt.Errorf("node %s 未配置 roles", node.Name)
 		}
-		for _, role := range node.Roles {
-			switch role {
-			case RoleControl, RoleStorage, RoleKafka:
-				roleCount[role]++
-			default:
-				return fmt.Errorf("node %s 包含不支持的 role: %s", node.Name, role)
-			}
+		// ExpandRoles validates role names and rejects unknown entries.
+		if _, err := ExpandRoles(node.Roles); err != nil {
+			return fmt.Errorf("node %s 包含无效 role: %w", node.Name, err)
 		}
 	}
 
-	controlCount := roleCount[RoleControl]
-	if controlCount == 0 {
-		return fmt.Errorf("至少需要一个 control 节点")
+	// Required services — each must have at least one placement node.
+	requiredServices := []string{
+		RoleManager, RoleAgentCenter, RoleConsumer, RoleEngine,
+		RoleMySQL, RoleRedis, RoleClickHouse, RoleKafka,
 	}
-	if roleCount[RoleStorage] != 1 {
-		return fmt.Errorf("v1 仅支持一个 storage 节点，当前为 %d", roleCount[RoleStorage])
+	for _, svc := range requiredServices {
+		if len(c.NodesWithRole(svc)) < 1 {
+			return fmt.Errorf("缺少必需服务 %s 的节点", svc)
+		}
 	}
-	if roleCount[RoleKafka] != 1 {
-		return fmt.Errorf("v1 仅支持一个 kafka 节点，当前为 %d", roleCount[RoleKafka])
+
+	// Infra singleton — mysql/redis/clickhouse/kafka each must have exactly 1 node.
+	infraSingletons := []string{RoleMySQL, RoleRedis, RoleClickHouse, RoleKafka}
+	for _, svc := range infraSingletons {
+		if n := len(c.NodesWithRole(svc)); n != 1 {
+			return fmt.Errorf("基建服务 %s 本版本仅支持 1 节点，当前 %d 个", svc, n)
+		}
 	}
+
+	// Kafka broker ports must be exactly 3.
 	if len(c.Infrastructure.Kafka.BrokerPorts) != 3 {
 		return fmt.Errorf("infrastructure.kafka.broker_ports 必须配置 3 个端口")
 	}
-	if c.ControlPlane.ManagerReplicas < controlCount {
-		return fmt.Errorf("control_plane.manager_replicas 不能小于 control 节点数 %d", controlCount)
+
+	// Prometheus requires a MySQL (storage) node.
+	if c.App.PrometheusEnabled && len(c.NodesWithRole(RoleMySQL)) < 1 {
+		return fmt.Errorf("启用 Prometheus 时必须有 storage 节点")
 	}
-	if c.ControlPlane.AgentCenterReplicas < controlCount {
-		return fmt.Errorf("control_plane.agentcenter_replicas 不能小于 control 节点数 %d", controlCount)
-	}
-	if c.ControlPlane.EngineReplicas < controlCount {
-		return fmt.Errorf("control_plane.engine_replicas 不能小于 control 节点数 %d", controlCount)
-	}
-	if c.ControlPlane.LLMProxyReplicas < controlCount {
-		return fmt.Errorf("control_plane.llmproxy_replicas 不能小于 control 节点数 %d", controlCount)
-	}
-	if c.ControlPlane.VulnSyncReplicas < controlCount {
-		return fmt.Errorf("control_plane.vulnsync_replicas 不能小于 control 节点数 %d", controlCount)
-	}
-	if c.App.PrometheusEnabled {
-		if _, err := c.StorageNode(); err != nil {
-			return fmt.Errorf("启用 Prometheus 时必须有 storage 节点: %w", err)
-		}
-	}
-	if _, err := c.StorageNode(); err != nil {
-		return err
-	}
-	if _, err := c.KafkaNode(); err != nil {
-		return err
-	}
+
 	return nil
 }
 
