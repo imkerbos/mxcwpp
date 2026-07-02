@@ -1056,7 +1056,7 @@ export interface Vulnerability {
   updatedAt?: string;
   hosts?: VulnerabilityHostRef[];
 }
-export interface VulnerabilityStats { total: number; critical: number; high: number; affectedHosts: number; }
+export interface VulnerabilityStats { total: number; critical: number; high: number; affectedHosts: number; hostInstances: number; patched: number; unpatched: number; remediationRate: number; }
 // GET /vulnerabilities → { items, total, stats }
 export interface VulnerabilityListResult { items: Vulnerability[]; total: number; stats: VulnerabilityStats; }
 
@@ -1136,6 +1136,16 @@ export interface RemediationReport {
   mttr: number;
   bySeverity: RemediationSeverityStat[];
   topUnpatched: RemediationHostStat[] | null;
+  recentPatched: RemediationPatchedInstance[] | null;
+}
+export interface RemediationPatchedInstance {
+  cveId: string;
+  severity: string;
+  hostId: string;
+  hostname: string;
+  ip: string;
+  component: string;
+  patchedAt: string | null;
 }
 export interface RemediationTrendItem { date: string; patched: number; discovered: number; }
 

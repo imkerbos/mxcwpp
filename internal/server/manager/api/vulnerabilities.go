@@ -97,7 +97,13 @@ func (h *VulnerabilitiesHandler) buildVulnerabilityQuery(filter vulnerabilityLis
 		if filter.HostID != "" {
 			query = query.Where("hv.status = ?", filter.Status)
 		} else {
-			query = query.Where("vulnerabilities.status = ?", filter.Status)
+			// 实例级口径:该 CVE 存在处于此状态的主机实例即命中。
+			// 禁用 vulnerabilities.status —— 它是 CVE 级 rollup,全部主机修好才置 patched,
+			// 用它筛"已修复"会漏掉"部分主机已修"的实例(如某 CVE 命中 3 台仅 1 台修好),
+			// 导致修复页显示已修数 >0 但列表筛已修返回空。详见 docs/vuln-stats-glossary.md。
+			query = query.Where(
+				"EXISTS (SELECT 1 FROM host_vulnerabilities WHERE host_vulnerabilities.vuln_id = vulnerabilities.id AND host_vulnerabilities.status = ?)",
+				filter.Status)
 		}
 	}
 
@@ -328,6 +334,11 @@ func (h *VulnerabilitiesHandler) ListVulnerabilities(c *gin.Context) {
 		if filter.HostID != "" {
 			vulns[i].AffectedHosts = len(vulns[i].Hosts)
 		}
+		// 按状态筛选时,状态列反映实例级筛选口径。vulnerabilities.status 是 CVE 级 rollup
+		// (全部主机修好才 patched),与"已修复实例"不一致,直接展示会让用户困惑。
+		if filter.Status != "" {
+			vulns[i].Status = filter.Status
+		}
 	}
 
 	// 聚合 asset_type / fix_owner 到 vulnerability 顶层(全局列表 hosts 数组为空时用)
@@ -401,14 +412,33 @@ GROUP BY vuln_id`, vulnIDs).Scan(&aggs)
 
 	affectedHosts := h.countAffectedHosts(statsFilter)
 
+	// 实例级统计（主机漏洞实例口径，与修复报告页同源）：在当前筛选的 vuln 集合上统计
+	// host_vulnerabilities。清掉状态约束以便按 patched/unpatched 拆分。CVE 级 total 是"漏洞种类"，
+	// 实例级是"主机×漏洞"，两者量纲不同、各自展示，见 docs/vuln-stats-glossary.md。
+	baseFilter := filter
+	baseFilter.Status = ""
+	vulnIDQuery := h.buildVulnerabilityQuery(baseFilter).Select("vulnerabilities.id")
+	var hostInstances, patchedInstances, unpatchedInstances int64
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status != ?", vulnIDQuery, "ignored").Count(&hostInstances)
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status = ?", vulnIDQuery, "patched").Count(&patchedInstances)
+	h.db.Model(&model.HostVulnerability{}).Where("vuln_id IN (?) AND status = ?", vulnIDQuery, "unpatched").Count(&unpatchedInstances)
+	var remediationRate float64
+	if hostInstances > 0 {
+		remediationRate = float64(patchedInstances) / float64(hostInstances) * 100
+	}
+
 	Success(c, gin.H{
 		"items": vulns,
 		"total": total,
 		"stats": gin.H{
-			"total":         statsTotal,
-			"critical":      critical,
-			"high":          high,
-			"affectedHosts": affectedHosts,
+			"total":           statsTotal, // 漏洞种类（CVE 去重）
+			"critical":        critical,
+			"high":            high,
+			"affectedHosts":   affectedHosts,
+			"hostInstances":   hostInstances,      // 主机漏洞总数（实例）
+			"patched":         patchedInstances,   // 已修复实例
+			"unpatched":       unpatchedInstances, // 未修复实例
+			"remediationRate": remediationRate,    // 修复率 %
 		},
 	})
 }
