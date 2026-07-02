@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/IBM/sarama"
@@ -53,6 +54,9 @@ type Router struct {
 	storyEngine     *storyline.Engine // 攻击故事线引擎（可选）
 	topics          []string
 	logger          *zap.Logger
+	// suppressed 运维事件抑制窗内的 host 集(hosts.behavior_suppress_until>now)，每 30s 刷新一次。
+	// 窗内低信号 BDE 偏离不落库，滤掉 agent 重连/插件重载引发的 WAL 重放突发假异常。
+	suppressed atomic.Pointer[map[string]struct{}]
 }
 
 // NewRouter 创建 Router (v2 拆分: Consumer 仅 writer 路径, 不做 CEL 检测).
@@ -93,7 +97,7 @@ func NewRouter(
 		prefix + kafka.TopicRemediation,
 	}
 
-	return &Router{
+	r := &Router{
 		group:       group,
 		mysql:       mysql,
 		ch:          ch,
@@ -101,7 +105,45 @@ func NewRouter(
 		redisClient: redisClient,
 		topics:      topics,
 		logger:      logger,
-	}, nil
+	}
+	go r.refreshSuppressLoop()
+	return r, nil
+}
+
+// behaviorSuppressBypassScore 运维抑制窗内仍放行的最低 risk_score——真高危(反弹shell/挖矿级)
+// 不因维护窗被压掉,只滤掉低信号突发噪声。
+const behaviorSuppressBypassScore = 95.0
+
+// refreshSuppressLoop 每 30s 刷新"运维抑制窗内 host 集"(hosts.behavior_suppress_until>now)。
+func (r *Router) refreshSuppressLoop() {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		set := map[string]struct{}{}
+		if r.mysql != nil {
+			if db := r.mysql.DB(); db != nil {
+				var ids []string
+				db.Model(&model.Host{}).
+					Where("behavior_suppress_until IS NOT NULL AND behavior_suppress_until > ?", time.Now()).
+					Pluck("host_id", &ids)
+				for _, id := range ids {
+					set[id] = struct{}{}
+				}
+			}
+		}
+		r.suppressed.Store(&set)
+		<-t.C
+	}
+}
+
+// isBehaviorSuppressed 该 host 是否在运维抑制窗内。
+func (r *Router) isBehaviorSuppressed(hostID string) bool {
+	m := r.suppressed.Load()
+	if m == nil {
+		return false
+	}
+	_, ok := (*m)[hostID]
+	return ok
 }
 
 // SetBDEEngine sets the optional BDE baseline engine for behavior anomaly detection.
@@ -394,6 +436,12 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 	// prod 实测全队列 learning 期刷 ~1万/天 behavior_alert 且无人处置(纯噪声)。
 	// 冷启动告警仅保留高信号(risk_score≥阈值),其余抑制；per-host 基线就绪(active)后照常全量。
 	if !shouldPersistBehaviorAlert(result.ColdStart, result.RiskScore) {
+		return
+	}
+
+	// 运维事件抑制:host 在抑制窗内(agent 刚重连/插件刚推送)且非真高危时不落库，
+	// 滤掉 WAL 重放/采集突发引发的假异常;真高危(≥95)仍放行。
+	if result.RiskScore < behaviorSuppressBypassScore && r.isBehaviorSuppressed(msg.AgentID) {
 		return
 	}
 

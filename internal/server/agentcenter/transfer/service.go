@@ -311,6 +311,10 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	// checkAndSendAgentOnlineNotification 的"<3min 视为未离线"判定误跳过解除，离线告警残留(read-after-write 竞态)。
 	go s.resolveAgentOfflineAlert(agentID)
 
+	// 运维事件抑制:重连往往伴随 WAL 重放(缓存 EDR 事件 flush)，短时把行为速率打高致 BDE 假异常。
+	// 设一个抑制窗，consumer 落库 behavior_alert 前查此窗，窗内低信号偏离不落库(见 router.shouldPersistBehaviorAlert)。
+	go s.setBehaviorSuppressWindow(agentID, behaviorSuppressAfterReconnect)
+
 	// 检查并发送 Agent 上线恢复通知（如果之前离线）
 	go s.checkAndSendAgentOnlineNotification(agentID, conn)
 
@@ -1941,6 +1945,17 @@ func (s *Service) resolveAgentOfflineAlert(agentID string) {
 	if result.RowsAffected > 0 {
 		s.logger.Info("已自动解决 Agent 离线告警", zap.String("agent_id", agentID))
 	}
+}
+
+// behaviorSuppressAfterReconnect agent 重连后 BDE 行为告警抑制时长(覆盖 WAL 重放突发窗)。
+const behaviorSuppressAfterReconnect = 10 * time.Minute
+
+// setBehaviorSuppressWindow 给 host 设一个"此刻前 BDE 行为告警抑制"的窗口。
+// consumer 落库 behavior_alert 前查此字段:窗内且低信号 → 不落库，避免运维突发(重连/插件重载)刷假异常。
+func (s *Service) setBehaviorSuppressWindow(agentID string, d time.Duration) {
+	until := model.ToLocalTime(time.Now().Add(d))
+	s.db.Model(&model.Host{}).Where("host_id = ?", agentID).
+		Update("behavior_suppress_until", &until)
 }
 
 // sendCertificateBundleIfNeeded 检查并下发证书包（如果Agent首次连接）

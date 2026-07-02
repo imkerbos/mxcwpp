@@ -480,6 +480,13 @@ func (h *ComponentsHandler) SetLatestVersion(c *gin.Context) {
 	// 同步更新插件配置（如果是插件）
 	var component model.Component
 	if err := h.db.First(&component, componentID).Error; err == nil {
+		// 运维事件抑制:插件/agent set-latest 触发全舰队 config-sync 重载(采集重跑)或升级(重连)，
+		// 短时把行为速率打高。给全部主机设 BDE 行为告警抑制窗，滤掉推送引发的假异常(consumer 侧生效)。
+		if component.Category == model.ComponentCategoryPlugin || component.Category == model.ComponentCategoryAgent {
+			until := model.ToLocalTime(time.Now().Add(15 * time.Minute))
+			h.db.Model(&model.Host{}).Where("status = ?", model.HostStatusOnline).
+				Update("behavior_suppress_until", &until)
+		}
 		if component.Category == model.ComponentCategoryPlugin {
 			h.logger.Info("设置最新版本后同步插件配置",
 				zap.String("component_name", component.Name),
