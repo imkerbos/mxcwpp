@@ -397,33 +397,45 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-func (c *Config) ControlNodes() []Node {
+// NodesWithRole returns all nodes whose expanded role set contains role.
+// Nodes for which ExpandRoles returns an error are skipped (treated as no match).
+// Results are sorted by Name.
+func (c *Config) NodesWithRole(role string) []Node {
 	var nodes []Node
 	for _, node := range c.Nodes {
-		if node.HasRole(RoleControl) {
-			nodes = append(nodes, node)
+		expanded, err := ExpandRoles(node.Roles)
+		if err != nil {
+			continue
+		}
+		for _, r := range expanded {
+			if r == role {
+				nodes = append(nodes, node)
+				break
+			}
 		}
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
 	return nodes
 }
 
+func (c *Config) ControlNodes() []Node {
+	return c.NodesWithRole(RoleManager)
+}
+
 func (c *Config) StorageNode() (Node, error) {
-	for _, node := range c.Nodes {
-		if node.HasRole(RoleStorage) {
-			return node, nil
-		}
+	nodes := c.NodesWithRole(RoleMySQL)
+	if len(nodes) == 0 {
+		return Node{}, fmt.Errorf("未找到 storage 节点")
 	}
-	return Node{}, fmt.Errorf("未找到 storage 节点")
+	return nodes[0], nil
 }
 
 func (c *Config) KafkaNode() (Node, error) {
-	for _, node := range c.Nodes {
-		if node.HasRole(RoleKafka) {
-			return node, nil
-		}
+	nodes := c.NodesWithRole(RoleKafka)
+	if len(nodes) == 0 {
+		return Node{}, fmt.Errorf("未找到 kafka 节点")
 	}
-	return Node{}, fmt.Errorf("未找到 kafka 节点")
+	return nodes[0], nil
 }
 
 func (n Node) HasRole(role string) bool {
@@ -468,44 +480,44 @@ func (c *Config) MySQLHost() string {
 	if c.Infrastructure.MySQL.Host != "" {
 		return c.Infrastructure.MySQL.Host
 	}
-	node, err := c.StorageNode()
-	if err != nil {
+	nodes := c.NodesWithRole(RoleMySQL)
+	if len(nodes) == 0 {
 		return ""
 	}
-	return node.Host
+	return nodes[0].Host
 }
 
 func (c *Config) RedisHost() string {
 	if c.Infrastructure.Redis.Host != "" {
 		return c.Infrastructure.Redis.Host
 	}
-	node, err := c.StorageNode()
-	if err != nil {
+	nodes := c.NodesWithRole(RoleRedis)
+	if len(nodes) == 0 {
 		return ""
 	}
-	return node.Host
+	return nodes[0].Host
 }
 
 func (c *Config) ClickHouseHost() string {
 	if c.Infrastructure.ClickHouse.Host != "" {
 		return c.Infrastructure.ClickHouse.Host
 	}
-	node, err := c.StorageNode()
-	if err != nil {
+	nodes := c.NodesWithRole(RoleClickHouse)
+	if len(nodes) == 0 {
 		return ""
 	}
-	return node.Host
+	return nodes[0].Host
 }
 
 func (c *Config) KafkaHost() string {
 	if c.Infrastructure.Kafka.Host != "" {
 		return c.Infrastructure.Kafka.Host
 	}
-	node, err := c.KafkaNode()
-	if err != nil {
+	nodes := c.NodesWithRole(RoleKafka)
+	if len(nodes) == 0 {
 		return ""
 	}
-	return node.Host
+	return nodes[0].Host
 }
 
 func (c *Config) KafkaBrokerEndpoints() []string {
