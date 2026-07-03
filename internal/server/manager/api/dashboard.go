@@ -169,9 +169,16 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Count(&pendingAlerts)
 	stats["pendingAlerts"] = pendingAlerts
 
-	// 3. 漏洞风险统计
+	// 3. 漏洞风险统计:数"真实可修 OS 主机漏洞"(host_vulnerabilities 实例,dnf/apt 系统包 + pre-check 确认
+	// 已装有修复),与漏洞列表(默认 OS)+雷达口径一致。
+	// 不用 vulnerabilities.status='unpatched'——那是 CVE 级 advisory rollup(含全源目录 + 不可信 rollup)，
+	// 会把待修数虚报成 2w+(实际真实待修仅数百)。
 	var pendingVulns int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ?", "unpatched").Count(&pendingVulns)
+	h.db.Table("host_vulnerabilities AS hv").
+		Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+		Where("hv.status = ? AND v.source <> ? AND hv.precheck_status IN ?",
+			"unpatched", "osv", []string{"available", "outdated_repo"}).
+		Count(&pendingVulns)
 	stats["pendingVulnerabilities"] = pendingVulns
 
 	var latestVuln model.Vulnerability
