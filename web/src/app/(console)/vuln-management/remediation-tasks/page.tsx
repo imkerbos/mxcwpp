@@ -32,6 +32,11 @@ const buildStatusMeta = (t: TFunction): Record<string, { tone: Tone; label: stri
   confirmed: { tone: "info", label: t("vuln.remediationTasks.statusConfirmed") },
   running: { tone: "info", label: t("vuln.remediationTasks.statusRunning") },
   success: { tone: "success", label: t("vuln.remediationTasks.statusSuccess") },
+  success_pending_verify: { tone: "info", label: t("vuln.remediationTasks.statusSuccessPendingVerify") },
+  main_verifying: { tone: "info", label: t("vuln.remediationTasks.statusMainVerifying") },
+  verified: { tone: "success", label: t("vuln.remediationTasks.statusVerified") },
+  verify_failed: { tone: "danger", label: t("vuln.remediationTasks.statusVerifyFailed") },
+  verify_blocked: { tone: "warning", label: t("vuln.remediationTasks.statusVerifyBlocked") },
   failed: { tone: "danger", label: t("vuln.remediationTasks.statusFailed") },
   cancelled: { tone: "neutral", label: t("vuln.remediationTasks.statusCancelled") },
 });
@@ -48,6 +53,11 @@ const buildStatusOptions = (t: TFunction) => [
   { label: t("vuln.remediationTasks.statusConfirmed"), value: "confirmed" },
   { label: t("vuln.remediationTasks.statusRunning"), value: "running" },
   { label: t("vuln.remediationTasks.statusSuccess"), value: "success" },
+  { label: t("vuln.remediationTasks.statusSuccessPendingVerify"), value: "success_pending_verify" },
+  { label: t("vuln.remediationTasks.statusMainVerifying"), value: "main_verifying" },
+  { label: t("vuln.remediationTasks.statusVerified"), value: "verified" },
+  { label: t("vuln.remediationTasks.statusVerifyFailed"), value: "verify_failed" },
+  { label: t("vuln.remediationTasks.statusVerifyBlocked"), value: "verify_blocked" },
   { label: t("vuln.remediationTasks.statusFailed"), value: "failed" },
   { label: t("vuln.remediationTasks.statusCancelled"), value: "cancelled" },
 ];
