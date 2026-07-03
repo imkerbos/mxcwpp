@@ -226,11 +226,15 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	}
 
 	// 7. 主机风险分布百分比
+	// 主机告警维：按"有 active incident 的主机"算，而非任意 active 告警。
+	// CEL 检测流被未治理的 behavior 规则(fork/内核模块/SSH配置等 high/critical)刷满全舰队,
+	// 任意告警口径下几乎每台都命中→比例恒 ~100%、雷达该维恒塌陷。incident 是经关联 + 流行度
+	// 过滤后的真实威胁信号(见 scheduler.incident_correlation prevalence filter),口径如实。
 	var alertHostCount int64
-	h.db.Model(&model.Alert{}).Where("status = ?", model.AlertStatusActive).Distinct("host_id").Count(&alertHostCount)
+	h.db.Model(&model.Incident{}).Where("status = ?", model.IncidentStatusActive).Distinct("host_id").Count(&alertHostCount)
 	totalHosts := hostCount + containerCount
 	if totalHosts > 0 {
-		// clamp 100：alertHostCount 可能含已下线/容器等非当前主机集，比例 >100 会让雷达该维越界塌陷
+		// clamp 100：incident host_id 可能含已下线/容器等非当前主机集，比例 >100 会让雷达该维越界塌陷
 		p := float64(alertHostCount) / float64(totalHosts) * 100.0
 		if p > 100 {
 			p = 100
@@ -252,13 +256,20 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 	} else {
 		stats["vulnHostPercent"] = 0.0
 	}
-	// 检测告警：来自 CEL 规则引擎的告警（category = 'detection_rule'）
-	var edrAlertHostCount int64
-	h.db.Model(&model.Alert{}).Where("status = ? AND category = ?", model.AlertStatusActive, "detection_rule").Distinct("host_id").Count(&edrAlertHostCount)
+	// 检测维：CEL 检测引擎归因的真实威胁——有 active incident 且成员含 detection 源告警的主机。
+	// 原口径 category='detection_rule' 恒空(CEL 告警 category 是 persistence/impact 等语义分类,
+	// 从不写 'detection_rule')→ 该维恒 0;且前端读 detectionAlertPercent 而后端旧发 edrAlertPercent,
+	// 键名不匹配→ NaN 无数据。改挂 incident + detection 源,与主机告警维同源(经关联/流行度过滤)但限 CEL 归因。
+	var detectionAlertHostCount int64
+	h.db.Model(&model.Incident{}).
+		Joins("JOIN alerts a ON a.host_id = incidents.host_id AND a.status = ? AND a.source = ?",
+			model.AlertStatusActive, model.AlertSourceDetection).
+		Where("incidents.status = ?", model.IncidentStatusActive).
+		Distinct("incidents.host_id").Count(&detectionAlertHostCount)
 	if totalHosts > 0 {
-		stats["edrAlertPercent"] = math.Round(float64(edrAlertHostCount)/float64(totalHosts)*1000) / 10
+		stats["detectionAlertPercent"] = math.Round(float64(detectionAlertHostCount)/float64(totalHosts)*1000) / 10
 	} else {
-		stats["edrAlertPercent"] = 0.0
+		stats["detectionAlertPercent"] = 0.0
 	}
 	// 病毒主机百分比：扫描结果中有未处理威胁的主机
 	var virusHostCount int64
