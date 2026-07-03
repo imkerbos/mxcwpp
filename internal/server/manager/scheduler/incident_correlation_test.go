@@ -48,6 +48,26 @@ func TestAggregateRisk_MultiTacticBoostAndCap(t *testing.T) {
 	}
 }
 
+func TestFilterHighPrevalence(t *testing.T) {
+	alerts := []incidentAlert{
+		{ID: 1, RuleID: "cel-25"}, // 高流行度端口规则 → 剔除
+		{ID: 2, RuleID: "cel-256"},
+		{ID: 3, RuleID: "cel-20"}, // 高流行度 → 剔除
+		{ID: 4, RuleID: ""},       // 空 rule_id 不在噪声集 → 保留
+	}
+	highPrev := map[string]struct{}{"cel-25": {}, "cel-20": {}}
+
+	got := filterHighPrevalence(alerts, highPrev)
+	if len(got) != 2 || got[0].ID != 2 || got[1].ID != 4 {
+		t.Fatalf("filterHighPrevalence=%v want [id2 id4]", got)
+	}
+
+	// 空噪声集：原样返回，不分配。
+	if same := filterHighPrevalence(alerts, nil); len(same) != len(alerts) {
+		t.Errorf("空噪声集应原样返回: len=%d want %d", len(same), len(alerts))
+	}
+}
+
 func TestSummarizeIncident(t *testing.T) {
 	alerts := []incidentAlert{
 		{ID: 1, Severity: "medium", RiskScore: 40, ATTCKTactic: "TA0011"},
