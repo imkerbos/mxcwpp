@@ -183,6 +183,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("低保真规则降级失败", zap.Error(err))
 	}
 
+	// 把纯端口启发式 C2 规则降级为 indicator（fidelity=low），生产 proxy/CDN 正常出站误报刷屏
+	if err := migrateMarkPortHeuristicLowFidelity(db, logger); err != nil {
+		logger.Warn("端口启发式规则降级失败", zap.Error(err))
+	}
+
 	// 给存量检测规则回填 detect-only 观察期起点 effective_at = created_at
 	if err := migrateBackfillRuleEffectiveAt(db, logger); err != nil {
 		logger.Warn("回填规则 effective_at 失败", zap.Error(err))
@@ -242,6 +247,35 @@ func migrateMarkLowFidelityRules(db *gorm.DB, logger *zap.Logger) error {
 	}
 	if total > 0 {
 		logger.Info("已降级低保真噪声规则为 indicator", zap.Int64("count", total))
+	}
+	return nil
+}
+
+// migrateMarkPortHeuristicLowFidelity 把纯端口启发式 C2 检测规则标记为 fidelity=low（降级 indicator，
+// 不独立告警，事件仍喂 anomaly/storyline 关联）。
+//
+// 依据 prod 实测：这类规则仅按 remote_port 命中高危端口/CobaltStrike默认端口/VPN/IRC/Tor/SOCKS/矿池端口，
+// 对 proxy/CDN/正常业务出站流量误报刷屏（全队列 197-228 台均匀铺满 = 环境噪声铁证）。端口本身零上下文，
+// 单信号价值极低；降级后仅参与多信号关联，真行为检测（memfd 反弹shell / 真信标模式 / 挖矿进程行为）保 high 不动。
+// 幂等：按规则名精确匹配，已 low 则跳过。
+func migrateMarkPortHeuristicLowFidelity(db *gorm.DB, logger *zap.Logger) error {
+	portHeuristicRules := []string{
+		"高危端口外连",
+		"IRC 协议外连",
+		"Tor/匿名代理外连",
+		"挖矿矿池端口外连",
+		"SOCKS 代理外连",
+		"VPN 端口外连",
+		"Cobalt Strike 默认端口",
+	}
+	r := db.Model(&model.DetectionRule{}).
+		Where("name IN ? AND fidelity <> ?", portHeuristicRules, model.RuleFidelityLow).
+		Update("fidelity", model.RuleFidelityLow)
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected > 0 {
+		logger.Info("已降级端口启发式 C2 规则为 indicator", zap.Int64("count", r.RowsAffected))
 	}
 	return nil
 }

@@ -19,6 +19,9 @@ const (
 	incidentMinTactics    = 2                // 跨 ≥ 此战术数 → 成事件
 	incidentMinAlerts     = 3                // 或告警数 ≥ 此值 → 成事件
 	incidentMultiBoostCap = 100.0
+	// incidentMaxPrevalence 单规则活跃告警覆盖主机比例上限；超过则视为环境噪声，剔除后再判事件。
+	// 定向攻击是稀有、主机特异的；铺满多数主机的规则对"这台被攻击"零贡献。
+	incidentMaxPrevalence = 0.25
 )
 
 // attckTacticOrder 按 ATT&CK kill-chain 给战术 ID 排序权重（越小越靠前）。未知放末尾。
@@ -40,6 +43,7 @@ type incidentAlert struct {
 	RiskScore   float64
 	ATTCKTactic string
 	Category    string
+	RuleID      string
 }
 
 // distinctCategoryCount 统计成员告警的不同分类数，作为攻击阶段数的回退度量。
@@ -158,9 +162,12 @@ func processIncidentCorrelation(db *gorm.DB, logger *zap.Logger) {
 		return
 	}
 
+	// 每周期算一次窗内高流行度规则集合，供各主机剔除环境噪声后再判事件（避免逐主机重复查全舰队）。
+	highPrev := highPrevalenceRules(db, cutoff)
+
 	var created, updated int
 	for _, hostID := range hostIDs {
-		if upsertIncidentForHost(db, logger, hostID, cutoff) {
+		if upsertIncidentForHost(db, logger, hostID, cutoff, highPrev) {
 			created++ // 计数粗略：created/updated 合并统计成 affected
 		}
 	}
@@ -178,10 +185,10 @@ func processIncidentCorrelation(db *gorm.DB, logger *zap.Logger) {
 }
 
 // upsertIncidentForHost 为单主机构建/更新 active incident。返回是否写入。
-func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutoff model.LocalTime) bool {
+func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutoff model.LocalTime, highPrev map[string]struct{}) bool {
 	var rows []incidentAlert
 	if err := db.Model(&model.Alert{}).
-		Select("id, severity, risk_score, attck_tactic, category").
+		Select("id, severity, risk_score, attck_tactic, category, rule_id").
 		Where("host_id = ? AND status = ? AND last_seen_at >= ?", hostID, model.AlertStatusActive, cutoff).
 		Scan(&rows).Error; err != nil {
 		logger.Warn("Incident 关联查询告警失败", zap.String("host_id", hostID), zap.Error(err))
@@ -191,9 +198,13 @@ func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutof
 		return false
 	}
 
+	// 剔除高流行度(环境噪声)规则告警后再判事件：只有稀有、主机特异的信号才成事件。
+	// 若剔除后无信号剩余，主机现存 active incident 应随之关闭（其成员已全为环境噪声）。
+	rows = filterHighPrevalence(rows, highPrev)
 	chain := hasAttackChain(rows)
 	maxSeverity, maxRisk, tactics, alertIDs := summarizeIncident(rows)
-	if !isIncidentWorthy(len(rows), len(tactics), chain) {
+	if len(rows) == 0 || !isIncidentWorthy(len(rows), len(tactics), chain) {
+		resolveActiveIncident(db, hostID)
 		return false
 	}
 
@@ -292,6 +303,65 @@ func autoResolveIncidents(db *gorm.DB, cutoff model.LocalTime) int {
 		}
 	}
 	return closed
+}
+
+// highPrevalenceRules 返回窗内"高流行度"规则集合：单规则活跃告警覆盖主机数超过舰队 incidentMaxPrevalence 比例。
+// 定向攻击稀有、主机特异；铺满多数主机的规则是环境噪声（运维常态/业务负载），对"这台被攻击"零贡献，
+// 应在事件关联前剔除。每关联周期算一次，供本轮所有主机复用。
+func highPrevalenceRules(db *gorm.DB, cutoff model.LocalTime) map[string]struct{} {
+	high := map[string]struct{}{}
+
+	var fleetSize int64
+	if err := db.Model(&model.Host{}).Count(&fleetSize).Error; err != nil || fleetSize <= 0 {
+		return high
+	}
+	threshold := float64(fleetSize) * incidentMaxPrevalence
+
+	type prevRow struct {
+		RuleID string
+		Hosts  int64
+	}
+	var rows []prevRow
+	if err := db.Model(&model.Alert{}).
+		Select("rule_id, COUNT(DISTINCT host_id) AS hosts").
+		Where("status = ? AND last_seen_at >= ?", model.AlertStatusActive, cutoff).
+		Group("rule_id").Scan(&rows).Error; err != nil {
+		return high
+	}
+	for _, r := range rows {
+		if r.RuleID != "" && float64(r.Hosts) > threshold {
+			high[r.RuleID] = struct{}{}
+		}
+	}
+	return high
+}
+
+// filterHighPrevalence 剔除命中高流行度规则的告警，保留稀有、主机特异的信号。
+func filterHighPrevalence(alerts []incidentAlert, highPrev map[string]struct{}) []incidentAlert {
+	if len(highPrev) == 0 {
+		return alerts
+	}
+	out := make([]incidentAlert, 0, len(alerts))
+	for _, a := range alerts {
+		if _, noisy := highPrev[a.RuleID]; noisy {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// resolveActiveIncident 关闭主机现存 active incident（其成员告警已全被高流行度过滤或不再够成事件）。
+// 与 autoResolveIncidents 互补：后者只处理主机近窗零 active 告警的情况；本函数处理"仍有告警但全为环境噪声"。
+func resolveActiveIncident(db *gorm.DB, hostID string) {
+	now := model.ToLocalTime(time.Now())
+	db.Model(&model.Incident{}).
+		Where("host_id = ? AND status = ?", hostID, model.IncidentStatusActive).
+		Updates(map[string]any{
+			"status":      model.IncidentStatusResolved,
+			"resolved_at": now,
+			"resolved_by": "auto",
+		})
 }
 
 func hostnameOr(hostname, hostID string) string {
