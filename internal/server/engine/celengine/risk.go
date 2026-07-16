@@ -1,8 +1,6 @@
 package celengine
 
 import (
-	"time"
-
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -57,39 +55,31 @@ func fidelityWeight(f string) float64 {
 	return 1.0
 }
 
-// assetWeight 按主机资产关键性加权；查不到按 normal。
+// assetWeight 按主机资产关键性加权；读原子快照零 DB，未命中按 normal(1.0)。
+// 快照由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）——原每事件一次
+// `SELECT criticality FROM hosts` 在高事件量下打满连接池，是 engine CPU 高根因。
 func (g *AlertGenerator) assetWeight(hostID string) float64 {
-	var h model.Host
-	if err := g.db.Select("criticality").Where("host_id = ?", hostID).First(&h).Error; err != nil {
+	snap := g.assetWeightCache.Load()
+	if snap == nil {
 		return 1.0
 	}
-	switch h.Criticality {
-	case "critical":
-		return 1.3
-	case "high":
-		return 1.15
-	case "low":
-		return 0.8
-	default: // normal / 空
-		return 1.0
+	if w, ok := (*snap)[hostID]; ok {
+		return w
 	}
+	return 1.0
 }
 
 // correlationBoost 体现多信号关联：同主机近 1h 活跃告警跨越的不同 category 越多，
 // 越可能是攻击链（非孤立误报），分越高。≥3 类 ×1.5，≥2 类 ×1.2，否则 ×1.0。
+// 读原子快照零 DB（原每事件一次 COUNT(DISTINCT category) 无索引全扫，是 engine CPU 高根因）；
+// 快照由 StartRiskCacheReload 每分钟刷新（详见 risk_cache.go）。
 func (g *AlertGenerator) correlationBoost(hostID string) float64 {
-	since := time.Now().Add(-time.Hour)
-	var distinctCategories int64
-	g.db.Model(&model.Alert{}).
-		Where("host_id = ? AND status = ? AND last_seen_at >= ?", hostID, model.AlertStatusActive, since).
-		Distinct("category").
-		Count(&distinctCategories)
-	switch {
-	case distinctCategories >= 3:
-		return 1.5
-	case distinctCategories >= 2:
-		return 1.2
-	default:
+	snap := g.correlationBoostCache.Load()
+	if snap == nil {
 		return 1.0
 	}
+	if b, ok := (*snap)[hostID]; ok {
+		return b
+	}
+	return 1.0
 }
