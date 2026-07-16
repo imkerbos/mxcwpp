@@ -313,9 +313,22 @@ func iocHitTitle(iocType string) string {
 	}
 }
 
+// iocInboundSuppressed 判断 IOC 命中是否因入站方向被抑制。
+// 公网服务被全网扫描,源 IP 恰在情报库=背景噪音,非本机主动外联 C2;仅出站(本机 → 恶意 IP)
+// 才是真 C2 指标。仅对 ip 类命中生效(hash/url 无方向语义)。方向字段缺失时不抑制(保守保留告警)。
+func iocInboundSuppressed(iocType, direction string) bool {
+	return iocType == "ip" && direction == "inbound"
+}
+
 // GenerateFromIOC 服务端 IOC 匹配命中 → 生成/更新 ioc_hit 告警。
 // 命中字段写入 ioc_match/ioc_type/ioc_value,前端研判可溯源命中来源。尊重白名单。
 func (g *AlertGenerator) GenerateFromIOC(hostID, iocType, iocValue string, fields map[string]string) {
+	// 入站 IP 命中抑制：公网服务(nginx/goproxy)被全网扫描,源 IP 恰在情报库=背景噪音,
+	// 非本机主动外联 C2。仅出站(本机 → 恶意 IP)才是真 C2 指标。避免公网面主机被扫描刷屏
+	// (2026-07 prod:单周 6000+ 全是入站扫描)。hash/url 命中无方向语义,不受此限。
+	if iocInboundSuppressed(iocType, fields["direction"]) {
+		return
+	}
 	ruleKey := "ioc-" + iocType
 	if ok, _ := g.matchDBWhitelist(ruleKey, hostID, IOCHitCategory, "critical", fields); ok {
 		return
