@@ -35,7 +35,7 @@ type RetentionSeed struct {
 
 // DefaultRetentionPolicies 列出内置策略。
 var DefaultRetentionPolicies = []RetentionSeed{
-	{"ebpf_events", "EDR 事件", "agent ebpf 上报的进程/文件/网络/DNS 原始事件", 7},
+	{"ebpf_events", "EDR 事件", "agent ebpf 上报的进程/文件/网络/DNS 原始事件（原始取证窗口）", 30},
 	{"storyline_events", "攻击故事线事件", "EDR 关联生成的故事线事件流", 90},
 	{"audit_log", "审计日志", "用户操作 / 管理动作审计（合规留存）", 180},
 	{"alert_events", "告警事件流", "告警生命周期事件", 90},
