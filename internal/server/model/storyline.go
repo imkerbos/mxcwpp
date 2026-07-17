@@ -8,16 +8,16 @@ type Storyline struct {
 	StoryID     string     `gorm:"type:varchar(64);uniqueIndex" json:"story_id"`
 	HostID      string     `gorm:"type:varchar(64);index" json:"host_id"`
 	Hostname    string     `gorm:"type:varchar(255)" json:"hostname"`
-	Severity    string     `gorm:"type:varchar(20)" json:"severity"`              // critical/high/medium/low
-	Status      string     `gorm:"type:varchar(20);default:active" json:"status"` // active/resolved/investigating
-	Phase       string     `gorm:"type:varchar(50)" json:"phase"`                 // MITRE ATT&CK phase (e.g. initial_access)
-	Summary     string     `gorm:"type:text" json:"summary"`                      // auto-generated summary
-	RuleNames   string     `gorm:"type:text" json:"rule_names"`                   // comma-separated matched rules
-	EventCount  int        `json:"event_count"`                                   // total events in storyline
-	AlertCount  int        `json:"alert_count"`                                   // events that triggered rules
-	RiskScore   float64    `gorm:"type:decimal(5,1)" json:"risk_score"`           // 0-100
+	Severity    string     `gorm:"type:varchar(20)" json:"severity"`                                                          // critical/high/medium/low
+	Status      string     `gorm:"type:varchar(20);default:active;index:idx_story_status_risk_seen,priority:1" json:"status"` // active/resolved/investigating
+	Phase       string     `gorm:"type:varchar(50)" json:"phase"`                                                             // MITRE ATT&CK phase (e.g. initial_access)
+	Summary     string     `gorm:"type:text" json:"summary"`                                                                  // auto-generated summary
+	RuleNames   string     `gorm:"type:text" json:"rule_names"`                                                               // comma-separated matched rules
+	EventCount  int        `json:"event_count"`                                                                               // total events in storyline
+	AlertCount  int        `json:"alert_count"`                                                                               // events that triggered rules
+	RiskScore   float64    `gorm:"type:decimal(5,1);index:idx_story_status_risk_seen,priority:2" json:"risk_score"`           // 0-100
 	FirstSeenAt LocalTime  `json:"first_seen_at"`
-	LastSeenAt  LocalTime  `json:"last_seen_at"`
+	LastSeenAt  LocalTime  `gorm:"index:idx_story_status_risk_seen,priority:3" json:"last_seen_at"`
 	ResolvedAt  *LocalTime `json:"resolved_at,omitempty"`
 	ResolvedBy  string     `gorm:"type:varchar(100)" json:"resolved_by,omitempty"`
 	CreatedAt   LocalTime  `json:"created_at"`
