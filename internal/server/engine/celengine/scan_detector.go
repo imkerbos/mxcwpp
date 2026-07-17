@@ -211,17 +211,19 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 	resultID := fmt.Sprintf("scan-%s-%s-%d", hostID, remoteAddr, time.Now().UnixNano())
 
 	alert := model.Alert{
-		ResultID:    resultID,
-		HostID:      hostID,
-		RuleID:      "scan-detector",
-		Source:      model.AlertSourceDetection,
-		Severity:    d.classifySeverity(portCount),
-		Category:    "port_scan",
-		Title:       fmt.Sprintf("端口扫描检测 - 来自 %s", remoteAddr),
-		Description: fmt.Sprintf("在 %d 秒内检测到来自 %s 的 %d 个不同端口访问，疑似端口扫描行为。被扫描端口：%s", int(scanWindow.Seconds()), remoteAddr, portCount, portsStr),
-		Status:      model.AlertStatusActive,
-		FirstSeenAt: now,
-		LastSeenAt:  now,
+		ResultID:       resultID,
+		HostID:         hostID,
+		RuleID:         "scan-detector",
+		Source:         model.AlertSourceDetection,
+		Severity:       d.classifySeverity(portCount),
+		Category:       "port_scan",
+		ATTCKTechnique: "T1046",                      // Network Service Discovery
+		ATTCKTactic:    tacticFromTechnique("T1046"), // TA0007 Discovery
+		Title:          fmt.Sprintf("端口扫描检测 - 来自 %s", remoteAddr),
+		Description:    fmt.Sprintf("在 %d 秒内检测到来自 %s 的 %d 个不同端口访问，疑似端口扫描行为。被扫描端口：%s", int(scanWindow.Seconds()), remoteAddr, portCount, portsStr),
+		Status:         model.AlertStatusActive,
+		FirstSeenAt:    now,
+		LastSeenAt:     now,
 	}
 
 	if err := d.db.Create(&alert).Error; err != nil {

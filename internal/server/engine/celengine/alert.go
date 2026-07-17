@@ -40,6 +40,11 @@ type AlertGenerator struct {
 	// hostCreatedAt 是 host_id → created_at 的原子快照，由 StartHostGraceReload 周期刷新。
 	// created_at 不可变，缓存即可消除 hostInGrace 每事件一次的 DB 查（详见 host_grace.go）。
 	hostCreatedAt atomic.Pointer[map[string]time.Time]
+	// assetWeightCache（host_id → 资产权重）、correlationBoostCache（host_id → 关联加权）
+	// 是风险打分两项输入的原子快照，由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）。
+	// 消除 computeRiskScore 每事件两次 DB 查（assetWeight / correlationBoost），engine CPU 高根因。
+	assetWeightCache      atomic.Pointer[map[string]float64]
+	correlationBoostCache atomic.Pointer[map[string]float64]
 }
 
 // NewAlertGenerator 创建 AlertGenerator
@@ -49,9 +54,11 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 		log:       logger,
 		throttler: NewHitThrottler(defaultHitBurstThreshold, defaultHitRefillWindow, defaultHitThrottleCapacity),
 	}
-	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload 周期刷新
+	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload / StartRiskCacheReload 周期刷新
 	g.reloadDBWhitelist()
 	g.reloadHostCreatedAt()
+	g.reloadAssetWeightCache()
+	g.reloadCorrelationBoostCache()
 	return g
 }
 
@@ -159,20 +166,22 @@ func (g *AlertGenerator) upsertAlert(hostID string, rule *model.DetectionRule, f
 
 	// 不存在 → 创建新告警
 	alert := model.Alert{
-		ResultID:    resultID,
-		HostID:      hostID,
-		RuleID:      fmt.Sprintf("cel-%d", rule.ID),
-		Source:      model.AlertSourceDetection,
-		Severity:    rule.Severity,
-		RiskScore:   g.computeRiskScore(hostID, rule),
-		Category:    categorize(rule),
-		Title:       rule.Name,
-		Description: rule.Description,
-		Actual:      string(detail),
-		Status:      model.AlertStatusActive,
-		HitCount:    1,
-		FirstSeenAt: now,
-		LastSeenAt:  now,
+		ResultID:       resultID,
+		HostID:         hostID,
+		RuleID:         fmt.Sprintf("cel-%d", rule.ID),
+		Source:         model.AlertSourceDetection,
+		Severity:       rule.Severity,
+		RiskScore:      g.computeRiskScore(hostID, rule),
+		Category:       categorize(rule),
+		ATTCKTechnique: rule.MitreID,
+		ATTCKTactic:    tacticFromTechnique(rule.MitreID),
+		Title:          rule.Name,
+		Description:    rule.Description,
+		Actual:         string(detail),
+		Status:         model.AlertStatusActive,
+		HitCount:       1,
+		FirstSeenAt:    now,
+		LastSeenAt:     now,
 	}
 
 	if err := g.db.Create(&alert).Error; err != nil {
@@ -313,9 +322,22 @@ func iocHitTitle(iocType string) string {
 	}
 }
 
+// iocInboundSuppressed 判断 IOC 命中是否因入站方向被抑制。
+// 公网服务被全网扫描,源 IP 恰在情报库=背景噪音,非本机主动外联 C2;仅出站(本机 → 恶意 IP)
+// 才是真 C2 指标。仅对 ip 类命中生效(hash/url 无方向语义)。方向字段缺失时不抑制(保守保留告警)。
+func iocInboundSuppressed(iocType, direction string) bool {
+	return iocType == "ip" && direction == "inbound"
+}
+
 // GenerateFromIOC 服务端 IOC 匹配命中 → 生成/更新 ioc_hit 告警。
 // 命中字段写入 ioc_match/ioc_type/ioc_value,前端研判可溯源命中来源。尊重白名单。
 func (g *AlertGenerator) GenerateFromIOC(hostID, iocType, iocValue string, fields map[string]string) {
+	// 入站 IP 命中抑制：公网服务(nginx/goproxy)被全网扫描,源 IP 恰在情报库=背景噪音,
+	// 非本机主动外联 C2。仅出站(本机 → 恶意 IP)才是真 C2 指标。避免公网面主机被扫描刷屏
+	// (2026-07 prod:单周 6000+ 全是入站扫描)。hash/url 命中无方向语义,不受此限。
+	if iocInboundSuppressed(iocType, fields["direction"]) {
+		return
+	}
 	ruleKey := "ioc-" + iocType
 	if ok, _ := g.matchDBWhitelist(ruleKey, hostID, IOCHitCategory, "critical", fields); ok {
 		return
@@ -354,6 +376,7 @@ func (g *AlertGenerator) GenerateFromIOC(hostID, iocType, iocValue string, field
 		RiskScore:      85,
 		Category:       IOCHitCategory,
 		ATTCKTechnique: "T1071",
+		ATTCKTactic:    tacticFromTechnique("T1071"),
 		Title:          iocHitTitle(iocType),
 		Description:    "外联/访问命中威胁情报库的恶意 " + iocType + ":" + iocValue,
 		Actual:         string(detail),
@@ -433,6 +456,7 @@ func (g *AlertGenerator) GenerateFromSequence(hostID string, rule model.Sequence
 		RiskScore:      sequenceRiskScore(rule.Severity),
 		Category:       AttackChainCategory,
 		ATTCKTechnique: rule.MitreID,
+		ATTCKTactic:    tacticFromTechnique(rule.MitreID),
 		Title:          rule.Name,
 		Description:    rule.Description,
 		Actual:         string(detail),

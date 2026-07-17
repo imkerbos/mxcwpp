@@ -2,6 +2,7 @@
 package setup
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"strings"
@@ -141,6 +142,10 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	// 5.5.1 注入 ChConn 到 model 层（启用 Alert/Vulnerability/HostVulnerability
 	// GORM AfterCreate/Update/Save hook 自动双写 CH）；chConn 为 nil 时同步自动 no-op。
 	model.SetClickHouse(chConn, logger)
+
+	// 5.5.2 把 retention_policies 下发为 CH 表 TTL，让保留策略真正落地（此前只有管理员手动
+	// 改才 ALTER，seed 只写 MySQL 不碰 CH）。seed 已在上面对齐 DB，此处对齐 CH。
+	migration.SyncRetentionTTL(context.Background(), db, chConn, logger)
 
 	// 5.6 初始化监控数据查询服务（主机性能监控仅使用 Prometheus）
 	metricsService := biz.NewMetricsService(db, prometheusClient, chConn, logger)

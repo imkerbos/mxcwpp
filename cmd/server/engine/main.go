@@ -122,6 +122,8 @@ func main() {
 					alertGen.StartWhitelistReload(ctx)
 					// 周期 reload 主机 created_at 快照,消除 hostInGrace 每事件 DB 查(engine CPU 高根因)
 					alertGen.StartHostGraceReload(ctx)
+					// 周期 reload 资产权重 / 关联度快照,消除 computeRiskScore 每事件两次 DB 查(engine CPU 高根因)
+					alertGen.StartRiskCacheReload(ctx)
 					stages = append(stages, engine.NewCelRuleStage(celEng, logger).WithAlertGenerator(alertGen))
 					seqDetector := celengine.NewSequenceDetector(celEng, db, nil, logger.Named("seq"))
 					if err := seqDetector.ReloadRules(); err != nil {
