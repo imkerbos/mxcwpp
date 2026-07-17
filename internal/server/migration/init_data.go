@@ -2,6 +2,7 @@
 package migration
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -170,7 +172,11 @@ func SeedFeatureFlags(db *gorm.DB, logger *zap.Logger) {
 	logger.Info("feature_flags 默认值已 seed", zap.Int("count", len(model.DefaultFeatureFlags)))
 }
 
-// SeedRetentionPolicies 启动时插入内置 retention policy 默认值。
+// SeedRetentionPolicies 启动时插入内置 retention policy 默认值，并对齐未被管理员改动的行。
+//
+// FirstOrCreate 只在缺失时插入；内置默认值日后变更（如 ebpf_events 7→30）不会自动落到
+// 已存在的旧行。故对 updated_by 为空（从未经管理员手动修改）的内置策略，把 retention_days
+// 对齐到当前默认值；管理员改过的（updated_by 非空）尊重其自定义，不覆盖。
 func SeedRetentionPolicies(db *gorm.DB, logger *zap.Logger) {
 	for _, s := range model.DefaultRetentionPolicies {
 		rp := model.RetentionPolicy{
@@ -183,9 +189,53 @@ func SeedRetentionPolicies(db *gorm.DB, logger *zap.Logger) {
 			Attrs(rp).
 			FirstOrCreate(&model.RetentionPolicy{}).Error; err != nil {
 			logger.Warn("seed retention_policy 失败", zap.String("ch_table", s.CHTable), zap.Error(err))
+			continue
+		}
+		if err := db.Model(&model.RetentionPolicy{}).
+			Where("ch_table = ? AND retention_days <> ? AND COALESCE(updated_by, '') = ''", s.CHTable, s.Days).
+			Update("retention_days", s.Days).Error; err != nil {
+			logger.Warn("对齐内置 retention 默认值失败", zap.String("ch_table", s.CHTable), zap.Error(err))
 		}
 	}
 	logger.Info("retention_policies 默认值已 seed", zap.Int("count", len(model.DefaultRetentionPolicies)))
+}
+
+// SyncRetentionTTL 把 retention_policies 表的保留天数下发为 ClickHouse 各表 TTL，让保留策略真正落地。
+//
+// 修复空转：建表 DDL 里的 TTL 是初始值，此前只有管理员手动调 UpdateRetentionPolicy 才会 ALTER；
+// SeedRetentionPolicies 只写 MySQL 不碰 CH，导致「MySQL 配了保留天数、CH 表 TTL 不变」。
+// 本函数在启动时（chConn 就绪、seed 之后）逐表对齐，使配置生效。chConn 为 nil 时跳过；
+// 单表 ALTER 失败只 warn 不中断启动。TTL 时间列沿用与管理端 UpdateRetentionPolicy 一致的 timestamp。
+func SyncRetentionTTL(ctx context.Context, db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) {
+	if chConn == nil {
+		logger.Info("chConn 为 nil，跳过 CH 保留 TTL 同步")
+		return
+	}
+	var policies []model.RetentionPolicy
+	if err := db.Find(&policies).Error; err != nil {
+		logger.Warn("加载 retention_policies 失败，跳过 CH TTL 同步", zap.Error(err))
+		return
+	}
+	synced, failed := 0, 0
+	for _, p := range policies {
+		ddl := fmt.Sprintf(
+			"ALTER TABLE %s MODIFY TTL toDateTime(timestamp) + INTERVAL %d DAY",
+			p.CHTable, p.RetentionDays)
+		tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := chConn.Exec(tctx, ddl)
+		cancel()
+		if err != nil {
+			failed++
+			logger.Warn("CH TTL 同步失败(跳过该表,不中断启动)",
+				zap.String("table", p.CHTable),
+				zap.Int("days", p.RetentionDays),
+				zap.Error(err))
+			continue
+		}
+		synced++
+	}
+	logger.Info("CH 保留 TTL 已同步",
+		zap.Int("synced", synced), zap.Int("failed", failed), zap.Int("total", len(policies)))
 }
 
 // initDefaultUsers 初始化默认用户
