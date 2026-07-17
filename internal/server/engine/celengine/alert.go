@@ -40,6 +40,11 @@ type AlertGenerator struct {
 	// hostCreatedAt 是 host_id → created_at 的原子快照，由 StartHostGraceReload 周期刷新。
 	// created_at 不可变，缓存即可消除 hostInGrace 每事件一次的 DB 查（详见 host_grace.go）。
 	hostCreatedAt atomic.Pointer[map[string]time.Time]
+	// assetWeightCache（host_id → 资产权重）、correlationBoostCache（host_id → 关联加权）
+	// 是风险打分两项输入的原子快照，由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）。
+	// 消除 computeRiskScore 每事件两次 DB 查（assetWeight / correlationBoost），engine CPU 高根因。
+	assetWeightCache      atomic.Pointer[map[string]float64]
+	correlationBoostCache atomic.Pointer[map[string]float64]
 }
 
 // NewAlertGenerator 创建 AlertGenerator
@@ -49,9 +54,11 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 		log:       logger,
 		throttler: NewHitThrottler(defaultHitBurstThreshold, defaultHitRefillWindow, defaultHitThrottleCapacity),
 	}
-	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload 周期刷新
+	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload / StartRiskCacheReload 周期刷新
 	g.reloadDBWhitelist()
 	g.reloadHostCreatedAt()
+	g.reloadAssetWeightCache()
+	g.reloadCorrelationBoostCache()
 	return g
 }
 
