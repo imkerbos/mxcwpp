@@ -117,6 +117,39 @@ func TestIsAlertWhitelisted(t *testing.T) {
 			// 反代规则 + 内网 IP 都满足，匹配第一条 c2_communication+exe
 			wantReason: "reverse_proxy_upstream",
 		},
+		{
+			name:       "fork bomb 规则 + sshd-session 被抑制（每连接子进程,非失控派生）",
+			ruleName:   "进程异常 - 同 ppid 高频 fork (fork bomb 嫌疑)",
+			fields:     map[string]string{"comm": "sshd-session"},
+			wantWL:     true,
+			wantReason: "benign_high_fork_process",
+		},
+		{
+			name:       "fork 规则 + systemctl 轮询被抑制",
+			ruleName:   "进程异常 - 同 ppid 高频 fork (fork bomb 嫌疑)",
+			fields:     map[string]string{"exe": "/usr/bin/systemctl"},
+			wantWL:     true,
+			wantReason: "benign_high_fork_process",
+		},
+		{
+			name:     "fork 规则 + 未知进程不抑制（保留真 fork bomb）",
+			ruleName: "进程异常 - 同 ppid 高频 fork (fork bomb 嫌疑)",
+			fields:   map[string]string{"comm": "bash"},
+			wantWL:   false,
+		},
+		{
+			name:       "反弹 Shell 规则 + runc 容器运行时被抑制",
+			ruleName:   "反弹 Shell - nc/ncat",
+			fields:     map[string]string{"comm": "runc"},
+			wantWL:     true,
+			wantReason: "container_runtime_or_dns_anchor",
+		},
+		{
+			name:     "反弹 Shell 规则 + bash 不抑制（保留真反弹 shell）",
+			ruleName: "反弹 Shell - nc/ncat",
+			fields:   map[string]string{"comm": "bash"},
+			wantWL:   false,
+		},
 	}
 
 	for _, tc := range cases {

@@ -106,6 +106,21 @@ var defaultAlertWhitelist = []alertWhitelistRule{
 		CmdlineContains: []string{"bigdata_monitoring", "TEXTFILE_DIR", "node_exporter", "textfile"},
 		Reason:          "devops_monitoring_textfile",
 	},
+	{
+		// 进程异常-高频 fork 误报：OpenSSH 9.8+ 每连接派生 sshd-session 子进程,高 SSH 连接量
+		// 主机(CDN/跳板)被当 fork bomb;systemctl list-units 监控轮询同理。均为良性系统进程,
+		// 非同一恶意父进程失控派生。(2026-07 prod 巡检:CDN 单条 33w hit)
+		RuleNamePattern: "fork",
+		ExeBasenameIn:   []string{"sshd-session", "sshd", "systemctl"},
+		Reason:          "benign_high_fork_process",
+	},
+	{
+		// 反弹 Shell-nc/ncat 误报：容器运行时 runc(启动容器)/ DNS 信任锚 unbound-anchor
+		// 被 nc/ncat 反弹规则误命中。非交互式反弹 shell。(2026-07 prod 巡检)
+		RuleNamePattern: "反弹",
+		ExeBasenameIn:   []string{"runc", "unbound-anchor"},
+		Reason:          "container_runtime_or_dns_anchor",
+	},
 }
 
 // privateCIDRs 是 RFC1918 + 回环 + 链路本地网段列表。
