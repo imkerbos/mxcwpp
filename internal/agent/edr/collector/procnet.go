@@ -29,7 +29,18 @@ type procNetPoller struct {
 
 	// Previous snapshot for diff-based detection.
 	prev map[connKey]struct{}
+	// listenPorts 是本机当前处于 LISTEN 状态的本地端口集（每次 snapshot 更新）。
+	// 用于推断新连接方向：local_port 属监听端口 → inbound(对端主动连入)，否则 outbound。
+	// procfs 采集(旧内核降级路径)无 eBPF 的 tcp_accept/tcp_connect 语义，靠此补方向，
+	// 使服务端 IOC 入站抑制在降级主机也生效。
+	listenPorts map[int]struct{}
 }
+
+// TCP 状态码（/proc/net/tcp 的 st 字段，十六进制）。
+const (
+	tcpStateEstablished = 1  // 0x01
+	tcpStateListen      = 10 // 0x0A
+)
 
 // connKey uniquely identifies a connection in /proc/net.
 type connKey struct {
@@ -118,6 +129,11 @@ func (p *procNetPoller) emitConnection(key connKey) {
 	evt.SetField("source", "procnet")
 	evt.SetField("local_addr", key.localIP)
 	evt.SetField("local_port", fmt.Sprintf("%d", key.localPort))
+	// 方向推断：本地端口属监听端口 → 对端主动连入(inbound)，否则本机主动外联(outbound)。
+	// 补齐 eBPF 降级路径缺失的 direction，使服务端 IOC 入站抑制在降级主机也生效。
+	if evtType == event.TCPConnect {
+		evt.SetField("direction", directionForLocalPort(p.listenPorts, key.localPort))
+	}
 
 	// DNS 事件标记：UDP 目标端口 53 标记为 DataType 3003
 	if evtType == event.UDPSend && key.remotePort == 53 {
@@ -148,17 +164,26 @@ func (p *procNetPoller) snapshot() map[connKey]struct{} {
 		{"/proc/net/udp6", "udp6", true},
 	}
 
+	listen := make(map[int]struct{})
 	for _, f := range files {
 		conns := p.parseFile(f.path, f.protocol, f.isV6)
+		isTCP := f.protocol == "tcp" || f.protocol == "tcp6"
 		for _, c := range conns {
-			// For TCP, only track ESTABLISHED connections (state 1).
-			if (f.protocol == "tcp" || f.protocol == "tcp6") && c.state != 1 {
-				continue
+			if isTCP {
+				// 记录 LISTEN 端口（用于方向推断），只把 ESTABLISHED 计入活动连接集。
+				if c.state == tcpStateListen {
+					listen[c.localPort] = struct{}{}
+					continue
+				}
+				if c.state != tcpStateEstablished {
+					continue
+				}
 			}
 			result[c.connKey] = struct{}{}
 		}
 	}
 
+	p.listenPorts = listen
 	return result
 }
 
