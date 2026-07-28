@@ -9,6 +9,24 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
+// baselineAlgoEWMA 标识 host_baseline_states 行的方差口径为指数加权(EWMV，M2JSON 存 variance)。
+// 空/其他值视为旧 Welford 行(M2JSON 存 sum-of-squared-deviations)，加载时换算。
+const baselineAlgoEWMA = "ewma"
+
+// welfordM2ToVariance 把旧 Welford 的 sum-of-squared-deviations 按 (samples-1) 换算成样本方差，
+// 作为 EWMA/EWMV 的种子（一次性迁移，samples<2 时方差为 0）。
+func welfordM2ToVariance(m2 [MetricCount]float64, samples int) [MetricCount]float64 {
+	var out [MetricCount]float64
+	if samples < 2 {
+		return out
+	}
+	n := float64(samples - 1)
+	for i := range m2 {
+		out[i] = m2[i] / n
+	}
+	return out
+}
+
 // loadFromDB restores persisted baselines from MySQL on engine startup.
 func (e *Engine) loadFromDB() {
 	var states []model.HostBaselineState
@@ -30,15 +48,32 @@ func (e *Engine) loadFromDB() {
 			e.logger.Warn("解析基线 mean 失败", zap.String("host_id", s.HostID), zap.Error(err))
 			continue
 		}
-		if err := json.Unmarshal([]byte(s.M2JSON), &bl.m2); err != nil {
+		var m2 [MetricCount]float64
+		if err := json.Unmarshal([]byte(s.M2JSON), &m2); err != nil {
 			e.logger.Warn("解析基线 m2 失败", zap.String("host_id", s.HostID), zap.Error(err))
 			continue
+		}
+		// 旧 Welford 行(algo != ewma): M2JSON 存 sum-of-squared-deviations，按 (samples-1)
+		// 换算成 variance 作 EWMA 种子；已是 ewma 行则 M2JSON 直接是 variance。
+		if s.Algo == baselineAlgoEWMA {
+			bl.variance = m2
+		} else {
+			bl.variance = welfordM2ToVariance(m2, bl.samples)
 		}
 		// 时段分桶基线（P1-A）。旧行/空值容错：解析失败则桶留空，评估回退扁平，下次 checkpoint 重建。
 		if s.BSamplesJSON != "" {
 			_ = json.Unmarshal([]byte(s.BMeanJSON), &bl.bMean)
-			_ = json.Unmarshal([]byte(s.BM2JSON), &bl.bM2)
 			_ = json.Unmarshal([]byte(s.BSamplesJSON), &bl.bSamples)
+			var bm2 [NumTimeBuckets][MetricCount]float64
+			if json.Unmarshal([]byte(s.BM2JSON), &bm2) == nil {
+				for k := range bl.bVar {
+					if s.Algo == baselineAlgoEWMA {
+						bl.bVar[k] = bm2[k]
+					} else {
+						bl.bVar[k] = welfordM2ToVariance(bm2[k], bl.bSamples[k])
+					}
+				}
+			}
 		}
 
 		// Re-check phase after restore (time may have passed while offline).
@@ -84,14 +119,15 @@ func (e *Engine) checkpoint() {
 			d.bl.mu.Unlock()
 			continue
 		}
-		m2JSON, err := json.Marshal(d.bl.m2)
+		// M2JSON 存 EWMV variance（algo=ewma），非旧 Welford 的 sum-of-squares。
+		varianceJSON, err := json.Marshal(d.bl.variance)
 		if err != nil {
 			d.bl.mu.Unlock()
 			continue
 		}
 		// 时段分桶基线（P1-A）：marshal 失败不阻断扁平持久化，置空即可。
 		bMeanJSON, _ := json.Marshal(d.bl.bMean)
-		bM2JSON, _ := json.Marshal(d.bl.bM2)
+		bVarJSON, _ := json.Marshal(d.bl.bVar)
 		bSamplesJSON, _ := json.Marshal(d.bl.bSamples)
 
 		state := model.HostBaselineState{
@@ -99,10 +135,11 @@ func (e *Engine) checkpoint() {
 			Phase:        d.bl.phase,
 			Samples:      d.bl.samples,
 			FirstSeen:    model.LocalTime(d.bl.firstSeen),
+			Algo:         baselineAlgoEWMA,
 			MeanJSON:     string(meanJSON),
-			M2JSON:       string(m2JSON),
+			M2JSON:       string(varianceJSON),
 			BMeanJSON:    string(bMeanJSON),
-			BM2JSON:      string(bM2JSON),
+			BM2JSON:      string(bVarJSON),
 			BSamplesJSON: string(bSamplesJSON),
 		}
 		d.bl.dirty = false
