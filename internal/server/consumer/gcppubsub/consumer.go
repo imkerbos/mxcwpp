@@ -89,20 +89,25 @@ func (c *Consumer) Start(ctx context.Context) {
 	}
 }
 
-// handleMessage 处理单条 Pub/Sub 消息
-func (c *Consumer) handleMessage(ctx context.Context, msg *pubsub.Message) {
-	defer msg.Ack()
-
+// handleMessage 处理单条 Pub/Sub 消息。
+//
+// 可靠性语义：处理成功（或消息本就无需处理）才 Ack；持久化失败则 Nack 触发重投（at-least-once），
+// 避免原先 `defer msg.Ack()` 无论写入成败都 Ack 的 at-most-once 缺陷（写失败即丢）。重投上限与
+// 死信由 Pub/Sub 订阅侧的 dead-letter policy 承接，与 Kafka 路径的 DLQ 语义对齐。
+// 解析失败 / 集群未接入 / 无有效事件属"已正确处理，无需落库"，Ack 避免毒消息无限重投。
+func (c *Consumer) handleMessage(_ context.Context, msg *pubsub.Message) {
 	// 解析 Cloud Logging LogEntry
 	var logEntry LogEntry
 	if err := json.Unmarshal(msg.Data, &logEntry); err != nil {
 		c.logger.Debug("解析 Pub/Sub 消息失败，跳过", zap.Error(err))
+		msg.Ack()
 		return
 	}
 
 	// 提取集群名称
 	clusterName := logEntry.Resource.Labels.ClusterName
 	if clusterName == "" {
+		msg.Ack()
 		return
 	}
 
@@ -112,16 +117,29 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *pubsub.Message) {
 		if err == gorm.ErrRecordNotFound {
 			c.logger.Debug("Pub/Sub 消息对应的集群未接入，跳过",
 				zap.String("cluster_name", clusterName))
+			msg.Ack()
+			return
 		}
+		// 非 NotFound 的查询错误可能是 DB 抖动，Nack 重投避免丢事件。
+		c.logger.Warn("查询集群失败，Nack 重投",
+			zap.String("cluster_name", clusterName), zap.Error(err))
+		msg.Nack()
 		return
 	}
 
 	// 转换为 AuditEvent
 	events := TransformLogEntry(&logEntry)
 	if len(events) == 0 {
+		msg.Ack()
 		return
 	}
 
-	// 交给审计事件处理器
-	c.processor.ProcessAuditEvents(cluster, events)
+	// 交给审计事件处理器；持久化失败则 Nack 重投。
+	if err := c.processor.ProcessAuditEvents(cluster, events); err != nil {
+		c.logger.Warn("处理审计事件失败，Nack 重投",
+			zap.Uint("cluster_id", c.cfg.ClusterID), zap.Error(err))
+		msg.Nack()
+		return
+	}
+	msg.Ack()
 }

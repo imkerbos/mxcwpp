@@ -50,9 +50,12 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	}
 
 	// 健康检查（支持 GET 和 HEAD 方法，Docker healthcheck 可能使用 HEAD）
-	healthHandler := api.NewHealthHandler(db, logger)
+	healthHandler := api.NewHealthHandler(db, chConn, redisClient, logger)
 	router.GET("/health", healthHandler.Health)
 	router.HEAD("/health", healthHandler.Health)
+	// readiness：额外探可选依赖(ClickHouse/Redis 若已配置)，供编排器判定是否承接流量
+	router.GET("/health/ready", healthHandler.Readiness)
+	router.HEAD("/health/ready", healthHandler.Readiness)
 
 	// Prometheus metrics 端点（可选 BasicAuth 保护）
 	// 跳过未替换的模板占位符（如 __METRICS_BASIC_AUTH_USER__），防 Prom self-scrape 401
