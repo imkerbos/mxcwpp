@@ -281,9 +281,18 @@ func (v *VulnScanner) ScanAll() error {
 	// 生成扫描摘要
 	var afterCount int64
 	v.db.Model(&model.Vulnerability{}).Count(&afterCount)
-	var criticalCount, highCount int64
-	v.db.Model(&model.Vulnerability{}).Where("status = ? AND severity = ?", "unpatched", "critical").Count(&criticalCount)
-	v.db.Model(&model.Vulnerability{}).Where("status = ? AND severity = ?", "unpatched", "high").Count(&highCount)
+	// fleet 口径：数舰队真实落地的去重 CVE（host_vulnerabilities join），而非 vulnerabilities
+	// advisory 全量目录——后者含大量主机未命中的 CVE，摘要严重/高危数会虚高数十倍。
+	fleetSev := func(sev string) int64 {
+		var n int64
+		v.db.Table("host_vulnerabilities AS hv").
+			Joins("JOIN vulnerabilities vln ON vln.id = hv.vuln_id").
+			Where("hv.status = ? AND vln.severity = ?", "unpatched", sev).
+			Select("COUNT(DISTINCT vln.cve_id)").Scan(&n)
+		return n
+	}
+	criticalCount := fleetSev("critical")
+	highCount := fleetSev("high")
 	var affectedHosts int64
 	v.db.Model(&model.HostVulnerability{}).Where("status = ?", "unpatched").Distinct("host_id").Count(&affectedHosts)
 

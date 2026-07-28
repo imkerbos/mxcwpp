@@ -787,25 +787,26 @@ func (h *VulnerabilitiesHandler) GetPriorityStats(c *gin.Context) {
 
 	var results []PriorityBucket
 
+	// fleet 口径：只统计舰队真实落地的去重 CVE（host_vulnerabilities join），与主列表 EXISTS 口径一致。
+	// 原直接数 vulnerabilities advisory 全量目录，与主列表自相矛盾（含大量主机未命中的 CVE）。
+	countPriority := func(cond string, args ...any) int64 {
+		var n int64
+		h.db.Table("host_vulnerabilities AS hv").
+			Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+			Where("hv.status = ?", "unpatched").
+			Where(cond, args...).
+			Select("COUNT(DISTINCT v.cve_id)").Scan(&n)
+		return n
+	}
+
 	// 高优先级 >= 0.75
-	var high int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ?", "unpatched", 0.75).Count(&high)
-	results = append(results, PriorityBucket{Level: "high", Count: high})
-
+	results = append(results, PriorityBucket{Level: "high", Count: countPriority("v.priority_score >= ?", 0.75)})
 	// 中高 0.50-0.75
-	var mediumHigh int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ? AND priority_score < ?", "unpatched", 0.50, 0.75).Count(&mediumHigh)
-	results = append(results, PriorityBucket{Level: "medium-high", Count: mediumHigh})
-
+	results = append(results, PriorityBucket{Level: "medium-high", Count: countPriority("v.priority_score >= ? AND v.priority_score < ?", 0.50, 0.75)})
 	// 中 0.25-0.50
-	var medium int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score >= ? AND priority_score < ?", "unpatched", 0.25, 0.50).Count(&medium)
-	results = append(results, PriorityBucket{Level: "medium", Count: medium})
-
+	results = append(results, PriorityBucket{Level: "medium", Count: countPriority("v.priority_score >= ? AND v.priority_score < ?", 0.25, 0.50)})
 	// 低 < 0.25
-	var low int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND priority_score < ?", "unpatched", 0.25).Count(&low)
-	results = append(results, PriorityBucket{Level: "low", Count: low})
+	results = append(results, PriorityBucket{Level: "low", Count: countPriority("v.priority_score < ?", 0.25)})
 
 	Success(c, results)
 }

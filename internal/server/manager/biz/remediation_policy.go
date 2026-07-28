@@ -206,7 +206,9 @@ func (p *PolicyExecutor) matchHosts(policy *model.RemediationPolicy) ([]string, 
 
 // matchVulns 根据条件筛选漏洞
 func (p *PolicyExecutor) matchVulns(policy *model.RemediationPolicy, hostIDs []string) ([]model.Vulnerability, error) {
-	query := p.db.Model(&model.Vulnerability{}).Where("status = ?", "unpatched")
+	// 不按 vulnerabilities.status（CVE 级 rollup）过滤：该字段滞后时会误排目标主机上仍未修的 CVE。
+	// 真实修复范围由下方 host_vulnerabilities 子查询（目标主机上 status=unpatched 的实例）权威界定。
+	query := p.db.Model(&model.Vulnerability{})
 
 	// 严重级别筛选
 	if policy.SeverityMin != "" {

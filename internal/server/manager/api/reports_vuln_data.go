@@ -58,39 +58,35 @@ func (h *ReportsHandler) BuildVulnReportData(startTime, endTime time.Time) gin.H
 	}
 	var s summary
 
-	timeRange := h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ?", startTime, endTime)
-	timeRange.Count(&s.TotalVulns)
+	// fleet 口径：统计舰队真实落地的去重 CVE（host_vulnerabilities 实例 join vulnerabilities），
+	// 而非 vulnerabilities advisory 全量目录——后者含大量主机未命中的 CVE，会把严重/高危数虚高数十倍
+	// （实测 advisory 全量严重 2718 vs 舰队真实 36）。与 dashboard.countVulnsBySeverity 口径一致。
+	countFleetCVE := func(extra string, args ...any) int64 {
+		var n int64
+		q := h.db.Table("host_vulnerabilities AS hv").
+			Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id").
+			Where("v.discovered_at >= ? AND v.discovered_at <= ?", startTime, endTime)
+		if extra != "" {
+			q = q.Where(extra, args...)
+		}
+		q.Select("COUNT(DISTINCT v.cve_id)").Scan(&n)
+		return n
+	}
 
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "unpatched").
-		Count(&s.UnpatchedVulns)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "fixed").
-		Count(&s.FixedVulns)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND status = ?", startTime, endTime, "ignored").
-		Count(&s.IgnoredVulns)
+	s.TotalVulns = countFleetCVE("")
+	s.UnpatchedVulns = countFleetCVE("hv.status = ?", "unpatched")
+	// 修：原查 vulnerabilities.status='fixed'（枚举不存在，恒 0），改数主机级已修 host_vuln.status='patched'。
+	s.FixedVulns = countFleetCVE("hv.status = ?", "patched")
+	// 风险接受为 CVE 级决策（vulnerabilities.status），fleet 内去重计数。
+	s.IgnoredVulns = countFleetCVE("v.status = ?", "ignored")
 
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND severity = ?", startTime, endTime, "critical").
-		Count(&s.CriticalVulns)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND severity = ?", startTime, endTime, "high").
-		Count(&s.HighVulns)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND severity = ?", startTime, endTime, "medium").
-		Count(&s.MediumVulns)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND severity = ?", startTime, endTime, "low").
-		Count(&s.LowVulns)
+	s.CriticalVulns = countFleetCVE("v.severity = ?", "critical")
+	s.HighVulns = countFleetCVE("v.severity = ?", "high")
+	s.MediumVulns = countFleetCVE("v.severity = ?", "medium")
+	s.LowVulns = countFleetCVE("v.severity = ?", "low")
 
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND has_exploit = ?", startTime, endTime, true).
-		Count(&s.WithExploit)
-	h.db.Model(&model.Vulnerability{}).
-		Where("discovered_at >= ? AND discovered_at <= ? AND in_kev = ?", startTime, endTime, true).
-		Count(&s.InKEV)
+	s.WithExploit = countFleetCVE("v.has_exploit = ?", true)
+	s.InKEV = countFleetCVE("v.in_kev = ?", true)
 
 	// 影响主机数（join 周期内 vuln 后 DISTINCT host）
 	h.db.Model(&model.HostVulnerability{}).
