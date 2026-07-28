@@ -292,9 +292,9 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 		// 心跳：upsert hosts 表 + 写 Redis agent:ac: 映射 + 写 ClickHouse 指标
 		writeErr = r.mysql.WriteHeartbeat(msg)
 		r.writeAgentACMapping(msg)
-		_ = r.ch.WriteHostMetrics(msg)
+		r.chWrite("host_metrics", r.ch.WriteHostMetrics(msg))
 	case msg.DataType == 1001:
-		_ = r.ch.WriteHostMetrics(msg) // 插件心跳，Phase 4 实现
+		r.chWrite("host_metrics", r.ch.WriteHostMetrics(msg)) // 插件心跳，Phase 4 实现
 
 	// 资产数据（5050~5060）
 	case msg.DataType >= 5050 && msg.DataType <= 5060:
@@ -304,7 +304,7 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 	case msg.DataType == 6001:
 		writeErr = r.mysql.WriteFIMEvent(msg)
 		if writeErr == nil {
-			_ = r.ch.WriteFIMEvent(msg)
+			r.chWrite("fim_event", r.ch.WriteFIMEvent(msg))
 			r.evaluateCEL(msg)
 		}
 	// FIM 任务完成
@@ -347,7 +347,7 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 
 	// eBPF 事件（3000-3003，含 DNS 事件）
 	case msg.DataType >= 3000 && msg.DataType <= 3003:
-		_ = r.ch.WriteEBPFEvent(msg)
+		r.chWrite("ebpf_event", r.ch.WriteEBPFEvent(msg))
 		r.evaluateCEL(msg)
 		r.ingestStoryline(msg)
 		// 网络事件额外进行端口扫描检测
@@ -368,10 +368,15 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 		writeErr = r.mysql.WriteCommandAck(msg)
 
 	default:
-		r.logger.Debug("Consumer 忽略未路由的 DataType",
+		// 未知/未路由 DataType 不再静默丢弃（原 Debug 日志 = 数据黑洞）：转 DLQ + 计数告警，
+		// 便于发现新功能上线时的路由缺口 / producer 错误 DataType。
+		r.logger.Warn("消费到未路由的未知 DataType，转入 DLQ",
 			zap.Int32("data_type", msg.DataType),
 			zap.String("agent_id", msg.AgentID),
 		)
+		consumermetrics.RecordUnknownDataType(dataTypeLabel)
+		r.dlq.Send(raw.Topic, msg, fmt.Errorf("unknown data type: %d", msg.DataType), 1)
+		procStatus = "dlq"
 	}
 
 	if writeErr != nil {
@@ -387,6 +392,16 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 
 	// 不论成功失败，均标记 offset（失败消息已进 DLQ，不阻塞消费进度）
 	session.MarkMessage(raw, "")
+}
+
+// chWrite 统一处理 ClickHouse 写结果：失败则计数 + 告警日志。
+// 不进 DLQ（重放会重复 MySQL 幂等写，代价大）——双写漂移由 ch_write_errors 指标暴露，
+// 后续 outbox/对账治理（架构评估 H2）。原各站点 `_ = r.ch.Write...` 静默吞错。
+func (r *Router) chWrite(op string, err error) {
+	if err != nil {
+		consumermetrics.RecordCHWriteError(op)
+		r.logger.Warn("ClickHouse 写入失败", zap.String("op", op), zap.Error(err))
+	}
 }
 
 // evaluateCEL noop (v2 拆分: 检测全部走 Engine 服务).
