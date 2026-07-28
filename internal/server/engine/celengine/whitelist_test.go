@@ -150,6 +150,38 @@ func TestIsAlertWhitelisted(t *testing.T) {
 			fields:   map[string]string{"comm": "bash"},
 			wantWL:   false,
 		},
+		// ===== H2 系统/云进程默认白名单 =====
+		{
+			name:         "ld.so 劫持 + dracut 临时目录 file_path 被抑制",
+			ruleName:     "动态链接劫持 - ld.so.preload",
+			ruleCategory: "defense_evasion",
+			fields:       map[string]string{"comm": "rm", "file_path": "/var/tmp/dracut.hMphBL/initramfs/etc/ld.so.conf"},
+			wantWL:       true,
+			wantReason:   "dracut_initramfs_rebuild",
+		},
+		{
+			name:         "memfd 执行 + runc init 被抑制",
+			ruleName:     "执行 - memfd_create 文件落地",
+			ruleCategory: "defense_evasion",
+			fields:       map[string]string{"comm": "6", "cmdline": "runc init"},
+			wantWL:       true,
+			wantReason:   "container_runtime_or_systemd_exec",
+		},
+		{
+			name:         "内核模块修改 + dnf-automatic 自动更新被抑制",
+			ruleName:     "内核模块配置修改",
+			ruleCategory: "persistence",
+			fields:       map[string]string{"comm": "dnf-automatic"},
+			wantWL:       true,
+			wantReason:   "auto_update",
+		},
+		{
+			name:         "真实 ld.so 劫持（非 dracut 路径）不抑制",
+			ruleName:     "动态链接劫持 - ld.so.preload",
+			ruleCategory: "defense_evasion",
+			fields:       map[string]string{"comm": "curl", "file_path": "/etc/ld.so.preload"},
+			wantWL:       false,
+		},
 	}
 
 	for _, tc := range cases {
