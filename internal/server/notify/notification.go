@@ -321,6 +321,20 @@ func (s *NotificationService) matchSeverity(notificationSeverities []string, ale
 	return false
 }
 
+// hostTagsMatch 判断主机标签是否命中通知配置要求的标签。
+// 采用 OR 语义：主机命中任一配置标签即视为匹配，与业务线/指定主机范围的"任一命中"约定一致。
+// 配置标签为空时不匹配任何主机（避免空条件退化为全量分发）。
+func hostTagsMatch(hostTags, requiredTags []string) bool {
+	for _, want := range requiredTags {
+		for _, have := range hostTags {
+			if want == have {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // matchScope 检查主机范围是否匹配
 func (s *NotificationService) matchScope(notification *model.Notification, alertData *AlertData) bool {
 	switch notification.Scope {
@@ -333,8 +347,12 @@ func (s *NotificationService) matchScope(notification *model.Notification, alert
 		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
 			return false
 		}
-		// TODO: 需要查询主机的标签，这里暂时返回 true
-		return true
+		// 查询主机的标签
+		var host model.Host
+		if err := s.db.First(&host, "host_id = ?", alertData.HostID).Error; err != nil {
+			return false
+		}
+		return hostTagsMatch(host.Tags, scopeValue.Tags)
 
 	case model.NotificationScopeBusinessLine:
 		// 解析 scope_value
@@ -919,8 +937,12 @@ func (s *NotificationService) matchAgentOfflineScope(notification *model.Notific
 		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
 			return false
 		}
-		// TODO: 需要查询主机的标签，这里暂时返回 true
-		return true
+		// 查询主机的标签
+		var host model.Host
+		if err := s.db.First(&host, "host_id = ?", offlineData.HostID).Error; err != nil {
+			return false
+		}
+		return hostTagsMatch(host.Tags, scopeValue.Tags)
 
 	case model.NotificationScopeBusinessLine:
 		// 解析 scope_value
@@ -1386,7 +1408,15 @@ func (s *NotificationService) matchScopeByHostID(notification *model.Notificatio
 	case model.NotificationScopeGlobal:
 		return true
 	case model.NotificationScopeHostTags:
-		return true // TODO: 标签匹配
+		var scopeValue model.ScopeValueData
+		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
+			return false
+		}
+		var host model.Host
+		if err := s.db.First(&host, "host_id = ?", hostID).Error; err != nil {
+			return false
+		}
+		return hostTagsMatch(host.Tags, scopeValue.Tags)
 	case model.NotificationScopeBusinessLine:
 		var scopeValue model.ScopeValueData
 		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
