@@ -279,6 +279,18 @@ func (w *ClickHouseWriter) Close() {
 	}
 }
 
+// Flush 同步刷新当前所有内存批次到 ClickHouse。
+//
+// 供 consumer 在 rebalance(Cleanup) 等 offset 提交边界前调用：让已消费但仍在内存批次里的
+// ebpf/fim/metrics 事件在分区重分配前落盘，避免重平衡/部署丢在途批次。
+// 注意：这不能消除 kill -9/OOM 硬崩溃在两次 flush 之间(≤flushTimeout)的丢失窗口——
+// 彻底 at-least-once 需 offset 提交与批 flush 协调(见架构评估 C1，属专项)。
+func (w *ClickHouseWriter) Flush() {
+	if w.conn != nil {
+		w.flush()
+	}
+}
+
 // WriteHostMetrics 将 DataType 1000/1001 消息追加到 host_metrics 批次
 func (w *ClickHouseWriter) WriteHostMetrics(msg *kafka.MQMessage) error {
 	if w.conn == nil {
