@@ -30,17 +30,22 @@ import (
 const agentACTTL = 180 * time.Second
 
 // coldStartBehaviorAlertMinScore 学习期(冷启动全局基线 5σ)落 behavior_alert 的最低 risk_score。
-// 低于此值的冷启动偏离视为噪声抑制(主机基线未就绪,全局基线在异构舰队误报多)；
-// 主机毕业(active)后用本机 3σ 基线，不受此限，照常全量落库。
+// 低于此值的冷启动偏离视为噪声抑制(主机基线未就绪,全局基线在异构舰队误报多)。
 const coldStartBehaviorAlertMinScore = 85.0
 
+// activeBehaviorAlertMinScore 毕业主机(active)落 behavior_alert 的最低 risk_score。
+// 原为 0(毕业后全量落库) → 单指标轻微越阈值(risk 很低)的 trivial 偏离全量刷库，是毕业主机
+// 噪声洪水主因(BDE 评估实测 67 万/周稳态毕业主机产)。设风险下限只保留有意义偏离，
+// 与 EWMA(基线自适应)/去重/节流叠加进一步收敛。低于此分仍进 anomaly/storyline 关联，只是不独立落 behavior_alert。
+const activeBehaviorAlertMinScore = 60.0
+
 // shouldPersistBehaviorAlert 决定 BDE 偏离是否落 behavior_alert。
-// 学习期(冷启动)仅保留 risk_score≥阈值的高信号；毕业后(非冷启动)全量保留。
+// 学习期(冷启动)仅保留高信号；毕业后(非冷启动)保留 risk_score≥下限的有意义偏离。
 func shouldPersistBehaviorAlert(coldStart bool, riskScore float64) bool {
 	if coldStart {
 		return riskScore >= coldStartBehaviorAlertMinScore
 	}
-	return true
+	return riskScore >= activeBehaviorAlertMinScore
 }
 
 // Router 订阅所有业务 Topic，根据 DataType 路由到对应写入器
