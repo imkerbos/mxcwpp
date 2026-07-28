@@ -33,8 +33,13 @@ type HostBaselineState struct {
 	Phase     string    `gorm:"type:varchar(20);default:learning" json:"phase"` // learning/active
 	Samples   int       `json:"samples"`
 	FirstSeen LocalTime `json:"first_seen"`
-	MeanJSON  string    `gorm:"type:text" json:"-"` // JSON array [13]float64（扁平基线）
-	M2JSON    string    `gorm:"type:text" json:"-"` // JSON array [13]float64（扁平基线）
+	// Algo 标识 M2JSON/BM2JSON 内容的统计口径：
+	//   "" 或 "welford" = 旧算法，M2JSON 存 sum of squared deviations（累加型，样本大后基线冻结）；
+	//   "ewma"         = 指数加权，M2JSON 存 variance（自适应，跟随常态漂移）。
+	// 加载旧行时按 (samples-1) 把 m2 换算成 variance 作为 EWMA 种子（见 persistence.loadFromDB）。
+	Algo     string `gorm:"column:algo;type:varchar(16);default:''" json:"-"`
+	MeanJSON string `gorm:"type:text" json:"-"` // JSON array [13]float64（扁平基线 mean）
+	M2JSON   string `gorm:"type:text" json:"-"` // JSON array [13]float64（EWMA 存 variance；旧行存 m2）
 	// 时段分桶基线（P1-A）。旧行无此列 → 加载时桶为空，回退扁平，下次 checkpoint 重建。
 	BMeanJSON    string    `gorm:"type:text" json:"-"` // JSON [NumTimeBuckets][13]float64
 	BM2JSON      string    `gorm:"type:text" json:"-"` // JSON [NumTimeBuckets][13]float64

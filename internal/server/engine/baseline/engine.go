@@ -37,7 +37,15 @@ const (
 	NumTimeBuckets = 4
 	// minBucketSamples 桶基线启用所需最小样本;不足则回退扁平基线(=分桶前行为)。
 	minBucketSamples = 50
+	// ewmaHalfLifeSamples EWMA 半衰期(快照数)。agent 每 60s 推一份快照 → 2880 ≈ 2 天。
+	// 均值/方差改指数加权后，基线跟随业务常态漂移：稳态偏离在约 1 个半衰期内自然回落到
+	// 阈值内，根治旧 Welford 等权聚合(样本量大后 delta/n→0)导致基线冻结、稳态偏离永不收敛。
+	ewmaHalfLifeSamples = 2880
 )
+
+// ewmaAlpha 是 EWMA 平滑系数，由半衰期推得：alpha = 1 - 2^(-1/H)。
+// var(非 const) 以便测试压缩半衰期加速收敛验证。
+var ewmaAlpha = 1 - math.Pow(2, -1.0/float64(ewmaHalfLifeSamples))
 
 // Phase constants for host baseline learning state.
 const (
@@ -85,14 +93,29 @@ type HostBaseline struct {
 	samples   int
 	phase     string // learning/active
 	dirty     bool   // true if updated since last checkpoint
-	// Welford's online algorithm for mean and variance（扁平基线，全时段聚合）。
-	mean [MetricCount]float64
-	m2   [MetricCount]float64 // sum of squared deviations
-	// 时段分桶基线（叠加层）：按 hour-of-day 分桶各维 Welford 统计。
-	// 桶样本足时评估用桶基线（同时段精准），不足回退扁平 mean/m2。
+	// EWMA/EWMV 指数加权均值与方差（扁平基线，全时段聚合）。
+	// variance 直接是指数加权方差，不再是 Welford 的 sum-of-squared-deviations。
+	mean     [MetricCount]float64
+	variance [MetricCount]float64
+	// 时段分桶基线（叠加层）：按 hour-of-day 分桶各维 EWMA/EWMV 统计。
+	// 桶样本足时评估用桶基线（同时段精准），不足回退扁平 mean/variance。
 	bMean    [NumTimeBuckets][MetricCount]float64
-	bM2      [NumTimeBuckets][MetricCount]float64
+	bVar     [NumTimeBuckets][MetricCount]float64
 	bSamples [NumTimeBuckets]int
+}
+
+// ewmaUpdate 用指数加权递推更新单维 (mean, variance)：
+//
+//	delta = x - mean
+//	mean += alpha * delta
+//	variance = (1-alpha) * (variance + alpha * delta * delta)
+//
+// 相比 Welford 等权聚合，老样本按 (1-alpha) 指数衰减，基线随负载迁移自适应，
+// 稳态偏离不再永久落在陈旧均值的 Nσ 外。
+func ewmaUpdate(mean, variance *float64, x float64) {
+	delta := x - *mean
+	*mean += ewmaAlpha * delta
+	*variance = (1 - ewmaAlpha) * (*variance + ewmaAlpha*delta*delta)
 }
 
 // timeBucket 把时刻映射到 [0,NumTimeBuckets) 的时段桶（按 hour-of-day 均分）。
@@ -110,25 +133,28 @@ func (b *HostBaseline) Update(metrics [MetricCount]float64) {
 	}
 	b.samples++
 	b.dirty = true
-	n := float64(b.samples)
 
+	// 首样本用观测值播种 mean、variance=0；此后 EWMA 递推（老样本指数衰减）。
 	for i := range MetricCount {
-		delta := metrics[i] - b.mean[i]
-		b.mean[i] += delta / n
-		delta2 := metrics[i] - b.mean[i]
-		b.m2[i] += delta * delta2
+		if b.samples == 1 {
+			b.mean[i] = metrics[i]
+			b.variance[i] = 0
+			continue
+		}
+		ewmaUpdate(&b.mean[i], &b.variance[i], metrics[i])
 	}
 
-	// 叠加更新当前时段桶（Welford，独立于扁平基线）。
+	// 叠加更新当前时段桶（EWMA，独立于扁平基线）。
 	bk := timeBucket(time.Now())
 	if bk >= 0 && bk < NumTimeBuckets {
 		b.bSamples[bk]++
-		bn := float64(b.bSamples[bk])
 		for i := range MetricCount {
-			delta := metrics[i] - b.bMean[bk][i]
-			b.bMean[bk][i] += delta / bn
-			delta2 := metrics[i] - b.bMean[bk][i]
-			b.bM2[bk][i] += delta * delta2
+			if b.bSamples[bk] == 1 {
+				b.bMean[bk][i] = metrics[i]
+				b.bVar[bk][i] = 0
+				continue
+			}
+			ewmaUpdate(&b.bMean[bk][i], &b.bVar[bk][i], metrics[i])
 		}
 	}
 
@@ -145,15 +171,11 @@ func (b *HostBaseline) statFor(bucket, i int) (mean, stddev float64) {
 	defer b.mu.Unlock()
 	if bucket >= 0 && bucket < NumTimeBuckets && b.bSamples[bucket] >= minBucketSamples {
 		mean = b.bMean[bucket][i]
-		if b.bSamples[bucket] >= 2 {
-			stddev = math.Sqrt(b.bM2[bucket][i] / float64(b.bSamples[bucket]-1))
-		}
+		stddev = math.Sqrt(b.bVar[bucket][i])
 		return
 	}
 	mean = b.mean[i]
-	if b.samples >= 2 {
-		stddev = math.Sqrt(b.m2[i] / float64(b.samples-1))
-	}
+	stddev = math.Sqrt(b.variance[i])
 	return
 }
 
@@ -161,10 +183,7 @@ func (b *HostBaseline) statFor(bucket, i int) (mean, stddev float64) {
 func (b *HostBaseline) Stddev(i int) float64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.samples < 2 {
-		return 0
-	}
-	return math.Sqrt(b.m2[i] / float64(b.samples-1))
+	return math.Sqrt(b.variance[i])
 }
 
 // Mean returns the mean for metric i.
