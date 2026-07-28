@@ -134,6 +134,46 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// TestReconcileHostVulns_PrefersMatchedFixedVersion 校验 3c：核销用 per-host
+// matched_fixed_version（该主机 OS 分支的适用修复版）+ 权威比较器，而非 CVE 级塌缩
+// fixed_version。CVE 级值偏低时旧逻辑会误标已修，本例应保持 unpatched。
+func TestReconcileHostVulns_PrefersMatchedFixedVersion(t *testing.T) {
+	db := setupReconcileTestDB(t)
+	logger := zap.NewNop()
+
+	vuln := model.Vulnerability{
+		CveID:        "CVE-2026-0001",
+		Severity:     "high",
+		PURL:         "pkg:rpm/openssl",
+		FixedVersion: "1.0", // CVE 级塌缩值（偏低）
+	}
+	require.NoError(t, db.Create(&vuln).Error)
+
+	hv := model.HostVulnerability{
+		VulnID:              vuln.ID,
+		HostID:              "host-1",
+		CurrentVersion:      "1.5",
+		Status:              model.HostVulnStatusUnpatched,
+		MatchedFixedVersion: "2.0", // per-host 适用修复版（更高）
+	}
+	require.NoError(t, db.Create(&hv).Error)
+
+	// 主机当前装 1.5：>= CVE 级 1.0，但 < per-host 2.0。
+	require.NoError(t, db.Exec(
+		`INSERT INTO software (id, host_id, name, version, purl) VALUES (?,?,?,?,?)`,
+		"sw1", "host-1", "openssl", "1.5", "pkg:rpm/openssl").Error)
+
+	rec := NewVulnReconciler(db, logger)
+	result, err := rec.ReconcileHosts([]string{"host-1"})
+	require.NoError(t, err)
+
+	// 用 per-host 2.0：1.5 < 2.0 → 不核销（旧逻辑用 CVE 1.0 会误标 patched）。
+	assert.Equal(t, 0, result.Patched)
+	var got model.HostVulnerability
+	require.NoError(t, db.First(&got, hv.ID).Error)
+	assert.Equal(t, model.HostVulnStatusUnpatched, got.Status)
+}
+
 func TestReconcileHostVulns_PackageRemoved_MarksVanished(t *testing.T) {
 	db := setupReconcileTestDB(t)
 	logger := zap.NewNop()

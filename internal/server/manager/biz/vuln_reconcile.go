@@ -1,12 +1,40 @@
 package biz
 
 import (
+	"strings"
 	"time"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/vulnsync/advisory"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
+
+// effectiveFixedVersion 优先用 per-host matched_fixed_version（针对该主机 OS-major/包分支的
+// 适用修复版本），为空才回退 CVE 级 fixed_version（跨包跨发行版塌缩值，对多数主机不准）。
+func effectiveFixedVersion(hv *model.HostVulnerability, cveFixed string) string {
+	if hv.MatchedFixedVersion != "" {
+		return hv.MatchedFixedVersion
+	}
+	return cveFixed
+}
+
+// isOSPackagePURL 判断是否 OS 系统包（RPM/dpkg/apk）。仅这类适用 NEVRA 权威比较；
+// 语言包（golang/npm/pypi 等 semver，带 v 前缀等）走通用比较器。
+func isOSPackagePURL(purl string) bool {
+	return strings.HasPrefix(purl, "pkg:rpm/") ||
+		strings.HasPrefix(purl, "pkg:deb/") ||
+		strings.HasPrefix(purl, "pkg:apk/")
+}
+
+// compareInstalledVsFix 比较当前版本与修复版：OS 包用按 OS family 的权威 NEVRA 比较
+// （正确处理 el9_4 等 release 后缀，修旧弱比较器吞后缀误判已修）；语言包用通用比较器。
+func compareInstalledVsFix(osFamily, purl, current, fixed string) (int, error) {
+	if isOSPackagePURL(purl) {
+		return advisory.CompareVersionByOS(osFamily, current, fixed)
+	}
+	return compareVersionStrings(current, fixed), nil
+}
 
 // VulnReconciler 漏洞陈旧记录核对器
 //
@@ -47,6 +75,7 @@ func (r *VulnReconciler) ReconcileHosts(hostIDs []string) (*ReconcileResult, err
 	if err != nil {
 		return nil, err
 	}
+	osFam := r.loadHostOSFamilies(hostIDs)
 
 	const batchSize = 500
 	offset := 0
@@ -65,7 +94,7 @@ func (r *VulnReconciler) ReconcileHosts(hostIDs []string) (*ReconcileResult, err
 		}
 
 		for i := range hvs {
-			r.reconcileOne(&hvs[i], currentPkgs, result)
+			r.reconcileOne(&hvs[i], currentPkgs, osFam[hvs[i].HostID], result)
 		}
 		offset += batchSize
 	}
@@ -73,10 +102,26 @@ func (r *VulnReconciler) ReconcileHosts(hostIDs []string) (*ReconcileResult, err
 	return result, nil
 }
 
+// loadHostOSFamilies 取这些 host 的 os_family，供选 RPM/dpkg 权威版本比较器。
+func (r *VulnReconciler) loadHostOSFamilies(hostIDs []string) map[string]string {
+	m := make(map[string]string, len(hostIDs))
+	var rows []struct {
+		HostID   string
+		OsFamily string
+	}
+	r.db.Table("hosts").Select("host_id, os_family").
+		Where("host_id IN ?", hostIDs).Scan(&rows)
+	for _, x := range rows {
+		m[x.HostID] = x.OsFamily
+	}
+	return m
+}
+
 // reconcileOne 处理单条 host_vulnerability
 func (r *VulnReconciler) reconcileOne(
 	hv *model.HostVulnerability,
 	currentPkgs map[string]map[string]string,
+	osFamily string,
 	result *ReconcileResult,
 ) {
 	result.Scanned++
@@ -91,18 +136,25 @@ func (r *VulnReconciler) reconcileOne(
 	hostPkgs := currentPkgs[hv.HostID]
 	currentVersion, exists := hostPkgs[vuln.PURL]
 
-	switch {
-	case !exists:
+	if !exists {
 		r.markVanished(hv, model.PatchedReasonPackageRemoved)
 		result.Vanished++
-	case vuln.FixedVersion != "" &&
-		compareVersionStrings(currentVersion, vuln.FixedVersion) >= 0:
-		r.markPatched(hv, model.PatchedReasonAutoVersionMatch, currentVersion)
-		result.Patched++
-	default:
-		if currentVersion != "" && currentVersion != hv.CurrentVersion {
-			r.db.Model(hv).Update("current_version", currentVersion)
+		return
+	}
+
+	// 优先用 per-host matched_fixed_version + OS 包权威 NEVRA 比较；
+	// 比较出错（版本串异常）时保守处理：不自动核销，避免误标已修掩盖真实漏洞。
+	fixed := effectiveFixedVersion(hv, vuln.FixedVersion)
+	if fixed != "" {
+		if cmp, err := compareInstalledVsFix(osFamily, vuln.PURL, currentVersion, fixed); err == nil && cmp >= 0 {
+			r.markPatched(hv, model.PatchedReasonAutoVersionMatch, currentVersion)
+			result.Patched++
+			return
 		}
+	}
+
+	if currentVersion != "" && currentVersion != hv.CurrentVersion {
+		r.db.Model(hv).Update("current_version", currentVersion)
 	}
 }
 
@@ -179,6 +231,7 @@ func (r *VulnReconciler) DetectResurfaced(hostIDs []string) int {
 		r.logger.Error("DetectResurfaced: 取 software 快照失败", zap.Error(err))
 		return 0
 	}
+	osFam := r.loadHostOSFamilies(hostIDs)
 
 	var hvs []model.HostVulnerability
 	err = r.db.
@@ -207,10 +260,15 @@ func (r *VulnReconciler) DetectResurfaced(hostIDs []string) int {
 		}
 
 		// 之前 vanished → 总是 resurface
-		// 之前 patched → 仅当 version 退回未达 fix 时 resurface
-		shouldResurface := hv.Status == model.HostVulnStatusVanished ||
-			(hv.Status == model.HostVulnStatusPatched && vuln.FixedVersion != "" &&
-				compareVersionStrings(currentVersion, vuln.FixedVersion) < 0)
+		// 之前 patched → 仅当 version 退回未达 fix 时 resurface（用 per-host fixed + 权威比较器）
+		shouldResurface := hv.Status == model.HostVulnStatusVanished
+		if !shouldResurface && hv.Status == model.HostVulnStatusPatched {
+			if fixed := effectiveFixedVersion(hv, vuln.FixedVersion); fixed != "" {
+				if cmp, err := compareInstalledVsFix(osFam[hv.HostID], vuln.PURL, currentVersion, fixed); err == nil && cmp < 0 {
+					shouldResurface = true
+				}
+			}
+		}
 
 		if shouldResurface {
 			r.db.Model(hv).Updates(map[string]any{
