@@ -264,6 +264,7 @@ var (
 		&SequenceRule{},
 		&BehaviorAlert{},
 		&HostBaselineState{},
+		&BDEMetricTuning{},
 		&Storyline{},
 		&StorylineEvent{},
 		&MemoryThreat{},

@@ -13,6 +13,7 @@ package baseline
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -247,6 +248,18 @@ type Engine struct {
 	global    *HostBaseline            // cross-host aggregate baseline
 	db        *gorm.DB                 // persistence layer (nil = memory-only)
 	logger    *zap.Logger
+	// tuning 各指标动态阈值倍率（反馈闭环 M1），由 StartTuningReload 周期从 bde_metric_tunings
+	// 刷新的原子快照；evaluate 读之叠加在静态 metricThresholdMult 上。nil=全 1.0（无动态调整）。
+	tuning atomic.Pointer[[MetricCount]float64]
+}
+
+// tuningMult 返回第 i 维当前动态阈值倍率（无快照/未调整时为 1.0）。
+func (e *Engine) tuningMult(i int) float64 {
+	snap := e.tuning.Load()
+	if snap == nil {
+		return 1.0
+	}
+	return snap[i]
 }
 
 // NewEngine creates a baseline engine. Pass db=nil for memory-only mode.
@@ -301,8 +314,8 @@ func (e *Engine) evaluate(hostID string, bl *HostBaseline, metrics [MetricCount]
 		absZ := math.Abs(z)
 		totalWeight += metricWeights[i]
 
-		// per-metric 阈值：计数/速率型指标重尾非高斯，抬高倍率减少正常业务波动误报（H1）。
-		if absZ > threshold*metricThresholdMult[i] {
+		// per-metric 阈值：静态倍率(计数型重尾抬高) × 动态倍率(反馈闭环按 ignored 率自调)。
+		if absZ > threshold*metricThresholdMult[i]*e.tuningMult(i) {
 			deviations = append(deviations, Deviation{
 				Metric: MetricNames[i],
 				Value:  metrics[i],
