@@ -83,6 +83,19 @@ func selectVersionComparator(pkgManager string) func(a, b string) (int, error) {
 	}
 }
 
+// CompareVersionByOS 按 OS family 选权威版本比较器（RPM/dpkg）比对 a、b。
+//
+// 供 reconcile/verify 等复用与 matcher 一致的严谨 NEVRA 语义，避免各处自造弱比较器
+// （忽略 el9_4 等 release 后缀导致误判已修）。debian/ubuntu 用 dpkg，其余用 RPM。
+func CompareVersionByOS(osFamily, a, b string) (int, error) {
+	pkgManager := "rpm"
+	switch strings.ToLower(osFamily) {
+	case "debian", "ubuntu":
+		pkgManager = "dpkg"
+	}
+	return selectVersionComparator(pkgManager)(a, b)
+}
+
 // composeNEVRAString 把 epoch/version/release 拼成标准 NEVRA 字符串(无 name 无 arch)。
 //
 //	epoch="" version="3.5.1" release="3.el9" → "3.5.1-3.el9"
