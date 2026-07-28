@@ -188,8 +188,12 @@ func (h *DashboardHandler) computeStats() ([]byte, error) {
 		stats["vulnDbUpdateTime"] = ""
 	}
 
+	// 已修复数:数 host_vulnerabilities 实例级 patched(舰队真实已修实例),与 pendingVulnerabilities/
+	// countVulnsBySeverity 的 host_vuln 口径对齐。
+	// 不用 vulnerabilities.status='patched'——那是 CVE 级 advisory rollup(仅当某 CVE 全舰队主机都修才置
+	// patched),绝大多数恒 unpatched,计数长期近 0 失真。
 	var hotPatchCount int64
-	h.db.Model(&model.Vulnerability{}).Where("status = ?", "patched").Count(&hotPatchCount)
+	h.db.Model(&model.HostVulnerability{}).Where("status = ?", "patched").Count(&hotPatchCount)
 	stats["hotPatchCount"] = hotPatchCount
 
 	// 4. 基线风险统计（单次聚合查询替代 5 条独立 COUNT）

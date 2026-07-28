@@ -5,7 +5,60 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
+
+// TestHotPatchCountFleetScope 校验 hotPatchCount 口径：数 host_vulnerabilities 实例级 patched
+// （舰队真实已修），而非 vulnerabilities.status='patched' 的 CVE 级 advisory rollup。
+// rollup 仅当某 CVE 全舰队主机都修才置 patched，绝大多数恒 unpatched → 计数长期近 0 失真。
+func TestHotPatchCountFleetScope(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Vulnerability{}, &model.HostVulnerability{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	// 3 个 CVE：都有主机已把该实例修好(host_vuln patched)，但没有一个 CVE 全舰队修完，
+	// 故 CVE 级 rollup 全部恒 unpatched → 旧口径数出 0。
+	vulns := []model.Vulnerability{
+		{CveID: "CVE-A", Severity: "critical", Status: "unpatched"},
+		{CveID: "CVE-B", Severity: "high", Status: "unpatched"},
+		{CveID: "CVE-C", Severity: "high", Status: "unpatched"},
+	}
+	if err := db.Create(&vulns).Error; err != nil {
+		t.Fatalf("seed vulns: %v", err)
+	}
+	hvs := []model.HostVulnerability{
+		{VulnID: vulns[0].ID, HostID: "h1", Status: "patched"},
+		{VulnID: vulns[0].ID, HostID: "h2", Status: "unpatched"}, // 同 CVE 另一主机未修
+		{VulnID: vulns[1].ID, HostID: "h1", Status: "patched"},
+		{VulnID: vulns[2].ID, HostID: "h3", Status: "unpatched"},
+	}
+	if err := db.Create(&hvs).Error; err != nil {
+		t.Fatalf("seed host_vulns: %v", err)
+	}
+
+	// 旧口径：vulnerabilities.status='patched' → 0（失真）
+	var oldCount int64
+	db.Model(&model.Vulnerability{}).Where("status = ?", "patched").Count(&oldCount)
+	if oldCount != 0 {
+		t.Fatalf("前置假设失败：CVE 级 rollup 应为 0，实得 %d", oldCount)
+	}
+
+	// 新口径（fix 后）：host_vulnerabilities.status='patched' → 2 个真实已修实例
+	var newCount int64
+	db.Model(&model.HostVulnerability{}).Where("status = ?", "patched").Count(&newCount)
+	if newCount != 2 {
+		t.Fatalf("hotPatchCount host_vuln 口径 = %d, 期望 2", newCount)
+	}
+}
 
 func TestComputeSecurityScore(t *testing.T) {
 	h := &DashboardHandler{}
