@@ -322,6 +322,24 @@ func iocHitTitle(iocType string) string {
 	}
 }
 
+// iocSeverityAndRisk 按 IOC 类型的天然置信度给告警 severity + risk_score，
+// 替代"一律 critical/85"（IP 类共享/CDN/复用多，置信度天然低于 hash 精确命中）。
+//   - hash：文件哈希精确匹配恶意样本，高置信 → critical
+//   - url ：URL 命中，较高置信 → high
+//   - ip  ：IP 易因共享云 IP/CDN/历史复用误伤，降级 → high（并已结合方向抑制入站）
+func iocSeverityAndRisk(iocType string) (severity string, risk int) {
+	switch iocType {
+	case "hash":
+		return "critical", 90
+	case "url":
+		return "high", 72
+	case "ip":
+		return "high", 65
+	default:
+		return "high", 60
+	}
+}
+
 // iocInboundSuppressed 判断 IOC 命中是否因入站方向被抑制。
 // 公网服务被全网扫描,源 IP 恰在情报库=背景噪音,非本机主动外联 C2;仅出站(本机 → 恶意 IP)
 // 才是真 C2 指标。仅对 ip 类命中生效(hash/url 无方向语义)。方向字段缺失时不抑制(保守保留告警)。
@@ -367,13 +385,14 @@ func (g *AlertGenerator) GenerateFromIOC(hostID, iocType, iocValue string, field
 		return
 	}
 
+	iocSeverity, iocRisk := iocSeverityAndRisk(iocType)
 	alert := model.Alert{
 		ResultID:       resultID,
 		HostID:         hostID,
 		RuleID:         ruleKey,
 		Source:         model.AlertSourceDetection,
-		Severity:       "critical",
-		RiskScore:      85,
+		Severity:       iocSeverity,
+		RiskScore:      iocRisk,
 		Category:       IOCHitCategory,
 		ATTCKTechnique: "T1071",
 		ATTCKTactic:    tacticFromTechnique("T1071"),
