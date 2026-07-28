@@ -82,6 +82,7 @@ func setupVulnScanAPITestDB(t *testing.T) *gorm.DB {
 			kernel_livepatch_enabled  INTEGER DEFAULT 0,
 			kernel_livepatch_provider TEXT,
 			active_livepatches        TEXT,
+			behavior_suppress_until   DATETIME,
 			created_at                DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at                DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
