@@ -229,7 +229,14 @@ func (r *Router) Setup(session sarama.ConsumerGroupSession) error {
 }
 
 // Cleanup 实现 sarama.ConsumerGroupHandler.Cleanup，rebalance 触发时清零成员指标。
+//
+// rebalance 会提交已标记的 offset 并把分区交给其他实例。此处先同步 flush ClickHouse 内存
+// 批次，让已消费但仍在批次里的 ebpf/fim/metrics 在分区重分配前落盘，避免重平衡/部署丢在途
+// 批次（graceful 退出已由 Close→done 覆盖；kill -9 硬崩溃残留窗口见 ClickHouseWriter.Flush 注释）。
 func (r *Router) Cleanup(session sarama.ConsumerGroupSession) error {
+	if r.ch != nil {
+		r.ch.Flush()
+	}
 	consumermetrics.SetGroupMembers(0)
 	r.logger.Info("ConsumerGroup Session 结束", zap.String("member_id", session.MemberID()))
 	return nil
