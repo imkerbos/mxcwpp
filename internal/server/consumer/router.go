@@ -12,6 +12,8 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/matrixplusio/mxcwpp/internal/common/jsonx"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
@@ -19,6 +21,7 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/writer"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/anomaly"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/baseline"
+	"github.com/matrixplusio/mxcwpp/internal/server/engine/celengine"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/storyline"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -48,10 +51,11 @@ type Router struct {
 	mysql           *writer.MySQLWriter
 	ch              *writer.ClickHouseWriter
 	dlq             *DLQHandler
-	redisClient     *redis.Client     // 可选，用于写 agent:ac: 映射
-	bdeEngine       *baseline.Engine  // BDE 基线引擎（可选）
-	anomalyDetector *anomaly.Detector // ML 异常检测引擎（可选）
-	storyEngine     *storyline.Engine // 攻击故事线引擎（可选）
+	redisClient     *redis.Client           // 可选，用于写 agent:ac: 映射
+	bdeEngine       *baseline.Engine        // BDE 基线引擎（可选）
+	bdeThrottler    *celengine.HitThrottler // BDE 告警节流：同 (host, metric) 高频复发窗内跳过写入
+	anomalyDetector *anomaly.Detector       // ML 异常检测引擎（可选）
+	storyEngine     *storyline.Engine       // 攻击故事线引擎（可选）
 	topics          []string
 	logger          *zap.Logger
 	// suppressed 运维事件抑制窗内的 host 集(hosts.behavior_suppress_until>now)，每 30s 刷新一次。
@@ -105,6 +109,9 @@ func NewRouter(
 		redisClient: redisClient,
 		topics:      topics,
 		logger:      logger,
+		// BDE 告警节流：同 (host, metric) 1min 内命中超 50 次开启 10min 静默窗，
+		// 削掉稳态偏离每 60s 复发的写入 churn（容量覆盖 host×13metric 组合）。
+		bdeThrottler: celengine.NewHitThrottler(50, time.Minute, 20000),
 	}
 	go r.refreshSuppressLoop()
 	return r, nil
@@ -452,7 +459,12 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 	// 历史问题：behavior_alerts 表定义但无写入逻辑 → 0 行。
 	if r.mysql != nil {
 		if db := r.mysql.DB(); db != nil {
+			now := time.Now()
 			for _, dev := range result.Deviations {
+				// 1c 节流：同 (host, metric) 高频复发在静默窗内跳过写入，削下游 churn。
+				if r.bdeThrottler != nil && !r.bdeThrottler.Allow(msg.AgentID, dev.Metric, now) {
+					continue
+				}
 				ba := model.BehaviorAlert{
 					HostID:    msg.AgentID,
 					Hostname:  msg.Hostname,
@@ -463,8 +475,22 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 					Stddev:    dev.Stddev,
 					ZScore:    dev.ZScore,
 					Status:    "open",
+					HitCount:  1,
 				}
-				if err := db.Create(&ba).Error; err != nil {
+				// 1d upsert：同 (tenant, host, metric) 已存在则累加 hit_count + 刷新最新偏离值，
+				// 不新增行。status 不覆盖（ignored/resolved 保持，避免复发把已处置的重新 open）。
+				if err := db.Clauses(clause.OnConflict{
+					Columns: []clause.Column{{Name: "tenant_id"}, {Name: "host_id"}, {Name: "metric"}},
+					DoUpdates: clause.Assignments(map[string]any{
+						"risk_score": result.RiskScore,
+						"value":      dev.Value,
+						"mean":       dev.Mean,
+						"stddev":     dev.Stddev,
+						"z_score":    dev.ZScore,
+						"hit_count":  gorm.Expr("hit_count + 1"),
+						"updated_at": now,
+					}),
+				}).Create(&ba).Error; err != nil {
 					r.logger.Warn("写 behavior_alerts 失败", zap.Error(err))
 				}
 			}
