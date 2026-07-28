@@ -193,6 +193,11 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("behavior_alerts 去重/唯一索引失败", zap.Error(err))
 	}
 
+	// 合并三条重复的 touch 时间戳篡改规则(同 T1070.006 三重告警)，禁用冗余两条
+	if err := migrateDedupTimestampRules(db, logger); err != nil {
+		logger.Warn("合并重复时间戳规则失败", zap.Error(err))
+	}
+
 	// 给存量检测规则回填 detect-only 观察期起点 effective_at = created_at
 	if err := migrateBackfillRuleEffectiveAt(db, logger); err != nil {
 		logger.Warn("回填规则 effective_at 失败", zap.Error(err))
@@ -298,6 +303,31 @@ func migrateMarkPortHeuristicLowFidelity(db *gorm.DB, logger *zap.Logger) error 
 	}
 	if r.RowsAffected > 0 {
 		logger.Info("已降级端口启发式 C2 规则为 indicator", zap.Int64("count", r.RowsAffected))
+	}
+	return nil
+}
+
+// migrateDedupTimestampRules 合并三条重复的 T1070.006 touch 时间戳篡改规则：
+// "防御规避 - 时间戳伪造" / "防御绕过 - timestamp tamper" / "防御逃避 - timestomp 篡改文件时间"
+// 都检测同一 touch -t/-r/-d 事件，命中会三重告警。保留第一条并补全 -d/--date 覆盖，禁用另两条。
+// 幂等；user_modified=true 的规则不覆盖（尊重用户自定义）。
+func migrateDedupTimestampRules(db *gorm.DB, logger *zap.Logger) error {
+	redundant := []string{"防御绕过 - timestamp tamper", "防御逃避 - timestomp 篡改文件时间"}
+	r := db.Model(&model.DetectionRule{}).
+		Where("name IN ? AND enabled = ? AND user_modified = ?", redundant, true, false).
+		Update("enabled", false)
+	if r.Error != nil {
+		return r.Error
+	}
+	// 保留规则补全 -d/--date 覆盖（原表达式缺，去重后由它统一覆盖）。
+	merged := `exe.contains("touch") && (cmdline.contains("-t") || cmdline.contains("-r") || cmdline.contains("-d") || cmdline.contains("--reference") || cmdline.contains("--date"))`
+	if err := db.Model(&model.DetectionRule{}).
+		Where("name = ? AND user_modified = ?", "防御规避 - 时间戳伪造", false).
+		Update("expression", merged).Error; err != nil {
+		return err
+	}
+	if r.RowsAffected > 0 {
+		logger.Info("合并重复时间戳篡改规则", zap.Int64("disabled", r.RowsAffected))
 	}
 	return nil
 }

@@ -31,6 +31,9 @@ type alertWhitelistRule struct {
 	// CmdlineContains 命令行包含任一子串即抑制（per-rule exception，排除已知良性脚本/工具）。
 	CmdlineContains []string
 
+	// FilePathContains 事件 file_path 包含任一子串即抑制（如 dracut initramfs 临时目录）。
+	FilePathContains []string
+
 	// DstIPInPrivate 目的 IP 在 RFC1918 / 回环 / 链路本地范围内即抑制。
 	DstIPInPrivate bool
 
@@ -120,6 +123,41 @@ var defaultAlertWhitelist = []alertWhitelistRule{
 		RuleNamePattern: "反弹",
 		ExeBasenameIn:   []string{"runc", "unbound-anchor"},
 		Reason:          "container_runtime_or_dns_anchor",
+	},
+
+	// ===== 系统 / 云平台进程默认基线（成体系抑制，覆盖任意 Linux 云主机通用误报，
+	// 替代逐个 prod 巡检硬编码）。宁可漏抑制不错抑制：均限定 category + 具体进程/路径特征。=====
+	{
+		// defense_evasion - ld.so.preload/ld.so.conf 劫持误报：dracut 重建 initramfs(内核更新)
+		// 在 /var/tmp/dracut.XXXX/ 临时目录写/删 ld.so.conf，被当动态链接劫持。
+		RuleCategoryPattern: "defense_evasion",
+		FilePathContains:    []string{"/var/tmp/dracut.", "/tmp/dracut."},
+		Reason:              "dracut_initramfs_rebuild",
+	},
+	{
+		// defense_evasion - memfd_create/无文件执行误报：容器运行时(runc init)与现代 systemd
+		// (systemd-executor --deserialize) 从 memfd/自身 fd 执行，是正常运行时行为。
+		RuleCategoryPattern: "defense_evasion",
+		CmdlineContains:     []string{"runc init", "systemd-executor", "/usr/lib/systemd/systemd"},
+		Reason:              "container_runtime_or_systemd_exec",
+	},
+	{
+		// persistence/defense_evasion - 自动更新触发内核模块/启动项/日志/内核参数配置修改误报：
+		// dnf-automatic / unattended-upgrade 打补丁属正常运维。
+		RuleCategoryPattern: "persistence",
+		ExeBasenameIn:       []string{"dnf-automatic", "unattended-upgrade", "unattended-upgrades", "dnf", "yum"},
+		Reason:              "auto_update",
+	},
+	{
+		RuleCategoryPattern: "defense_evasion",
+		ExeBasenameIn:       []string{"dnf-automatic", "unattended-upgrade", "unattended-upgrades"},
+		Reason:              "auto_update",
+	},
+	{
+		// execution - LOLBins/容器内包管理器误报：运维脚本 find -exec、容器内 yum/apt 属正常。
+		RuleCategoryPattern: "execution",
+		ExeBasenameIn:       []string{"dnf", "yum", "apt", "apt-get", "dpkg", "rpm"},
+		Reason:              "package_manager_exec",
 	},
 }
 
@@ -227,6 +265,9 @@ func IsAlertWhitelisted(rule *model.DetectionRule, fields map[string]string) (bo
 			matched = true
 		}
 		if len(w.CmdlineContains) > 0 && cmdlineContainsAny(fields["cmdline"], w.CmdlineContains) {
+			matched = true
+		}
+		if len(w.FilePathContains) > 0 && cmdlineContainsAny(fields["file_path"], w.FilePathContains) {
 			matched = true
 		}
 		if w.DstIPInPrivate && ipIsPrivate(dstIP) {
