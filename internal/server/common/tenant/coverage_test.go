@@ -73,6 +73,7 @@ func TestTenantIDColumnCoverage(t *testing.T) {
 		"Notification":     true,
 		"PushSubscription": true,
 		"Permission":       true, // RBAC 权限定义全局
+		"Role":             true, // RBAC 角色定义全局（含内置角色 + 自定义角色）
 		"RolePermission":   true, // 角色-权限关联全局
 		"CanaryRollout":    true, // Agent 灰度发布全局
 		"LoginDevice":      true, // 登录可信设备：按 username+device_id，非租户隔离

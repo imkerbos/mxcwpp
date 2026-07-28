@@ -36,7 +36,8 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			host_id  TEXT PRIMARY KEY,
 			hostname TEXT,
 			ipv4     TEXT DEFAULT '[]',
-			status   TEXT DEFAULT 'offline'
+			status   TEXT DEFAULT 'offline',
+			criticality TEXT NOT NULL DEFAULT 'normal'
 		)`,
 		`CREATE TABLE vulnerabilities (
 			tenant_id TEXT NOT NULL DEFAULT 't-default',
@@ -104,6 +105,8 @@ func setupVulnLifecycleDB(t *testing.T) *gorm.DB {
 			prev_status                   TEXT DEFAULT '',
 			vanished_at                   DATETIME,
 			resurfaced_at                 DATETIME,
+			matched_component             TEXT DEFAULT '',
+			matched_fixed_version         TEXT DEFAULT '',
 			created_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at                    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(vuln_id, host_id)

@@ -101,6 +101,8 @@ func setupReconcileTestDB(t *testing.T) *gorm.DB {
 			prev_status      TEXT DEFAULT '',
 			vanished_at      DATETIME,
 			resurfaced_at    DATETIME,
+			matched_component     TEXT DEFAULT '',
+			matched_fixed_version TEXT DEFAULT '',
 			created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(vuln_id, host_id)
