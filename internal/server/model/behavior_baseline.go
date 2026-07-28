@@ -3,17 +3,21 @@ package model
 // BehaviorAlert stores a BDE (Behavior Detection Engine) anomaly alert.
 // Generated when a host's behavior profile deviates significantly from its baseline.
 type BehaviorAlert struct {
-	TenantID  string    `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
-	ID        uint      `gorm:"primarykey" json:"id"`
-	HostID    string    `gorm:"type:varchar(64);index" json:"host_id"`
-	Hostname  string    `gorm:"type:varchar(255)" json:"hostname"`
-	RiskScore float64   `gorm:"type:decimal(5,1)" json:"risk_score"`         // 0-100
-	Metric    string    `gorm:"type:varchar(50)" json:"metric"`              // e.g. "proc_fork_rate"
-	Value     float64   `gorm:"type:decimal(15,4)" json:"value"`             // observed value
-	Mean      float64   `gorm:"type:decimal(15,4)" json:"mean"`              // baseline mean
-	Stddev    float64   `gorm:"type:decimal(15,4)" json:"stddev"`            // baseline stddev
-	ZScore    float64   `gorm:"type:decimal(8,2)" json:"z_score"`            // deviation z-score
-	Status    string    `gorm:"type:varchar(20);default:open" json:"status"` // open/resolved/ignored
+	TenantID  string  `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
+	ID        uint    `gorm:"primarykey" json:"id"`
+	HostID    string  `gorm:"type:varchar(64);index" json:"host_id"`
+	Hostname  string  `gorm:"type:varchar(255)" json:"hostname"`
+	RiskScore float64 `gorm:"type:decimal(5,1)" json:"risk_score"`         // 0-100
+	Metric    string  `gorm:"type:varchar(50)" json:"metric"`              // e.g. "proc_fork_rate"
+	Value     float64 `gorm:"type:decimal(15,4)" json:"value"`             // observed value
+	Mean      float64 `gorm:"type:decimal(15,4)" json:"mean"`              // baseline mean
+	Stddev    float64 `gorm:"type:decimal(15,4)" json:"stddev"`            // baseline stddev
+	ZScore    float64 `gorm:"type:decimal(8,2)" json:"z_score"`            // deviation z-score
+	Status    string  `gorm:"type:varchar(20);default:open" json:"status"` // open/resolved/ignored
+	// HitCount 同 (host_id, metric) 稳态偏离每次复发累加，不新增行(去重)。
+	// 唯一索引 ux_behavior_alerts_host_metric(tenant_id,host_id,metric) 在 migration 手建，
+	// 不用 struct tag，避免 AutoMigrate 在存量重复行上建唯一索引失败。
+	HitCount  int       `gorm:"default:1" json:"hit_count"`
 	CreatedAt LocalTime `json:"created_at"`
 	UpdatedAt LocalTime `json:"updated_at"`
 }
