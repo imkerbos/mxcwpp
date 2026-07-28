@@ -86,6 +86,17 @@ var metricWeights = [MetricCount]float64{
 	0.5, 0.8, 1.5, // DNS (NX ratio weighted higher)
 }
 
+// metricThresholdMult 各指标的偏离阈值倍率（叠加在基础 deviationThreshold 上）。
+// 计数/速率型指标（proc_exec/fork_rate/net_connect/dns_query 等）重尾非高斯，3σ 的
+// "0.3% 尾部"假设不成立 → 正常业务波动天天越界，抬高倍率减少误报；比率型([0,1] 有界)
+// 与敏感指标(file_sensitive_hits)保持基础灵敏度。
+var metricThresholdMult = [MetricCount]float64{
+	1.7, 1.3, 1.7, // proc: exec_count / unique_exe / fork_rate
+	1.5, 1.3, 1.0, // file: write_count / unique_path / sensitive_hits(敏感,保灵敏)
+	1.7, 1.5, 1.5, 1.0, // net: connect_count / unique_ip / unique_port / external_ratio(比率)
+	1.7, 1.5, 1.0, // dns: query_count / unique_domain / nx_ratio(比率)
+}
+
 // HostBaseline holds running statistics for a single host.
 type HostBaseline struct {
 	mu        sync.Mutex
@@ -290,7 +301,8 @@ func (e *Engine) evaluate(hostID string, bl *HostBaseline, metrics [MetricCount]
 		absZ := math.Abs(z)
 		totalWeight += metricWeights[i]
 
-		if absZ > threshold {
+		// per-metric 阈值：计数/速率型指标重尾非高斯，抬高倍率减少正常业务波动误报（H1）。
+		if absZ > threshold*metricThresholdMult[i] {
 			deviations = append(deviations, Deviation{
 				Metric: MetricNames[i],
 				Value:  metrics[i],
