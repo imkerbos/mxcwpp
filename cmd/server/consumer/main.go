@@ -203,6 +203,7 @@ func main() {
 		chWriter,
 		dlqHandler,
 		redisClient,
+		cfg.Kafka.Consumer.InitialOffset,
 		logger,
 	)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -81,13 +82,23 @@ func NewRouter(
 	ch *writer.ClickHouseWriter,
 	dlq *DLQHandler,
 	redisClient *redis.Client, // 可为 nil，Redis 不可用时跳过 agent:ac: 写入
+	initialOffset string, // 冷启动初始位点："newest"（默认）或 "oldest"
 	logger *zap.Logger,
 ) (*Router, error) {
 	cfg := sarama.NewConfig()
 	cfg.Version = sarama.V2_6_0_0
 	cfg.Consumer.Group.Rebalance.GroupStrategies = []sarama.BalanceStrategy{sarama.NewBalanceStrategyRoundRobin()}
-	cfg.Consumer.Offsets.Initial = sarama.OffsetNewest
+	initial := parseInitialOffset(initialOffset)
+	cfg.Consumer.Offsets.Initial = initial
 	cfg.Consumer.Return.Errors = true
+	// 仅冷启动（新消费组 / offset 过期）时 Initial 生效；提示位点语义避免运维误判积压去向。
+	if initial == sarama.OffsetNewest {
+		logger.Warn("Kafka consumer 初始位点=newest：冷启动/offset 过期时从最新位点消费，" +
+			"可能跳过 producer 已写入但未消费的积压事件（如需消费积压设 kafka.consumer.initial_offset=oldest）")
+	} else {
+		logger.Warn("Kafka consumer 初始位点=oldest：冷启动从最早未消费开始，" +
+			"注意 ClickHouse append 写入会因重放产生重复（MySQL upsert 幂等）")
+	}
 
 	group, err := sarama.NewConsumerGroup(brokers, groupID, cfg)
 	if err != nil {
@@ -120,6 +131,15 @@ func NewRouter(
 	}
 	go r.refreshSuppressLoop()
 	return r, nil
+}
+
+// parseInitialOffset 将配置字符串解析为 sarama 冷启动初始位点。
+// "oldest" → OffsetOldest（从最早未消费开始，需消费幂等）；其余（含空 / "newest"）→ OffsetNewest（默认）。
+func parseInitialOffset(s string) int64 {
+	if strings.EqualFold(strings.TrimSpace(s), "oldest") {
+		return sarama.OffsetOldest
+	}
+	return sarama.OffsetNewest
 }
 
 // behaviorSuppressBypassScore 运维抑制窗内仍放行的最低 risk_score——真高危(反弹shell/挖矿级)
