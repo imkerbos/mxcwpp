@@ -49,3 +49,16 @@ type HostBaselineState struct {
 }
 
 func (HostBaselineState) TableName() string { return "host_baseline_states" }
+
+// BDEMetricTuning 存 BDE 各指标的动态阈值倍率（反馈闭环 M1）。
+// 周期统计 behavior_alerts 中该指标的 ignored 率（analyst 标误报），高则抬阈值抑制、
+// 低则缓降恢复灵敏；evaluate 读此倍率叠加在静态 metricThresholdMult 上，实现检测→处置→调参闭环。
+type BDEMetricTuning struct {
+	Metric        string    `gorm:"column:metric;type:varchar(50);primaryKey" json:"metric"`
+	ThresholdMult float64   `gorm:"column:threshold_mult;type:decimal(5,2);default:1" json:"threshold_mult"`
+	IgnoredRate   float64   `gorm:"column:ignored_rate;type:decimal(5,3)" json:"ignored_rate"` // 上次计算的 ignored 率（观测）
+	Samples       int       `gorm:"column:samples" json:"samples"`                             // 上次计算的样本数（ignored+resolved）
+	UpdatedAt     LocalTime `json:"updated_at"`
+}
+
+func (BDEMetricTuning) TableName() string { return "bde_metric_tunings" }

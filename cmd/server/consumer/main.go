@@ -174,6 +174,8 @@ func main() {
 	// 6.3 初始化 BDE 基线引擎（行为检测，支持持久化和冷启动）
 	bdeEngine := baseline.NewEngine(db, logger.Named("bde"))
 	bdeEngine.StartCheckpoint(ctx.Done())
+	// 反馈闭环：周期按 behavior_alerts 的 ignored 率自调各指标阈值倍率。
+	bdeEngine.StartTuningReload(ctx)
 	logger.Info("BDE 基线引擎已启动")
 
 	// 6.8 初始化攻击故事线引擎（聚合 story_id 标记的事件为攻击叙事）
