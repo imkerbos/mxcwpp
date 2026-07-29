@@ -21,14 +21,21 @@ function useCountUp(target: number, ms = 1200) {
 
 type Kpi = { icon: React.ReactNode; label: string; value: number; suffix?: string; accent: string };
 
-export function KpiTicker() {
-  // ⚠️ P1 mock。P2 接后端聚合端点。
+export type KpiData = {
+  blockedToday: number;
+  activeThreats: number;
+  agentsOnline: number;
+  fpSuppressRate: number;
+  postureScore: number;
+};
+
+export function KpiTicker({ kpi }: { kpi: KpiData }) {
   const kpis: Kpi[] = [
-    { icon: <ShieldBan className="h-5 w-5" />, label: "今日拦截威胁", value: 229, accent: "text-rose-300" },
-    { icon: <Flame className="h-5 w-5" />, label: "活跃威胁", value: 148, accent: "text-orange-300" },
-    { icon: <Radar className="h-5 w-5" />, label: "在线探针", value: 227, accent: "text-emerald-300" },
-    { icon: <Filter className="h-5 w-5" />, label: "误报压制率", value: 96, suffix: "%", accent: "text-cyan-300" },
-    { icon: <Gauge className="h-5 w-5" />, label: "安全态势评分", value: 72, accent: "text-violet-300" },
+    { icon: <ShieldBan className="h-5 w-5" />, label: "今日拦截威胁", value: kpi.blockedToday, accent: "text-rose-300" },
+    { icon: <Flame className="h-5 w-5" />, label: "活跃威胁", value: kpi.activeThreats, accent: "text-orange-300" },
+    { icon: <Radar className="h-5 w-5" />, label: "在线探针", value: kpi.agentsOnline, accent: "text-emerald-300" },
+    { icon: <Filter className="h-5 w-5" />, label: "误报压制率", value: kpi.fpSuppressRate, suffix: "%", accent: "text-cyan-300" },
+    { icon: <Gauge className="h-5 w-5" />, label: "安全态势评分", value: kpi.postureScore, accent: "text-violet-300" },
   ];
   return (
     <div className="grid grid-cols-5 gap-3 px-4 py-2">
