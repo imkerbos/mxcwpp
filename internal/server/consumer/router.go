@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -63,10 +64,83 @@ type Router struct {
 	anomalyDetector *anomaly.Detector       // ML 异常检测引擎（可选）
 	storyEngine     *storyline.Engine       // 攻击故事线引擎（可选）
 	topics          []string
-	logger          *zap.Logger
+
+	// offset 手动提交（at-least-once for ClickHouse）：关闭 sarama auto-commit，改由屏障
+	// 循环「先快照已处理 offset → 同步 flush CH 落盘 → MarkOffset 快照 → Commit」。
+	// 保证提交的 offset 对应的 CH 行必已落盘，根治 kill-9/OOM 在两次 flush 间丢 ebpf/fim/metrics。
+	offsetMu      sync.Mutex
+	processed     map[topicPartition]int64 // (topic,partition) → 最高已处理 offset
+	barrierCancel context.CancelFunc       // 当前 session 的屏障取消（Cleanup 时触发最后一屏障）
+	barrierDone   chan struct{}            // 等待最后一屏障 flush+commit 完成
+	logger        *zap.Logger
 	// suppressed 运维事件抑制窗内的 host 集(hosts.behavior_suppress_until>now)，每 30s 刷新一次。
 	// 窗内低信号 BDE 偏离不落库，滤掉 agent 重连/插件重载引发的 WAL 重放突发假异常。
 	suppressed atomic.Pointer[map[string]struct{}]
+}
+
+// topicPartition 唯一标识一个分区，用作已处理 offset map 的键。
+type topicPartition struct {
+	topic     string
+	partition int32
+}
+
+// offsetCommitInterval 屏障提交周期：每周期 flush CH + 提交已处理 offset。
+// 越短崩溃后重放窗越小（CH 用 ReplacingMergeTree 幂等吸收重复），代价是 commit 频率略高。
+const offsetCommitInterval = 5 * time.Second
+
+// recordProcessed 记录一条消息已处理（用最高 offset）。替代 session.MarkMessage：
+// offset 不再逐条上报，改由屏障在 CH flush 落盘后统一 MarkOffset+Commit，保证 at-least-once。
+func (r *Router) recordProcessed(raw *sarama.ConsumerMessage) {
+	tp := topicPartition{topic: raw.Topic, partition: raw.Partition}
+	r.offsetMu.Lock()
+	if raw.Offset > r.processed[tp] {
+		r.processed[tp] = raw.Offset
+	}
+	r.offsetMu.Unlock()
+}
+
+// snapshotProcessed 复制当前各分区最高已处理 offset（供屏障在 flush 前取快照）。
+func (r *Router) snapshotProcessed() map[topicPartition]int64 {
+	r.offsetMu.Lock()
+	defer r.offsetMu.Unlock()
+	snap := make(map[topicPartition]int64, len(r.processed))
+	for tp, off := range r.processed {
+		snap[tp] = off
+	}
+	return snap
+}
+
+// flushAndCommit 执行一次提交屏障：先快照已处理 offset，再同步 flush ClickHouse（保证快照内
+// 所有 CH 行落盘；MySQL 本就同步落盘），最后 MarkOffset 快照并 Commit。
+// 顺序关键：快照必须在 flush 之前取，才能保证"提交的 offset ⊆ 已落盘"。
+func (r *Router) flushAndCommit(session sarama.ConsumerGroupSession) {
+	snap := r.snapshotProcessed()
+	if len(snap) == 0 {
+		return
+	}
+	if r.ch != nil {
+		r.ch.Flush()
+	}
+	for tp, off := range snap {
+		// sarama 约定：标记"下一条待消费"位点 = 已处理 offset + 1。
+		session.MarkOffset(tp.topic, tp.partition, off+1, "")
+	}
+	session.Commit()
+}
+
+// commitBarrier 周期性提交屏障，绑定到某个 session 生命周期（Setup 启动、Cleanup 停止）。
+func (r *Router) commitBarrier(ctx context.Context, session sarama.ConsumerGroupSession) {
+	t := time.NewTicker(offsetCommitInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			r.flushAndCommit(session) // 交出分区前的最后一屏障
+			return
+		case <-t.C:
+			r.flushAndCommit(session)
+		}
+	}
 }
 
 // NewRouter 创建 Router (v2 拆分: Consumer 仅 writer 路径, 不做 CEL 检测).
@@ -91,6 +165,9 @@ func NewRouter(
 	initial := parseInitialOffset(initialOffset)
 	cfg.Consumer.Offsets.Initial = initial
 	cfg.Consumer.Return.Errors = true
+	// 关闭自动提交：offset 改由屏障在 CH flush 落盘后手动提交(at-least-once)，
+	// 避免 auto-commit 在 CH 批次未落盘时就推进 offset → kill-9 丢数据。
+	cfg.Consumer.Offsets.AutoCommit.Enable = false
 	// 仅冷启动（新消费组 / offset 过期）时 Initial 生效；提示位点语义避免运维误判积压去向。
 	if initial == sarama.OffsetNewest {
 		logger.Warn("Kafka consumer 初始位点=newest：冷启动/offset 过期时从最新位点消费，" +
@@ -125,6 +202,7 @@ func NewRouter(
 		redisClient: redisClient,
 		topics:      topics,
 		logger:      logger,
+		processed:   make(map[topicPartition]int64),
 		// BDE 告警节流：同 (host, metric) 1min 内命中超 50 次开启 10min 静默窗，
 		// 削掉稳态偏离每 60s 复发的写入 churn（容量覆盖 host×13metric 组合）。
 		bdeThrottler: celengine.NewHitThrottler(50, time.Minute, 20000),
@@ -252,6 +330,19 @@ func (r *Router) Setup(session sarama.ConsumerGroupSession) error {
 	}
 	// 成员数无法直接获取，至少表达"本实例已加入组并分到 partition"
 	consumermetrics.SetGroupMembers(1)
+	// 重置已处理 offset 跟踪：旧 session 的 offset 已在其 Cleanup 最后一屏障提交，
+	// 新 session 只跟踪本次分到的分区，避免残留旧分区键无界增长。
+	r.offsetMu.Lock()
+	r.processed = make(map[topicPartition]int64)
+	r.offsetMu.Unlock()
+	// 启动本 session 的提交屏障：周期 flush CH + 手动提交 offset。
+	ctx, cancel := context.WithCancel(context.Background())
+	r.barrierCancel = cancel
+	r.barrierDone = make(chan struct{})
+	go func() {
+		r.commitBarrier(ctx, session)
+		close(r.barrierDone)
+	}()
 	r.logger.Info("ConsumerGroup Session 建立",
 		zap.String("member_id", session.MemberID()),
 		zap.Int32("generation_id", session.GenerationID()),
@@ -262,12 +353,13 @@ func (r *Router) Setup(session sarama.ConsumerGroupSession) error {
 
 // Cleanup 实现 sarama.ConsumerGroupHandler.Cleanup，rebalance 触发时清零成员指标。
 //
-// rebalance 会提交已标记的 offset 并把分区交给其他实例。此处先同步 flush ClickHouse 内存
-// 批次，让已消费但仍在批次里的 ebpf/fim/metrics 在分区重分配前落盘，避免重平衡/部署丢在途
-// 批次（graceful 退出已由 Close→done 覆盖；kill -9 硬崩溃残留窗口见 ClickHouseWriter.Flush 注释）。
+// 停止本 session 的提交屏障并等待其最后一次 flush+commit 完成，保证交出分区前：
+// CH 在途批次已落盘 + 对应 offset 已提交（一致），避免重平衡/部署丢在途批次或重复消费过多。
 func (r *Router) Cleanup(session sarama.ConsumerGroupSession) error {
-	if r.ch != nil {
-		r.ch.Flush()
+	if r.barrierCancel != nil {
+		r.barrierCancel() // 触发屏障最后一次 flush+commit
+		<-r.barrierDone   // 等其完成再交出分区
+		r.barrierCancel = nil
 	}
 	consumermetrics.SetGroupMembers(0)
 	r.logger.Info("ConsumerGroup Session 结束", zap.String("member_id", session.MemberID()))
@@ -287,15 +379,16 @@ func (r *Router) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.
 			if !ok {
 				return nil
 			}
-			r.handleMessage(session, msg)
+			r.handleMessage(msg)
 		case <-session.Context().Done():
 			return nil
 		}
 	}
 }
 
-// handleMessage 解码 MQMessage 并路由到对应写入器
-func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.ConsumerMessage) {
+// handleMessage 解码 MQMessage 并路由到对应写入器。
+// offset 通过 recordProcessed 记录，由提交屏障统一提交，不再需要 session。
+func (r *Router) handleMessage(raw *sarama.ConsumerMessage) {
 	// Prometheus: 测量端到端处理延迟与结果（success/error/dlq）
 	start := time.Now()
 	procStatus := "success" // 默认成功；解码失败或写入失败时改写
@@ -313,7 +406,7 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 			zap.Error(err),
 		)
 		procStatus = "error"
-		session.MarkMessage(raw, "")
+		r.recordProcessed(raw)
 		return
 	}
 	dataTypeLabel = strconv.Itoa(int(msg.DataType))
@@ -422,8 +515,9 @@ func (r *Router) handleMessage(session sarama.ConsumerGroupSession, raw *sarama.
 		procStatus = "dlq"
 	}
 
-	// 不论成功失败，均标记 offset（失败消息已进 DLQ，不阻塞消费进度）
-	session.MarkMessage(raw, "")
+	// 不论成功失败，均记录 offset（失败消息已进 DLQ，不阻塞消费进度）；
+	// offset 由提交屏障在 CH flush 落盘后统一提交，不在此逐条上报。
+	r.recordProcessed(raw)
 }
 
 // chWrite 统一处理 ClickHouse 写结果：失败则计数 + 告警日志。
