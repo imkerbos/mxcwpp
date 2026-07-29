@@ -3460,11 +3460,22 @@ func (h *ReportsHandler) GetRemediationExecutiveReport(c *gin.Context) {
 	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND (status = ? OR status = ? OR status = ?)", startTime, endTime, "pending", "confirmed", "running").Count(&pendingTasks)
 	h.db.Model(&model.RemediationTask{}).Where("created_at >= ? AND created_at <= ? AND status = ?", startTime, endTime, "cancelled").Count(&cancelledTasks)
 
-	// 2. 漏洞修复情况
+	// 2. 漏洞修复情况 —— 按舰队真实落地的去重 CVE（host_vulnerabilities join），
+	// 而非 vulnerabilities advisory 全量目录 + CVE 级 status rollup（后者严重虚高、修复率恒近 0）。
 	var totalVulns, patchedVulns, unpatchedVulns int64
-	h.db.Model(&model.Vulnerability{}).Where("discovered_at <= ?", endTime).Count(&totalVulns)
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND patched_at >= ? AND patched_at <= ?", "patched", startTime, endTime).Count(&patchedVulns)
-	h.db.Model(&model.Vulnerability{}).Where("status = ? AND discovered_at <= ?", "unpatched", endTime).Count(&unpatchedVulns)
+	fleetCVE := func(extra string, args ...any) int64 {
+		var n int64
+		q := h.db.Table("host_vulnerabilities AS hv").
+			Joins("JOIN vulnerabilities v ON v.id = hv.vuln_id")
+		if extra != "" {
+			q = q.Where(extra, args...)
+		}
+		q.Select("COUNT(DISTINCT v.cve_id)").Scan(&n)
+		return n
+	}
+	totalVulns = fleetCVE("v.discovered_at <= ?", endTime)
+	patchedVulns = fleetCVE("hv.status = ? AND hv.patched_at >= ? AND hv.patched_at <= ?", "patched", startTime, endTime)
+	unpatchedVulns = fleetCVE("hv.status = ? AND v.discovered_at <= ?", "unpatched", endTime)
 
 	remediationRate := 0.0
 	if totalVulns > 0 {
