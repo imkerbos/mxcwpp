@@ -74,6 +74,7 @@
     "section": "导航",
     "workspace": "工作台",
     "dashboard": "安全概览",
+    "screen": "态势大屏",
     "assets": "资产中心",
     "alert-center": "告警中心",
     "vuln-management": "漏洞管理",
