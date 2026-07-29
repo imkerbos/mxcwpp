@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"gorm.io/driver/mysql"
@@ -139,6 +140,21 @@ func main() {
 					}
 					iocMatcher.StartReload(ctx)
 					stages = append(stages, engine.NewIOCStage(iocMatcher, alertGen, logger))
+
+					// 入站端口扫描聚合检测(ScanDetector,需 Redis 做源IP×窗口滑动计数)。
+					// 激活此前未接线的 ScanDetector：按聚合判扫描替代"单入站连接即告警"的旧规则。
+					// 未配 Redis(addr 空)则跳过(NewScanDetector 对 nil 返回 nil，ScanStage 安全 no-op)。
+					if cfg.Redis.Addr != "" {
+						rdb := redis.NewClient(&redis.Options{
+							Addr:     cfg.Redis.Addr,
+							Password: cfg.Redis.Password,
+							DB:       cfg.Redis.DB,
+						})
+						if scanDet := celengine.NewScanDetector(rdb, db, logger.Named("scan")); scanDet != nil {
+							scanDet.StartWhitelistReload(ctx)
+							stages = append(stages, engine.NewScanStage(scanDet, logger))
+						}
+					}
 				}
 				storyEng := storyline.NewEngine(db, logger.Named("story"))
 				stages = append(stages, engine.NewStorylineStage(storyEng, logger))
