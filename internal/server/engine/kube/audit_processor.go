@@ -27,8 +27,12 @@ func NewKubeAuditProcessor(db *gorm.DB, logger *zap.Logger, alarmService *KubeAl
 	}
 }
 
-// ProcessAuditEvents 处理审计事件列表：创建 KubeEvent 记录 + 规则引擎检测生成告警
-func (p *KubeAuditProcessor) ProcessAuditEvents(cluster model.KubeCluster, events []model.AuditEvent) {
+// ProcessAuditEvents 处理审计事件列表：创建 KubeEvent 记录 + 规则引擎检测生成告警。
+//
+// 返回非 nil error 表示至少有一条事件持久化失败（DB 写入失败），调用方据此决定是否重投
+// （Pub/Sub Nack）。序列化失败属毒事件（无法重投修复）不计入返回错误，仅跳过。
+func (p *KubeAuditProcessor) ProcessAuditEvents(cluster model.KubeCluster, events []model.AuditEvent) error {
+	var writeErr error
 	for _, event := range events {
 		// 只处理 ResponseComplete 阶段，避免重复
 		if event.Stage != "" && event.Stage != "ResponseComplete" {
@@ -61,11 +65,13 @@ func (p *KubeAuditProcessor) ProcessAuditEvents(cluster model.KubeCluster, event
 
 		if err := p.db.Create(&kubeEvent).Error; err != nil {
 			p.logger.Error("保存 audit event 失败", zap.Error(err))
+			writeErr = err
 		}
 
 		// 规则引擎检测
 		p.detector.DetectAuditEvent(cluster.ID, cluster.Name, &event)
 	}
+	return writeErr
 }
 
 func classifyAuditSeverity(event *model.AuditEvent) string {

@@ -44,6 +44,11 @@ const (
 	fallbackMsgTTL = 5 * time.Minute
 )
 
+// replayBackoff 是 replayLoop 在 Kafka Input 仍满时的短退避（避免热自旋）。
+// var 以便测试压缩。注意：仅在 Input 满时退避，成功入通道时不退避，故恢复期可全速排空——
+// 区别于旧实现"每条失败 sleep 1s"把恢复串行成 1 条/秒。
+var replayBackoff = 100 * time.Millisecond
+
 // pendingMsg 是降级队列中暂存的消息
 type pendingMsg struct {
 	topic      string
@@ -174,6 +179,29 @@ func (p *AsyncProducer) Send(topic, key string, msg *MQMessage) error {
 	}
 }
 
+// trySendInput 非阻塞地把消息投入 Kafka Input，返回是否成功入通道。
+//
+// 与 Send 的区别：满时 **不** 自动回落降级队列（不重置 retryCount）。供 replayLoop 使用，
+// 以便由调用方保留并递增重试计数——旧实现 replayLoop 调 Send 导致每次重放都以 retryCount=0
+// 回落，fallbackMaxRetries 永不触发。
+func (p *AsyncProducer) trySendInput(topic, key string, msg *MQMessage) bool {
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	pm := p.msgPool.Get().(*sarama.ProducerMessage)
+	pm.Topic = topic
+	pm.Key = sarama.StringEncoder(key)
+	pm.Value = sarama.ByteEncoder(body)
+	select {
+	case p.producer.Input() <- pm:
+		return true
+	default:
+		p.msgPool.Put(pm)
+		return false
+	}
+}
+
 // producerReliableSendTimeout 是 SendReliable 在 Kafka Input 满时的最长阻塞等待时间。
 // 为 var 以便测试压缩等待时间。
 var producerReliableSendTimeout = 3 * time.Second
@@ -281,10 +309,16 @@ func (p *AsyncProducer) replayLoop() {
 				continue
 			}
 
-			// 重放：直接放入 Kafka 输入通道，如失败再放回队列
-			if err := p.Send(pm.topic, pm.key, pm.msg); err != nil {
-				time.Sleep(1 * time.Second)
+			// 重放：直接投入 Kafka Input（不走 Send，避免 retryCount 被重置为 0）。
+			// 成功即 done；Input 仍满则保留并递增 retryCount 回队（达上限则丢弃），
+			// 短退避避免热自旋——不再像旧实现每条 sleep 1s 把恢复串行成 1 条/秒。
+			if !p.trySendInput(pm.topic, pm.key, pm.msg) {
 				_ = p.enqueueToFallbackWithRetry(pm.topic, pm.key, pm.msg, pm.retryCount+1)
+				select {
+				case <-p.closed:
+					return
+				case <-time.After(replayBackoff):
+				}
 			}
 		}
 	}
@@ -308,7 +342,14 @@ func (p *AsyncProducer) errorLoop() {
 			if body, e := err.Msg.Value.Encode(); e == nil {
 				var msg MQMessage
 				if e := json.Unmarshal(body, &msg); e == nil {
-					_ = p.enqueueToFallback(err.Msg.Topic, "", &msg)
+					// 透传原始分区 key，避免重投后同 agent 消息跨分区破坏顺序。
+					key := ""
+					if err.Msg.Key != nil {
+						if kb, ke := err.Msg.Key.Encode(); ke == nil {
+							key = string(kb)
+						}
+					}
+					_ = p.enqueueToFallback(err.Msg.Topic, key, &msg)
 				}
 			}
 			p.msgPool.Put(err.Msg)

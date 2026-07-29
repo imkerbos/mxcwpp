@@ -25,6 +25,7 @@ type EngineConfig struct {
 	AlertTopic  string         `mapstructure:"alert_topic"`
 	Kafka       KafkaConfig    `mapstructure:"kafka"`
 	Database    DBConfig       `mapstructure:"database"`
+	Redis       RedisConfig    `mapstructure:"redis"` // ScanDetector 入站扫描聚合计数用；未配则跳过扫描检测
 	OTel        OTelConfig     `mapstructure:"otel"`
 	Pipeline    PipelineConfig `mapstructure:"pipeline"`
 }

@@ -188,6 +188,16 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("端口启发式规则降级失败", zap.Error(err))
 	}
 
+	// behavior_alerts 存量去重 + 唯一索引，让 BDE 落库改 upsert(同 host+metric 累加 hit_count 不新增行)
+	if err := migrateBehaviorAlertDedup(db, logger); err != nil {
+		logger.Warn("behavior_alerts 去重/唯一索引失败", zap.Error(err))
+	}
+
+	// 合并三条重复的 touch 时间戳篡改规则(同 T1070.006 三重告警)，禁用冗余两条
+	if err := migrateDedupTimestampRules(db, logger); err != nil {
+		logger.Warn("合并重复时间戳规则失败", zap.Error(err))
+	}
+
 	// 给存量检测规则回填 detect-only 观察期起点 effective_at = created_at
 	if err := migrateBackfillRuleEffectiveAt(db, logger); err != nil {
 		logger.Warn("回填规则 effective_at 失败", zap.Error(err))
@@ -227,18 +237,31 @@ func migrateBackfillRuleEffectiveAt(db *gorm.DB, logger *zap.Logger) error {
 //
 // 仅降级"低保真"规则名模式；高保真规则(反弹shell/CobaltStrike/memfd/真C2/横向)保持 high。
 func migrateMarkLowFidelityRules(db *gorm.DB, logger *zap.Logger) error {
+	var total int64
+
+	// 1) 类目驱动降级：整个噪声类目单信号、繁忙业务上必然刷屏、近零真阳价值。
+	//    - network_scan：入站扫描/探测规则(tcp_accept 单事件，每次合法连接即命中)。
+	//    - discovery：主机/网络/用户/进程枚举、云元数据探测等单信号。
+	//    比按规则名逐条匹配更彻底(name-pattern 曾漏掉 network_scan 全部入站规则)。
+	//    保留 user_modified=true 的规则（用户显式设过 fidelity 则不覆盖）。
+	rc := db.Model(&model.DetectionRule{}).
+		Where("category IN ? AND fidelity <> ? AND user_modified = ?",
+			noiseFidelityCategories, model.RuleFidelityLow, false).
+		Update("fidelity", model.RuleFidelityLow)
+	if rc.Error != nil {
+		return rc.Error
+	}
+	total += rc.RowsAffected
+
+	// 2) 跨类目单信号噪声规则名模式（属 execution/defense_evasion 等类，非 1) 的噪声类目，仍需按名匹配）。
 	lowFidelityPatterns := []string{
 		"高频外连%",
-		"DNS 查询%", // 非 DNS 工具 / 高频请求
-		"信息收集%",   // 主机/用户/进程/网络枚举
-		"发现 -%",   // net user/arp/ldap 等枚举（agent yaml 原始名）
 		"/tmp 目录可执行文件创建%",
 		"反检测 - 隐藏文件大量创建%",
 	}
-	var total int64
 	for _, p := range lowFidelityPatterns {
 		r := db.Model(&model.DetectionRule{}).
-			Where("name LIKE ? AND fidelity <> ?", p, model.RuleFidelityLow).
+			Where("name LIKE ? AND fidelity <> ? AND user_modified = ?", p, model.RuleFidelityLow, false).
 			Update("fidelity", model.RuleFidelityLow)
 		if r.Error != nil {
 			return r.Error
@@ -250,6 +273,10 @@ func migrateMarkLowFidelityRules(db *gorm.DB, logger *zap.Logger) error {
 	}
 	return nil
 }
+
+// noiseFidelityCategories 是整类降级为 fidelity=low 的噪声检测类目。
+// 单信号、无上下文、在正常业务负载上持续刷屏，价值仅在多信号关联，故降为 indicator。
+var noiseFidelityCategories = []string{"network_scan", "discovery"}
 
 // migrateMarkPortHeuristicLowFidelity 把纯端口启发式 C2 检测规则标记为 fidelity=low（降级 indicator，
 // 不独立告警，事件仍喂 anomaly/storyline 关联）。
@@ -277,6 +304,82 @@ func migrateMarkPortHeuristicLowFidelity(db *gorm.DB, logger *zap.Logger) error 
 	if r.RowsAffected > 0 {
 		logger.Info("已降级端口启发式 C2 规则为 indicator", zap.Int64("count", r.RowsAffected))
 	}
+	return nil
+}
+
+// migrateDedupTimestampRules 合并三条重复的 T1070.006 touch 时间戳篡改规则：
+// "防御规避 - 时间戳伪造" / "防御绕过 - timestamp tamper" / "防御逃避 - timestomp 篡改文件时间"
+// 都检测同一 touch -t/-r/-d 事件，命中会三重告警。保留第一条并补全 -d/--date 覆盖，禁用另两条。
+// 幂等；user_modified=true 的规则不覆盖（尊重用户自定义）。
+func migrateDedupTimestampRules(db *gorm.DB, logger *zap.Logger) error {
+	redundant := []string{"防御绕过 - timestamp tamper", "防御逃避 - timestomp 篡改文件时间"}
+	r := db.Model(&model.DetectionRule{}).
+		Where("name IN ? AND enabled = ? AND user_modified = ?", redundant, true, false).
+		Update("enabled", false)
+	if r.Error != nil {
+		return r.Error
+	}
+	// 保留规则补全 -d/--date 覆盖（原表达式缺，去重后由它统一覆盖）。
+	merged := `exe.contains("touch") && (cmdline.contains("-t") || cmdline.contains("-r") || cmdline.contains("-d") || cmdline.contains("--reference") || cmdline.contains("--date"))`
+	if err := db.Model(&model.DetectionRule{}).
+		Where("name = ? AND user_modified = ?", "防御规避 - 时间戳伪造", false).
+		Update("expression", merged).Error; err != nil {
+		return err
+	}
+	if r.RowsAffected > 0 {
+		logger.Info("合并重复时间戳篡改规则", zap.Int64("disabled", r.RowsAffected))
+	}
+	return nil
+}
+
+// behaviorAlertDedupIndex 是 behavior_alerts 的 (tenant_id, host_id, metric) 唯一索引名。
+const behaviorAlertDedupIndex = "ux_behavior_alerts_host_metric"
+
+// migrateBehaviorAlertDedup 为 behavior_alerts 建 (tenant_id, host_id, metric) 唯一索引，
+// 使 BDE 落库改 upsert：同主机同指标的稳态偏离每 60s 复发只累加 hit_count，不再无限新增行。
+//
+// 历史问题：BDE 逐条 db.Create，无去重键 → 同一稳态偏离每快照一行，实测积压 ~197 万全 open。
+// 建唯一索引前须先合并存量重复行（否则唯一索引创建失败）。
+// 幂等：索引已存在则直接返回。
+func migrateBehaviorAlertDedup(db *gorm.DB, logger *zap.Logger) error {
+	if db.Migrator().HasIndex(&model.BehaviorAlert{}, behaviorAlertDedupIndex) {
+		return nil
+	}
+
+	// 存量去重仅在 MySQL 上执行（sqlite 测试环境无存量数据）。
+	// 保留每组最小 id 行，其 hit_count 置为该组行数，删除其余重复行。
+	if db.Dialector.Name() == "mysql" {
+		if err := db.Exec(`
+UPDATE behavior_alerts b
+JOIN (
+	SELECT MIN(id) AS keep_id, COUNT(*) AS cnt
+	FROM behavior_alerts
+	GROUP BY tenant_id, host_id, metric
+) g ON b.id = g.keep_id
+SET b.hit_count = g.cnt`).Error; err != nil {
+			return fmt.Errorf("behavior_alerts 累加 hit_count 失败: %w", err)
+		}
+		r := db.Exec(`
+DELETE b FROM behavior_alerts b
+JOIN (
+	SELECT MIN(id) AS keep_id, tenant_id, host_id, metric
+	FROM behavior_alerts
+	GROUP BY tenant_id, host_id, metric
+) g ON b.tenant_id = g.tenant_id AND b.host_id = g.host_id AND b.metric = g.metric
+WHERE b.id <> g.keep_id`)
+		if r.Error != nil {
+			return fmt.Errorf("behavior_alerts 删除重复行失败: %w", r.Error)
+		}
+		if r.RowsAffected > 0 {
+			logger.Info("behavior_alerts 存量去重", zap.Int64("removed", r.RowsAffected))
+		}
+	}
+
+	if err := db.Exec("CREATE UNIQUE INDEX " + behaviorAlertDedupIndex +
+		" ON behavior_alerts (tenant_id, host_id, metric)").Error; err != nil {
+		return fmt.Errorf("behavior_alerts 唯一索引创建失败: %w", err)
+	}
+	logger.Info("behavior_alerts 唯一索引已创建，BDE 落库启用 upsert 去重")
 	return nil
 }
 

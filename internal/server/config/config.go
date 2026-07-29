@@ -266,8 +266,18 @@ type KafkaConfig struct {
 	Brokers []string `mapstructure:"brokers"`
 	// 生产者
 	Producer KafkaProducerConfig `mapstructure:"producer"`
+	// 消费者
+	Consumer KafkaConsumerConfig `mapstructure:"consumer"`
 	// Topic 前缀（用于多环境隔离，如 dev. / prod.）
 	TopicPrefix string `mapstructure:"topic_prefix"`
+}
+
+// KafkaConsumerConfig 是 Kafka 消费者配置
+type KafkaConsumerConfig struct {
+	// InitialOffset 冷启动（新消费组 / offset 过期）时的初始位点："newest"（默认，保持现状）或
+	// "oldest"。newest 会跳过 producer 已写入但未消费的积压；oldest 从最早未消费开始，需配合
+	// 消费幂等（MySQL upsert 幂等，ClickHouse append 会重复）。
+	InitialOffset string `mapstructure:"initial_offset"`
 }
 
 // KafkaProducerConfig 是 Kafka 生产者配置
@@ -539,6 +549,9 @@ func setDefaults(cfg *Config, logFileSet bool) {
 	// Kafka 默认配置
 	if len(cfg.Kafka.Brokers) == 0 {
 		cfg.Kafka.Brokers = []string{"kafka:9092"}
+	}
+	if cfg.Kafka.Consumer.InitialOffset == "" {
+		cfg.Kafka.Consumer.InitialOffset = "newest" // 默认保持现状，不破坏既有部署
 	}
 	if cfg.Kafka.Producer.RequiredAcks == 0 {
 		cfg.Kafka.Producer.RequiredAcks = -1

@@ -395,12 +395,12 @@ rules:
     description: "检测当前用户/组/登录信息收集"
 
   - name: "防御规避 - 时间戳伪造"
-    expression: 'exe.contains("touch") && (cmdline.contains("-t") || cmdline.contains("-r") || cmdline.contains("--reference"))'
+    expression: 'exe.contains("touch") && (cmdline.contains("-t") || cmdline.contains("-r") || cmdline.contains("-d") || cmdline.contains("--reference") || cmdline.contains("--date"))'
     severity: medium
     category: defense_evasion
     mitre_id: "T1070.006"
     data_types: ["3000"]
-    description: "检测 touch 命令修改文件时间戳，可能为反取证操作"
+    description: "检测 touch 命令修改文件时间戳，可能为反取证操作（合并原 timestamp tamper / timestomp 三条重复规则）"
 
   - name: "防御规避 - 进程名伪装"
     expression: 'exe.contains("/tmp/") && (exe.endsWith("sshd") || exe.endsWith("kworker") || exe.endsWith("systemd") || exe.endsWith("crond"))'
@@ -971,14 +971,6 @@ rules:
     mitre_id: "T1070.003"
     data_types: ["3000"]
     description: "清理 shell 历史 (history -c / 删除 .bash_history / HISTFILE=/dev/null)"
-
-  - name: "防御绕过 - timestamp tamper"
-    expression: 'exe.endsWith("/touch") && (cmdline.contains("-t ") || cmdline.contains("--date") || cmdline.contains("-r "))'
-    severity: medium
-    category: defense_evasion
-    mitre_id: "T1070.006"
-    data_types: ["3000"]
-    description: "touch 修改文件时间戳 (timestomping 反取证)"
 
   - name: "防御绕过 - 进程伪装成 kthreadd 等内核线程"
     expression: '(comm.startsWith("[kworker") || comm.startsWith("[kthread") || cmdline.startsWith("[kworker") || cmdline.startsWith("[kthread") || cmdline.contains(" [kworker") || cmdline.contains(" [kthread"))'
@@ -1662,14 +1654,6 @@ rules:
 
   # ==================== P6-3 扩展规则 ====================
   # ATT&CK 198 → 250 条覆盖更细子技术: 防御逃避/凭证窃取/发现/横移/收集/外传/C2/影响
-
-  - name: "防御逃避 - timestomp 篡改文件时间"
-    expression: 'cmdline.contains("touch -r") || cmdline.contains("touch -t") || cmdline.contains("touch -d")'
-    severity: medium
-    category: defense_evasion
-    mitre_id: "T1070.006"
-    data_types: ["3000"]
-    description: "改文件 mtime/atime, 留隐蔽"
 
   - name: "防御逃避 - Process Hollowing 痕迹"
     expression: 'cmdline.contains("ptrace") && cmdline.contains("PTRACE_POKETEXT")'

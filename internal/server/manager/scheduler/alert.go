@@ -290,8 +290,30 @@ func matchAlertScopeWithReason(db *gorm.DB, logger *zap.Logger, notification *mo
 		return false, "主机不在指定主机列表中"
 
 	case model.NotificationScopeHostTags:
-		// TODO: 实现主机标签匹配
-		return true, ""
+		// 查询主机的标签
+		var host model.Host
+		if err := db.First(&host, "host_id = ?", alert.HostID).Error; err != nil {
+			logger.Debug("查询主机失败，跳过告警",
+				zap.String("host_id", alert.HostID),
+				zap.Uint("alert_id", alert.ID),
+				zap.Error(err),
+			)
+			return false, "主机不存在"
+		}
+		// 解析 scope_value
+		var scopeValue model.ScopeValueData
+		if err := json.Unmarshal([]byte(notification.ScopeValue), &scopeValue); err != nil {
+			logger.Warn("解析通知配置主机范围失败",
+				zap.Uint("notification_id", notification.ID),
+				zap.Error(err),
+			)
+			return false, "解析主机标签配置失败"
+		}
+		// OR 语义：主机命中任一配置标签即匹配，与业务线/指定主机范围约定一致
+		if hostTagsMatchAny(host.Tags, scopeValue.Tags) {
+			return true, ""
+		}
+		return false, "主机标签不在通知配置的标签列表中"
 
 	default:
 		logger.Warn("未知的通知范围类型",
@@ -300,4 +322,17 @@ func matchAlertScopeWithReason(db *gorm.DB, logger *zap.Logger, notification *mo
 		)
 		return false, "未知的通知范围类型"
 	}
+}
+
+// hostTagsMatchAny 判断主机标签是否命中通知配置要求的标签。
+// OR 语义：主机命中任一配置标签即匹配；配置标签为空时不匹配（避免空条件退化为全量分发）。
+func hostTagsMatchAny(hostTags, requiredTags []string) bool {
+	for _, want := range requiredTags {
+		for _, have := range hostTags {
+			if want == have {
+				return true
+			}
+		}
+	}
+	return false
 }

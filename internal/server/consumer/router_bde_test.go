@@ -9,8 +9,10 @@ func TestShouldPersistBehaviorAlert(t *testing.T) {
 		risk      float64
 		want      bool
 	}{
-		{"毕业后全量保留-低分", false, 10, true},
-		{"毕业后全量保留-高分", false, 95, true},
+		{"毕业后-低分抑制(风险下限)", false, 10, false},
+		{"毕业后-临界下抑制", false, activeBehaviorAlertMinScore - 0.1, false},
+		{"毕业后-达下限保留", false, activeBehaviorAlertMinScore, true},
+		{"毕业后-高分保留", false, 95, true},
 		{"学习期冷启动-低分抑制", true, 40, false},
 		{"学习期冷启动-临界下抑制", true, coldStartBehaviorAlertMinScore - 0.1, false},
 		{"学习期冷启动-达阈值保留", true, coldStartBehaviorAlertMinScore, true},

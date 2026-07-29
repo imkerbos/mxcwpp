@@ -83,6 +83,19 @@ func selectVersionComparator(pkgManager string) func(a, b string) (int, error) {
 	}
 }
 
+// CompareVersionByOS 按 OS family 选权威版本比较器（RPM/dpkg）比对 a、b。
+//
+// 供 reconcile/verify 等复用与 matcher 一致的严谨 NEVRA 语义，避免各处自造弱比较器
+// （忽略 el9_4 等 release 后缀导致误判已修）。debian/ubuntu 用 dpkg，其余用 RPM。
+func CompareVersionByOS(osFamily, a, b string) (int, error) {
+	pkgManager := "rpm"
+	switch strings.ToLower(osFamily) {
+	case "debian", "ubuntu":
+		pkgManager = "dpkg"
+	}
+	return selectVersionComparator(pkgManager)(a, b)
+}
+
 // composeNEVRAString 把 epoch/version/release 拼成标准 NEVRA 字符串(无 name 无 arch)。
 //
 //	epoch="" version="3.5.1" release="3.el9" → "3.5.1-3.el9"
@@ -222,9 +235,17 @@ func CompareRPMVersion(a, b string) (int, error) {
 	if c := rpmSegmentCompare(aVer, bVer); c != 0 {
 		return c, nil
 	}
-	// version 相同时 release 才参与比较；若一边 release 空，视为相等（不比 release）
-	if aRel == "" || bRel == "" {
+	// version 相同时 release 才参与比较。
+	// 一方带 release 一方裸版本（如 fixed=3.5.1-9.el9 vs host 上报裸 3.5.1）：
+	// 保守视裸版本一方为更低（未达带 release 的安全 bump），避免把裸版本主机误判已修 → 漏报。
+	if aRel == "" && bRel == "" {
 		return 0, nil
+	}
+	if aRel == "" {
+		return -1, nil
+	}
+	if bRel == "" {
+		return 1, nil
 	}
 	return rpmSegmentCompare(aRel, bRel), nil
 }
@@ -236,6 +257,21 @@ func rpmSegmentCompare(a, b string) int {
 	for len(a) > 0 || len(b) > 0 {
 		a = trimNonAlnum(a)
 		b = trimNonAlnum(b)
+		// '~'（波浪号）在 RPM 版本语义里排序最小，标记 pre-release：1.0~rc1 < 1.0。
+		// 一方遇 '~' 一方未遇 → 有 '~' 的一方更小；双方都遇 → 各消耗一个后继续比较。
+		// 必须先于下面的空串判断，否则 "~rc1" vs "" 会被误判为前者更大。
+		aTilde := len(a) > 0 && a[0] == '~'
+		bTilde := len(b) > 0 && b[0] == '~'
+		if aTilde || bTilde {
+			if !aTilde {
+				return 1
+			}
+			if !bTilde {
+				return -1
+			}
+			a, b = a[1:], b[1:]
+			continue
+		}
 		if len(a) == 0 && len(b) == 0 {
 			return 0
 		}
@@ -280,10 +316,12 @@ func rpmSegmentCompare(a, b string) int {
 	return 0
 }
 
+// trimNonAlnum 跳过前导分隔符，返回从首个字母/数字或 '~' 开始的子串。
+// '~' 不作为普通分隔符跳过——它承载 pre-release 排序语义，须交由调用方特殊处理。
 func trimNonAlnum(s string) string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) {
+		if c == '~' || unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) {
 			return s[i:]
 		}
 	}

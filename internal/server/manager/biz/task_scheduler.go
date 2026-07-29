@@ -316,6 +316,9 @@ func (s *TaskScheduler) maybeTriggerVulnScan() {
 	// 首次启动检查
 	allZero := s.lastFullScanStart.IsZero() && s.lastIncrementalStart.IsZero() && s.lastSyncStart.IsZero()
 	if allZero {
+		// 此处刻意数情报库 vulnerabilities 全量(CVE advisory 目录),而非舰队 host_vulnerabilities。
+		// 语义是"CVE 情报库是否已 bootstrap":库空 + 有带 PURL 软件包 → 首次全量扫描。
+		// host_vulnerabilities 是扫描产物,初始必空,拿它判空会永远触发全量,故必须用情报库口径。
 		var vulnCount int64
 		s.db.Model(&model.Vulnerability{}).Count(&vulnCount)
 

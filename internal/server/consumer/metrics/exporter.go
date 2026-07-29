@@ -52,7 +52,29 @@ var (
 		Name: "mxcwpp_consumer_group_members",
 		Help: "Current number of members in the consumer group.",
 	})
+
+	// ClickHouse 写入失败次数（MySQL 已落但 CH 写失败 → 双写漂移风险，原被 `_=` 静默吞掉）。
+	CHWriteErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mxcwpp_consumer_ch_write_errors_total",
+		Help: "Number of ClickHouse write failures in the consumer, labeled by operation.",
+	}, []string{"op"})
+
+	// 消费到未路由的未知 DataType 次数（已转 DLQ，原仅 Debug 丢弃 = 静默数据黑洞）。
+	UnknownDataTypeTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mxcwpp_consumer_unknown_data_type_total",
+		Help: "Number of messages with an unrouted/unknown DataType consumed (sent to DLQ).",
+	}, []string{"data_type"})
 )
+
+// RecordCHWriteError 记录一次 ClickHouse 写失败（op 为固定小集合，如 host_metrics/fim_event/ebpf_event）。
+func RecordCHWriteError(op string) {
+	CHWriteErrorsTotal.WithLabelValues(op).Inc()
+}
+
+// RecordUnknownDataType 记录一次未知 DataType（已转 DLQ）。
+func RecordUnknownDataType(dataType string) {
+	UnknownDataTypeTotal.WithLabelValues(dataType).Inc()
+}
 
 // RecordProcessing 在 handleMessage 完成后调用，统一记录三项指标。
 //

@@ -21,11 +21,11 @@ func TestStatFor_BucketWhenReadyElseFlat(t *testing.T) {
 	// 扁平基线:mean=10
 	bl.samples = 300
 	bl.mean[0] = 10
-	bl.m2[0] = 300 * 4 // sd≈sqrt(1200/299)
+	bl.variance[0] = 4 // sd=2 (EWMV variance 直接存)
 	// 桶1样本足(>=minBucketSamples),mean=50;桶0样本不足
 	bl.bSamples[1] = minBucketSamples
 	bl.bMean[1][0] = 50
-	bl.bM2[1][0] = float64(minBucketSamples) * 9
+	bl.bVar[1][0] = 9
 	bl.bSamples[0] = minBucketSamples - 1
 	bl.bMean[0][0] = 999 // 不应被采用(样本不足)
 

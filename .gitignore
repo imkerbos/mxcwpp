@@ -21,6 +21,9 @@ tmp/
 /agentcenter
 /manager
 /consumer
+/engine
+/vulnsync
+/llmproxy
 /baseline
 /baseline-plugin
 /collector-plugin

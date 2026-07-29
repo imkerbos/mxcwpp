@@ -87,5 +87,6 @@ func (h *KubeAuditHandler) ReceiveAuditWebhook(c *gin.Context) {
 
 // processAuditEvents 异步处理 audit 事件（委托给 KubeAuditProcessor）
 func (h *KubeAuditHandler) processAuditEvents(cluster model.KubeCluster, events []AuditEvent) {
-	h.processor.ProcessAuditEvents(cluster, events)
+	// Webhook 路径异步 fire-and-forget，K8s 已收到 2xx 无法重投；写入错误已在处理器内记录日志，此处忽略返回值。
+	_ = h.processor.ProcessAuditEvents(cluster, events)
 }
