@@ -74,6 +74,7 @@
     "section": "Navigation",
     "workspace": "Workspace",
     "dashboard": "Security Overview",
+    "screen": "Situation Screen",
     "assets": "Assets",
     "alert-center": "Alerts",
     "vuln-management": "Vulnerabilities",
