@@ -210,12 +210,14 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 	now := model.ToLocalTime(time.Now())
 	resultID := fmt.Sprintf("scan-%s-%s-%d", hostID, remoteAddr, time.Now().UnixNano())
 
+	internal := isInternalSource(remoteAddr)
+
 	alert := model.Alert{
 		ResultID:       resultID,
 		HostID:         hostID,
 		RuleID:         "scan-detector",
 		Source:         model.AlertSourceDetection,
-		Severity:       d.classifySeverity(portCount),
+		Severity:       d.classifySeverity(portCount, remoteAddr),
 		Category:       "port_scan",
 		ATTCKTechnique: "T1046",                      // Network Service Discovery
 		ATTCKTactic:    tacticFromTechnique("T1046"), // TA0007 Discovery
@@ -231,6 +233,17 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 		return
 	}
 
+	// 内网源多为节点/监控探测，降级 low 并以 Info 记录，避免刷 Warn 日志。
+	if internal {
+		d.logger.Info("检测到内网源端口探测（降级 low，未告警通知）",
+			zap.String("host_id", hostID),
+			zap.String("remote_addr", remoteAddr),
+			zap.Int("port_count", portCount),
+			zap.String("ports", portsStr),
+		)
+		return
+	}
+
 	d.logger.Warn("检测到端口扫描",
 		zap.String("host_id", hostID),
 		zap.String("remote_addr", remoteAddr),
@@ -238,7 +251,7 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 		zap.String("ports", portsStr),
 	)
 
-	// 异步发送检测告警通知
+	// 异步发送检测告警通知（仅外网源，内网降级项不通知以免噪声）
 	go func() {
 		var host model.Host
 		hostname, ip := "", ""
@@ -264,8 +277,27 @@ func (d *ScanDetector) triggerScanAlert(ctx context.Context, hostID, remoteAddr 
 	}()
 }
 
-// classifySeverity 根据端口数量分级
-func (d *ScanDetector) classifySeverity(portCount int) string {
+// isInternalSource 判断源 IP 是否为内网地址（RFC1918 / 环回 / 链路本地 / IPv6 ULA）。
+//
+// 内网源的"端口扫描"绝大多数是基础设施正常行为：K8s 节点 kubelet 存活/就绪探测、
+// Prometheus metrics 抓取、健康检查等，会在 60s 内连很多端口。这类源随节点调度/扩缩
+// 动态漂移，用 IP 白名单逐个豁免追不完；而按 /24 整段消音又会让节点或 hostNetwork
+// Pod 失陷后的横向扫描隐形。故内网源不消音、只降级（见 classifySeverity）——
+// 既压掉日常探测噪声，又保留内网失陷主机扫描的可见性。
+func isInternalSource(remoteAddr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(remoteAddr))
+	if ip == nil {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+// classifySeverity 根据端口数量与源 IP 归属分级。
+// 内网源降级为 low（仍入库可查，不占 active high 版面）；外网源按端口数正常分级。
+func (d *ScanDetector) classifySeverity(portCount int, remoteAddr string) string {
+	if isInternalSource(remoteAddr) {
+		return "low"
+	}
 	switch {
 	case portCount >= 50:
 		return "critical"
