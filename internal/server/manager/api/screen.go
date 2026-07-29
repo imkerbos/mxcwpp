@@ -112,17 +112,7 @@ func (h *ScreenHandler) GetOverview(c *gin.Context) {
 		}
 	}
 
-	// ---------- 态势评分（越高越安全，简单加权后钳制）----------
-	risk := sev["critical"]*6 + sev["high"]*1 + critVuln*2
-	score := 100 - int(risk)
-	if score < 20 {
-		score = 20
-	}
-	if score > 99 {
-		score = 99
-	}
-
-	// ---------- 各引擎 ----------
+	// ---------- 各引擎计数（评分与引擎墙共用）----------
 	var bdeOpen, mlCrit, kubeActive int64
 	h.db.Model(&model.BehaviorAlert{}).Where("status = ?", "open").Count(&bdeOpen)
 	h.db.Model(&model.AnomalyAlert{}).Where("severity = ?", "critical").Count(&mlCrit)
@@ -133,6 +123,30 @@ func (h *ScreenHandler) GetOverview(c *gin.Context) {
 			_ = row.Scan(&fimCount)
 		}
 	}
+
+	// ---------- 态势评分（越高越安全）----------
+	// 各风险维度独立扣分并各自封顶（饱和），避免单一维度把评分打穿地板；
+	// 繁忙但可控的舰队应落在 50~85，仅真正失控才低分。
+	capf := func(v, weight, cap float64) int {
+		d := v * weight
+		if d > cap {
+			d = cap
+		}
+		return int(d)
+	}
+	score := 100
+	score -= capf(float64(sev["critical"]), 3, 30) // 严重告警：每个 -3，最多 -30
+	score -= capf(float64(sev["high"]), 0.3, 25)    // 高危告警：每个 -0.3，最多 -25
+	score -= capf(float64(critVuln), 1, 20)         // 严重漏洞：每个 -1，最多 -20
+	score -= capf(float64(mlCrit), 0.002, 15)       // ML 异常：饱和 -15
+	if score < 30 {
+		score = 30
+	}
+	if score > 99 {
+		score = 99
+	}
+
+	// ---------- 各引擎健康墙 ----------
 	engineStatus := func(warn bool) string {
 		if warn {
 			return "warn"
