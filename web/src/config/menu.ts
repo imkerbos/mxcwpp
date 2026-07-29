@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Database, Bell, Bug, ShieldCheck, FileSearch,
-  ScanLine, Boxes, Zap, Wrench, Settings, Activity, ScrollText,
+  ScanLine, Boxes, Zap, Wrench, Settings, Activity, ScrollText, Radar,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -9,6 +9,7 @@ export interface MenuItem { key: string; path: string; title: string; icon: Luci
 
 export const MENUS: MenuItem[] = [
   { key: "dashboard", path: "/dashboard", title: "安全概览", icon: LayoutDashboard, perms: ["dashboard"] },
+  { key: "screen", path: "/screen", title: "态势大屏", icon: Radar, perms: ["dashboard"] },
   { key: "assets", path: "/assets", title: "资产中心", icon: Database, perms: ["assets"] },
   { key: "alert-center", path: "/alert-center", title: "告警中心", icon: Bell, perms: ["alerts"] },
   { key: "vuln-management", path: "/vuln-management", title: "漏洞管理", icon: Bug, perms: ["vuln"] },

@@ -277,6 +277,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger, acDispatcher)
 	setupDashboardAPI(router, db, logger, chConn, redisClient, acRegistry, promClient)
+	setupScreenAPI(router, db, logger, chConn)
 	setupAssetsAPI(router, db, logger)
 	setupReportsAPI(router, db, logger, chConn, redisClient, cfg)
 	setupBusinessLinesAPI(router, db, logger)
@@ -554,6 +555,14 @@ func setupFixAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, acDis
 func setupDashboardAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn, redisClient *redis.Client, acRegistry *sd.Registry, promClient *prometheus.Client) {
 	handler := api.NewDashboardHandler(db, logger, chConn, redisClient, acRegistry, promClient)
 	router.GET("/dashboard/stats", handler.GetDashboardStats)
+}
+
+// setupScreenAPI 设置态势感知大屏 API 路由。
+func setupScreenAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, chConn chdriver.Conn) {
+	handler := api.NewScreenHandler(db, chConn, logger)
+	router.GET("/screen/overview", handler.GetOverview)
+	router.GET("/screen/alerts/stream", handler.GetAlertStream)
+	router.GET("/screen/attack-sources", handler.GetAttackSources)
 }
 
 // setupUsersAPI 设置用户管理 API 路由
