@@ -562,6 +562,7 @@ func setupScreenAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, ch
 	handler := api.NewScreenHandler(db, chConn, logger)
 	router.GET("/screen/overview", handler.GetOverview)
 	router.GET("/screen/alerts/stream", handler.GetAlertStream)
+	router.GET("/screen/attack-sources", handler.GetAttackSources)
 }
 
 // setupUsersAPI 设置用户管理 API 路由

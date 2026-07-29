@@ -37,8 +37,21 @@ export interface ScreenOverview {
   feed: ScreenFeedItem[];
 }
 
+// 攻击地图数据源（P3）：入站连接（攻击面）+ IOC 命中（确认威胁）两层，均已 GeoIP 定位。
+export interface AttackSource {
+  name: string;
+  country: string;
+  coord: [number, number]; // [lng, lat]
+  count: number;
+}
+export interface AttackSources {
+  inbound: AttackSource[]; // 外网入站连接源（灰/黄底层）
+  threats: AttackSource[]; // IOC 命中的恶意源（红点）
+}
+
 export const screenApi = {
   getOverview: () => get<ScreenOverview>("/screen/overview"),
+  getAttackSources: () => get<AttackSources>("/screen/attack-sources"),
 };
 
 /**

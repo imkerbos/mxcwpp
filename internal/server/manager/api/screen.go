@@ -6,11 +6,15 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"regexp"
 	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/gin-gonic/gin"
+	"github.com/oschwald/geoip2-golang"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -22,11 +26,24 @@ type ScreenHandler struct {
 	db     *gorm.DB
 	ch     chdriver.Conn
 	logger *zap.Logger
+	geo    *geoip2.Reader // GeoIP 库；缺失时为 nil，攻击地图返回空（前端走示例兜底）。
 }
 
-// NewScreenHandler 创建大屏处理器。
+// NewScreenHandler 创建大屏处理器。GeoIP 库路径由 MXCWPP_GEOIP_DB 覆盖，
+// 缺省 /etc/mxcwpp/geoip/GeoLite2-City.mmdb；文件不存在则地理定位禁用（不报错）。
 func NewScreenHandler(db *gorm.DB, ch chdriver.Conn, logger *zap.Logger) *ScreenHandler {
-	return &ScreenHandler{db: db, ch: ch, logger: logger}
+	h := &ScreenHandler{db: db, ch: ch, logger: logger}
+	path := os.Getenv("MXCWPP_GEOIP_DB")
+	if path == "" {
+		path = "/etc/mxcwpp/geoip/GeoLite2-City.mmdb"
+	}
+	if r, err := geoip2.Open(path); err == nil {
+		h.geo = r
+		logger.Info("GeoIP 库已加载", zap.String("path", path))
+	} else {
+		logger.Warn("GeoIP 库未加载，攻击地图地理定位禁用", zap.String("path", path), zap.Error(err))
+	}
+	return h
 }
 
 // screenTactics 大屏 ATT&CK 覆盖固定 12 战术（顺序与前端一致）。
@@ -365,6 +382,143 @@ func (h *ScreenHandler) GetAlertStream(c *gin.Context) {
 			}
 		}
 	}
+}
+
+// ipInTitle 从告警标题里抽取第一个 IPv4（如 "端口扫描检测 - 来自 1.2.3.4"）。
+var ipInTitle = regexp.MustCompile(`\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b`)
+
+// isExternalIP 判断是否公网 IP（排除 RFC1918/环回/链路本地）。
+func isExternalIP(ip net.IP) bool {
+	return ip != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
+}
+
+// geoLoc 经 GeoIP 解析 IP → 经纬度 + 中文国名。库缺失或解析失败返回 ok=false。
+func (h *ScreenHandler) geoLoc(ip net.IP) (lat, lng float64, country string, ok bool) {
+	if h.geo == nil {
+		return 0, 0, "", false
+	}
+	rec, err := h.geo.City(ip)
+	if err != nil || (rec.Location.Latitude == 0 && rec.Location.Longitude == 0) {
+		return 0, 0, "", false
+	}
+	country = rec.Country.Names["zh-CN"]
+	if country == "" {
+		country = rec.Country.Names["en"]
+	}
+	city := rec.City.Names["en"]
+	if city == "" {
+		city = country
+	}
+	_ = city
+	return rec.Location.Latitude, rec.Location.Longitude, country, true
+}
+
+// GetAttackSources 返回攻击地图两层数据：外网入站连接（攻击面）+ IOC 命中（确认威胁）。
+// GET /api/v1/screen/attack-sources
+func (h *ScreenHandler) GetAttackSources(c *gin.Context) {
+	Success(c, gin.H{
+		"inbound": h.inboundSources(),
+		"threats": h.threatSources(),
+	})
+}
+
+// geoAgg 按 (国家) 聚合地理点，累加计数，取第一次出现的经纬度作代表点。
+type geoAgg struct {
+	name    string
+	country string
+	lng     float64
+	lat     float64
+	count   int64
+}
+
+// inboundSources 近 1h 外网入站连接源 → GeoIP 聚合，取 top 15。
+func (h *ScreenHandler) inboundSources() []gin.H {
+	if h.ch == nil || h.geo == nil {
+		return []gin.H{}
+	}
+	rows, err := h.ch.Query(context.Background(),
+		"SELECT remote_addr, count() AS c FROM mxcwpp.ebpf_events WHERE timestamp >= now() - INTERVAL 1 HOUR AND remote_addr != '' GROUP BY remote_addr ORDER BY c DESC LIMIT 500")
+	if err != nil {
+		return []gin.H{}
+	}
+	defer rows.Close()
+	agg := map[string]*geoAgg{}
+	for rows.Next() {
+		var addr string
+		var c uint64
+		if rows.Scan(&addr, &c) != nil {
+			continue
+		}
+		ip := net.ParseIP(addr)
+		if !isExternalIP(ip) {
+			continue
+		}
+		lat, lng, country, ok := h.geoLoc(ip)
+		if !ok {
+			continue
+		}
+		if a, exists := agg[country]; exists {
+			a.count += int64(c)
+		} else {
+			agg[country] = &geoAgg{name: country, country: country, lng: lng, lat: lat, count: int64(c)}
+		}
+	}
+	return topGeo(agg, 15)
+}
+
+// threatSources 由 IOC 命中告警抽取外网恶意 IP → GeoIP 聚合。
+func (h *ScreenHandler) threatSources() []gin.H {
+	if h.geo == nil {
+		return []gin.H{}
+	}
+	var titles []string
+	h.db.Model(&model.Alert{}).
+		Where("category = ? AND status = ? AND created_at >= ?", "ioc_hit", model.AlertStatusActive, time.Now().Add(-24*time.Hour)).
+		Order("created_at desc").Limit(500).Pluck("title", &titles)
+	agg := map[string]*geoAgg{}
+	for _, t := range titles {
+		m := ipInTitle.FindString(t)
+		if m == "" {
+			continue
+		}
+		ip := net.ParseIP(m)
+		if !isExternalIP(ip) {
+			continue
+		}
+		lat, lng, country, ok := h.geoLoc(ip)
+		if !ok {
+			continue
+		}
+		if a, exists := agg[country]; exists {
+			a.count++
+		} else {
+			agg[country] = &geoAgg{name: country, country: country, lng: lng, lat: lat, count: 1}
+		}
+	}
+	return topGeo(agg, 10)
+}
+
+// topGeo 聚合 map → 按计数降序取 top n，输出前端 AttackSource 结构。
+func topGeo(agg map[string]*geoAgg, n int) []gin.H {
+	list := make([]*geoAgg, 0, len(agg))
+	for _, a := range agg {
+		list = append(list, a)
+	}
+	for i := 0; i < len(list); i++ {
+		for j := i + 1; j < len(list); j++ {
+			if list[j].count > list[i].count {
+				list[i], list[j] = list[j], list[i]
+			}
+		}
+	}
+	if len(list) > n {
+		list = list[:n]
+	}
+	out := make([]gin.H, 0, len(list))
+	for _, a := range list {
+		out = append(out, gin.H{"name": a.name, "country": a.country, "coord": []float64{a.lng, a.lat}, "count": a.count})
+	}
+	return out
 }
 
 // jsonEscape 转义告警标题中的双引号/反斜杠，防止破坏 SSE JSON。
