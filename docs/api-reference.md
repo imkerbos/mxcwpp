@@ -170,6 +170,11 @@
 | GET | `/api/v1/rules/:rule_id` | 规则详情 |
 | PUT | `/api/v1/rules/:rule_id` | 更新规则 |
 | DELETE | `/api/v1/rules/:rule_id` | 删除规则 |
+| GET | `/api/v1/policies/custom-exec-rules` | 自定义且携带可执行内容的规则清单 |
+
+创建、更新规则以及策略导入均**拒绝**自定义（非内置）规则携带 `command_exec` 检查或 `fix.command` 修复命令——这些内容会以 root 在全部目标主机执行。内置规则不受限；确需该能力由管理员开启 `server.security.allow_custom_exec_rules`（见 [配置](configuration.md)）。
+
+`/api/v1/policies/custom-exec-rules` 列出**存量**此类规则（写入闸门不回溯清理已有数据），含所属策略、可执行内容位于 check 还是 fix、以及截断后的修复命令，供逐条研判后停用或保留。
 
 ---
 

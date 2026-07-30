@@ -398,7 +398,7 @@ Redis 不可用时降级为无锁模式，依赖调度间隔的自然错开来�
 | Agent <-> Plugin | OS Pipe + Protobuf | 父子进程隔离 |
 | Manager <-> AgentCenter | HTTP 内部接口 | `X-Internal-Secret` 共享密钥（常量时间比较） |
 
-**mTLS 细节**：AgentCenter 的 TLS 配置使用 `VerifyClientCertIfGiven` 策略，允许 Agent 首次连接时不携带客户端证书（用于初始证书下发），后续连接切换为完整 mTLS 双向认证。
+**mTLS 细节**：AgentCenter 的 TLS 配置使用 `VerifyClientCertIfGiven` 策略——单一监听端口无法对 enroll 与正常流分别设置 `ClientAuth`，故用「TLS 放行 + 应用层强制」的组合：无客户端证书的连接只能走 Transfer 的 enroll 阶段，其余所有 RPC 由拦截器要求已验证的客户端证书。
 
 **gRPC Keepalive**：Time=60s（空闲后发 ping），Timeout=10s（ping 等待响应超时），MinTime=10s（客户端最短 ping 间隔）。
 
@@ -424,6 +424,32 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
   - 集群部署（`internal/deploy/cluster`）在 `Config.Validate()` 强校验 `app.internal_secret`，Manager 与所有 AC 渲染同一密钥。
 - **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
 - 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
+
+### Agent 身份信任链（E-SEC-3）
+
+Agent 接入的信任建立在三段上，任一段缺失都会被 fail-closed 拒绝：
+
+1. **首连锁定 AC 身份**。本地无 CA 文件时，Agent 用构建期嵌入的 CA 指纹做完整 pinned-root 校验：指纹命中的证书必须确为 CA，叶子证书必须由该 CA 验签通过，且 SAN 命中目标主机名、用途含 `serverAuth`。仅「链中出现该 CA」是不够的——攻击者可以把公开的 CA 证书塞进伪造链。缺少合法指纹时**在连接前失败**，不回退无 pin 的 `InsecureSkipVerify`。
+2. **enroll 换一机一证**。无客户端证书的 Agent 只能 enroll：提交合法 AgentID 与 enroll 令牌（定长摘要 + 常量时间比较，空令牌一律无效），AC 现签 `CN=AgentID` 的单机证书并下发后即结束该流。enroll 期间不注册连接、不处理心跳、不下发插件任务。
+3. **稳态强制身份绑定**。持证连接强制客户端证书 CN == 上报 AgentID，吊销序列号在握手期拒绝；非 Transfer 的 RPC 一律要求已验证客户端证书。
+
+一机一证使失陷主机可单独吊销，且私钥泄露不波及他机。生产构建的安装包不再下发共享 client 证书。
+
+`insecure_dev_mode` 是唯一放宽通路，被限制为仅在 gRPC 与 HTTP 均绑定回环时可用，官方部署渲染永不设置。
+
+### 下发命令的执行边界（E-SEC-4）
+
+平台会把命令下发到 Agent 并以 root 执行，因此「谁能编辑内容」等价于「谁能在全舰队执行代码」。执行侧统一采用**结构化 argv + 显式允许集**，不再使用「危险词黑名单 + shell 字符串」：
+
+| 链路 | 边界 |
+|------|------|
+| 漏洞修复（`plugins/remediation`） | 命令切成 argv，逐项对照允许的程序 / 子命令 / 选项 / 操作数，**不经 shell** 执行；操作数不得为路径、URL 或包文件 |
+| 远程取证（`internal/agent/forensics`） | 只读取证程序白名单，同样 argv 化、不经 shell；排除 `find`（`-exec`/`-delete` 无法约束为只读）、解释器与下载工具 |
+| 基线 `command_exec` / `fix.command` | 自定义规则禁止携带（创建、更新、策略导入三个写入口一致）；内置规则不受限 |
+
+不采用前缀白名单的原因：前缀只约束第一个词，参数空间完全开放，而只要还经 `sh -c`，未被枚举的语法（换行分隔、命令替换、重定向）就都是缺口。共享校验位于 `internal/common/execpolicy`。
+
+`rpm` 与 `dpkg` 的安装操作只接受文件路径，而安装本地包必然以 root 运行包内维护者脚本——不存在安全的操作数形式，故整体移除；装包一律走包管理器按包名从已配置仓库取。
 
 ### RBAC deny-by-default 与路由覆盖闸（E-SEC-2）
 

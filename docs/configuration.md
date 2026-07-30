@@ -172,7 +172,25 @@ server:
   manager_addr: "http://manager:8080"   # AC 向 Manager 注册使用的地址
   instance_id: ""           # 多实例部署时的实例标识（留空自动生成）
   external_url: ""          # 外网访问地址（如 https://mxcwpp.example.com），用于拼接 K8s Audit Webhook URL
+  internal_secret: "xxx"    # Manager↔AgentCenter 管理面鉴权共享密钥，≥32
+  security:
+    headers:
+      enabled: true
+      hsts: true            # 仅在 UI 走 HTTPS 时开启
+    login_rate_limit:       # 需要 Redis
+      enabled: true
+      rps: 10
+      burst: 5
+    jwt_blacklist:          # 需要 Redis
+      enabled: true
+    allow_custom_exec_rules: false   # 默认 false，见下
 ```
+
+`jwt_secret` 与 `internal_secret` 均要求 ≥32 字符、非占位符、非常见弱值，否则 Manager 拒绝启动。`login_rate_limit` 与 `jwt_blacklist` 启用但未配置 Redis 时同样拒绝启动——避免出现「配置里写着 enabled、实际不生效」的静默半失效。
+
+`allow_custom_exec_rules` 控制自定义（非内置）基线规则能否携带 `command_exec` 检查与 `fix.command` 修复命令。这两处内容会**以 root 在全部目标主机执行**，因此放开等于把「基线配置权限」提权成「全舰队任意代码执行」。默认 `false`：规则创建、更新与策略导入三个写入口一律拒绝，内置规则（随发布同步，`builtin=true`）不受限制。
+
+该开关只作用于写入路径，**不影响存量规则**。存量清单见 `GET /api/v1/policies/custom-exec-rules`。
 
 ### database
 
@@ -345,11 +363,24 @@ metrics:
 ```yaml
 mtls:
   ca_cert: "/etc/mxcwpp/certs/ca.crt"
+  ca_key: "/etc/mxcwpp/certs/ca.key"          # AgentCenter 按 AgentID 在线签发单机证书
   server_cert: "/etc/mxcwpp/certs/server.crt"
   server_key: "/etc/mxcwpp/certs/server.key"
+  enroll_token: "<openssl rand -hex 32>"      # Agent 首连引导令牌，≥32
+  per_agent_cert: true                        # 一机一证
+  enforce_agent_id: true                      # 强制客户端证书 CN == AgentID
+  insecure_dev_mode: false                    # 仅本地开发，要求 gRPC/HTTP 均绑回环
 ```
 
 mTLS 用于 Agent 与 AgentCenter 之间的双向认证通信。证书由 `deploy.sh` 的 `init` 命令调用 `scripts/generate-certs.sh` 自动生成。证书路径为容器内路径，通过 volume 挂载 `deploy/certs/` 目录映射。
+
+**AgentCenter 启动前置校验（不满足即拒绝启动）**：CA 与服务端证书必须存在、可读、在有效期内、私钥配对，服务端证书必须由该 CA 签发且含 `serverAuth` 用途；`enroll_token` 必须达到强度要求；`per_agent_cert` 与 `enforce_agent_id` 必须为 `true`。
+
+这些前置条件不是洁癖：任一不满足时，Agent 要么无法建立信任、要么能以伪造身份接入，而进程本身看起来是健康的。宁可启动失败，也不进入「看似健康、信任面失效」的状态。
+
+`insecure_dev_mode` 是唯一的放宽开关，且被限制为仅在 gRPC 与 HTTP **均绑定回环地址**时可用；官方部署脚本与集群渲染永不设置它。
+
+`server.crt` 的 SAN 必须覆盖 Agent 实际连接的地址（`deploy.sh` 会传入 `SERVER_IP`）。升级时若发现现有证书缺少 `serverAuth` 或 SAN 不匹配，`deploy.sh` 会**用原 CA 重签叶子证书**——CA 保持不变，已部署 Agent 的信任链不受影响。
 
 ### log
 
