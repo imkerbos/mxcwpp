@@ -9,6 +9,7 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -85,11 +86,6 @@ const (
 	// 5 分钟覆盖大多数攻击短链；过长会引入无关 noise。
 	enrichWindow = 5 * time.Minute
 
-	// correlationDedupWindow:同 host_id + pattern_name 24h 内只生成 1 个 open alert。
-	// prod 实测同 host 7d 内单 pattern 触发 400-2900 次,显然是 detector tuning 问题不是真威胁。
-	// dedup 让 SOC 处置量降到可控,真新告警仍能触发(24h 后窗口外新 pattern 仍写入)。
-	correlationDedupWindow = 24 * time.Hour
-
 	// enrichTopN 控制每类 IOC 最多带回 N 个，避免 trigger_context JSON 膨胀。
 	enrichTopN = 10
 
@@ -110,20 +106,25 @@ type Detector struct {
 	sampleBuffer [][]float64          // recent samples for training
 	hostMeans    map[string][]float64 // per-host running mean for z-score
 	hostCounts   map[string]int       // sample count per host
+
+	suppress *suppressCache // 白名单主机 + 反馈自动抑制（周期 reload，热路径零 DB）
 }
 
 // NewDetector creates a new anomaly detection engine.
 // chConn 用于告警生成时回查 ebpf_events 拿攻击链 IOC；可为 nil（ClickHouse 未启用时降级，
 // 告警仍生成但 trigger_context 只含 metric_snapshot/elevated_metrics）。
 func NewDetector(db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) *Detector {
-	return &Detector{
+	d := &Detector{
 		logger:     logger,
 		db:         db,
 		chConn:     chConn,
 		forest:     NewIForest(),
 		hostMeans:  make(map[string][]float64),
 		hostCounts: make(map[string]int),
+		suppress:   newSuppressCache(),
 	}
+	d.suppress.reload(db, logger) // 启动即加载一次白名单 + 反馈抑制
+	return d
 }
 
 // StartRetrain begins periodic retraining in the background.
@@ -139,6 +140,7 @@ func (d *Detector) StartRetrain(stop <-chan struct{}) {
 				return
 			case <-ticker.C:
 				d.retrain()
+				d.suppress.reload(d.db, d.logger) // 周期刷新白名单 + 反馈抑制（反馈闭环）
 			}
 		}
 	}()
@@ -271,15 +273,19 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		}
 	}
 
-	severity := "medium"
-	if score >= 0.80 {
-		severity = "critical"
-	} else if score >= 0.70 {
-		severity = "high"
+	// 抑制：白名单主机 / 反馈自动抑制直接跳过（IForest 路径也纳入治理）。
+	if d.suppress.suppressed(hostID, "isolation_forest", "") {
+		return
+	}
+
+	// severity 重校准并封顶 high（IForest 是与 BDE 同源重叠的粗粒度信号，不单独判 critical）。
+	severity := forestSeverity(score)
+	if topMetric != "" && isInfraHostname(hostname) {
+		severity = downgradeForInfra(severity)
 	}
 
 	// 拼描述：让 UI drawer 至少有一行有意义内容，避免 v-if 空白
-	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=0.6 触发告警）", score)
+	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, anomalyThreshold)
 	if topMetric != "" {
 		description = fmt.Sprintf("指标 %s 偏离主机历史均值，当前值 %.2f；Isolation Forest 异常评分 %.2f",
 			topMetric, topValue, score)
@@ -308,9 +314,8 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		Status:         "open",
 	}
 
-	if err := d.db.Create(&alert).Error; err != nil {
-		d.logger.Error("failed to save anomaly alert", zap.Error(err))
-	}
+	// upsert 去重：同 (host,isolation_forest,top_metric) 复发累加 hit_count，不裸刷新行。
+	d.upsertAnomaly(&alert)
 
 	d.logger.Warn("IForest anomaly detected",
 		zap.String("host_id", hostID),
@@ -365,6 +370,11 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			if mean[idx] == 0 {
 				continue
 			}
+			// 绝对下限：指标当前值本身不够高就不算 elevated，
+			// 掐掉"空闲主机基线趋近 0 → 做 1 个连接比值就爆表"的假阳性。
+			if metrics[idx] < metricFloor[idx] {
+				continue
+			}
 			// Simple ratio-based elevation check (current/mean > threshold).
 			ratio := metrics[idx] / mean[idx]
 			if ratio > correlationThreshold {
@@ -382,11 +392,17 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			continue
 		}
 
-		// dedup: 24h 内同 host_id + pattern 已有 open alert → 跳过,避免噪声。
-		// SOC 处置/标 false_positive 后,24h 外的新触发仍能生成。
-		// prod 实测同 host 7d 单 pattern 触发 400-2900 次,dedup 让告警量降到可控。
-		if d.hasRecentOpenAlert(hostID, pattern.Name) {
+		// 抑制：白名单主机 / 反馈闭环自动抑制的 (host,pattern) 直接跳过。
+		if d.suppress.suppressed(hostID, "correlation", pattern.Name) {
 			continue
+		}
+
+		// severity 按证据强度分级（覆盖率+平均比值），以 pattern 声明值为上限，
+		// 替代此前一律硬编码 → 消除 c2_beacon 假 critical 洪水。
+		severity := correlationSeverity(pattern.Severity, elevated, len(pattern.Indices))
+		// 基础设施主机（CDN/ZK/大数据/DB/MQ）有合法周期流量，降一级但不消音（保留可见性）。
+		if isInfraHostname(hostname) {
+			severity = downgradeForInfra(severity)
 		}
 
 		// Correlation 路径：补充攻击链 IOC（按 pattern 类型回查 ebpf_events）。
@@ -406,22 +422,22 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			Hostname:       hostname,
 			AlertType:      "correlation",
 			PatternName:    pattern.Name,
-			Severity:       pattern.Severity,
+			Severity:       severity,
 			AnomalyScore:   float64(elevatedCount) / float64(len(pattern.Indices)),
 			Description:    pattern.Description,
 			TriggerContext: trigger,
 			Status:         "open",
 		}
 
-		if err := d.db.Create(&alert).Error; err != nil {
-			d.logger.Error("failed to save correlation alert", zap.Error(err))
-		}
+		// upsert 去重：同 (host,correlation,pattern) 复发只累加 hit_count，不新建行、
+		// 不覆盖已处置 status（含 false_positive）→ 结构性根治刷屏 + 修"标误报反被解封重报"。
+		d.upsertAnomaly(&alert)
 
 		d.logger.Warn("correlation pattern detected",
 			zap.String("host_id", hostID),
 			zap.String("pattern", pattern.Name),
 			zap.Int("elevated_metrics", elevatedCount),
-			zap.String("severity", pattern.Severity),
+			zap.String("severity", severity),
 			zap.Int("suspicious_ips", len(trigger.SuspiciousIPs)),
 			zap.Int("suspicious_domains", len(trigger.SuspiciousDomains)),
 			zap.Int("sensitive_files", len(trigger.SensitiveFiles)),
@@ -429,21 +445,30 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 	}
 }
 
-// hasRecentOpenAlert 检查 24h 内是否已有同 host + pattern 的 open correlation alert,
-// 命中则跳过本次告警生成(dedup)。SOC 处置后(status != open) 不影响新告警。
-func (d *Detector) hasRecentOpenAlert(hostID, patternName string) bool {
-	var cnt int64
-	cutoff := time.Now().Add(-correlationDedupWindow)
-	err := d.db.Model(&model.AnomalyAlert{}).
-		Where("host_id = ? AND alert_type = ? AND pattern_name = ? AND status = ? AND created_at >= ?",
-			hostID, "correlation", patternName, "open", cutoff).
-		Limit(1).
-		Count(&cnt).Error
-	if err != nil {
-		d.logger.Warn("dedup query failed,放行告警", zap.Error(err))
-		return false // 查询失败时放行(宁可多发也别漏)
+// upsertAnomaly 按唯一键 (tenant_id, host_id, alert_type, pattern_name, top_metric) 去重落库：
+// 首次插入，复发则累加 hit_count + 刷新 last_seen/score，绝不新建行、绝不覆盖已处置 status。
+// 结构性根治此前"每次触发新建一行"刷屏，并修掉旧 dedup"标 false_positive 反被解封重报"的缺陷。
+func (d *Detector) upsertAnomaly(alert *model.AnomalyAlert) {
+	now := model.Now()
+	alert.LastSeenAt = now
+	if alert.HitCount == 0 {
+		alert.HitCount = 1
 	}
-	return cnt > 0
+	err := d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "tenant_id"}, {Name: "host_id"}, {Name: "alert_type"},
+			{Name: "pattern_name"}, {Name: "top_metric"},
+		},
+		DoUpdates: clause.Assignments(map[string]any{
+			"hit_count":     gorm.Expr("hit_count + 1"),
+			"anomaly_score": alert.AnomalyScore,
+			"last_seen_at":  now,
+			"updated_at":    now,
+		}),
+	}).Create(alert).Error
+	if err != nil {
+		d.logger.Error("failed to upsert anomaly alert", zap.Error(err))
+	}
 }
 
 // enrichTriggerContext 根据 pattern 类型回查 ebpf_events 拿 IOC。
