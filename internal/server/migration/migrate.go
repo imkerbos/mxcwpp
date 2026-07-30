@@ -193,6 +193,12 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("behavior_alerts 去重/唯一索引失败", zap.Error(err))
 	}
 
+	// anomaly_alerts 存量去重 + 唯一索引，让 ML 异常引擎落库改 upsert
+	// (同 host+alert_type+pattern+top_metric 累加 hit_count 不新增行，根治 c2_beacon 刷屏)
+	if err := migrateAnomalyAlertDedup(db, logger); err != nil {
+		logger.Warn("anomaly_alerts 去重/唯一索引失败", zap.Error(err))
+	}
+
 	// 合并三条重复的 touch 时间戳篡改规则(同 T1070.006 三重告警)，禁用冗余两条
 	if err := migrateDedupTimestampRules(db, logger); err != nil {
 		logger.Warn("合并重复时间戳规则失败", zap.Error(err))
@@ -334,6 +340,54 @@ func migrateDedupTimestampRules(db *gorm.DB, logger *zap.Logger) error {
 
 // behaviorAlertDedupIndex 是 behavior_alerts 的 (tenant_id, host_id, metric) 唯一索引名。
 const behaviorAlertDedupIndex = "ux_behavior_alerts_host_metric"
+
+// anomalyAlertDedupIndex 是 anomaly_alerts 的去重唯一索引名。
+const anomalyAlertDedupIndex = "ux_anomaly_alerts_dedup"
+
+// migrateAnomalyAlertDedup 为 anomaly_alerts 建 (tenant_id, host_id, alert_type, pattern_name, top_metric)
+// 唯一索引，让 ML 异常引擎落库改 upsert（同键复发累加 hit_count，不新增行、不覆盖已处置 status）。
+// 根治 c2_beacon 每次触发新建一行的刷屏，并修掉旧 dedup"标 false_positive 反被解封重报"的缺陷。
+func migrateAnomalyAlertDedup(db *gorm.DB, logger *zap.Logger) error {
+	if db.Migrator().HasIndex(&model.AnomalyAlert{}, anomalyAlertDedupIndex) {
+		return nil
+	}
+
+	// 存量去重仅在 MySQL 上执行（sqlite 测试环境无存量）。保留每组最小 id，hit_count 置为组行数。
+	if db.Dialector.Name() == "mysql" {
+		if err := db.Exec(`
+UPDATE anomaly_alerts a
+JOIN (
+	SELECT MIN(id) AS keep_id, COUNT(*) AS cnt
+	FROM anomaly_alerts
+	GROUP BY tenant_id, host_id, alert_type, pattern_name, top_metric
+) g ON a.id = g.keep_id
+SET a.hit_count = g.cnt`).Error; err != nil {
+			return fmt.Errorf("anomaly_alerts 累加 hit_count 失败: %w", err)
+		}
+		r := db.Exec(`
+DELETE a FROM anomaly_alerts a
+JOIN (
+	SELECT MIN(id) AS keep_id, tenant_id, host_id, alert_type, pattern_name, top_metric
+	FROM anomaly_alerts
+	GROUP BY tenant_id, host_id, alert_type, pattern_name, top_metric
+) g ON a.tenant_id = g.tenant_id AND a.host_id = g.host_id AND a.alert_type = g.alert_type
+	AND a.pattern_name = g.pattern_name AND a.top_metric = g.top_metric
+WHERE a.id <> g.keep_id`)
+		if r.Error != nil {
+			return fmt.Errorf("anomaly_alerts 删除重复行失败: %w", r.Error)
+		}
+		if r.RowsAffected > 0 {
+			logger.Info("anomaly_alerts 存量去重", zap.Int64("removed", r.RowsAffected))
+		}
+	}
+
+	if err := db.Exec("CREATE UNIQUE INDEX " + anomalyAlertDedupIndex +
+		" ON anomaly_alerts (tenant_id, host_id, alert_type, pattern_name, top_metric)").Error; err != nil {
+		return fmt.Errorf("anomaly_alerts 唯一索引创建失败: %w", err)
+	}
+	logger.Info("anomaly_alerts 唯一索引已创建，ML 异常落库启用 upsert 去重")
+	return nil
+}
 
 // migrateBehaviorAlertDedup 为 behavior_alerts 建 (tenant_id, host_id, metric) 唯一索引，
 // 使 BDE 落库改 upsert：同主机同指标的稳态偏离每 60s 复发只累加 hit_count，不再无限新增行。

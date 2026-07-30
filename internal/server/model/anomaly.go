@@ -58,8 +58,12 @@ type AnomalyAlert struct {
 	TriggerContext AnomalyTriggerContext `gorm:"type:text" json:"trigger_context,omitempty"`  // 触发证据 + IOC（JSON 文本列）
 	Status         string                `gorm:"type:varchar(20);default:open" json:"status"` // open/confirmed/false_positive
 	ResolvedBy     string                `gorm:"type:varchar(100)" json:"resolved_by,omitempty"`
-	CreatedAt      LocalTime             `json:"created_at"`
-	UpdatedAt      LocalTime             `json:"updated_at"`
+	// HitCount: 同一 (host+alert_type+pattern+top_metric) 复发次数（upsert 去重累加），
+	// 替代此前"每次触发新建一行"的刷屏。LastSeenAt 记最近一次复发时间。
+	HitCount   int       `gorm:"column:hit_count;default:1" json:"hit_count"`
+	LastSeenAt LocalTime `gorm:"column:last_seen_at" json:"last_seen_at"`
+	CreatedAt  LocalTime `json:"created_at"`
+	UpdatedAt  LocalTime `json:"updated_at"`
 }
 
 func (AnomalyAlert) TableName() string { return "anomaly_alerts" }
