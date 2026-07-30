@@ -136,9 +136,9 @@ func (h *ScreenHandler) GetOverview(c *gin.Context) {
 	}
 	score := 100
 	score -= capf(float64(sev["critical"]), 3, 30) // 严重告警：每个 -3，最多 -30
-	score -= capf(float64(sev["high"]), 0.3, 25)    // 高危告警：每个 -0.3，最多 -25
-	score -= capf(float64(critVuln), 1, 20)         // 严重漏洞：每个 -1，最多 -20
-	score -= capf(float64(mlCrit), 0.002, 15)       // ML 异常：饱和 -15
+	score -= capf(float64(sev["high"]), 0.3, 25)   // 高危告警：每个 -0.3，最多 -25
+	score -= capf(float64(critVuln), 1, 20)        // 严重漏洞：每个 -1，最多 -20
+	score -= capf(float64(mlCrit), 0.002, 15)      // ML 异常：饱和 -15
 	if score < 30 {
 		score = 30
 	}

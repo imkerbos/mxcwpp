@@ -123,6 +123,13 @@ type SecurityConfig struct {
 	// （builtin=true，随发布同步）不受此开关限制。
 	// 确有自定义可执行规则需求的环境才显式开启，且开启后每次执行都会留审计。
 	AllowCustomExecRules bool `mapstructure:"allow_custom_exec_rules"`
+	// BlockExistingCustomExecRules 控制**派发阶段**是否跳过存量的自定义可执行规则。
+	// 默认 false：只记审计不拦截。
+	//
+	// 与 AllowCustomExecRules 分开是刻意的：前者关的是"新增提权路径"，可以立即默认收紧
+	// 而不影响任何现有行为；后者拦的是已经在跑的存量规则，直接默认打开会静默削减基线覆盖面。
+	// 先用 GET /api/v1/policies/custom-exec-rules 盘点、逐条研判，再决定是否开启。
+	BlockExistingCustomExecRules bool `mapstructure:"block_existing_custom_exec_rules"`
 }
 
 // SecurityHeadersConfig 控制安全响应头中间件。
