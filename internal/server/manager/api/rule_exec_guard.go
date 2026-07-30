@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -80,4 +83,75 @@ func guardImportedPolicy(allowCustomExec bool, policy *PolicyExportFormat) error
 		}
 	}
 	return nil
+}
+
+// CustomExecRuleItem 是一条"自定义且携带可执行内容"的基线规则。
+type CustomExecRuleItem struct {
+	PolicyID       string `json:"policy_id"`
+	PolicyName     string `json:"policy_name"`
+	RuleID         string `json:"rule_id"`
+	Title          string `json:"title"`
+	Enabled        bool   `json:"enabled"`
+	HasCommandExec bool   `json:"has_command_exec"`
+	HasFixCommand  bool   `json:"has_fix_command"`
+	// FixCommand 截断展示，供人工研判；完整内容在规则详情里看。
+	FixCommand string `json:"fix_command,omitempty"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+// ListCustomExecRules 列出所有自定义（非内置）且携带可执行内容的基线规则。
+// GET /api/v1/policies/custom-exec-rules
+//
+// 写入路径已禁止新增这类规则，但存量规则仍会以 root 在目标主机执行。本接口给出
+// 完整清单供人工研判：确认无用的直接停用/删除，确需保留的再决定是否开启
+// server.security.allow_custom_exec_rules。没有这份清单就无法判断收紧到什么程度是安全的。
+func (h *RulesHandler) ListCustomExecRules(c *gin.Context) {
+	var rules []model.Rule
+	if err := h.db.Where("builtin = ?", false).Find(&rules).Error; err != nil {
+		h.logger.Error("查询自定义规则失败", zap.Error(err))
+		InternalError(c, "查询自定义规则失败")
+		return
+	}
+
+	policyNames := map[string]string{}
+	var policies []model.Policy
+	if err := h.db.Select("id", "name").Find(&policies).Error; err == nil {
+		for _, p := range policies {
+			policyNames[p.ID] = p.Name
+		}
+	}
+
+	items := make([]CustomExecRuleItem, 0)
+	for _, r := range rules {
+		hasCheck := checkConfigHasExec(r.CheckConfig)
+		hasFix := fixConfigHasExec(r.FixConfig)
+		if !hasCheck && !hasFix {
+			continue
+		}
+		cmd := strings.TrimSpace(r.FixConfig.Command)
+		if len(cmd) > 200 {
+			cmd = cmd[:200] + "..."
+		}
+		items = append(items, CustomExecRuleItem{
+			PolicyID:       r.PolicyID,
+			PolicyName:     policyNames[r.PolicyID],
+			RuleID:         r.RuleID,
+			Title:          r.Title,
+			Enabled:        r.Enabled,
+			HasCommandExec: hasCheck,
+			HasFixCommand:  hasFix,
+			FixCommand:     cmd,
+			UpdatedAt:      r.UpdatedAt.String(),
+		})
+	}
+
+	h.logger.Info("[AUDIT] 查询自定义可执行基线规则清单",
+		zap.String("actor", c.GetString("username")),
+		zap.Int("total", len(items)))
+
+	Success(c, gin.H{
+		"total": len(items),
+		"items": items,
+		"note":  "这些规则的内容会以 root 在目标主机执行。写入路径已禁止新增；存量规则请逐条研判后停用或保留。",
+	})
 }

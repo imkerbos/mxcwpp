@@ -3,7 +3,8 @@
 // incident response purposes. All actions are audited.
 //
 // Safety:
-//   - Dangerous commands (rm -rf, dd, mkfs, etc.) are blocked
+//   - Command execution is restricted to an allowlist of read-only inspection
+//     programs, parsed into argv and executed without a shell
 //   - Command execution has timeout (default 30s, max 5min)
 //   - File retrieval has size limit (default 50MB)
 //   - All operations logged to audit trail
@@ -20,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -32,18 +32,6 @@ const (
 	defaultTimeout = 30 * time.Second
 	maxTimeout     = 5 * time.Minute
 )
-
-// dangerousPatterns are command patterns that are always blocked.
-var dangerousPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`rm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+|--recursive\s+)/`),
-	regexp.MustCompile(`dd\s+.*if=/dev/(zero|urandom).*of=/dev/`),
-	regexp.MustCompile(`mkfs\b`),
-	regexp.MustCompile(`:(){ :|:& };:`),                   // fork bomb
-	regexp.MustCompile(`>\s*/dev/sd[a-z]`),                // overwrite disk
-	regexp.MustCompile(`chmod\s+(-[a-zA-Z]*\s+)?777\s+/`), // chmod 777 /
-	regexp.MustCompile(`shutdown|reboot|halt|poweroff`),
-	regexp.MustCompile(`iptables\s+-F`), // flush all iptables rules
-}
 
 // Handler processes forensic commands from the Server.
 type Handler struct {
@@ -193,15 +181,19 @@ func (h *Handler) handleCmdExec(ctx context.Context, req Request) *Response {
 		return resp
 	}
 
-	// Safety: check against dangerous patterns.
-	if blocked := h.isDangerous(req.Command); blocked != "" {
-		resp.Error = fmt.Sprintf("command blocked by safety filter: matched pattern '%s'", blocked)
-		h.logger.Warn("dangerous forensic command blocked",
+	// 白名单校验：只允许枚举内的只读取证程序，并解析为 argv 后不经 shell 执行。
+	argv, err := ParseForensicArgv(req.Command)
+	if err != nil {
+		resp.Error = fmt.Sprintf("command rejected by forensic exec policy: %v", err)
+		h.logger.Warn("[AUDIT] forensic command rejected",
 			zap.String("request_id", req.RequestID),
 			zap.String("command", req.Command),
-			zap.String("pattern", blocked))
+			zap.Error(err))
 		return resp
 	}
+	h.logger.Info("[AUDIT] forensic command accepted",
+		zap.String("request_id", req.RequestID),
+		zap.Strings("argv", argv))
 
 	timeout := defaultTimeout
 	if req.TimeoutS > 0 {
@@ -215,12 +207,12 @@ func (h *Handler) handleCmdExec(ctx context.Context, req Request) *Response {
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(cmdCtx, "sh", "-c", req.Command)
+	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	duration := time.Since(start)
 
 	resp.Duration = int(duration.Milliseconds())
@@ -238,15 +230,6 @@ func (h *Handler) handleCmdExec(ctx context.Context, req Request) *Response {
 
 	resp.Success = true
 	return resp
-}
-
-func (h *Handler) isDangerous(command string) string {
-	for _, pat := range dangerousPatterns {
-		if pat.MatchString(command) {
-			return pat.String()
-		}
-	}
-	return ""
 }
 
 func truncateOutput(s string, maxLen int) string {

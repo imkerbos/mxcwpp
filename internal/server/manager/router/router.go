@@ -507,6 +507,9 @@ func setupPoliciesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 // setupRulesAPI 设置规则 API 路由
 func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
 	handler := api.NewRulesHandler(db, logger, allowCustomExec)
+	// 存量自定义可执行规则盘点（必须在 /policies/:policy_id/rules 之前注册，
+	// 否则会被 :policy_id 通配吞掉）。
+	router.GET("/policies/custom-exec-rules", handler.ListCustomExecRules)
 	router.GET("/policies/:policy_id/rules", handler.ListRules)
 	router.POST("/policies/:policy_id/rules", handler.CreateRule)
 	router.GET("/rules/:rule_id", handler.GetRule)
