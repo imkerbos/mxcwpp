@@ -217,9 +217,47 @@ func main() {
 
 	// 初始化 ML 异常检测引擎（IForest + 关联检测）
 	anomalyDet := anomaly.NewDetector(db, chConn, logger.Named("anomaly"))
+	// M0 安全模式：从 feature_flag 读取安全模式（缺配置/非法回落 shadow，绝不默认写正式告警），
+	// 并校验 anomaly_alerts schema（hit_count/last_seen_at/去重唯一索引）。schema 未就绪时检测器
+	// fail-closed（落库模式降级 shadow，只观测不落库），进程仍存活；就绪状态经 /readyz 暴露。
+	anomalyDet.SetMode(anomaly.LoadMode(db, logger.Named("anomaly")))
+	anomalyDet.VerifySchema()
+	consumermetrics.RegisterReadiness("anomaly_schema", func() bool {
+		return anomalyDet.Status().SchemaReady
+	})
 	anomalyDet.StartRetrain(ctx.Done())
 	router.SetAnomalyDetector(anomalyDet)
-	logger.Info("ML 异常检测引擎已启动")
+	st := anomalyDet.Status()
+	logger.Info("ML 异常检测引擎已启动",
+		zap.String("mode", string(st.Mode)),
+		zap.String("effective_mode", string(st.EffectiveMode)),
+		zap.Bool("schema_ready", st.SchemaReady),
+		zap.Bool("dns_field_ready", st.DNSFieldReady),
+	)
+
+	// ML 异常检测器状态指标：启动即初始化一次，随后周期刷新（trained/sample/host 会随消费变化）。
+	refreshAnomalyMetrics := func() {
+		s := anomalyDet.Status()
+		consumermetrics.SetAnomalyStatus(
+			string(s.Mode), string(s.EffectiveMode),
+			s.SchemaReady, s.DNSFieldReady, s.Trained, s.SampleCount, s.HostCount)
+	}
+	refreshAnomalyMetrics()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// 周期重载安全模式，使 off/shadow 能作为无需重启的线上止血开关。
+				// DB 瞬时失败时 LoadMode fail-closed 到 shadow，恢复后下一周期自动重载。
+				anomalyDet.SetMode(anomaly.LoadMode(db, logger.Named("anomaly")))
+				refreshAnomalyMetrics()
+			}
+		}
+	}()
 
 	// 7.5 启动 Prometheus /metrics HTTP server（与消费循环并行）
 	//

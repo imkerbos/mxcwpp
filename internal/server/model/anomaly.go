@@ -15,7 +15,7 @@ type AnomalyTriggerContext struct {
 
 	// 攻击链 IOC（按 pattern 类型回查 ebpf_events 5 分钟窗口聚合）
 	SuspiciousIPs     []string `json:"suspicious_ips,omitempty"`     // 关联可疑远端 IP
-	SuspiciousDomains []string `json:"suspicious_domains,omitempty"` // 关联可疑 DNS 域名
+	SuspiciousDomains []string `json:"suspicious_domains,omitempty"` // 关联可疑 DNS 域名（仅 DNS domain 字段接通后填充；M0 不填，避免把 resolver IP 当域名）
 	SensitiveFiles    []string `json:"sensitive_files,omitempty"`    // 命中的敏感文件路径
 	ProcessChain      []string `json:"process_chain,omitempty"`      // 高频执行的进程 exe 路径
 	ScannedPorts      []string `json:"scanned_ports,omitempty"`      // 扫描的远端端口

@@ -173,7 +173,7 @@ func TestEnrichTriggerContext_NilChConn(t *testing.T) {
 		}
 	}()
 	for _, p := range []string{"c2_beacon", "data_exfiltration", "privilege_escalation", "reconnaissance", "unknown_pattern"} {
-		d.enrichTriggerContext(trigger, p, "host-1", start, now)
+		d.enrichTriggerContext(trigger, p, "host-1", false, start, now)
 	}
 	if len(trigger.SuspiciousIPs) != 0 || len(trigger.SuspiciousDomains) != 0 ||
 		len(trigger.SensitiveFiles) != 0 || len(trigger.ProcessChain) != 0 ||

@@ -35,6 +35,32 @@ var metricFloor = [featureCount]float64{
 	0.3, // 12 dns_nx_ratio（比率）
 }
 
+// --- M0 DNS 可信性闸 ---
+//
+// 背景：agent 侧尚未采集真实 DNS 的 domain / rcode，dns_unique_domain / dns_nx_ratio 两维不可信：
+//   - dns_unique_domain：无 domain 字段，恒近 0；
+//   - dns_nx_ratio：无 rcode，无法判 NXDOMAIN，恒为 0。
+// 且 c2_beacon 回查 ebpf_events 的 dns_query 事件拿到的 remote_addr 是 resolver IP，不是被查询域名，
+// 把它当 SuspiciousDomains 就是"把 resolver IP 称 domain"。M0 一律禁用依赖这两维的检测/富化，
+// 待 M1 接通真实 domain/rcode 字段后再放开（见 Detector.dnsValid）。
+
+// dnsInvalidIndices 是 M0 不可信的 DNS 指标索引集合（dns_unique_domain=11 / dns_nx_ratio=12）。
+// dns_query_count(10) 只是查询计数、不依赖 domain/rcode，仍可信，不在此列。
+var dnsInvalidIndices = map[int]struct{}{11: {}, 12: {}}
+
+// dnsFieldInvalidIndex 判断某指标索引是否属于 M0 不可信的 DNS 维（domain/rcode 未接通）。
+func dnsFieldInvalidIndex(idx int) bool {
+	_, ok := dnsInvalidIndices[idx]
+	return ok
+}
+
+// patternRequiresDNSFields 判断某 correlation pattern 是否本质依赖不可信的 DNS 维而应在 M0 整体禁用。
+// reconnaissance 的核心信号是 dns_nx_ratio（DNS 枚举/NXDOMAIN），domain/rcode 未接通前它既不可达、
+// 又会把 resolver IP 误当域名 IOC，故整体禁用；c2_beacon 剔除不可信维后仍有充分的 proc/net 信号，不禁用。
+func patternRequiresDNSFields(name string) bool {
+	return name == "reconnaissance"
+}
+
 // severityRank 用于取严重度上限（数值大=更严重）。
 var severityRank = map[string]int{"low": 0, "medium": 1, "high": 2, "critical": 3}
 
