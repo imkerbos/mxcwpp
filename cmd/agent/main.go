@@ -163,17 +163,7 @@ func main() {
 	cfg.SignPublicKey = signPublicKey
 
 	// Agent↔AC 信任链：CA 指纹 + enroll 令牌。
-	// 环境变量优先（便于安装脚本按机注入），其次构建时嵌入。
-	if v := os.Getenv("MXCWPP_CA_FINGERPRINT"); v != "" {
-		cfg.Local.TLS.CAFingerprint = v
-	} else if caFingerprint != "" {
-		cfg.Local.TLS.CAFingerprint = caFingerprint
-	}
-	if v := os.Getenv("MXCWPP_ENROLL_TOKEN"); v != "" {
-		cfg.Local.TLS.EnrollToken = v
-	} else if enrollToken != "" {
-		cfg.Local.TLS.EnrollToken = enrollToken
-	}
+	cfg.Local.TLS.CAFingerprint, cfg.Local.TLS.EnrollToken = resolveTrustConfig(caFingerprint, enrollToken)
 
 	// 3. 初始化日志（默认配置：按天轮转，保留7天）
 	log, err := logger.Init(logger.LogConfig{
@@ -388,4 +378,24 @@ func printVersion() {
 	if serverHost != "" {
 		fmt.Printf("Server: %s\n", serverHost)
 	}
+}
+
+// resolveTrustConfig 决定 agent 使用的 CA 指纹与 enroll 令牌。
+//
+// 环境变量优先于构建期嵌入值：安装脚本按机写入 root-only 的 EnvironmentFile，
+// 令牌得以逐机轮换而不必重新出包；构建期嵌入仅作为未注入环境变量时的兜底。
+//
+// 抽成独立函数是为了可测：这两个值决定一台新机器能否 enroll 上线，取值顺序一旦搞反
+// （比如嵌入值盖掉环境变量），表现是全网新装 agent 静默失败，而 main() 里的内联逻辑
+// 没有任何测试能发现。
+func resolveTrustConfig(embeddedFingerprint, embeddedToken string) (fingerprint, token string) {
+	fingerprint = embeddedFingerprint
+	if v := os.Getenv("MXCWPP_CA_FINGERPRINT"); v != "" {
+		fingerprint = v
+	}
+	token = embeddedToken
+	if v := os.Getenv("MXCWPP_ENROLL_TOKEN"); v != "" {
+		token = v
+	}
+	return fingerprint, token
 }

@@ -80,3 +80,28 @@ func TestPeerLeafCertNoTLS(t *testing.T) {
 		t.Fatal("无 TLS 上下文应返回 false")
 	}
 }
+
+// TestEnrollTokenRoundTrip agent 侧写入的 metadata 必须被 AC 侧的真实读取逻辑原样读回。
+//
+// 这是一条跨端契约：写在 agent（certissue.WithEnrollToken），读在 AC
+// （enrollTokenFromCtx）。两侧各自的单测都无法发现 key 或写法漂移——表现会是
+// "agent 明明配了令牌却一律 enroll 被拒"，而服务端日志只说令牌无效。
+func TestEnrollTokenRoundTrip(t *testing.T) {
+	const token = "0123456789abcdef0123456789abcdef"
+
+	// agent 侧构造出站 ctx，再按 gRPC 的传输语义转成服务端看到的入站 ctx。
+	outCtx := certissue.WithEnrollToken(context.Background(), token)
+	md, ok := metadata.FromOutgoingContext(outCtx)
+	if !ok {
+		t.Fatal("agent 侧未写入任何 metadata")
+	}
+	if got := enrollTokenFromCtx(metadata.NewIncomingContext(context.Background(), md)); got != token {
+		t.Fatalf("AC 侧读到 %q，want %q", got, token)
+	}
+
+	// 令牌为空时不应写入 metadata：服务端会 fail-closed 拒绝，客户端不假装成功。
+	empty := certissue.WithEnrollToken(context.Background(), "")
+	if md, ok := metadata.FromOutgoingContext(empty); ok && len(md.Get(certissue.EnrollTokenMetaKey)) > 0 {
+		t.Error("空令牌不应写入 metadata")
+	}
+}

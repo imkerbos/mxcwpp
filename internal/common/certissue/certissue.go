@@ -6,6 +6,7 @@
 package certissue
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -15,6 +16,8 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/metadata"
 )
 
 // DefaultAgentCertValidity 单机证书默认有效期（1 年，配合定期轮换）。
@@ -23,6 +26,18 @@ const DefaultAgentCertValidity = 365 * 24 * time.Hour
 // EnrollTokenMetaKey 是 agent 通过 gRPC metadata 上报 enroll 引导令牌时使用的 key。
 // AC 经 metadata.FromIncomingContext 读取并校验，令牌不进入 proto 消息体（避免落日志）。
 const EnrollTokenMetaKey = "x-enroll-token"
+
+// WithEnrollToken 把 enroll 令牌挂到出站 gRPC metadata 上。令牌为空时原样返回，
+// 由服务端 fail-closed 拒绝，不在客户端假装成功。
+//
+// 与服务端的读取逻辑同处一个包：写入与读取一旦分居两处，key 或写法的任何漂移都会
+// 表现为"agent 明明配了令牌却一律 enroll 失败"，且两侧各自的单测都不会发现。
+func WithEnrollToken(ctx context.Context, token string) context.Context {
+	if token == "" {
+		return ctx
+	}
+	return metadata.AppendToOutgoingContext(ctx, EnrollTokenMetaKey, token)
+}
 
 // ParseRSAPrivateKey 解析 PEM 编码的 RSA 私钥，兼容 PKCS#1 与 PKCS#8 格式。
 func ParseRSAPrivateKey(pemData []byte) (*rsa.PrivateKey, error) {
