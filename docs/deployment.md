@@ -466,13 +466,36 @@ make certs
 
 ```
 deploy/certs/
-  ca.crt / ca.key            # CA 证书
-  server.crt / server.key    # AgentCenter 使用
+  ca.crt / ca.key            # CA 证书（ca.key 供 AC 在线签发单机证书）
+  server.crt / server.key    # AgentCenter 使用（必须含 serverAuth + 覆盖 SERVER_IP 的 SAN）
   agent.crt / agent.key      # Agent 使用
   client.crt / client.key    # agent.crt/key 的副本，兼容旧名称
+  ssl/server.crt,server.key  # 仅此子目录挂载给 nginx（443）
+  enroll_token.secret        # 集群渲染生成的 enroll 令牌，0600，不入库
 ```
 
-Agent 首次连接时 AgentCenter 自动下发证书，后续连接切换为正式 mTLS。
+> nginx 容器只挂载 `certs/ssl`。整个 `certs` 目录含 CA 私钥、client 私钥与 enroll 令牌，
+> 挂给一个直面公网的容器等于交出整条信任链。
+
+### Agent 接入（一机一证）
+
+Agent 首连不再使用共享客户端证书，而是凭 **enroll 令牌**换取按 AgentID 签发的单机证书：
+
+1. Agent 无客户端证书时只能走 enroll：提交合法 AgentID + enroll 令牌；
+2. AgentCenter 校验后现签 `CN=AgentID` 的单机证书并下发，随即结束该连接；
+3. Agent 携新证书重连，走完整 mTLS，且证书 CN 必须与上报 AgentID 一致。
+
+enroll 阶段不注册在线连接、不处理心跳、不下发插件任务，也无法访问其它 RPC。失陷主机可单独吊销，私钥泄露不影响他机。
+
+**安装时必须提供 enroll 令牌**（取自部署机 `deploy/.env` 的 `ENROLL_TOKEN`）：
+
+```bash
+MXCWPP_ENROLL_TOKEN=<token> bash -c "$(curl -fsSL http://SERVER_IP:8080/agent/install.sh)"
+```
+
+令牌写入 `/etc/mxcwpp-agent/agent.env`（root-only 0600），由 systemd 经 `EnvironmentFile` 注入，不出现在进程参数或 unit 文件中。**令牌不经 `/agent/install.sh` 下发**——该端点匿名可访问，注入即等于公开令牌。
+
+已持有单机证书的主机重装/升级无需再次提供令牌。生产构建（`PROD_BUILD=1`）的安装包只含 `ca.crt`，不再下发共享 client 证书。
 
 ---
 

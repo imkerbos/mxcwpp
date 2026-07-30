@@ -54,7 +54,23 @@ func TestRenderInternalSecret_ManagerAndACShareStrongSecret(t *testing.T) {
 	if acCfg.Server.HTTP.Host != "0.0.0.0" {
 		t.Errorf("AC HTTP host = %q, 期望 0.0.0.0（外部可达）", acCfg.Server.HTTP.Host)
 	}
-	// 核心断言：AC 生成配置绑定 0.0.0.0 且带强密钥，必须能通过 fail-closed 校验。
+
+	// 信任链渲染断言：一机一证 + 强制身份绑定 + 强 enroll token 必须默认开启。
+	if !acCfg.MTLS.PerAgentCert || !acCfg.MTLS.EnforceAgentID {
+		t.Errorf("AC 配置应默认开启 per_agent_cert / enforce_agent_id，得 per=%v enforce=%v",
+			acCfg.MTLS.PerAgentCert, acCfg.MTLS.EnforceAgentID)
+	}
+	if err := config.ValidateEnrollToken(acCfg.MTLS.EnrollToken); err != nil {
+		t.Errorf("渲染的 enroll_token 未达强度: %v", err)
+	}
+
+	// 核心断言：把 mtls 证书路径指向本次渲染实际写出的证书文件（容器内路径 /etc/mxcwpp/certs
+	// 在测试环境不存在），再跑完整 fail-closed 校验——官方渲染结果必须通过强校验。
+	acCertsDir := filepath.Join(filepath.Dir(filepath.Dir(acPath)), "certs")
+	acCfg.MTLS.CACert = filepath.Join(acCertsDir, "ca.crt")
+	acCfg.MTLS.CAKey = filepath.Join(acCertsDir, "ca.key")
+	acCfg.MTLS.ServerCert = filepath.Join(acCertsDir, "server.crt")
+	acCfg.MTLS.ServerKey = filepath.Join(acCertsDir, "server.key")
 	if err := acCfg.ValidateAgentCenter(); err != nil {
 		t.Errorf("生成的 AC 配置无法通过 ValidateAgentCenter: %v", err)
 	}

@@ -18,14 +18,14 @@ func newSvc(mtls config.MTLSConfig) *Service {
 }
 
 func TestEnrollTokenValid(t *testing.T) {
-	// 空配置令牌：迁移期不校验，任何令牌（含空）通过
-	if !newSvc(config.MTLSConfig{}).enrollTokenValid("") {
-		t.Fatal("空配置令牌应放行")
+	// fail-closed：服务端未配置令牌（空 want）→ 任何令牌（含空）一律无效。
+	if newSvc(config.MTLSConfig{}).enrollTokenValid("") {
+		t.Fatal("空配置令牌应拒绝空令牌")
 	}
-	if !newSvc(config.MTLSConfig{}).enrollTokenValid("whatever") {
-		t.Fatal("空配置令牌应放行任意令牌")
+	if newSvc(config.MTLSConfig{}).enrollTokenValid("whatever") {
+		t.Fatal("空配置令牌应拒绝任意令牌")
 	}
-	// 配置了令牌：必须精确匹配
+	// 配置了令牌：constant-time 精确匹配。
 	s := newSvc(config.MTLSConfig{EnrollToken: "secret-123"})
 	if !s.enrollTokenValid("secret-123") {
 		t.Fatal("匹配令牌应通过")
@@ -35,6 +35,13 @@ func TestEnrollTokenValid(t *testing.T) {
 	}
 	if s.enrollTokenValid("") {
 		t.Fatal("空令牌应拒绝")
+	}
+	// 前缀/子串不得通过（固定长度 hash 比较，杜绝长度旁路）。
+	if s.enrollTokenValid("secret-1") {
+		t.Fatal("前缀令牌应拒绝")
+	}
+	if s.enrollTokenValid("secret-1234") {
+		t.Fatal("超长令牌应拒绝")
 	}
 }
 

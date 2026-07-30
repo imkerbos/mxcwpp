@@ -175,6 +175,7 @@ GET	/api/v1/policies/:policy_id	authenticated-perm	baseline:view
 GET	/api/v1/policies/:policy_id/export	authenticated-perm	baseline:view
 GET	/api/v1/policies/:policy_id/rules	authenticated-perm	baseline:view
 GET	/api/v1/policies/:policy_id/statistics	authenticated-perm	baseline:view
+GET	/api/v1/policies/custom-exec-rules	authenticated-perm	baseline:view
 GET	/api/v1/policies/export	authenticated-perm	baseline:view
 GET	/api/v1/policy-groups	authenticated-perm	baseline:view
 GET	/api/v1/policy-groups/:id	authenticated-perm	baseline:view

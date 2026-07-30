@@ -276,40 +276,131 @@ init_dirs() {
     log_info "数据目录: $DATA_DIR"
 }
 
+# cert_san_config 输出 server 证书的 SAN/EKU 扩展配置。SAN 必须覆盖 agent 与浏览器
+# 实际连接的地址，否则 agent 首连 pin 校验（SAN 匹配）与 nginx 443 都会失败。
+cert_san_config() {
+    local extra_ip=""
+    if [ -n "${SERVER_IP:-}" ] && [ "${SERVER_IP}" != "127.0.0.1" ]; then
+        extra_ip="IP.3 = ${SERVER_IP}"
+    fi
+    cat <<EOF
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = agentcenter
+DNS.3 = mxcwpp-server
+IP.1 = 127.0.0.1
+IP.2 = ::1
+${extra_ip}
+EOF
+}
+
+# issue_server_cert 用现有 CA 签发 server.crt（含 SAN + serverAuth EKU）。
+# 复用已有 CA，保证已部署 agent 的 ca.crt 信任链不变，仅更换服务端叶子证书。
+issue_server_cert() {
+    local dir="$SCRIPT_DIR/certs"
+    [ -f "$dir/server.key" ] || openssl genrsa -out "$dir/server.key" 4096
+    openssl req -new -key "$dir/server.key" -out "$dir/server.csr" -subj "/CN=mxcwpp-server"
+    openssl x509 -req -days 3650 -in "$dir/server.csr" \
+        -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
+        -out "$dir/server.crt" -extensions v3_req -extfile <(cert_san_config)
+    rm -f "$dir/server.csr"
+    chmod 600 "$dir/server.key"
+}
+
+# server_cert_ok 判断已有 server.crt 是否满足信任链要求：必须含 serverAuth EKU
+# （否则 AgentCenter 启动期 fail-closed 拒绝），且 SAN 覆盖 SERVER_IP（否则 agent
+# 首连 pin 校验会因 SAN 不匹配而失败）。
+server_cert_ok() {
+    local crt="$SCRIPT_DIR/certs/server.crt" text ip_re
+    [ -f "$crt" ] || return 1
+    text="$(openssl x509 -in "$crt" -noout -text 2>/dev/null)" || return 1
+    echo "$text" | grep -q "TLS Web Server Authentication" || return 1
+    if [ -n "${SERVER_IP:-}" ] && [ "${SERVER_IP}" != "127.0.0.1" ]; then
+        # 转义点号并用 ERE：BSD grep（macOS 开发机）不支持 BRE 的 \| 交替，
+        # 用 BRE 会让判定恒假，静默把合规证书误判为需重签。
+        ip_re="$(printf '%s' "$SERVER_IP" | sed 's/\./\\./g')"
+        echo "$text" | grep -Eq "IP Address:${ip_re}([^0-9.]|$)" || return 1
+    fi
+    return 0
+}
+
+# sync_nginx_ssl 只把服务端证书对同步到 certs/ssl，供 nginx 只读挂载。
+# 绝不让 nginx 容器看到 ca.key / client.key / enroll_token.secret。
+sync_nginx_ssl() {
+    local dir="$SCRIPT_DIR/certs"
+    mkdir -p "$dir/ssl"
+    cp -f "$dir/server.crt" "$dir/ssl/server.crt"
+    cp -f "$dir/server.key" "$dir/ssl/server.key"
+    chmod 644 "$dir/ssl/server.crt"
+    chmod 600 "$dir/ssl/server.key"
+}
+
 init_certs() {
+    # 升级路径：SERVER_IP 由 .env 提供（init_certs 早于 init_config 执行）。
+    if [ -z "${SERVER_IP:-}" ] && [ -f "$ENV_FILE" ]; then
+        SERVER_IP="$(grep -m1 '^SERVER_IP=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+    fi
+
+    mkdir -p "$SCRIPT_DIR/certs/ssl"
+
     if [ -f "$SCRIPT_DIR/certs/ca.crt" ]; then
-        log_info "证书已存在"
+        # 已有证书：绝不重建 CA（重建会让全量已部署 agent 失去信任链），但必须确认
+        # server.crt 满足 SAN/EKU 要求；不满足则用原 CA 重签叶子证书。
+        if server_cert_ok; then
+            log_info "证书已存在（server.crt SAN/EKU 校验通过）"
+        else
+            if [ ! -f "$SCRIPT_DIR/certs/ca.key" ]; then
+                log_error "server.crt 缺少 serverAuth EKU 或 SAN 未覆盖 ${SERVER_IP:-<未知>}，且本机无 ca.key 无法重签"
+                log_error "请在持有该 CA 私钥的机器上重签 server.crt 后再部署，否则 AgentCenter 会 fail-closed 拒绝启动"
+                exit 1
+            fi
+            log_warn "server.crt 缺少 serverAuth EKU 或 SAN 未覆盖 ${SERVER_IP:-<未知>}，用现有 CA 重签（CA 不变，agent 信任链兼容）"
+            issue_server_cert
+            log_info "server.crt 已重签"
+        fi
+        sync_nginx_ssl
         return
     fi
 
     log_step "生成 mTLS 证书..."
-    mkdir -p "$SCRIPT_DIR/certs/ssl"
 
     cd "$PROJECT_ROOT"
     if [ -f "./scripts/generate-certs.sh" ]; then
-        ./scripts/generate-certs.sh
+        # 传入 SERVER_IP，保证 server.crt SAN 覆盖 agent 实际连接地址。
+        EXTRA_IPS="${SERVER_IP:-}" ./scripts/generate-certs.sh
         cp -r certs/* "$SCRIPT_DIR/certs/"
     else
-        # 手动生成证书
+        # 手动生成证书（部署包内无 scripts/ 时的兜底路径）
         cd "$SCRIPT_DIR/certs"
 
         # CA
         openssl genrsa -out ca.key 4096
         openssl req -new -x509 -days 3650 -key ca.key -out ca.crt -subj "/CN=MxCwpp CA"
+        chmod 600 ca.key
 
-        # Server
-        openssl genrsa -out server.key 2048
-        openssl req -new -key server.key -out server.csr -subj "/CN=mxcwpp-server"
-        openssl x509 -req -days 365 -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt
-        rm -f server.csr
+        # Server：必须带 SAN + serverAuth EKU，否则 AC 拒绝启动、agent pin 校验失败
+        issue_server_cert
 
-        # Agent
+        # Agent：clientAuth EKU
         openssl genrsa -out agent.key 2048
         openssl req -new -key agent.key -out agent.csr -subj "/CN=mxcwpp-agent"
-        openssl x509 -req -days 365 -in agent.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out agent.crt
+        openssl x509 -req -days 3650 -in agent.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out agent.crt -extensions v3_req -extfile <(printf '%s\n' \
+                '[v3_req]' \
+                'basicConstraints = CA:FALSE' \
+                'keyUsage = digitalSignature, keyEncipherment' \
+                'extendedKeyUsage = clientAuth')
         rm -f agent.csr
+        chmod 600 agent.key
     fi
 
+    sync_nginx_ssl
     log_info "证书生成完成"
 }
 
@@ -328,14 +419,13 @@ is_strong_secret() {
     return 0
 }
 
-# persist_internal_secret 把 INTERNAL_SECRET 写为 .env 中唯一一行 INTERNAL_SECRET=<value>，
-# 删除任何已有（含空/重复/弱）行，权限 0600。
-persist_internal_secret() {
+# persist_env_kv 把 KEY 写为 .env 中唯一一行 KEY=<value>，删除任何已有（含空/重复/弱）行，权限 0600。
+persist_env_kv() {
+    local key="$1" value="$2" tmp
     [ -f "$ENV_FILE" ] || : > "$ENV_FILE"
-    local tmp
     tmp="$(mktemp)"
-    grep -v '^INTERNAL_SECRET=' "$ENV_FILE" > "$tmp" 2>/dev/null || true
-    printf 'INTERNAL_SECRET=%s\n' "$INTERNAL_SECRET" >> "$tmp"
+    grep -v "^${key}=" "$ENV_FILE" > "$tmp" 2>/dev/null || true
+    printf '%s=%s\n' "$key" "$value" >> "$tmp"
     mv "$tmp" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 }
@@ -347,8 +437,29 @@ ensure_internal_secret() {
         INTERNAL_SECRET="$(openssl rand -hex 32)"
         log_warn "INTERNAL_SECRET 缺失或强度不足，已生成强密钥（Manager↔AgentCenter 管理面鉴权必需）"
     fi
-    persist_internal_secret
+    persist_env_kv INTERNAL_SECRET "$INTERNAL_SECRET"
     log_info "INTERNAL_SECRET 已持久化到 .env（唯一一行，重复执行不变更）"
+}
+
+# ensure_enroll_token 确保 ENROLL_TOKEN 达标并稳定持久化（同 internal_secret 待遇）。
+# 生产（非 insecure_dev_mode）AgentCenter 要求它 ≥32 强度，否则 fail-closed 拒绝启动。
+ensure_enroll_token() {
+    if ! is_strong_secret "${ENROLL_TOKEN:-}"; then
+        ENROLL_TOKEN="$(openssl rand -hex 32)"
+        log_warn "ENROLL_TOKEN 缺失或强度不足，已生成强令牌（Agent 首连 enroll 换取一机一证必需）"
+    fi
+    persist_env_kv ENROLL_TOKEN "$ENROLL_TOKEN"
+    log_info "ENROLL_TOKEN 已持久化到 .env（唯一一行，重复执行不变更）"
+}
+
+# ensure_jwt_secret 确保 JWT_SECRET 达标并稳定持久化。弱/占位符 JWT 会被 Manager 启动期拒绝。
+ensure_jwt_secret() {
+    if ! is_strong_secret "${JWT_SECRET:-}"; then
+        JWT_SECRET="$(openssl rand -hex 32)"
+        log_warn "JWT_SECRET 缺失或强度不足，已生成强密钥（登录令牌签发/校验必需）"
+    fi
+    persist_env_kv JWT_SECRET "$JWT_SECRET"
+    log_info "JWT_SECRET 已持久化到 .env（唯一一行，重复执行不变更）"
 }
 
 init_config() {
@@ -375,9 +486,11 @@ init_config() {
     kafka3="${kafka3:-$kafka2}"
     local PLUGINS_URL="${PLUGINS_BASE_URL:-http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download}"
 
-    # internal_secret 自愈+持久化：升级场景下若 .env 未设置（历史部署留空），生成强密钥
-    # 并稳定写回 .env，避免 AC 管理端口 fail-closed 拒绝启动，且重复执行不轮换。
+    # internal_secret / enroll_token / jwt_secret 自愈+持久化：升级场景下若 .env 未设置或弱，
+    # 生成强值并稳定写回 .env，避免启动期 fail-closed 拒绝，且重复执行不轮换。
     ensure_internal_secret
+    ensure_enroll_token
+    ensure_jwt_secret
 
     sed -i.bak \
         -e "s|__GRPC_PORT__|${GRPC_PORT:-6751}|g" \
@@ -418,8 +531,9 @@ init_config() {
         -e "s|__HEARTBEAT_INTERVAL__|${HEARTBEAT_INTERVAL:-60}|g" \
         -e "s|__PLUGINS_DIR__|${PLUGINS_DIR:-/opt/mxcwpp/plugins}|g" \
         -e "s|__PLUGINS_BASE_URL__|${PLUGINS_URL}|g" \
-        -e "s|__JWT_SECRET__|${JWT_SECRET:-change-me-in-production}|g" \
+        -e "s|__JWT_SECRET__|${JWT_SECRET}|g" \
         -e "s|__INTERNAL_SECRET__|${INTERNAL_SECRET}|g" \
+        -e "s|__ENROLL_TOKEN__|${ENROLL_TOKEN}|g" \
         -e "s|__MANAGER_ADDR__|${MANAGER_ADDR:-http://manager:8080}|g" \
         -e "s|__INSTANCE_ID__|${INSTANCE_ID:-}|g" \
         "$SCRIPT_DIR/config/server.yaml"

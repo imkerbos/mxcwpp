@@ -101,6 +101,22 @@ func (h *AuthHandler) isTokenBlacklisted(c *gin.Context, jti string) bool {
 	return n > 0
 }
 
+// userActive 查询用户当前是否为启用状态。用户不存在或非 active 均返回 false，
+// 使被禁用/删除用户的旧 token 立即失效。查询失败时 fail-closed（返回 false）。
+func (h *AuthHandler) userActive(username string) bool {
+	if username == "" {
+		return false
+	}
+	var count int64
+	if err := h.db.Model(&model.User{}).
+		Where("username = ? AND status = ?", username, model.UserStatusActive).
+		Count(&count).Error; err != nil {
+		h.logger.Warn("校验用户有效性失败，拒绝该请求", zap.String("username", username), zap.Error(err))
+		return false
+	}
+	return count > 0
+}
+
 // LoginRequest 登录请求
 // CaptchaID/CaptchaCode 改为可选：仅在风控判定需要验证码时才校验。
 type LoginRequest struct {
@@ -309,15 +325,17 @@ func extractBearerToken(c *gin.Context) (string, error) {
 	return token, nil
 }
 
-// parseToken 解析并验证 JWT Token，严格检查签名算法为 HS256
+// parseToken 解析并验证 JWT Token，**严格只接受 HS256**。
+//
+// 双重把关：jwt.WithValidMethods 在库层限定 alg 白名单，keyFunc 再断言具体方法为 HS256，
+// 杜绝 HS384/HS512 降级与 none/Algorithm Confusion 攻击。
 func (h *AuthHandler) parseToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		// 严格检查签名算法，防止 Algorithm Confusion Attack
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return h.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +407,14 @@ func (h *AuthHandler) AuthMiddleware() gin.HandlerFunc {
 		// JWT 黑名单：登出/被禁用的 token 即使未到期也拒绝。
 		if h.isTokenBlacklisted(c, claims.ID) {
 			UnauthorizedExpired(c, "登录已失效，请重新登录")
+			c.Abort()
+			return
+		}
+
+		// 用户即时有效性校验：禁用/删除的用户，其旧 token 即使未到期也立即失效。
+		// （JWT 黑名单仅覆盖登出；此处补齐“禁用即吊销全部在用 token”的语义。）
+		if !h.userActive(claims.Username) {
+			UnauthorizedExpired(c, "账户已被禁用或删除，请重新登录")
 			c.Abort()
 			return
 		}

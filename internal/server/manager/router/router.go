@@ -131,19 +131,27 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// 认证相关路由（不需要认证）
 	jwtSecret := cfg.Server.JWTSecret
-	if len(jwtSecret) < 32 {
-		logger.Fatal("JWT 密钥未配置或长度不足: 请在配置文件中设置 server.jwt_secret（至少 32 字符）")
+	// 强度校验：拒绝空/弱/占位符/短密钥（与 internal_secret 同策略、独立取值）。
+	if err := config.ValidateJWTSecret(jwtSecret); err != nil {
+		logger.Fatal("server.jwt_secret 校验失败", zap.Error(err))
 	}
 	authHandler := api.NewAuthHandler(db, logger, []byte(jwtSecret))
-	// 批4: 登出 JWT 黑名单（默认关，需 Redis）。启用后登出即吊销 token。
-	if cfg.Server.Security.JWTBlacklist.Enabled && redisClient != nil {
+	// 批4: 登出 JWT 黑名单（需 Redis）。启用但缺 Redis 时 fail-fast，避免“表面 enabled 实际不吊销”。
+	if cfg.Server.Security.JWTBlacklist.Enabled {
+		if redisClient == nil {
+			logger.Fatal("server.security.jwt_blacklist 已启用但 Redis 不可用，拒绝启动（避免登出/禁用不生效）")
+		}
 		authHandler.EnableJWTBlacklist(redisClient)
 		logger.Info("JWT 黑名单已启用（登出即吊销）")
 	}
 	apiV1.GET("/auth/captcha", authHandler.GetCaptcha)
 
-	// 批4: 登录接口 IP 限流（默认关，灰度开），防口令爆破。登录前置无 tenant，按 IP 限流。
+	// 批4: 登录接口 IP 限流（灰度开），防口令爆破。登录前置无 tenant，按 IP 限流。
+	// 启用但缺 Redis 时 fail-fast，避免限流规则静默失效。
 	if cfg.Server.Security.LoginRateLimit.Enabled {
+		if redisClient == nil {
+			logger.Fatal("server.security.login_rate_limit 已启用但 Redis 不可用，拒绝启动（避免登录限流静默失效）")
+		}
 		rps := cfg.Server.Security.LoginRateLimit.RPS
 		if rps <= 0 {
 			rps = 10
@@ -271,7 +279,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
-	setupRulesAPI(router, db, logger)
+	setupRulesAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupTasksAPI(router, db, logger, acDispatcher)
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger, acDispatcher)
@@ -283,7 +291,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
 	setupIncidentAPI(router, db, logger)
-	setupPolicyImportExportAPI(router, db, logger)
+	setupPolicyImportExportAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
@@ -497,8 +505,11 @@ func setupPoliciesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 }
 
 // setupRulesAPI 设置规则 API 路由
-func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewRulesHandler(db, logger)
+func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	handler := api.NewRulesHandler(db, logger, allowCustomExec)
+	// 存量自定义可执行规则盘点（必须在 /policies/:policy_id/rules 之前注册，
+	// 否则会被 :policy_id 通配吞掉）。
+	router.GET("/policies/custom-exec-rules", handler.ListCustomExecRules)
 	router.GET("/policies/:policy_id/rules", handler.ListRules)
 	router.POST("/policies/:policy_id/rules", handler.CreateRule)
 	router.GET("/rules/:rule_id", handler.GetRule)
@@ -770,8 +781,8 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupPolicyImportExportAPI 设置策略导入导出 API 路由
-func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	api.RegisterPolicyImportExportRoutes(router, db, logger)
+func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	api.RegisterPolicyImportExportRoutes(router, db, logger, allowCustomExec)
 }
 
 // setupInspectionAPI 设置运维巡检 API 路由

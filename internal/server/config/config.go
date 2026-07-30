@@ -115,6 +115,14 @@ type SecurityConfig struct {
 	Headers        SecurityHeadersConfig `mapstructure:"headers"`          // 安全响应头
 	LoginRateLimit RateLimitRuleConfig   `mapstructure:"login_rate_limit"` // 登录接口 IP 限流（防爆破）
 	JWTBlacklist   JWTBlacklistConfig    `mapstructure:"jwt_blacklist"`    // 登出 JWT 黑名单（需 Redis）
+	// AllowCustomExecRules 允许自定义（非内置）基线规则携带 command_exec 检查与
+	// fix.command 修复命令。默认 false。
+	//
+	// 这两个字段的内容会以 root 在全部目标主机上执行，因此"能编辑基线规则"等价于
+	// "能在全舰队执行任意代码"——对只应拥有基线配置权限的角色而言是提权。内置规则
+	// （builtin=true，随发布同步）不受此开关限制。
+	// 确有自定义可执行规则需求的环境才显式开启，且开启后每次执行都会留审计。
+	AllowCustomExecRules bool `mapstructure:"allow_custom_exec_rules"`
 }
 
 // SecurityHeadersConfig 控制安全响应头中间件。
@@ -334,6 +342,10 @@ type MTLSConfig struct {
 	EnforceAgentID bool `mapstructure:"enforce_agent_id"`
 	// RevokedSerials 是已吊销的证书序列号（十进制字符串）列表，握手期拒绝。
 	RevokedSerials []string `mapstructure:"revoked_serials"`
+	// InsecureDevMode 是显式的不安全开发模式（默认 false）。仅供本地/回环开发放行
+	// “无 per-agent 证书 / 弱信任配置”场景；一旦开启，ValidateAgentCenter 要求 gRPC/HTTP
+	// 均绑定回环地址，且官方 prod/deploy/cluster 渲染绝不设置此项。
+	InsecureDevMode bool `mapstructure:"insecure_dev_mode"`
 }
 
 // LogConfig 是日志配置

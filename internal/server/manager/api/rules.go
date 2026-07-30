@@ -17,14 +17,17 @@ type RulesHandler struct {
 	service *service.PolicyService
 	db      *gorm.DB
 	logger  *zap.Logger
+	// allowCustomExec 见 server.security.allow_custom_exec_rules。
+	allowCustomExec bool
 }
 
 // NewRulesHandler 创建规则处理器
-func NewRulesHandler(db *gorm.DB, logger *zap.Logger) *RulesHandler {
+func NewRulesHandler(db *gorm.DB, logger *zap.Logger, allowCustomExec bool) *RulesHandler {
 	return &RulesHandler{
-		service: service.NewPolicyService(db, logger),
-		db:      db,
-		logger:  logger,
+		service:         service.NewPolicyService(db, logger),
+		db:              db,
+		logger:          logger,
+		allowCustomExec: allowCustomExec,
 	}
 }
 
@@ -127,6 +130,17 @@ func (h *RulesHandler) CreateRule(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 
+	// 自定义规则不得携带在主机上以 root 执行的内容（command_exec / fix.command）。
+	if err := guardCustomExecRule(h.allowCustomExec, false, req.CheckConfig, req.FixConfig); err != nil {
+		h.logger.Warn("[AUDIT] 拒绝创建含可执行内容的自定义基线规则",
+			zap.String("rule_id", req.RuleID),
+			zap.String("policy_id", policyID),
+			zap.String("actor", c.GetString("username")),
+			zap.Error(err))
+		BadRequest(c, err.Error())
+		return
+	}
+
 	rule := &model.Rule{
 		RuleID:      req.RuleID,
 		PolicyID:    policyID,
@@ -206,6 +220,16 @@ func (h *RulesHandler) UpdateRule(c *gin.Context) {
 	}
 	if req.FixConfig != nil {
 		rule.FixConfig = *req.FixConfig
+	}
+
+	// 同 CreateRule：更新同样不得把可执行内容塞进自定义规则。内置规则不受限。
+	if err := guardCustomExecRule(h.allowCustomExec, rule.Builtin, rule.CheckConfig, rule.FixConfig); err != nil {
+		h.logger.Warn("[AUDIT] 拒绝更新为含可执行内容的自定义基线规则",
+			zap.String("rule_id", ruleID),
+			zap.String("actor", c.GetString("username")),
+			zap.Error(err))
+		BadRequest(c, err.Error())
+		return
 	}
 
 	if err := h.service.UpdateRule(rule); err != nil {

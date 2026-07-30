@@ -24,6 +24,7 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/api/proto/bridge"
 	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
+	"github.com/matrixplusio/mxcwpp/internal/common/certissue"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/audit"
@@ -242,7 +243,6 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	}
 
 	// 身份校验：把 TLS 客户端证书 CN 与上报 AgentID 绑定，杜绝伪造 AgentID 顶替他机。
-	// EnforceAgentID=false 为观察模式（只告警不拒绝，供存量迁移），=true 为强制模式（步骤 6）。
 	leafCert, hasClientCert := peerLeafCert(stream.Context())
 	if hasClientCert && s.isRevokedSerial(leafCert.SerialNumber) {
 		s.logger.Warn("拒绝已吊销证书的连接",
@@ -251,24 +251,37 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 		)
 		return status.Errorf(codes.PermissionDenied, "客户端证书已吊销")
 	}
-	if s.cfg.MTLS.EnforceAgentID {
-		if hasClientCert {
-			if leafCert.Subject.CommonName != agentID {
-				s.logger.Warn("强制模式：拒绝 CN 与 AgentID 不符的连接",
-					zap.String("cert_cn", leafCert.Subject.CommonName),
-					zap.String("agent_id", agentID),
-				)
-				return status.Errorf(codes.PermissionDenied, "客户端证书 CN 与上报 AgentID 不符")
-			}
-		} else if !s.enrollTokenValid(enrollTokenFromCtx(stream.Context())) {
-			s.logger.Warn("强制模式：拒绝无有效客户端证书且 enroll 令牌无效的连接",
+
+	// AgentID 字符集/长度约束：非法即拒绝，避免未校验文本进入后续证书 CN / 存储 / 路径。
+	if err := certissue.ValidAgentID(agentID); err != nil {
+		return status.Errorf(codes.InvalidArgument, "非法 AgentID: %v", err)
+	}
+
+	// 无客户端证书：只允许走 enroll（提交合法 AgentID + enroll 令牌换取一机一证），签发后即结束该流、
+	// 要求带证书重连。绝不注册在线连接 / 处理心跳 records / 下发插件任务 / 进入其它业务面。
+	// 共享 client key 下发路径仅在显式 insecure_dev_mode（回环开发）可达，生产不可触达。
+	if !hasClientCert {
+		if s.cfg.MTLS.PerAgentCert {
+			return s.enrollOnly(ctx, stream, agentID)
+		}
+		if !s.cfg.MTLS.InsecureDevMode {
+			s.logger.Warn("拒绝无客户端证书连接（未开启 per_agent_cert 且非 insecure_dev_mode）",
+				zap.String("agent_id", agentID))
+			return status.Errorf(codes.Unauthenticated, "缺少有效客户端证书")
+		}
+		// insecure_dev_mode：回退旧的共享证书下发 + 完整注册（仅回环开发）。
+	}
+
+	// 有客户端证书：强制 CN==AgentID。EnforceAgentID=true 为生产强制（拒绝），
+	// =false 为迁移观察模式（降 Debug，不刷屏，真正拦截由强制模式兜底）。
+	if hasClientCert && leafCert.Subject.CommonName != agentID {
+		if s.cfg.MTLS.EnforceAgentID {
+			s.logger.Warn("强制模式：拒绝 CN 与 AgentID 不符的连接",
+				zap.String("cert_cn", leafCert.Subject.CommonName),
 				zap.String("agent_id", agentID),
 			)
-			return status.Errorf(codes.Unauthenticated, "缺少有效客户端证书，且 enroll 令牌无效")
+			return status.Errorf(codes.PermissionDenied, "客户端证书 CN 与上报 AgentID 不符")
 		}
-	} else if hasClientCert && leafCert.Subject.CommonName != agentID {
-		// 观察模式降 Debug：迁移期 500 台重连会高频命中，Warn 会刷屏。
-		// 真正该拦截的场景由强制模式（EnforceAgentID=true）的 Warn + 拒绝兜底。
 		s.logger.Debug("观察模式：客户端证书 CN 与上报 AgentID 不符（迁移期允许，强制后将拒绝）",
 			zap.String("cert_cn", leafCert.Subject.CommonName),
 			zap.String("agent_id", agentID),

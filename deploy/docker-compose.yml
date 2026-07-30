@@ -331,6 +331,8 @@ services:
       - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # nginx 443 读 /etc/nginx/ssl/server.{crt,key}；deploy.sh 只把服务端证书对同步到
+      # ./certs/ssl。绝不挂整个 ./certs：其中含 CA 私钥 / client.key / enroll_token.secret。
       - ./certs/ssl:/etc/nginx/ssl:ro
       - ${DATA_DIR:-./data}/logs/nginx:/var/log/nginx
     environment:

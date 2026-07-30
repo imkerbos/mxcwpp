@@ -119,7 +119,7 @@ func TestGRPCEnrollmentOverTLS(t *testing.T) {
 			for _, c := range cs.PeerCertificates {
 				raw = append(raw, c.Raw)
 			}
-			return certissue.VerifyChainPinnedCA(raw, caFP)
+			return certissue.VerifyChainPinnedCA(raw, caFP, "127.0.0.1")
 		},
 	}
 	conn1, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(pinTLS)))

@@ -50,9 +50,10 @@ func ParseRSAPrivateKey(pemData []byte) (*rsa.PrivateKey, error) {
 // validity<=0 时使用 DefaultAgentCertValidity。
 // 返回新签发的 certPEM 与 keyPEM；不修改入参。
 func SignAgentCert(caCertPEM, caKeyPEM []byte, agentID string, validity time.Duration) (certPEM, keyPEM []byte, err error) {
-	if strings.TrimSpace(agentID) == "" {
-		return nil, nil, fmt.Errorf("agentID 不能为空")
+	if err := ValidAgentID(strings.TrimSpace(agentID)); err != nil {
+		return nil, nil, err
 	}
+	agentID = strings.TrimSpace(agentID)
 	if validity <= 0 {
 		validity = DefaultAgentCertValidity
 	}
