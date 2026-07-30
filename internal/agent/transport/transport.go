@@ -11,7 +11,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	grpcLib "google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 
 	"github.com/matrixplusio/mxcwpp/api/proto/bridge"
 	"github.com/matrixplusio/mxcwpp/api/proto/grpc"
@@ -182,10 +181,7 @@ func StartupWithManager(ctx context.Context, wg *sync.WaitGroup, mgr *Manager) {
 			mgr.logger.Debug("creating gRPC Transfer client with snappy compression")
 			client := grpc.NewTransferClient(conn)
 			// enroll 引导令牌经 metadata 上报 AC（首连签发单机证书时鉴权），不放进 proto 消息体
-			streamCtx := ctx
-			if tok := mgr.cfg.Local.TLS.EnrollToken; tok != "" {
-				streamCtx = metadata.AppendToOutgoingContext(ctx, certissue.EnrollTokenMetaKey, tok)
-			}
+			streamCtx := certissue.WithEnrollToken(ctx, mgr.cfg.Local.TLS.EnrollToken)
 			stream, err := client.Transfer(streamCtx, grpcLib.UseCompressor("snappy"))
 			if err != nil {
 				mgr.setConnected(false)
