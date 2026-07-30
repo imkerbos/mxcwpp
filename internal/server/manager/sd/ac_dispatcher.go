@@ -9,6 +9,7 @@ import (
 	"time"
 
 	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
+	"github.com/matrixplusio/mxcwpp/internal/server/common/internalauth"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -17,20 +18,36 @@ const dispatchTimeout = 5 * time.Second
 
 // ACDispatcher 实现 SendCommand 接口，优先精准路由到目标 AC，失败时退化为广播
 type ACDispatcher struct {
-	registry    *Registry
-	redisClient *redis.Client
-	httpClient  *http.Client
-	logger      *zap.Logger
+	registry       *Registry
+	redisClient    *redis.Client
+	httpClient     *http.Client
+	logger         *zap.Logger
+	internalSecret string // AC 管理面内部认证密钥，随每次调用置于 X-Internal-Secret 头
 }
 
-// NewACDispatcher 创建 ACDispatcher
-func NewACDispatcher(registry *Registry, redisClient *redis.Client, logger *zap.Logger) *ACDispatcher {
+// NewACDispatcher 创建 ACDispatcher。
+// internalSecret 与 AC 端 server.internal_secret 一致，用于通过 AC 管理面鉴权。
+func NewACDispatcher(registry *Registry, redisClient *redis.Client, logger *zap.Logger, internalSecret string) *ACDispatcher {
 	return &ACDispatcher{
-		registry:    registry,
-		redisClient: redisClient,
-		httpClient:  &http.Client{Timeout: dispatchTimeout},
-		logger:      logger,
+		registry:       registry,
+		redisClient:    redisClient,
+		httpClient:     &http.Client{Timeout: dispatchTimeout},
+		logger:         logger,
+		internalSecret: internalSecret,
 	}
+}
+
+// postJSON 向 AC 发送带内部认证头的 JSON POST 请求。
+func (d *ACDispatcher) postJSON(url string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if d.internalSecret != "" {
+		req.Header.Set(internalauth.HeaderName, d.internalSecret)
+	}
+	return d.httpClient.Do(req)
 }
 
 // commandReq 对应 httptrans/handler.go 的 sendCommandReq
@@ -125,7 +142,7 @@ func (d *ACDispatcher) SendCommand(agentID string, cmd *grpcProto.Command) error
 
 func (d *ACDispatcher) sendToInstance(inst *ACInstance, agentID string, body []byte) error {
 	url := fmt.Sprintf("http://%s/command", inst.HTTPAddr)
-	resp, err := d.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := d.postJSON(url, body)
 	if err != nil {
 		d.logger.Debug("AC 命令转发失败",
 			zap.String("ac_id", inst.ID),
@@ -205,7 +222,7 @@ func (d *ACDispatcher) SendDependencyInstall(agentID, name, action, version, req
 
 func (d *ACDispatcher) sendDepInstallToInstance(inst *ACInstance, body []byte) error {
 	url := fmt.Sprintf("http://%s/dependency/install", inst.HTTPAddr)
-	resp, err := d.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := d.postJSON(url, body)
 	if err != nil {
 		return err
 	}

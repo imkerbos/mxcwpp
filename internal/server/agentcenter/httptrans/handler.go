@@ -10,6 +10,7 @@ import (
 
 	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/transfer"
+	"github.com/matrixplusio/mxcwpp/internal/server/common/internalauth"
 )
 
 // Handler 是 AC HTTP 管理接口的处理器
@@ -23,30 +24,36 @@ func NewHandler(t *transfer.Service, logger *zap.Logger) *Handler {
 	return &Handler{transfer: t, logger: logger}
 }
 
-// RegisterRoutes 注册所有管理路由到给定的 RouterGroup
-func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
+// RegisterRoutes 注册所有管理路由到给定的 RouterGroup。
+//
+// 威胁模型：/command、/command/batch、/dependency/install 可向 Agent 下发任务，
+// /conn/stat、/conn/list 泄漏在线 Agent 清单（ID/主机名/IP/版本）——全部强制内部
+// 服务认证（X-Internal-Secret，常量时间比较，空 secret 一律拒绝）。
+// /health 保持匿名，仅暴露最小 liveness（供 Manager SD 探活），不含任何在线明细。
+// /metrics 由 setup 注册（匿名，依赖部署拓扑限制在受控网络内，不发布到宿主公网）。
+func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, internalSecret string) {
 	rg.GET("/health", h.Health)
-	rg.GET("/conn/stat", h.ConnStat)
-	rg.GET("/conn/list", h.ConnList)
-	rg.POST("/command", h.SendCommand)
-	rg.POST("/command/batch", h.SendCommandBatch)
-	rg.POST("/dependency/install", h.SendDependencyInstall)
+
+	protected := rg.Group("", internalauth.Middleware(internalSecret))
+	protected.GET("/conn/stat", h.ConnStat)
+	protected.GET("/conn/list", h.ConnList)
+	protected.POST("/command", h.SendCommand)
+	protected.POST("/command/batch", h.SendCommandBatch)
+	protected.POST("/dependency/install", h.SendDependencyInstall)
 }
 
-// healthResp 是 /health 的响应体
+// healthResp 是 /health 的响应体（仅最小 liveness，不含在线明细）。
 type healthResp struct {
-	Status     string `json:"status"`
-	OnlineConn int    `json:"online_connections"`
+	Status string `json:"status"`
 }
 
 // Health godoc
 // GET /health
-// Manager SD 模块每 10s 主动探测，判断 AC 实例是否存活
+// Manager SD 模块每 10s 主动探测，判断 AC 实例是否存活。
+// 匿名可达，故只返回存活状态；在线 Agent 数经受保护的 /conn/stat 或 SD 心跳上报，
+// 不在此匿名端点泄漏。
 func (h *Handler) Health(c *gin.Context) {
-	c.JSON(http.StatusOK, healthResp{
-		Status:     "ok",
-		OnlineConn: h.transfer.GetOnlineAgentCount(),
-	})
+	c.JSON(http.StatusOK, healthResp{Status: "ok"})
 }
 
 // connStatResp 是 /conn/stat 的响应体

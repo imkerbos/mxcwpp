@@ -91,7 +91,7 @@ Agent 接入层，核心职责为连接管理与数据转发；同时依赖 MySQ
 - mTLS 支持 VerifyClientCertIfGiven（允许无证书首次连接以完成证书下发）
 - 将 Agent 上报数据按 DataType 路由到 Kafka Topic
 - Kafka 不可用时使用内存降级队列暂存，恢复后自动重放
-- HTTP 管理接口：`/health` `/conn/stat` `/conn/list` `/command` `/command/batch`
+- HTTP 管理接口：`/health`（匿名 liveness）+ `/conn/stat` `/conn/list` `/command` `/command/batch` `/dependency/install`（强制 `X-Internal-Secret` 内部鉴权，详见「安全与通信」）
 - 启动时向 Manager SD 注册（重试 3 次），15s 心跳（包含 ConnCount），优雅注销
 - 主机性能指标通过 `/metrics` 暴露给 Prometheus 抓取
 - 内置 6 个调度器（`internal/server/agentcenter/scheduler/`）：任务调度、心跳超时检测、告警调度、Agent 更新、插件更新、组件推送超时
@@ -396,13 +396,42 @@ Redis 不可用时降级为无锁模式，依赖调度间隔的自然错开来�
 | 浏览器 <-> Nginx / Manager | HTTPS / REST | JWT |
 | Agent <-> AgentCenter | gRPC 双向流 | mTLS（VerifyClientCertIfGiven） |
 | Agent <-> Plugin | OS Pipe + Protobuf | 父子进程隔离 |
-| Manager <-> AgentCenter | HTTP 内部接口 | 内网调用 |
+| Manager <-> AgentCenter | HTTP 内部接口 | `X-Internal-Secret` 共享密钥（常量时间比较） |
 
 **mTLS 细节**：AgentCenter 的 TLS 配置使用 `VerifyClientCertIfGiven` 策略，允许 Agent 首次连接时不携带客户端证书（用于初始证书下发），后续连接切换为完整 mTLS 双向认证。
 
 **gRPC Keepalive**：Time=60s（空闲后发 ping），Timeout=10s（ping 等待响应超时），MinTime=10s（客户端最短 ping 间隔）。
 
 证书生成：`scripts/generate-certs.sh`
+
+### AgentCenter 管理端口鉴权与网络边界（E-SEC-1）
+
+AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
+
+| 接口 | 鉴权 | 说明 |
+|------|------|------|
+| `/command` `/command/batch` `/dependency/install` | 强制 `X-Internal-Secret` | 可向 Agent 下发任务，无凭据返回 401，handler 不执行 |
+| `/conn/stat` `/conn/list` | 强制 `X-Internal-Secret` | 泄漏在线 Agent 清单，同上保护 |
+| `/health` | 匿名 | 仅最小 liveness（`{"status":"ok"}`），不含在线明细；供 Manager SD 探活 |
+| `/metrics` | 匿名 | Prometheus 抓取；由部署拓扑保证仅受控网络可达，不发布到宿主公网 |
+
+- 共享逻辑在中立包 `internal/server/common/internalauth`（Manager 与 AC 共用；对提供值与密钥各做 SHA-256 归一为定长摘要后再 `subtle.ConstantTimeCompare`，避免长度侧信道；空密钥 fail-closed 一律拒绝；不记录密钥）。
+- Manager 侧命令分发 / 依赖安装（`sd.ACDispatcher`）精准路由与广播均携带同一密钥。
+- Manager 的内部服务路由 `/api/v1/internal/ac/*`、`/api/v1/internal/alerts/*` **始终挂载** `internalauth.Middleware`——空密钥时由中间件 fail-closed 返回 401，绝不匿名可达。
+- **启动 fail-fast（不留静默半失效）**：
+  - AgentCenter：`Config.ValidateAgentCenter()` 经 `ValidateInternalSecret` **无论绑定地址如何**都强制非空、非模板占位符、非弱默认值、长度 ≥32 的 `server.internal_secret`——空密钥下 AC 受保护接口全部 401、注册/命令下发永久失败，故 loopback 也拒绝空密钥启动；非 loopback 额外强调管理面裸奔风险。
+  - Manager：`Config.ValidateManager()` 在打开内部路由前强校验同一密钥，失败即退出（仅 Manager 专用初始化路径调用，不影响 Consumer/Engine 等共用 Config 的进程）。
+  - 集群部署（`internal/deploy/cluster`）在 `Config.Validate()` 强校验 `app.internal_secret`，Manager 与所有 AC 渲染同一密钥。
+- **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
+- 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
+
+### RBAC deny-by-default 与路由覆盖闸（E-SEC-2）
+
+- 所有 JWT 认证路由（`apiV1Auth`）走 `EnforcePermissions`：按「模块 × 动作」（view/manage/respond）校验；**未登记路由对非 admin 一律拒绝（deny-by-default）并记 `access.denied` 审计**，不再因空映射放行；admin 为显式超管通路。
+- `/api/v2` 管理面路由（`/admin`、`/config/change-requests`、`/mssp`）显式 admin 门禁；`/system/mode` 为登录即可的只读查询。
+- 路由分类权威表 `internal/server/manager/api/route_policy.go` 把每条注册路由归为 public / internal / authenticated-perm / authenticated-basic / admin 之一（public/basic 用**精确 method+path**，不用前缀吞并）。
+- **精确路由 golden manifest** `internal/server/manager/router/testdata/routes.golden` 逐条记录 `METHOD PATH CLASS PERM`。CI 测试 `route_manifest_test.go` 把**实际 `engine.Routes()`** 与 golden 双向比对：新增未登记路由、陈旧条目、class/permission 变化均失败（新增路由不会被宽泛 prefix 自动吞掉）。改动路由后用 `go test ./internal/server/manager/router/ -run TestRouteManifest -update-routes` 重新生成，由人工审查 diff（CI 不自增改 golden）。
+- 运行时门禁验证 `route_gating_test.go`：对 internal / authenticated / admin / public 各类代表路由发真实无凭据请求，断言在 handler 前被相应机制拦截（分类 = 实际门禁）。
 
 ## 与 Elkeid 的关键差异
 

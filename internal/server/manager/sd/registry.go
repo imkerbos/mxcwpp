@@ -469,17 +469,8 @@ func (r *Registry) probeOne(inst *ACInstance) {
 		return
 	}
 
-	// 解析 conn count（可选，用于负载均衡精度）
-	var body struct {
-		OnlineConn int64 `json:"online_connections"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil {
-		r.mu.Lock()
-		if cur, ok := r.instances[id]; ok {
-			cur.ConnCount = body.OnlineConn
-		}
-		r.mu.Unlock()
-	}
+	// /health 现仅暴露最小 liveness（不含在线数），连接数以 AC 心跳上报为准
+	// （Heartbeat 每 15s 更新 ConnCount），此处不再从 /health 读取以免清零心跳值。
 
 	// 探测成功，重置失败计数
 	atomic.StoreInt32(&inst.failCount, 0)

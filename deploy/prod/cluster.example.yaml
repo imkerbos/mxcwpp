@@ -46,6 +46,10 @@ network:
 
 app:
   jwt_secret: change-this-32-char-secret
+  # Manager↔AgentCenter 管理面鉴权共享密钥（Manager 与所有 AC 渲染出同一值）。
+  # 必填，生产强校验：≥32 字符、拒绝空/模板/常见默认值。生成：openssl rand -hex 32
+  # 下方为占位符，render 前必须替换，否则校验拒绝。
+  internal_secret: __REPLACE_WITH_openssl_rand_hex_32__
   log_level: info
   log_format: json
   heartbeat_interval: 60

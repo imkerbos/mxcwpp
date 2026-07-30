@@ -52,8 +52,13 @@ func Initialize(configPath string) (*ManagerServices, error) {
 		return nil, err
 	}
 
-	// 2. 验证配置
+	// 2. 验证配置（通用规则 + Manager 专用强内部密钥校验）
 	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	// fail-fast：Manager 的内部服务路由始终强制 X-Internal-Secret，缺强密钥会导致
+	// AC 注册/命令下发永久 401，故启动前即拒绝，不留“健康但控制链路失效”状态。
+	if err := cfg.ValidateManager(); err != nil {
 		return nil, err
 	}
 
@@ -159,7 +164,7 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	}
 
 	// 5.8 初始化 Manager 侧任务调度器
-	acDispatcher := sd.NewACDispatcher(acRegistry, redisClient, logger)
+	acDispatcher := sd.NewACDispatcher(acRegistry, redisClient, logger, cfg.Server.InternalSecret)
 	taskScheduler := biz.NewTaskScheduler(db, acDispatcher, redisClient, logger)
 
 	// 5.9 初始化病毒库更新器

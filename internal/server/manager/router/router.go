@@ -106,23 +106,20 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	scannerWebhookHandler := api.NewKubeScannerHandler(db, logger, biz.NewKubeClientManager(db, logger), cfg)
 	router.POST("/api/v1/kube/scanner/report-webhook/:cluster_token", scannerWebhookHandler.ReceiveReportWebhook)
 
-	// AC 内部注册接口（不需要 JWT，AC 到 Manager 的内部调用）
+	// AC 内部注册接口（不走 JWT，AC→Manager 内部调用，强制 X-Internal-Secret）。
+	// 始终挂载中间件：空 secret 由中间件 fail-closed 返回 401，绝不匿名可达。
 	discoveryHandler := api.NewDiscoveryHandler(acRegistry, logger)
 	internalAC := router.Group("/api/v1/internal/ac")
-	if secret := cfg.Server.InternalSecret; secret != "" {
-		internalAC.Use(middleware.InternalAuth(secret))
-	}
+	internalAC.Use(middleware.InternalAuth(cfg.Server.InternalSecret))
 	internalAC.POST("/register", discoveryHandler.Register)
 	internalAC.POST("/heartbeat", discoveryHandler.Heartbeat)
 	internalAC.DELETE("/deregister", discoveryHandler.Deregister)
 
-	// Prometheus 告警 webhook（不走 JWT，仅可选 X-Internal-Secret 鉴权 + Prom IP 白名单）
-	// 接收 Prometheus alerting 配置中 webhook 推送的告警，入 mxcwpp alerts 表
+	// Prometheus 告警 webhook（不走 JWT，强制 X-Internal-Secret + Prom IP 白名单）。
+	// 同样始终挂载中间件，空 secret fail-closed。
 	promAlertsHandler := api.NewPrometheusAlertsHandler(db, logger)
 	internalAlerts := router.Group("/api/v1/internal/alerts")
-	if secret := cfg.Server.InternalSecret; secret != "" {
-		internalAlerts.Use(middleware.InternalAuth(secret))
-	}
+	internalAlerts.Use(middleware.InternalAuth(cfg.Server.InternalSecret))
 	internalAlerts.POST("/prometheus", promAlertsHandler.Ingest)
 
 	// API 路由
@@ -217,8 +214,9 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
 
 	// P1-1: 配置中心变更审批 /api/v2/config/change-requests/*
+	// 配置变更审批属管理动作，deny-by-default：仅 admin 可访问（此前仅需登录，是越权空洞）。
 	configChangeHandler := api.NewConfigChangeRequestHandler(db, logger)
-	configChangeGroup := apiV2.Group("/config/change-requests")
+	configChangeGroup := apiV2.Group("/config/change-requests", api.RoleMiddleware("admin"))
 	configChangeGroup.POST("", configChangeHandler.Create)
 	configChangeGroup.GET("", configChangeHandler.List)
 	configChangeGroup.GET("/sensitivity", configChangeHandler.GetSensitivity)
@@ -228,9 +226,10 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	configChangeGroup.POST("/:id/cancel", configChangeHandler.Cancel)
 
 	// A3: MSSP 控制台路由 /api/v2/mssp/*
+	// 跨租户视图属平台管理面，deny-by-default：仅 admin 可访问（此前仅需登录，是越权空洞）。
 	msspSvc := mssp.NewService(db, logger)
 	msspHandler := api.NewMSSPHandler(msspSvc, logger)
-	msspGroup := apiV2.Group("/mssp")
+	msspGroup := apiV2.Group("/mssp", api.RoleMiddleware("admin"))
 	msspGroup.GET("/dashboard", msspHandler.Dashboard)
 	msspGroup.GET("/child-tenants", msspHandler.ListChildTenants)
 	msspGroup.POST("/child-tenants", msspHandler.CreateChildTenant)

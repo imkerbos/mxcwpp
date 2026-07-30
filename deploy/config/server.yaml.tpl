@@ -13,6 +13,8 @@ server:
   manager_addr: "__MANAGER_ADDR__"
   instance_id: "__INSTANCE_ID__"
   cors_origins: __CORS_ORIGINS__
+  # Manager↔AgentCenter 管理面鉴权密钥（deploy.sh 从 .env INTERNAL_SECRET 替换；留空自动生成）。
+  # AC 管理端口绑定 0.0.0.0 时必填且需足够强度，否则 fail-closed 拒绝启动。
   internal_secret: "__INTERNAL_SECRET__"
 
 database:
