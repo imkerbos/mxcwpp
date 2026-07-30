@@ -205,3 +205,6 @@ docs/internal/
 
 # openssl CA serial artifact (generated)
 deploy/certs/*.srl
+
+# generated & persisted agent enroll token (secret, do not commit)
+deploy/certs/enroll_token.secret

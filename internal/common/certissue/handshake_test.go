@@ -113,7 +113,7 @@ func TestHandshakeCAPinning(t *testing.T) {
 				for _, c := range cs.PeerCertificates {
 					raw = append(raw, c.Raw)
 				}
-				return VerifyChainPinnedCA(raw, wantFP)
+				return VerifyChainPinnedCA(raw, wantFP, "ac.local")
 			},
 		}
 	}

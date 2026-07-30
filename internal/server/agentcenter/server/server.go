@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -11,13 +12,53 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 
+	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
 	_ "github.com/matrixplusio/mxcwpp/internal/common/compressor" // 注册 Snappy 解压器（Agent 端压缩，Server 端解压）
 	acmetrics "github.com/matrixplusio/mxcwpp/internal/server/agentcenter/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
 )
+
+// hasVerifiedClientCert 判断 gRPC 上下文中是否携带经 TLS 链校验通过的客户端证书。
+func hasVerifiedClientCert(ctx context.Context) bool {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.AuthInfo == nil {
+		return false
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return false
+	}
+	return len(tlsInfo.State.VerifiedChains) > 0 && len(tlsInfo.State.VerifiedChains[0]) > 0
+}
+
+// requireClientCertUnary 除 Transfer（承载首连 enroll，允许无证书完成一机一证）外，
+// 所有 unary RPC 必须携带已验证客户端证书，杜绝无证书调用非 enroll 接口（如 FileExt）。
+func requireClientCertUnary(logger *zap.Logger) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if info.FullMethod != grpcProto.Transfer_Transfer_FullMethodName && !hasVerifiedClientCert(ctx) {
+			logger.Warn("拒绝无客户端证书的非 enroll RPC", zap.String("method", info.FullMethod))
+			return nil, status.Errorf(codes.Unauthenticated, "该 RPC 要求已验证客户端证书")
+		}
+		return handler(ctx, req)
+	}
+}
+
+// requireClientCertStream 与 requireClientCertUnary 对应的流拦截器。
+func requireClientCertStream(logger *zap.Logger) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if info.FullMethod != grpcProto.Transfer_Transfer_FullMethodName && !hasVerifiedClientCert(ss.Context()) {
+			logger.Warn("拒绝无客户端证书的非 enroll 流 RPC", zap.String("method", info.FullMethod))
+			return status.Errorf(codes.Unauthenticated, "该 RPC 要求已验证客户端证书")
+		}
+		return handler(srv, ss)
+	}
+}
 
 // CreateGRPCServer 创建并配置 gRPC Server
 func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, error) {
@@ -123,6 +164,13 @@ func CreateGRPCServer(cfg *config.Config, logger *zap.Logger) (*grpc.Server, err
 	antiDoS := cfg.Server.GRPC.AntiDoS
 	unaryChain := []grpc.UnaryServerInterceptor{recoveryUnaryInterceptor(logger)}
 	streamChain := []grpc.StreamServerInterceptor{recoveryStreamInterceptor(logger)}
+	// mTLS 已配置（ClientCAs 生效）时，强制“无客户端证书只能走 Transfer 的 enroll 阶段”，
+	// 其余 RPC 必须携带已验证客户端证书。放在 recovery 之后、限流/指标之前。
+	if cfg.MTLS.CACert != "" && cfg.MTLS.ServerCert != "" {
+		unaryChain = append(unaryChain, requireClientCertUnary(logger))
+		streamChain = append(streamChain, requireClientCertStream(logger))
+		logger.Info("已启用非 enroll RPC 强制客户端证书拦截器")
+	}
 	if antiDoS.PerIPRPS > 0 {
 		ipLimiter := newIPRateLimiter(antiDoS.PerIPRPS, antiDoS.PerIPBurst)
 		unaryChain = append(unaryChain, ipLimiter.unaryInterceptor())

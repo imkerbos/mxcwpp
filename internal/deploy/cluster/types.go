@@ -80,6 +80,7 @@ type SANs struct {
 type App struct {
 	JWTSecret          string `yaml:"jwt_secret"`
 	InternalSecret     string `yaml:"internal_secret"` // Manager↔AgentCenter 管理面鉴权共享密钥
+	EnrollToken        string `yaml:"enroll_token"`    // Agent enroll 引导令牌；留空则 render 自动生成并持久化到 deploy/certs
 	LogLevel           string `yaml:"log_level"`
 	LogFormat          string `yaml:"log_format"`
 	HeartbeatInterval  int    `yaml:"heartbeat_interval"`

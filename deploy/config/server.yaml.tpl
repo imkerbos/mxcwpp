@@ -16,6 +16,17 @@ server:
   # Manager↔AgentCenter 管理面鉴权密钥（deploy.sh 从 .env INTERNAL_SECRET 替换；留空自动生成）。
   # AC 管理端口绑定 0.0.0.0 时必填且需足够强度，否则 fail-closed 拒绝启动。
   internal_secret: "__INTERNAL_SECRET__"
+  # 生产安全加固（依赖 Redis）：安全响应头(含 HSTS，UI 走 443 HTTPS)、登录限流、JWT 黑名单。
+  security:
+    headers:
+      enabled: true
+      hsts: true
+    login_rate_limit:
+      enabled: true
+      rps: 10
+      burst: 5
+    jwt_blacklist:
+      enabled: true
 
 database:
   type: "mysql"
@@ -78,8 +89,16 @@ metrics:
 
 mtls:
   ca_cert: "/etc/mxcwpp/certs/ca.crt"
+  # CA 私钥：AgentCenter 用它按 AgentID 在线签发一机一证（per_agent_cert）。
+  ca_key: "/etc/mxcwpp/certs/ca.key"
   server_cert: "/etc/mxcwpp/certs/server.crt"
   server_key: "/etc/mxcwpp/certs/server.key"
+  # Agent enroll 引导令牌（deploy.sh 从 .env ENROLL_TOKEN 替换；留空自动生成强令牌）。
+  # 生产（非 insecure_dev_mode）必填且需 ≥32 强度，否则 AgentCenter fail-closed 拒绝启动。
+  enroll_token: "__ENROLL_TOKEN__"
+  # 一机一证 + 强制客户端证书 CN==AgentID：生产强制开启，杜绝伪造 AgentID / 共享私钥。
+  per_agent_cert: true
+  enforce_agent_id: true
 
 log:
   level: "__LOG_LEVEL__"

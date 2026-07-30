@@ -334,6 +334,10 @@ type MTLSConfig struct {
 	EnforceAgentID bool `mapstructure:"enforce_agent_id"`
 	// RevokedSerials 是已吊销的证书序列号（十进制字符串）列表，握手期拒绝。
 	RevokedSerials []string `mapstructure:"revoked_serials"`
+	// InsecureDevMode 是显式的不安全开发模式（默认 false）。仅供本地/回环开发放行
+	// “无 per-agent 证书 / 弱信任配置”场景；一旦开启，ValidateAgentCenter 要求 gRPC/HTTP
+	// 均绑定回环地址，且官方 prod/deploy/cluster 渲染绝不设置此项。
+	InsecureDevMode bool `mapstructure:"insecure_dev_mode"`
 }
 
 // LogConfig 是日志配置

@@ -8,7 +8,11 @@
 #   MXCWPP_HTTP_SERVER=http://192.168.8.140:8080 MXCWPP_AGENT_SERVER=192.168.8.140:6751 \
 #   bash -c "$(curl -fsSL http://192.168.8.140:8080/agent/install.sh)"
 #
+# 首次安装必须提供 enroll 令牌（服务端 mtls.enroll_token / deploy 的 .env ENROLL_TOKEN）:
+#   MXCWPP_ENROLL_TOKEN=<token> bash -c "$(curl -fsSL http://SERVER_IP:8080/agent/install.sh)"
+#
 # 可选参数:
+#   MXCWPP_CA_FINGERPRINT=<sha256-hex>  安装包未内置 ca.crt 时用于 pin 住 AgentCenter
 #
 # 注意：如果使用前端代理（如 3000 端口），请确保代理已配置 /agent 路径
 
@@ -232,6 +236,50 @@ install_package() {
     rmdir "$(dirname "$PACKAGE_FILE")" 2>/dev/null
 }
 
+# 配置 Agent↔AgentCenter 信任链引导参数。
+#
+# MXCWPP_ENROLL_TOKEN：首连 enroll 引导令牌，与服务端 mtls.enroll_token 一致（部署时由
+#   deploy.sh 生成并写入 deploy/.env 的 ENROLL_TOKEN）。新装机器无此令牌无法换取单机证书。
+# MXCWPP_CA_FINGERPRINT：AC CA 的 SHA-256 指纹，用于安装包未内置 ca.crt 时 pin 住 AC。
+#
+# 令牌**不**经 /agent/install.sh 下发（该端点匿名可访问），必须由安装者显式注入环境变量。
+# 写入 root-only 0600 的 EnvironmentFile，避免出现在进程参数 / ps / unit 文件中。
+# 未提供且本机已有配置文件时保持原样，保证重装/升级幂等。
+configure_agent_trust() {
+    local env_dir="/etc/mxcwpp-agent"
+    local env_file="$env_dir/agent.env"
+
+    if [ -z "$MXCWPP_ENROLL_TOKEN" ] && [ -z "$MXCWPP_CA_FINGERPRINT" ]; then
+        if [ -f "$env_file" ]; then
+            echo -e "${GREEN}Reusing existing trust config: ${env_file}${NC}"
+            return
+        fi
+        if [ -f /var/lib/mxcwpp-agent/certs/client.crt ]; then
+            # 已持有客户端证书，走正常 mTLS，无需 enroll 令牌。
+            return
+        fi
+        # 全新安装且既无令牌又无客户端证书：装上去也只会 enroll 失败并反复重连。
+        # 在此直接失败，避免留下一台"已安装但永不上线"的机器。
+        echo -e "${RED}Error: MXCWPP_ENROLL_TOKEN is required for a new installation.${NC}"
+        echo -e "${RED}The agent cannot obtain its per-host certificate without it.${NC}"
+        echo -e "${RED}Get the token from the server deployment (.env ENROLL_TOKEN) and re-run:${NC}"
+        echo -e "${RED}  MXCWPP_ENROLL_TOKEN=<token> bash -c \"\$(curl -fsSL \$SERVER_HOST/agent/install.sh)\"${NC}"
+        exit 1
+    fi
+
+    mkdir -p "$env_dir"
+    chmod 700 "$env_dir"
+    : > "$env_file"
+    chmod 600 "$env_file"
+    if [ -n "$MXCWPP_ENROLL_TOKEN" ]; then
+        echo "MXCWPP_ENROLL_TOKEN=${MXCWPP_ENROLL_TOKEN}" >> "$env_file"
+    fi
+    if [ -n "$MXCWPP_CA_FINGERPRINT" ]; then
+        echo "MXCWPP_CA_FINGERPRINT=${MXCWPP_CA_FINGERPRINT}" >> "$env_file"
+    fi
+    echo -e "${GREEN}Trust config written to ${env_file} (root-only)${NC}"
+}
+
 # 配置业务线环境变量（如果提供了）
 configure_business_line() {
     if [ -n "$BUSINESS_LINE" ]; then
@@ -256,9 +304,9 @@ EOF
 start_service() {
     echo -e "${GREEN}Starting agent service...${NC}"
     
-    # 配置业务线（如果提供了）
+    # 信任链引导参数已在 main 早期落地（configure_agent_trust）
     configure_business_line
-    
+
     systemctl daemon-reload
     systemctl enable mxcwpp-agent
     systemctl start mxcwpp-agent
@@ -295,7 +343,11 @@ main() {
     echo -e "${GREEN}HTTP Server: ${SERVER_HOST}${NC}"
     echo -e "${GREEN}Agent Server: ${AGENT_SERVER_HOST}${NC}"
     echo ""
-    
+
+    # 先落地信任链引导参数：缺 enroll 令牌的全新安装会在此直接失败，
+    # 避免下载安装完成后才发现这台机器永远无法上线。
+    configure_agent_trust
+
     # 下载并安装
     PACKAGE_FILE=$(download_package)
     install_package "$PACKAGE_FILE"
