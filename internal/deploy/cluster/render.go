@@ -93,11 +93,12 @@ type pdfDoc struct {
 }
 
 type serverDoc struct {
-	GRPC        endpointDoc `yaml:"grpc"`
-	HTTP        endpointDoc `yaml:"http"`
-	JWTSecret   string      `yaml:"jwt_secret"`
-	ManagerAddr string      `yaml:"manager_addr"`
-	InstanceID  string      `yaml:"instance_id"`
+	GRPC           endpointDoc `yaml:"grpc"`
+	HTTP           endpointDoc `yaml:"http"`
+	JWTSecret      string      `yaml:"jwt_secret"`
+	InternalSecret string      `yaml:"internal_secret"`
+	ManagerAddr    string      `yaml:"manager_addr"`
+	InstanceID     string      `yaml:"instance_id"`
 }
 
 type endpointDoc struct {
@@ -451,11 +452,12 @@ func renderTemplateFile(tmplPath, outputPath string, data any, mode os.FileMode)
 func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, managerHTTPPort int) error {
 	doc := serverConfigDoc{
 		Server: serverDoc{
-			GRPC:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
-			HTTP:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
-			JWTSecret:   cfg.App.JWTSecret,
-			ManagerAddr: fmt.Sprintf("http://localhost:%d", managerHTTPPort),
-			InstanceID:  assignment.Node.Name,
+			GRPC:           endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
+			HTTP:           endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
+			JWTSecret:      cfg.App.JWTSecret,
+			InternalSecret: cfg.App.InternalSecret,
+			ManagerAddr:    fmt.Sprintf("http://localhost:%d", managerHTTPPort),
+			InstanceID:     assignment.Node.Name,
 		},
 		Database: databaseDoc{
 			Type: "mysql",

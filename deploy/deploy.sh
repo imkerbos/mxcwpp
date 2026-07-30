@@ -150,6 +150,11 @@ init_env() {
     JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
     log_info "已自动生成 JWT 密钥"
 
+    # 内部服务密钥（Manager↔AgentCenter 管理面鉴权）。AC 管理端口绑定 0.0.0.0，
+    # 未配置强密钥将拒绝启动（fail-closed），此处自动生成。
+    INTERNAL_SECRET=$(openssl rand -hex 32)
+    log_info "已自动生成内部服务密钥（internal_secret）"
+
     # 日志保留天数
     read -p "日志保留天数 [7]: " LOG_RETENTION_DAYS
     LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
@@ -246,6 +251,9 @@ PLUGINS_BASE_URL=
 
 # ============ JWT ============
 JWT_SECRET=$JWT_SECRET
+
+# ============ Internal Communication ============
+INTERNAL_SECRET=$INTERNAL_SECRET
 EOF
 
     chmod 600 "$ENV_FILE"
@@ -305,6 +313,44 @@ init_certs() {
     log_info "证书生成完成"
 }
 
+# is_strong_secret 判断内部密钥是否达标：非空、长度 >=32、非模板占位符、非弱默认值。
+# 与 Go 侧 config.ValidateInternalSecret 保持一致，避免 shell/Go 门槛不一致。
+is_strong_secret() {
+    local s="${1:-}" low
+    [ -n "$s" ] || return 1
+    [ "${#s}" -ge 32 ] || return 1
+    case "$s" in *__*) return 1 ;; esac
+    low="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]')"
+    case "$low" in
+        *change-me*|*changeme*|*change_me*|*change-this*|*changethis*) return 1 ;;
+        secret|password|default|test|example|mxcwppinternalsecret789) return 1 ;;
+    esac
+    return 0
+}
+
+# persist_internal_secret 把 INTERNAL_SECRET 写为 .env 中唯一一行 INTERNAL_SECRET=<value>，
+# 删除任何已有（含空/重复/弱）行，权限 0600。
+persist_internal_secret() {
+    [ -f "$ENV_FILE" ] || : > "$ENV_FILE"
+    local tmp
+    tmp="$(mktemp)"
+    grep -v '^INTERNAL_SECRET=' "$ENV_FILE" > "$tmp" 2>/dev/null || true
+    printf 'INTERNAL_SECRET=%s\n' "$INTERNAL_SECRET" >> "$tmp"
+    mv "$tmp" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+}
+
+# ensure_internal_secret 确保 INTERNAL_SECRET 达标并稳定持久化到 .env。
+# 幂等：已达标则原值重写（唯一一行），未达标（缺/空/弱/重复）才生成新强密钥；重复执行不轮换。
+ensure_internal_secret() {
+    if ! is_strong_secret "${INTERNAL_SECRET:-}"; then
+        INTERNAL_SECRET="$(openssl rand -hex 32)"
+        log_warn "INTERNAL_SECRET 缺失或强度不足，已生成强密钥（Manager↔AgentCenter 管理面鉴权必需）"
+    fi
+    persist_internal_secret
+    log_info "INTERNAL_SECRET 已持久化到 .env（唯一一行，重复执行不变更）"
+}
+
 init_config() {
     source "$ENV_FILE"
 
@@ -328,6 +374,10 @@ init_config() {
     kafka2="${kafka2:-$kafka1}"
     kafka3="${kafka3:-$kafka2}"
     local PLUGINS_URL="${PLUGINS_BASE_URL:-http://$SERVER_IP:${HTTP_PORT:-80}/api/v1/plugins/download}"
+
+    # internal_secret 自愈+持久化：升级场景下若 .env 未设置（历史部署留空），生成强密钥
+    # 并稳定写回 .env，避免 AC 管理端口 fail-closed 拒绝启动，且重复执行不轮换。
+    ensure_internal_secret
 
     sed -i.bak \
         -e "s|__GRPC_PORT__|${GRPC_PORT:-6751}|g" \
@@ -369,6 +419,7 @@ init_config() {
         -e "s|__PLUGINS_DIR__|${PLUGINS_DIR:-/opt/mxcwpp/plugins}|g" \
         -e "s|__PLUGINS_BASE_URL__|${PLUGINS_URL}|g" \
         -e "s|__JWT_SECRET__|${JWT_SECRET:-change-me-in-production}|g" \
+        -e "s|__INTERNAL_SECRET__|${INTERNAL_SECRET}|g" \
         -e "s|__MANAGER_ADDR__|${MANAGER_ADDR:-http://manager:8080}|g" \
         -e "s|__INSTANCE_ID__|${INSTANCE_ID:-}|g" \
         "$SCRIPT_DIR/config/server.yaml"

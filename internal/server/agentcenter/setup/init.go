@@ -60,8 +60,11 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 		return nil, err
 	}
 
-	// 2. 验证配置
+	// 2. 验证配置（通用规则 + AgentCenter 特有的网络边界 fail-closed 规则）
 	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateAgentCenter(); err != nil {
 		return nil, err
 	}
 
@@ -248,7 +251,9 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	httpRouter := gin.New()
 	httpRouter.Use(gin.Recovery())
 	mgmtHandler := httptrans.NewHandler(transferService, logger)
-	mgmtHandler.RegisterRoutes(httpRouter.Group("/"))
+	mgmtHandler.RegisterRoutes(httpRouter.Group("/"), cfg.Server.InternalSecret)
+	// /metrics 保持匿名供 Prometheus 抓取；由部署拓扑保证 AC 管理端口仅受控网络可达，
+	// 不发布到宿主公网。ValidateAgentCenter 已强制外部可达绑定必须配置强 internal_secret。
 	httpRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// 自暴露 build 元信息（version + PID），monitor.go 通过 PromQL 拉取
