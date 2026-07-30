@@ -183,7 +183,8 @@ server:
       burst: 5
     jwt_blacklist:          # 需要 Redis
       enabled: true
-    allow_custom_exec_rules: false   # 默认 false，见下
+    allow_custom_exec_rules: false            # 禁止**新增**自定义可执行规则
+    block_existing_custom_exec_rules: false   # 派发时是否拦截**存量**自定义可执行规则
 ```
 
 `jwt_secret` 与 `internal_secret` 均要求 ≥32 字符、非占位符、非常见弱值，否则 Manager 拒绝启动。`login_rate_limit` 与 `jwt_blacklist` 启用但未配置 Redis 时同样拒绝启动——避免出现「配置里写着 enabled、实际不生效」的静默半失效。
@@ -191,6 +192,12 @@ server:
 `allow_custom_exec_rules` 控制自定义（非内置）基线规则能否携带 `command_exec` 检查与 `fix.command` 修复命令。这两处内容会**以 root 在全部目标主机执行**，因此放开等于把「基线配置权限」提权成「全舰队任意代码执行」。默认 `false`：规则创建、更新与策略导入三个写入口一律拒绝，内置规则（随发布同步，`builtin=true`）不受限制。
 
 该开关只作用于写入路径，**不影响存量规则**。存量清单见 `GET /api/v1/policies/custom-exec-rules`。
+
+`block_existing_custom_exec_rules` 才是管存量的：为 `true` 时，AgentCenter 与 Manager 在**派发阶段**跳过这类规则。默认 `false`——只记 `[AUDIT]` 审计不拦截。
+
+两个开关分开是刻意的：前者关的是「新增提权路径」，可以立即默认收紧而不改变任何现有行为；后者拦的是已经在跑的存量规则，默认打开会静默削减基线覆盖面，那是砍功能不是收紧。正确顺序是先用盘点接口逐条研判，再决定是否开启。
+
+判定按**本次实际下发的内容**算：检查任务会裁剪 `fix.command`，所以只有 `fix.command` 可执行的规则在检查态不算携带可执行内容，不会被误伤。
 
 ### database
 

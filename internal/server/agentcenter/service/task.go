@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -21,6 +22,17 @@ type TaskService struct {
 	db     *gorm.DB
 	logger *zap.Logger
 }
+
+// blockCustomExecRules 控制派发阶段是否跳过"自定义 + 携带可执行内容"的规则。
+//
+// 进程级而非每实例：TaskService 有 6 处构造点，多数拿不到 Config；做成实例字段就等于
+// 埋下"某条派发路径漏设 → 闸门在那条路径上静默失效"的分叉。安全策略在一个进程内只应
+// 有一份取值。默认 false（只记审计不拦截），与配置默认一致。
+var blockCustomExecRules atomic.Bool
+
+// SetBlockCustomExecRules 由持有配置的进程初始化调用一次，见
+// server.security.block_existing_custom_exec_rules。
+func SetBlockCustomExecRules(block bool) { blockCustomExecRules.Store(block) }
 
 // NewTaskService 创建任务服务实例
 func NewTaskService(db *gorm.DB, logger *zap.Logger) *TaskService {
@@ -475,6 +487,15 @@ func (s *TaskService) sendTaskToHostMultiPolicy(
 	return nil
 }
 
+// ruleCarriesExec 判断本次下发的规则内容是否包含会在目标主机执行的部分。
+// stripFixCommand=true（检查任务）时不下发 fix.command，故只看 command_exec。
+func ruleCarriesExec(rule *model.Rule, stripFixCommand bool) bool {
+	if rule.CheckConfig.HasCommandExecCheck() {
+		return true
+	}
+	return !stripFixCommand && rule.FixConfig.HasFixCommand()
+}
+
 // buildMultiPoliciesData 构建多策略数据
 // 返回 json.RawMessage 避免双重 JSON 编码（之前返回 string，嵌入 map 后 Marshal 会再次转义）
 // stripFixCommand: 检查任务不需要 fix.command / fix.restart_services，裁剪以减少传输量
@@ -500,6 +521,7 @@ func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *mod
 		// 收集启用的规则（并按运行时类型过滤）
 		rulesList := make([]map[string]interface{}, 0)
 		var skippedRules []string
+		var customExecRules []string
 		for _, rule := range policy.Rules {
 			if !rule.Enabled {
 				continue
@@ -509,6 +531,17 @@ func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *mod
 				skippedRules = append(skippedRules, rule.RuleID)
 				continue
 			}
+
+			// 自定义规则携带的可执行内容会以 root 在目标主机执行。写入路径已禁止新增，
+			// 此处针对存量：按**本次实际下发的内容**判定——检查任务裁剪了 fix.command，
+			// 只在修复态才可执行的规则不应被检查任务误伤。
+			if !rule.Builtin && ruleCarriesExec(&rule, stripFixCommand) {
+				customExecRules = append(customExecRules, rule.RuleID)
+				if blockCustomExecRules.Load() {
+					continue
+				}
+			}
+
 			ruleData := map[string]interface{}{
 				"rule_id":     rule.RuleID,
 				"category":    rule.Category,
@@ -524,6 +557,17 @@ func (s *TaskService) buildMultiPoliciesData(policies []*model.Policy, host *mod
 				ruleData["fix"] = rule.FixConfig
 			}
 			rulesList = append(rulesList, ruleData)
+		}
+
+		// 存量自定义可执行规则：无论拦截与否都留审计，这份记录同时是盘点依据。
+		if len(customExecRules) > 0 {
+			s.logger.Warn("[AUDIT] 下发了自定义且携带可执行内容的基线规则",
+				zap.String("policy_id", policy.ID),
+				zap.String("host_id", host.HostID),
+				zap.Strings("rule_ids", customExecRules),
+				zap.Bool("blocked", blockCustomExecRules.Load()),
+				zap.String("hint", "清单见 GET /api/v1/policies/custom-exec-rules；"+
+					"确认无需保留后可开启 server.security.block_existing_custom_exec_rules"))
 		}
 
 		// 记录被运行时类型过滤的规则

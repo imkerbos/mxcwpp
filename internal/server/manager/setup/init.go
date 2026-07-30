@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	acservice "github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kms"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
 	"github.com/matrixplusio/mxcwpp/internal/server/database"
@@ -61,6 +62,10 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	if err := cfg.ValidateManager(); err != nil {
 		return nil, err
 	}
+
+	// 基线规则派发闸门是进程级策略。Manager 通过 TaskScheduler 走与 AgentCenter 同一条
+	// 派发链，故两个进程都要设置，否则同一份配置在两侧行为不一致。
+	acservice.SetBlockCustomExecRules(cfg.Server.Security.BlockExistingCustomExecRules)
 
 	// 3. 初始化日志
 	logger, err := serverLogger.Init(cfg.Log)

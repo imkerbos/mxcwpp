@@ -11,24 +11,6 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
-// execCheckerType 是会在目标主机上起 shell 的检查器类型。
-const execCheckerType = "command_exec"
-
-// checkConfigHasExec 判断检查配置是否包含 command_exec。
-func checkConfigHasExec(cfg model.CheckConfig) bool {
-	for _, r := range cfg.Rules {
-		if strings.EqualFold(strings.TrimSpace(r.Type), execCheckerType) {
-			return true
-		}
-	}
-	return false
-}
-
-// fixConfigHasExec 判断修复配置是否携带修复命令。
-func fixConfigHasExec(cfg model.FixConfig) bool {
-	return strings.TrimSpace(cfg.Command) != ""
-}
-
 // guardCustomExecRule 拦截自定义规则携带可执行内容的写入。
 //
 // command_exec 的参数与 fix.command 都会以 root 在全部目标主机上执行，所以放开自定义
@@ -43,10 +25,10 @@ func guardCustomExecRule(allowCustomExec, builtin bool, check model.CheckConfig,
 		return nil
 	}
 	var offending []string
-	if checkConfigHasExec(check) {
+	if check.HasCommandExecCheck() {
 		offending = append(offending, "check_config 含 command_exec 检查")
 	}
-	if fixConfigHasExec(fix) {
+	if fix.HasFixCommand() {
 		offending = append(offending, "fix_config.command 含修复命令")
 	}
 	if len(offending) == 0 {
@@ -123,8 +105,8 @@ func (h *RulesHandler) ListCustomExecRules(c *gin.Context) {
 
 	items := make([]CustomExecRuleItem, 0)
 	for _, r := range rules {
-		hasCheck := checkConfigHasExec(r.CheckConfig)
-		hasFix := fixConfigHasExec(r.FixConfig)
+		hasCheck := r.CheckConfig.HasCommandExecCheck()
+		hasFix := r.FixConfig.HasFixCommand()
 		if !hasCheck && !hasFix {
 			continue
 		}
