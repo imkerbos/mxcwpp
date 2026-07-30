@@ -279,7 +279,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
-	setupRulesAPI(router, db, logger)
+	setupRulesAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupTasksAPI(router, db, logger, acDispatcher)
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger, acDispatcher)
@@ -291,7 +291,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
 	setupIncidentAPI(router, db, logger)
-	setupPolicyImportExportAPI(router, db, logger)
+	setupPolicyImportExportAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
@@ -505,8 +505,8 @@ func setupPoliciesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 }
 
 // setupRulesAPI 设置规则 API 路由
-func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewRulesHandler(db, logger)
+func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	handler := api.NewRulesHandler(db, logger, allowCustomExec)
 	router.GET("/policies/:policy_id/rules", handler.ListRules)
 	router.POST("/policies/:policy_id/rules", handler.CreateRule)
 	router.GET("/rules/:rule_id", handler.GetRule)
@@ -778,8 +778,8 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupPolicyImportExportAPI 设置策略导入导出 API 路由
-func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	api.RegisterPolicyImportExportRoutes(router, db, logger)
+func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	api.RegisterPolicyImportExportRoutes(router, db, logger, allowCustomExec)
 }
 
 // setupInspectionAPI 设置运维巡检 API 路由

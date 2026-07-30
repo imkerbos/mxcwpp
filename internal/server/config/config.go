@@ -115,6 +115,14 @@ type SecurityConfig struct {
 	Headers        SecurityHeadersConfig `mapstructure:"headers"`          // 安全响应头
 	LoginRateLimit RateLimitRuleConfig   `mapstructure:"login_rate_limit"` // 登录接口 IP 限流（防爆破）
 	JWTBlacklist   JWTBlacklistConfig    `mapstructure:"jwt_blacklist"`    // 登出 JWT 黑名单（需 Redis）
+	// AllowCustomExecRules 允许自定义（非内置）基线规则携带 command_exec 检查与
+	// fix.command 修复命令。默认 false。
+	//
+	// 这两个字段的内容会以 root 在全部目标主机上执行，因此"能编辑基线规则"等价于
+	// "能在全舰队执行任意代码"——对只应拥有基线配置权限的角色而言是提权。内置规则
+	// （builtin=true，随发布同步）不受此开关限制。
+	// 确有自定义可执行规则需求的环境才显式开启，且开启后每次执行都会留审计。
+	AllowCustomExecRules bool `mapstructure:"allow_custom_exec_rules"`
 }
 
 // SecurityHeadersConfig 控制安全响应头中间件。

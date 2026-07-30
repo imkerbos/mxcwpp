@@ -582,7 +582,8 @@ func (h *PoliciesHandler) BatchExport(c *gin.Context) {
 		return
 	}
 
-	exportHandler := NewPolicyImportExportHandler(h.db, h.logger)
+	// 仅用于导出格式转换，不走导入路径，allowCustomExec 在此无影响。
+	exportHandler := NewPolicyImportExportHandler(h.db, h.logger, false)
 	var exportData []PolicyExportFormat
 	for _, policy := range policies {
 		exportData = append(exportData, exportHandler.convertPolicyToExportFormat(&policy))
