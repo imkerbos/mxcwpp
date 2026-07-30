@@ -151,6 +151,8 @@ func (h *PolicyImportExportHandler) ImportPolicy(c *gin.Context) {
 				zap.String("policy_id", policies[i].ID),
 				zap.String("actor", c.GetString("username")),
 				zap.Error(err))
+			auditExecRuleRejected(c, "baseline_policy.exec_content_rejected", policies[i].ID,
+				"import "+err.Error())
 			BadRequest(c, err.Error())
 			return
 		}

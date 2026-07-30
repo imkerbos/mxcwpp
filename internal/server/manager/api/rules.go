@@ -137,6 +137,8 @@ func (h *RulesHandler) CreateRule(c *gin.Context) {
 			zap.String("policy_id", policyID),
 			zap.String("actor", c.GetString("username")),
 			zap.Error(err))
+		auditExecRuleRejected(c, "baseline_rule.exec_content_rejected", req.RuleID,
+			"create policy_id="+policyID+" "+err.Error())
 		BadRequest(c, err.Error())
 		return
 	}
@@ -228,6 +230,8 @@ func (h *RulesHandler) UpdateRule(c *gin.Context) {
 			zap.String("rule_id", ruleID),
 			zap.String("actor", c.GetString("username")),
 			zap.Error(err))
+		auditExecRuleRejected(c, "baseline_rule.exec_content_rejected", ruleID,
+			"update "+err.Error())
 		BadRequest(c, err.Error())
 		return
 	}

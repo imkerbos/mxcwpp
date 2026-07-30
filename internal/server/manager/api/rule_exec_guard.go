@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/audit"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -135,5 +137,24 @@ func (h *RulesHandler) ListCustomExecRules(c *gin.Context) {
 		"total": len(items),
 		"items": items,
 		"note":  "这些规则的内容会以 root 在目标主机执行。写入路径已禁止新增；存量规则请逐条研判后停用或保留。",
+	})
+}
+
+// auditExecRuleRejected 把"携带可执行内容的自定义规则被拒"记入平台审计流。
+//
+// 这类拒绝是安全事件：它意味着有人尝试写入会在全舰队以 root 执行的内容。只落 zap 日志
+// 等于没有记录——运维看不到、查不到、也无法据此复盘。故与 access.denied 同级进审计。
+func auditExecRuleRejected(c *gin.Context, action, resourceID, detail string) {
+	audit.Record(c.Request.Context(), audit.Event{
+		ActorType:    model.ActorTypeUser,
+		Username:     c.GetString("username"),
+		Action:       action,
+		Outcome:      model.OutcomeFailure,
+		ResourceType: "baseline_rule",
+		ResourceID:   resourceID,
+		Path:         c.Request.URL.Path,
+		IP:           c.ClientIP(),
+		StatusCode:   http.StatusBadRequest,
+		Detail:       detail,
 	})
 }
