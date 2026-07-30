@@ -9,6 +9,7 @@ import (
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -29,11 +30,14 @@ var MetricNames = [featureCount]string{
 // 配合 correlationThreshold 2.0 → 3.0 + 24h dedup 大幅压制 false positive。
 var correlationPatterns = []correlationPattern{
 	{
+		// pattern_name 保留 "c2_beacon" 兼容既有 UI/查询/反馈数据；但语义并非已证实的 C2 信标。
+		// M0 仅有 proc/net/DNS-volume 的量级联合升高，无周期性(beaconing)特征，故 Description 明确为
+		// 待研判的 process/network/DNS-volume correlation、未验证 C2 周期性；Severity 上限 high(绝不 critical)。
 		Name:        "c2_beacon",
-		Description: "Possible C2 beaconing: high network + DNS activity with process execution",
+		Description: "Process/network/DNS-volume correlation pending triage — joint volume elevation across process/network/DNS activity. NOT confirmed C2 beaconing: no periodicity/jitter analysis performed; requires analyst verification.",
 		Indices:     []int{0, 6, 7, 10, 11}, // proc_exec, net_connect, net_unique_ip, dns_query, dns_unique_domain
 		MinActive:   4,                      // 5 个指标至少 4 个 elevated(原 3,误报太多)
-		Severity:    "critical",
+		Severity:    "high",                 // 上限 high：仅量级联合升高不足以判 critical(无周期性证据)
 	},
 	{
 		Name:        "data_exfiltration",
@@ -85,11 +89,6 @@ const (
 	// 5 分钟覆盖大多数攻击短链；过长会引入无关 noise。
 	enrichWindow = 5 * time.Minute
 
-	// correlationDedupWindow:同 host_id + pattern_name 24h 内只生成 1 个 open alert。
-	// prod 实测同 host 7d 内单 pattern 触发 400-2900 次,显然是 detector tuning 问题不是真威胁。
-	// dedup 让 SOC 处置量降到可控,真新告警仍能触发(24h 后窗口外新 pattern 仍写入)。
-	correlationDedupWindow = 24 * time.Hour
-
 	// enrichTopN 控制每类 IOC 最多带回 N 个，避免 trigger_context JSON 膨胀。
 	enrichTopN = 10
 
@@ -110,19 +109,166 @@ type Detector struct {
 	sampleBuffer [][]float64          // recent samples for training
 	hostMeans    map[string][]float64 // per-host running mean for z-score
 	hostCounts   map[string]int       // sample count per host
+	// persistMu synchronizes safety-mode/schema transitions with anomaly_alerts writes.
+	// A writer holds RLock through the DB upsert; SetMode/VerifySchema take Lock, so once
+	// a transition to off/shadow returns, no write admitted under the previous mode can remain in flight.
+	persistMu sync.RWMutex
+
+	suppress *suppressCache // 白名单主机 + 反馈自动抑制（周期 reload，热路径零 DB）
+
+	// M0 安全模式（读写受 mu 保护）。默认 ModeShadow + schema/DNS 未就绪：
+	// 只观测不落库，直到显式配置 context/alert 且 schema gate 通过；alert 还需 schema 就绪才允许 critical。
+	mode        Mode
+	schemaReady bool // anomaly_alerts 必需列 + 去重唯一索引齐备（VerifySchema 设置）
+	dnsValid    bool // DNS domain/rcode 字段可信；M0 恒 false → 禁用依赖 domain/NX 的检测
 }
 
 // NewDetector creates a new anomaly detection engine.
 // chConn 用于告警生成时回查 ebpf_events 拿攻击链 IOC；可为 nil（ClickHouse 未启用时降级，
 // 告警仍生成但 trigger_context 只含 metric_snapshot/elevated_metrics）。
 func NewDetector(db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) *Detector {
-	return &Detector{
+	d := &Detector{
 		logger:     logger,
 		db:         db,
 		chConn:     chConn,
 		forest:     NewIForest(),
 		hostMeans:  make(map[string][]float64),
 		hostCounts: make(map[string]int),
+		suppress:   newSuppressCache(),
+		// 安全默认：shadow 模式（只观测不落库）+ schema/DNS 未就绪。
+		// 调用方须显式 SetMode(LoadMode 结果) / VerifySchema 才能改变。
+		mode:        ModeShadow,
+		schemaReady: false,
+		dnsValid:    false,
+	}
+	d.suppress.reload(db, logger) // 启动即加载一次白名单 + 反馈抑制
+	return d
+}
+
+// SetMode 设置检测器安全模式（规整非法值为 shadow 安全默认）。
+func (d *Detector) SetMode(m Mode) {
+	d.persistMu.Lock()
+	defer d.persistMu.Unlock()
+	d.mu.Lock()
+	d.mode = normalizeMode(string(m))
+	d.mu.Unlock()
+}
+
+// anomalyAlertDedupIndex 是 anomaly_alerts 去重唯一索引名（与 migration 包保持一致）。
+// upsert 去重依赖它才能生效；缺失则 schema gate 判定未就绪、禁止 alert 官方模式。
+const anomalyAlertDedupIndex = "ux_anomaly_alerts_dedup"
+
+// VerifySchema 校验 anomaly_alerts 的必需列（hit_count/last_seen_at）与去重唯一索引是否齐备，
+// 设置并返回 schemaReady。缺失时清晰记录原因：不 fatal 整个进程（服务保持存活、其余功能不受影响），
+// 仅令一切会落库的模式（context/alert）fail-closed 降级为 shadow（只观测不落库，见 EffectiveMode）；
+// 就绪状态通过 Status() 暴露给 /readyz 与 Prometheus。
+func (d *Detector) VerifySchema() bool {
+	ready := true
+	if d.db == nil {
+		d.persistMu.Lock()
+		d.mu.Lock()
+		d.schemaReady = false
+		d.mu.Unlock()
+		d.persistMu.Unlock()
+		d.logger.Warn("anomaly schema gate：db 为空，判定未就绪")
+		return false
+	}
+	mig := d.db.Migrator()
+	var missing []string
+	for _, col := range []string{"hit_count", "last_seen_at"} {
+		if !mig.HasColumn(&model.AnomalyAlert{}, col) {
+			missing = append(missing, "column:"+col)
+			ready = false
+		}
+	}
+	if !mig.HasIndex(&model.AnomalyAlert{}, anomalyAlertDedupIndex) {
+		missing = append(missing, "index:"+anomalyAlertDedupIndex)
+		ready = false
+	}
+	d.persistMu.Lock()
+	d.mu.Lock()
+	d.schemaReady = ready
+	d.mu.Unlock()
+	d.persistMu.Unlock()
+	if ready {
+		d.logger.Info("anomaly schema gate 通过：必需列 + 去重唯一索引齐备")
+	} else {
+		d.logger.Error("anomaly schema gate 未通过：缺失关键 schema，落库模式已 fail-closed 降级为 shadow（只观测不落库）",
+			zap.Strings("missing", missing))
+	}
+	return ready
+}
+
+// EffectiveMode 返回生效模式（fail-closed）：schema 未就绪时，一切会落库的模式（context/alert）
+// 降级为 shadow（只观测不落库）；off 保持 off。
+func (d *Detector) EffectiveMode() Mode {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.effectiveModeLocked()
+}
+
+func (d *Detector) effectiveModeLocked() Mode {
+	if d.mode == ModeOff {
+		return ModeOff
+	}
+	// fail-closed：缺 hit_count/last_seen_at/去重唯一索引时绝不写 anomaly_alerts —— 无去重索引会让
+	// upsert 退化成"每次触发新建一行"刷屏。context/alert 一律降为 shadow（只观测不落库）。
+	if !d.schemaReady {
+		return ModeShadow
+	}
+	return d.mode
+}
+
+// officialCeilingLocked 返回当前允许的最高严重度：仅生效 alert 模式才允许 critical，
+// 其余（off/shadow/context 及降级）封顶 high —— 结构性禁止 ML 信号被当作正式高危定罪。
+func (d *Detector) officialCeilingLocked() string {
+	if d.effectiveModeLocked() == ModeAlert {
+		return "critical"
+	}
+	return "high"
+}
+
+// persistEligibleLocked 判断当前是否允许落库 anomaly_alerts：仅生效 context/alert 两种模式为真。
+// off/shadow 及任何降级/未知模式一律为假。调用方必须持 d.mu；真正写入必须经
+// persistAnomalyIfEligible，在 persistMu 保护下做最终检查，不能依赖早先的模式快照。
+func (d *Detector) persistEligibleLocked() bool {
+	em := d.effectiveModeLocked()
+	return em == ModeContext || em == ModeAlert
+}
+
+// persistAnomalyIfEligible 在真正写库前再次检查生效模式，并把检查与 upsert 放在同一个
+// persistMu 读临界区内。SetMode/VerifySchema 使用写锁，因此不会出现“已切到 off/shadow，
+// 旧协程仍按 context/alert 快照落库”的竞态。
+func (d *Detector) persistAnomalyIfEligible(alert *model.AnomalyAlert) (Mode, bool) {
+	d.persistMu.RLock()
+	defer d.persistMu.RUnlock()
+
+	d.mu.Lock()
+	em := d.effectiveModeLocked()
+	eligible := d.persistEligibleLocked()
+	// 模式可能在前面的检测/富化期间从 alert 切到 context；最终写入前按当前模式再次封顶，
+	// 避免旧的 critical 快照在 context 下落库。
+	alert.Severity = capSeverity(alert.Severity, d.officialCeilingLocked())
+	d.mu.Unlock()
+	if !eligible {
+		return em, false
+	}
+	d.upsertAnomaly(alert)
+	return em, true
+}
+
+// Status 返回检测器运行时状态快照（供 /readyz 与 Prometheus 指标）。
+func (d *Detector) Status() Status {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return Status{
+		Mode:          d.mode,
+		EffectiveMode: d.effectiveModeLocked(),
+		SchemaReady:   d.schemaReady,
+		DNSFieldReady: d.dnsValid,
+		Trained:       d.forest.Trained(),
+		SampleCount:   len(d.sampleBuffer),
+		HostCount:     len(d.hostMeans),
 	}
 }
 
@@ -139,6 +285,7 @@ func (d *Detector) StartRetrain(stop <-chan struct{}) {
 				return
 			case <-ticker.C:
 				d.retrain()
+				d.suppress.reload(d.db, d.logger) // 周期刷新白名单 + 反馈抑制（反馈闭环）
 			}
 		}
 	}()
@@ -152,6 +299,11 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 	}
 
 	d.mu.Lock()
+	// off 模式完全空转：不缓冲、不打分、不产信号。
+	if d.mode == ModeOff {
+		d.mu.Unlock()
+		return
+	}
 	// Add to sample buffer.
 	d.sampleBuffer = append(d.sampleBuffer, metrics)
 	if len(d.sampleBuffer) > sampleWindowSize {
@@ -271,15 +423,23 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		}
 	}
 
-	severity := "medium"
-	if score >= 0.80 {
-		severity = "critical"
-	} else if score >= 0.70 {
-		severity = "high"
+	// 抑制：白名单主机 / 反馈自动抑制直接跳过（IForest 路径也纳入治理）。
+	if d.suppress.suppressed(hostID, "isolation_forest", "") {
+		return
 	}
 
+	// severity 重校准并封顶 high（IForest 是与 BDE 同源重叠的粗粒度信号，不单独判 critical）。
+	severity := forestSeverity(score)
+	if topMetric != "" && isInfraHostname(hostname) {
+		severity = downgradeForInfra(severity)
+	}
+	// M0 安全模式：非生效 alert 一律封顶 high。落库资格在真正 upsert 前再次检查。
+	d.mu.Lock()
+	severity = capSeverity(severity, d.officialCeilingLocked())
+	d.mu.Unlock()
+
 	// 拼描述：让 UI drawer 至少有一行有意义内容，避免 v-if 空白
-	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=0.6 触发告警）", score)
+	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, anomalyThreshold)
 	if topMetric != "" {
 		description = fmt.Sprintf("指标 %s 偏离主机历史均值，当前值 %.2f；Isolation Forest 异常评分 %.2f",
 			topMetric, topValue, score)
@@ -308,8 +468,16 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		Status:         "open",
 	}
 
-	if err := d.db.Create(&alert).Error; err != nil {
-		d.logger.Error("failed to save anomaly alert", zap.Error(err))
+	// 只有生效 context/alert 才落库；off/shadow 及并发降级一律只观测不落库
+	// （零业务影响地观察模型行为，且防止 SetMode 并发切 off 后仍 upsert）。
+	if em, persisted := d.persistAnomalyIfEligible(&alert); !persisted {
+		d.logger.Info("IForest anomaly detected (not persisted)",
+			zap.String("host_id", hostID),
+			zap.String("effective_mode", string(em)),
+			zap.Float64("score", score),
+			zap.String("top_metric", topMetric),
+			zap.String("severity", severity))
+		return
 	}
 
 	d.logger.Warn("IForest anomaly detected",
@@ -358,11 +526,33 @@ func topDeviations(metrics, mean []float64, n int) []model.ElevatedMetric {
 }
 
 func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []float64) {
+	d.mu.Lock()
+	ceiling := d.officialCeilingLocked()
+	dnsValid := d.dnsValid
+	d.mu.Unlock()
+
 	for _, pattern := range correlationPatterns {
+		// M0：DNS domain/rcode 未接生产前，禁用依赖 domain/NX 的侦察检测——它靠 dns_nx_ratio，
+		// 而该字段恒为 0（无 rcode），既不可达又会把 resolver IP 误当域名 IOC。M1 修好 DNS 后放开。
+		if patternRequiresDNSFields(pattern.Name) && !dnsValid {
+			continue
+		}
 		elevatedCount := 0
+		validTotal := 0 // 参与判定的有效指标数（剔除 M0 不可信的 DNS 域名/NX 指标）
 		elevated := make([]model.ElevatedMetric, 0, len(pattern.Indices))
 		for _, idx := range pattern.Indices {
+			// M0：dns_unique_domain / dns_nx_ratio 依赖未采集的 domain/rcode，不可信，
+			// 不计入判定，避免无效 DNS 字段推高覆盖率/severity 产生 critical。
+			if !dnsValid && dnsFieldInvalidIndex(idx) {
+				continue
+			}
+			validTotal++
 			if mean[idx] == 0 {
+				continue
+			}
+			// 绝对下限：指标当前值本身不够高就不算 elevated，
+			// 掐掉"空闲主机基线趋近 0 → 做 1 个连接比值就爆表"的假阳性。
+			if metrics[idx] < metricFloor[idx] {
 				continue
 			}
 			// Simple ratio-based elevation check (current/mean > threshold).
@@ -382,12 +572,20 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			continue
 		}
 
-		// dedup: 24h 内同 host_id + pattern 已有 open alert → 跳过,避免噪声。
-		// SOC 处置/标 false_positive 后,24h 外的新触发仍能生成。
-		// prod 实测同 host 7d 单 pattern 触发 400-2900 次,dedup 让告警量降到可控。
-		if d.hasRecentOpenAlert(hostID, pattern.Name) {
+		// 抑制：白名单主机 / 反馈闭环自动抑制的 (host,pattern) 直接跳过。
+		if d.suppress.suppressed(hostID, "correlation", pattern.Name) {
 			continue
 		}
+
+		// severity 按证据强度分级（覆盖率+平均比值），以 pattern 声明值为上限，
+		// 替代此前一律硬编码 → 消除 c2_beacon 假 critical 洪水。
+		severity := correlationSeverity(pattern.Severity, elevated, validTotal)
+		// 基础设施主机（CDN/ZK/大数据/DB/MQ）有合法周期流量，降一级但不消音（保留可见性）。
+		if isInfraHostname(hostname) {
+			severity = downgradeForInfra(severity)
+		}
+		// M0 安全模式：官方严重度上限（非生效 alert 一律封顶 high，禁止 ML 正式判 critical）。
+		severity = capSeverity(severity, ceiling)
 
 		// Correlation 路径：补充攻击链 IOC（按 pattern 类型回查 ebpf_events）。
 		// 回查失败不阻塞告警生成，只是 trigger_context 字段缺失。
@@ -399,29 +597,41 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 			WindowStart:     windowStart.Format("2006-01-02 15:04:05"),
 			WindowEnd:       now.Format("2006-01-02 15:04:05"),
 		}
-		d.enrichTriggerContext(&trigger, pattern.Name, hostID, windowStart, now)
+		d.enrichTriggerContext(&trigger, pattern.Name, hostID, dnsValid, windowStart, now)
 
+		score := 0.0
+		if validTotal > 0 {
+			score = float64(elevatedCount) / float64(validTotal)
+		}
 		alert := model.AnomalyAlert{
 			HostID:         hostID,
 			Hostname:       hostname,
 			AlertType:      "correlation",
 			PatternName:    pattern.Name,
-			Severity:       pattern.Severity,
-			AnomalyScore:   float64(elevatedCount) / float64(len(pattern.Indices)),
+			Severity:       severity,
+			AnomalyScore:   score,
 			Description:    pattern.Description,
 			TriggerContext: trigger,
 			Status:         "open",
 		}
 
-		if err := d.db.Create(&alert).Error; err != nil {
-			d.logger.Error("failed to save correlation alert", zap.Error(err))
+		// 只有生效 context/alert 才落库；off/shadow 及并发降级一律只观测不落库
+		// （防止 SetMode 在 Ingest 后并发切 off/shadow 时快照仍 upsert）。
+		if em, persisted := d.persistAnomalyIfEligible(&alert); !persisted {
+			d.logger.Info("correlation pattern detected (not persisted)",
+				zap.String("host_id", hostID),
+				zap.String("effective_mode", string(em)),
+				zap.String("pattern", pattern.Name),
+				zap.Int("elevated_metrics", elevatedCount),
+				zap.String("severity", severity))
+			continue
 		}
 
 		d.logger.Warn("correlation pattern detected",
 			zap.String("host_id", hostID),
 			zap.String("pattern", pattern.Name),
 			zap.Int("elevated_metrics", elevatedCount),
-			zap.String("severity", pattern.Severity),
+			zap.String("severity", severity),
 			zap.Int("suspicious_ips", len(trigger.SuspiciousIPs)),
 			zap.Int("suspicious_domains", len(trigger.SuspiciousDomains)),
 			zap.Int("sensitive_files", len(trigger.SensitiveFiles)),
@@ -429,21 +639,30 @@ func (d *Detector) checkCorrelations(hostID, hostname string, metrics, mean []fl
 	}
 }
 
-// hasRecentOpenAlert 检查 24h 内是否已有同 host + pattern 的 open correlation alert,
-// 命中则跳过本次告警生成(dedup)。SOC 处置后(status != open) 不影响新告警。
-func (d *Detector) hasRecentOpenAlert(hostID, patternName string) bool {
-	var cnt int64
-	cutoff := time.Now().Add(-correlationDedupWindow)
-	err := d.db.Model(&model.AnomalyAlert{}).
-		Where("host_id = ? AND alert_type = ? AND pattern_name = ? AND status = ? AND created_at >= ?",
-			hostID, "correlation", patternName, "open", cutoff).
-		Limit(1).
-		Count(&cnt).Error
-	if err != nil {
-		d.logger.Warn("dedup query failed,放行告警", zap.Error(err))
-		return false // 查询失败时放行(宁可多发也别漏)
+// upsertAnomaly 按唯一键 (tenant_id, host_id, alert_type, pattern_name, top_metric) 去重落库：
+// 首次插入，复发则累加 hit_count + 刷新 last_seen/score，绝不新建行、绝不覆盖已处置 status。
+// 结构性根治此前"每次触发新建一行"刷屏，并修掉旧 dedup"标 false_positive 反被解封重报"的缺陷。
+func (d *Detector) upsertAnomaly(alert *model.AnomalyAlert) {
+	now := model.Now()
+	alert.LastSeenAt = now
+	if alert.HitCount == 0 {
+		alert.HitCount = 1
 	}
-	return cnt > 0
+	err := d.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "tenant_id"}, {Name: "host_id"}, {Name: "alert_type"},
+			{Name: "pattern_name"}, {Name: "top_metric"},
+		},
+		DoUpdates: clause.Assignments(map[string]any{
+			"hit_count":     gorm.Expr("hit_count + 1"),
+			"anomaly_score": alert.AnomalyScore,
+			"last_seen_at":  now,
+			"updated_at":    now,
+		}),
+	}).Create(alert).Error
+	if err != nil {
+		d.logger.Error("failed to upsert anomaly alert", zap.Error(err))
+	}
 }
 
 // enrichTriggerContext 根据 pattern 类型回查 ebpf_events 拿 IOC。
@@ -451,7 +670,7 @@ func (d *Detector) hasRecentOpenAlert(hostID, patternName string) bool {
 //
 // 查询都走 proj_time_desc projection + (host_id, timestamp) 过滤，P99 < 200ms。
 // 整体硬上限 enrichQueryTimeout=3s，避免单次告警拖累 BDE 主流程。
-func (d *Detector) enrichTriggerContext(trigger *model.AnomalyTriggerContext, patternName, hostID string, start, end time.Time) {
+func (d *Detector) enrichTriggerContext(trigger *model.AnomalyTriggerContext, patternName, hostID string, dnsValid bool, start, end time.Time) {
 	if d.chConn == nil {
 		return
 	}
@@ -462,8 +681,12 @@ func (d *Detector) enrichTriggerContext(trigger *model.AnomalyTriggerContext, pa
 	case "c2_beacon":
 		trigger.SuspiciousIPs = d.queryTopStrings(ctx, hostID, start, end,
 			"SELECT remote_addr FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type IN ('tcp_connect','udp_send') AND remote_addr != '' GROUP BY remote_addr ORDER BY count() DESC LIMIT ?")
-		trigger.SuspiciousDomains = d.queryTopStrings(ctx, hostID, start, end,
-			"SELECT remote_addr FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'dns_query' AND remote_addr != '' GROUP BY remote_addr ORDER BY count() DESC LIMIT ?")
+		// M0：dns_query 事件的 remote_addr 是 resolver IP、不是被查询域名。DNS domain 字段接通前
+		// 绝不把 resolver IP 当 SuspiciousDomains 富化（否则就是"把 resolver IP 称 domain"）。M1 放开。
+		if dnsValid {
+			trigger.SuspiciousDomains = d.queryTopStrings(ctx, hostID, start, end,
+				"SELECT remote_addr FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'dns_query' AND remote_addr != '' GROUP BY remote_addr ORDER BY count() DESC LIMIT ?")
+		}
 		trigger.ProcessChain = d.queryTopStrings(ctx, hostID, start, end,
 			"SELECT exe FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'process_exec' AND exe != '' GROUP BY exe ORDER BY count() DESC LIMIT ?")
 	case "data_exfiltration":
@@ -477,10 +700,14 @@ func (d *Detector) enrichTriggerContext(trigger *model.AnomalyTriggerContext, pa
 		trigger.ProcessChain = d.queryTopStrings(ctx, hostID, start, end,
 			"SELECT exe FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'process_exec' AND exe != '' GROUP BY exe ORDER BY count() DESC LIMIT ?")
 	case "reconnaissance":
+		// recon 在 M0 已被 patternRequiresDNSFields 整体禁用，此分支仅在 DNS 就绪后可达；
+		// SuspiciousDomains 同样只在 dnsValid 时富化，避免 resolver IP 被当域名。
 		trigger.ScannedPorts = d.queryTopStrings(ctx, hostID, start, end,
 			"SELECT remote_port FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type IN ('tcp_connect','udp_send') AND remote_port != '' GROUP BY remote_port ORDER BY count() DESC LIMIT ?")
-		trigger.SuspiciousDomains = d.queryTopStrings(ctx, hostID, start, end,
-			"SELECT remote_addr FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'dns_query' AND remote_addr != '' GROUP BY remote_addr ORDER BY count() DESC LIMIT ?")
+		if dnsValid {
+			trigger.SuspiciousDomains = d.queryTopStrings(ctx, hostID, start, end,
+				"SELECT remote_addr FROM ebpf_events WHERE host_id = ? AND timestamp >= ? AND timestamp <= ? AND event_type = 'dns_query' AND remote_addr != '' GROUP BY remote_addr ORDER BY count() DESC LIMIT ?")
+		}
 	}
 }
 

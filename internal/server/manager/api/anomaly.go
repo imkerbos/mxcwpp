@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -54,10 +55,17 @@ func (h *AnomalyHandler) ListAnomalies(c *gin.Context) {
 	}
 
 	var total int64
-	q.Count(&total)
+	if err := q.Count(&total).Error; err != nil {
+		h.logger.Warn("异常告警计数失败", zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
 
 	var alerts []model.AnomalyAlert
-	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&alerts).Error; err != nil {
+	// 按最近复发时间倒序，同刻再按 id 倒序 —— 让"最新复发"的告警排在最前，稳定分页。
+	if err := q.Order("last_seen_at DESC").Order("id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Find(&alerts).Error; err != nil {
+		h.logger.Warn("异常告警查询失败", zap.Error(err))
 		InternalError(c, "查询失败")
 		return
 	}
@@ -152,15 +160,31 @@ func (h *AnomalyHandler) ResolveAnomaly(c *gin.Context) {
 
 	var alert model.AnomalyAlert
 	if err := h.db.First(&alert, id).Error; err != nil {
-		NotFound(c, "异常告警不存在")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			NotFound(c, "异常告警不存在")
+			return
+		}
+		h.logger.Warn("异常告警查询失败", zap.Uint64("id", id), zap.Error(err))
+		InternalError(c, "查询失败")
 		return
 	}
 
 	username, _ := c.Get("username")
-	h.db.Model(&alert).Updates(map[string]any{
+	if err := h.db.Model(&alert).Updates(map[string]any{
 		"status":      req.Status,
 		"resolved_by": fmt.Sprintf("%v", username),
-	})
+	}).Error; err != nil {
+		h.logger.Warn("异常告警状态更新失败", zap.Uint64("id", id), zap.Error(err))
+		InternalError(c, "更新失败")
+		return
+	}
+
+	// 重新读取最新行返回，避免把 Updates 前的旧 status/resolved_by 回给前端。
+	if err := h.db.First(&alert, id).Error; err != nil {
+		h.logger.Warn("异常告警更新后回读失败", zap.Uint64("id", id), zap.Error(err))
+		InternalError(c, "查询失败")
+		return
+	}
 
 	Success(c, alert)
 }

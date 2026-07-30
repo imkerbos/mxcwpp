@@ -15,7 +15,7 @@ type AnomalyTriggerContext struct {
 
 	// 攻击链 IOC（按 pattern 类型回查 ebpf_events 5 分钟窗口聚合）
 	SuspiciousIPs     []string `json:"suspicious_ips,omitempty"`     // 关联可疑远端 IP
-	SuspiciousDomains []string `json:"suspicious_domains,omitempty"` // 关联可疑 DNS 域名
+	SuspiciousDomains []string `json:"suspicious_domains,omitempty"` // 关联可疑 DNS 域名（仅 DNS domain 字段接通后填充；M0 不填，避免把 resolver IP 当域名）
 	SensitiveFiles    []string `json:"sensitive_files,omitempty"`    // 命中的敏感文件路径
 	ProcessChain      []string `json:"process_chain,omitempty"`      // 高频执行的进程 exe 路径
 	ScannedPorts      []string `json:"scanned_ports,omitempty"`      // 扫描的远端端口
@@ -58,8 +58,12 @@ type AnomalyAlert struct {
 	TriggerContext AnomalyTriggerContext `gorm:"type:text" json:"trigger_context,omitempty"`  // 触发证据 + IOC（JSON 文本列）
 	Status         string                `gorm:"type:varchar(20);default:open" json:"status"` // open/confirmed/false_positive
 	ResolvedBy     string                `gorm:"type:varchar(100)" json:"resolved_by,omitempty"`
-	CreatedAt      LocalTime             `json:"created_at"`
-	UpdatedAt      LocalTime             `json:"updated_at"`
+	// HitCount: 同一 (host+alert_type+pattern+top_metric) 复发次数（upsert 去重累加），
+	// 替代此前"每次触发新建一行"的刷屏。LastSeenAt 记最近一次复发时间。
+	HitCount   int       `gorm:"column:hit_count;default:1" json:"hit_count"`
+	LastSeenAt LocalTime `gorm:"column:last_seen_at" json:"last_seen_at"`
+	CreatedAt  LocalTime `json:"created_at"`
+	UpdatedAt  LocalTime `json:"updated_at"`
 }
 
 func (AnomalyAlert) TableName() string { return "anomaly_alerts" }

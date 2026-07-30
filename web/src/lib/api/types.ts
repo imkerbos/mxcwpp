@@ -2112,6 +2112,8 @@ export interface AnomalyEvent {
   trigger_context?: AnomalyTriggerContext;
   status: "open" | "confirmed" | "false_positive";
   resolved_by: string;
+  hit_count: number;
+  last_seen_at: string;
   created_at: string;
   updated_at: string;
 }

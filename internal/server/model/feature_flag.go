@@ -35,6 +35,11 @@ const (
 	FlagDataSourcePorts           = "data_source.ports"
 	FlagDataSourceServices        = "data_source.services"
 	FlagDataSourceKernelModules   = "data_source.kernel_modules"
+
+	// FlagAnomalyDetectorMode 控制 ML 异常检测器（IForest + correlation）的行为安全模式。
+	// 取值 off/shadow/context/alert（见 engine/anomaly.Mode）。默认 shadow：只写日志/指标、不落库，
+	// 缺配置绝不默认写正式告警。缺失/非法值一律回落 shadow（绝不回落 context/alert）。
+	FlagAnomalyDetectorMode = "anomaly.detector_mode"
 )
 
 // FeatureFlagSeed 启动时 AutoMigrate 后 seed 的默认值。
@@ -54,4 +59,5 @@ var DefaultFeatureFlags = []FeatureFlagSeed{
 	{FlagDataSourcePorts, "mysql", "ports 资产快照数据源"},
 	{FlagDataSourceServices, "mysql", "services 资产快照数据源"},
 	{FlagDataSourceKernelModules, "mysql", "kernel_modules 资产快照数据源"},
+	{FlagAnomalyDetectorMode, "shadow", "ML 异常检测器安全模式 off/shadow/context/alert；默认 shadow（只写日志/指标不落库，缺配置绝不默认写正式告警）"},
 }

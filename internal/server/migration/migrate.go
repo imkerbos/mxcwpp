@@ -193,6 +193,14 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		logger.Warn("behavior_alerts 去重/唯一索引失败", zap.Error(err))
 	}
 
+	// anomaly_alerts 存量去重 + 唯一索引，让 ML 异常引擎落库改 upsert
+	// (同 host+alert_type+pattern+top_metric 累加 hit_count 不新增行，根治 c2_beacon 刷屏)。
+	// 迁移失败不静默 Warn 掩盖：记 Error 明示 —— 缺唯一索引会让 upsert 退化成刷屏，
+	// 检测器 VerifySchema 会因索引缺失判定 schema 未就绪并 fail-closed（落库模式降级 shadow，只观测不落库）。
+	if err := migrateAnomalyAlertDedup(db, logger); err != nil {
+		logger.Error("anomaly_alerts 去重/唯一索引迁移失败：检测器将因 schema 未就绪 fail-closed 降级 shadow（只观测不落库）", zap.Error(err))
+	}
+
 	// 合并三条重复的 touch 时间戳篡改规则(同 T1070.006 三重告警)，禁用冗余两条
 	if err := migrateDedupTimestampRules(db, logger); err != nil {
 		logger.Warn("合并重复时间戳规则失败", zap.Error(err))
@@ -334,6 +342,109 @@ func migrateDedupTimestampRules(db *gorm.DB, logger *zap.Logger) error {
 
 // behaviorAlertDedupIndex 是 behavior_alerts 的 (tenant_id, host_id, metric) 唯一索引名。
 const behaviorAlertDedupIndex = "ux_behavior_alerts_host_metric"
+
+// anomalyAlertDedupIndex 是 anomaly_alerts 的去重唯一索引名。
+const anomalyAlertDedupIndex = "ux_anomaly_alerts_dedup"
+
+// migrateAnomalyAlertDedup 为 anomaly_alerts 建 (tenant_id, host_id, alert_type, pattern_name, top_metric)
+// 唯一索引，让 ML 异常引擎落库改 upsert（同键复发累加 hit_count，不新增行、不覆盖已处置 status）。
+// 根治 c2_beacon 每次触发新建一行的刷屏，并修掉旧 dedup"标 false_positive 反被解封重报"的缺陷。
+func migrateAnomalyAlertDedup(db *gorm.DB, logger *zap.Logger) error {
+	hasIndex := db.Migrator().HasIndex(&model.AnomalyAlert{}, anomalyAlertDedupIndex)
+	var nullKeyRows int64
+	if err := db.Model(&model.AnomalyAlert{}).
+		Where("tenant_id IS NULL OR host_id IS NULL OR alert_type IS NULL OR pattern_name IS NULL OR top_metric IS NULL").
+		Count(&nullKeyRows).Error; err != nil {
+		return fmt.Errorf("anomaly_alerts 历史 NULL 键检查失败: %w", err)
+	}
+	// 已有唯一索引仍可能含多条 NULL 键（MySQL UNIQUE 允许多个 NULL）。为安全归一化，
+	// 仅在确有 NULL 键时临时移除索引；任一步失败都会被 runtime schema gate 降级为 shadow。
+	if hasIndex && nullKeyRows > 0 {
+		if err := db.Migrator().DropIndex(&model.AnomalyAlert{}, anomalyAlertDedupIndex); err != nil {
+			return fmt.Errorf("anomaly_alerts 临时移除旧唯一索引失败: %w", err)
+		}
+		hasIndex = false
+	}
+
+	// 先把历史 NULL 去重键归一化。MySQL UNIQUE 允许多个 NULL，且 NULL = NULL 不成立；
+	// 不归一化会导致旧行无法合并、后续 upsert 也永远命不中旧行。
+	for _, stmt := range []string{
+		"UPDATE anomaly_alerts SET tenant_id = 't-default' WHERE tenant_id IS NULL OR tenant_id = ''",
+		"UPDATE anomaly_alerts SET host_id = '' WHERE host_id IS NULL",
+		"UPDATE anomaly_alerts SET alert_type = '' WHERE alert_type IS NULL",
+		"UPDATE anomaly_alerts SET pattern_name = '' WHERE pattern_name IS NULL",
+		"UPDATE anomaly_alerts SET top_metric = '' WHERE top_metric IS NULL",
+		"UPDATE anomaly_alerts SET hit_count = 1 WHERE hit_count IS NULL OR hit_count < 1",
+		"UPDATE anomaly_alerts SET last_seen_at = COALESCE(last_seen_at, updated_at, created_at, CURRENT_TIMESTAMP) WHERE last_seen_at IS NULL",
+	} {
+		if err := db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("anomaly_alerts 历史字段归一化失败: %w", err)
+		}
+	}
+
+	if hasIndex {
+		return nil
+	}
+
+	// 存量去重仅在 MySQL 上执行（sqlite 测试环境无存量）。保留每组最小 id，hit_count 置为组行数。
+	if db.Dialector.Name() == "mysql" {
+		if err := db.Exec(`
+UPDATE anomaly_alerts a
+JOIN (
+	SELECT MIN(id) AS keep_id, SUM(GREATEST(hit_count, 1)) AS cnt, MAX(last_seen_at) AS last_seen
+	FROM anomaly_alerts
+	GROUP BY tenant_id, host_id, alert_type, pattern_name, top_metric
+) g ON a.id = g.keep_id
+SET a.hit_count = g.cnt, a.last_seen_at = g.last_seen`).Error; err != nil {
+			return fmt.Errorf("anomaly_alerts 累加 hit_count 失败: %w", err)
+		}
+		r := db.Exec(`
+DELETE a FROM anomaly_alerts a
+JOIN (
+	SELECT MIN(id) AS keep_id, tenant_id, host_id, alert_type, pattern_name, top_metric
+	FROM anomaly_alerts
+	GROUP BY tenant_id, host_id, alert_type, pattern_name, top_metric
+) g ON a.tenant_id = g.tenant_id AND a.host_id = g.host_id AND a.alert_type = g.alert_type
+	AND a.pattern_name = g.pattern_name AND a.top_metric = g.top_metric
+WHERE a.id <> g.keep_id`)
+		if r.Error != nil {
+			return fmt.Errorf("anomaly_alerts 删除重复行失败: %w", r.Error)
+		}
+		if r.RowsAffected > 0 {
+			logger.Info("anomaly_alerts 存量去重", zap.Int64("removed", r.RowsAffected))
+		}
+	} else if db.Dialector.Name() == "sqlite" {
+		// SQLite 仅用于本地/测试，但仍完整验证历史归一化 + 去重契约。
+		if err := db.Exec(`
+UPDATE anomaly_alerts AS a
+SET hit_count = (
+	SELECT COALESCE(SUM(CASE WHEN b.hit_count < 1 THEN 1 ELSE b.hit_count END), 1) FROM anomaly_alerts AS b
+	WHERE b.tenant_id = a.tenant_id AND b.host_id = a.host_id AND b.alert_type = a.alert_type
+		AND b.pattern_name = a.pattern_name AND b.top_metric = a.top_metric
+), last_seen_at = (
+	SELECT MAX(b.last_seen_at) FROM anomaly_alerts AS b
+	WHERE b.tenant_id = a.tenant_id AND b.host_id = a.host_id AND b.alert_type = a.alert_type
+		AND b.pattern_name = a.pattern_name AND b.top_metric = a.top_metric
+)`).Error; err != nil {
+			return fmt.Errorf("anomaly_alerts sqlite 累加 hit_count 失败: %w", err)
+		}
+		if err := db.Exec(`
+DELETE FROM anomaly_alerts
+WHERE id NOT IN (
+	SELECT MIN(id) FROM anomaly_alerts
+	GROUP BY tenant_id, host_id, alert_type, pattern_name, top_metric
+)`).Error; err != nil {
+			return fmt.Errorf("anomaly_alerts sqlite 删除重复行失败: %w", err)
+		}
+	}
+
+	if err := db.Exec("CREATE UNIQUE INDEX " + anomalyAlertDedupIndex +
+		" ON anomaly_alerts (tenant_id, host_id, alert_type, pattern_name, top_metric)").Error; err != nil {
+		return fmt.Errorf("anomaly_alerts 唯一索引创建失败: %w", err)
+	}
+	logger.Info("anomaly_alerts 唯一索引已创建，ML 异常落库启用 upsert 去重")
+	return nil
+}
 
 // migrateBehaviorAlertDedup 为 behavior_alerts 建 (tenant_id, host_id, metric) 唯一索引，
 // 使 BDE 落库改 upsert：同主机同指标的稳态偏离每 60s 复发只累加 hit_count，不再无限新增行。

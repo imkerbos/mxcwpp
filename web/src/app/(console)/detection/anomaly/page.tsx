@@ -43,7 +43,7 @@ const metricCn = (k: string) => METRIC_LABEL[k] ?? k;
 
 // 异常模式 → 人话研判 + 处置建议
 const PATTERN_VERDICT: Record<string, { verdict: string; action: string }> = {
-  c2_beacon: { verdict: "主机疑似 C2 回连:网络+DNS 活动异常升高,符合信标/隐蔽通道特征。", action: "隔离主机,核对外联进程链是否合法,封禁可疑外联 IP/域名。" },
+  c2_beacon: { verdict: "进程/网络/DNS 量级联合异常升高,待研判:尚未验证 C2 周期性(非已证实信标),需人工确认是否合法。", action: "核对外联进程链是否合法,评估是否需隔离主机与封禁可疑外联 IP。" },
   data_exfiltration: { verdict: "疑似数据外传:外联与数据传输量异常,可能存在数据渗出。", action: "阻断外传通道,排查敏感数据访问,评估泄露范围。" },
   privilege_escalation: { verdict: "疑似提权:进程/权限相关指标异常,可能存在提权尝试。", action: "核查 sudo/setuid 与内核提权痕迹,修补相关漏洞。" },
   reconnaissance: { verdict: "疑似侦察:短时大量探测类行为,可能是攻击前置侦察。", action: "确认是否来自合法运维,核查来源进程。" },
@@ -191,6 +191,17 @@ export default function AnomalyPage() {
       render: (r) => <span className="font-mono text-xs text-faint">{r.top_metric || "—"}</span>,
     },
     {
+      key: "last_seen_at",
+      title: t("detection.anomaly.colLastSeen"),
+      render: (r) => <span className="tabular-nums text-faint">{r.last_seen_at || "—"}</span>,
+    },
+    {
+      key: "hit_count",
+      title: t("detection.anomaly.colHitCount"),
+      align: "right",
+      render: (r) => <span className="tabular-nums text-muted">{r.hit_count ?? 1}</span>,
+    },
+    {
       key: "status",
       title: t("common.status"),
       render: (r) => <StatusTag tone={statusMeta[r.status].tone}>{statusMeta[r.status].label}</StatusTag>,
@@ -302,6 +313,8 @@ export default function AnomalyPage() {
               <Field label={t("detection.anomaly.fieldTopMetric")} value={<span className="font-mono">{detail.top_metric || "—"}</span>} />
               <Field label={t("detection.anomaly.fieldTopValue")} value={<span className="tabular-nums">{detail.top_value}</span>} />
               <Field label={t("detection.anomaly.fieldFoundAt")} value={<span className="tabular-nums">{detail.created_at}</span>} />
+              <Field label={t("detection.anomaly.fieldLastSeen")} value={<span className="tabular-nums">{detail.last_seen_at || "—"}</span>} />
+              <Field label={t("detection.anomaly.fieldHitCount")} value={<span className="tabular-nums">{detail.hit_count ?? 1}</span>} />
             </div>
             {/* 研判与处置(人话,取代直接看元数据) */}
             {(() => {
