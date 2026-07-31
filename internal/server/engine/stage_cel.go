@@ -134,3 +134,7 @@ func actionFromRule(rule any) json.RawMessage {
 
 // 编译期断言
 var _ Stage = (*CelRuleStage)(nil)
+
+// PersistsOwnAlerts 表明本 Stage 通过 AlertGenerator 自行把告警写进 alerts 表，
+// 流水线不应再统一落库一次，否则同一次命中会在界面上出现两条。
+func (s *CelRuleStage) PersistsOwnAlerts() bool { return s.alertGen != nil }

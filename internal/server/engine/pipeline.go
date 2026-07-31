@@ -20,10 +20,11 @@ import (
 //
 // 设计文档: docs/engine-detection-design.md
 type Pipeline struct {
-	producer *AlertProducer
-	resolver *mode.MemoryResolver
-	stages   []Stage
-	logger   *zap.Logger
+	producer    *AlertProducer
+	alertWriter *StageAlertWriter
+	resolver    *mode.MemoryResolver
+	stages      []Stage
+	logger      *zap.Logger
 }
 
 // Stage 是 Pipeline 中的一层检测处理器。
@@ -87,6 +88,27 @@ type Alert struct {
 	Payload        json.RawMessage
 }
 
+// WithStageAlertWriter 注入落库器，让不自带落库能力的 Stage 的告警也能进 alerts 表。
+//
+// 只对未实现 selfPersistingStage 的 Stage 生效：CEL / Sequence / IOC 已通过
+// AlertGenerator 自行落库，再写一遍会在界面上出现两条同源告警。
+func (p *Pipeline) WithStageAlertWriter(w *StageAlertWriter) *Pipeline {
+	p.alertWriter = w
+	return p
+}
+
+// selfPersistingStage 由自行把告警写进 alerts 表的 Stage 实现。
+// 流水线据此跳过统一落库，避免同一次命中被写两遍。
+type selfPersistingStage interface {
+	PersistsOwnAlerts() bool
+}
+
+// stageSelfPersists 判断 Stage 是否自带落库。
+func stageSelfPersists(st Stage) bool {
+	sp, ok := st.(selfPersistingStage)
+	return ok && sp.PersistsOwnAlerts()
+}
+
 // NewPipeline 构造检测管线。
 func NewPipeline(producer *AlertProducer, resolver *mode.MemoryResolver, stages []Stage, logger *zap.Logger) *Pipeline {
 	if logger == nil {
@@ -143,7 +165,16 @@ func (p *Pipeline) Handler() MessageHandler {
 					zap.Error(err))
 				continue
 			}
+			selfPersists := stageSelfPersists(st)
 			for _, a := range alerts {
+				// 不自带落库的 Stage 统一在此落库。此前它们只把告警推到
+				// mxcwpp.engine.alert，而该 topic 无人消费——检测在跑，界面上永远看不到。
+				if !selfPersists && p.alertWriter != nil {
+					if err := p.alertWriter.Persist(st.Name(), ev, a); err != nil {
+						p.logger.Error("stage 告警落库失败（该告警不会出现在界面上）",
+							zap.String("stage", st.Name()), zap.Error(err))
+					}
+				}
 				if err := p.emitAlert(ctx, ev, a); err != nil {
 					p.logger.Warn("emit alert failed", zap.Error(err))
 				}
