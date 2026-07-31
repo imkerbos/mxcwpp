@@ -8,6 +8,50 @@ const (
 	IncidentStatusResolved      = "resolved"
 )
 
+// 研判结论。关闭事件必须给出结论——"关掉了"和"判过了"是两件事。
+//
+// 结论同时是检测质量的唯一可信来源：precision 只能由它算出，
+// 拿 resolved 数量代替会把"没人看所以批量关掉"算成检测准确。
+const (
+	// VerdictTruePositive 真实威胁。
+	VerdictTruePositive = "true_positive"
+	// VerdictFalsePositive 误报，检测本身有问题。
+	VerdictFalsePositive = "false_positive"
+	// VerdictBenignTruePositive 检测正确但行为无害（如运维自己的操作）。
+	// 单独一档很关键：把它算进误报会让规则被错误地调松。
+	VerdictBenignTruePositive = "benign_true_positive"
+)
+
+// IncidentEventType 是事件时间线上的动作类型。
+const (
+	IncidentEventAssigned  = "assigned"
+	IncidentEventAcked     = "acked"
+	IncidentEventComment   = "comment"
+	IncidentEventEvidence  = "evidence"
+	IncidentEventEscalated = "escalated"
+	IncidentEventVerdict   = "verdict"
+	IncidentEventResolved  = "resolved"
+)
+
+// IncidentEvent 是一条事件时间线记录：状态变更、研判备注、证据附加都落在这里。
+//
+// 单表承载而非拆成评论/审计/证据三张：调查过程本身就是一条连续的叙事，
+// 拆开会让"谁在什么时候基于什么做了什么决定"需要跨表拼接，而这恰恰是复盘要看的东西。
+type IncidentEvent struct {
+	TenantID   string `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
+	ID         uint   `gorm:"primaryKey;autoIncrement" json:"id"`
+	IncidentID string `gorm:"column:incident_id;type:varchar(128);not null;index" json:"incident_id"`
+	Type       string `gorm:"column:type;type:varchar(20);not null;index" json:"type"`
+	Actor      string `gorm:"column:actor;type:varchar(100);not null" json:"actor"`
+	Body       string `gorm:"column:body;type:text" json:"body"`
+	// Ref 指向证据所在位置（如 storyline id、告警 result_id、外部工单号）。
+	Ref       string    `gorm:"column:ref;type:varchar(255)" json:"ref,omitempty"`
+	CreatedAt LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP;index" json:"created_at"`
+}
+
+// TableName 指定表名
+func (IncidentEvent) TableName() string { return "incident_events" }
+
 // Incident 安全事件：把同主机、同时间窗内的多源信号(CEL 告警 + BDE 行为异常 + storyline)
 // 关联成一个事件，按 ATT&CK 战术阶段排列，聚合风险。对齐 XDR「碎片告警 → 攻击链事件」。
 //
@@ -34,6 +78,37 @@ type Incident struct {
 
 	Title   string `gorm:"column:title;type:varchar(255)" json:"title"`
 	Summary string `gorm:"column:summary;type:text" json:"summary"`
+
+	// --- 运营闭环字段 ---
+	//
+	// 此前事件只有 active/investigating/resolved 三态与一个 resolved_by（实际只会是
+	// "auto"）：没有负责人、没有响应时限、没有研判结论、关闭不需要理由。
+	// 结果是告警越准积压越多，最后没人看——检测能力再强也变不成处置能力。
+
+	// Owner 负责人。无 owner 的事件不计入 MTTA/MTTR，只计入覆盖率。
+	Owner      string     `gorm:"column:owner;type:varchar(100);index" json:"owner,omitempty"`
+	AssignedAt *LocalTime `gorm:"column:assigned_at;type:timestamp" json:"assigned_at,omitempty"`
+	AssignedBy string     `gorm:"column:assigned_by;type:varchar(100)" json:"assigned_by,omitempty"`
+
+	// AckedAt 认领时间，MTTA 的终点。与 AssignedAt 分开：被指派不等于有人开始看。
+	AckedAt *LocalTime `gorm:"column:acked_at;type:timestamp" json:"acked_at,omitempty"`
+	AckedBy string     `gorm:"column:acked_by;type:varchar(100)" json:"acked_by,omitempty"`
+
+	// AckDueAt / ResolveDueAt 按严重级别在事件创建时算出，用于识别超时。
+	AckDueAt     *LocalTime `gorm:"column:ack_due_at;type:timestamp;index" json:"ack_due_at,omitempty"`
+	ResolveDueAt *LocalTime `gorm:"column:resolve_due_at;type:timestamp;index" json:"resolve_due_at,omitempty"`
+
+	// Verdict 研判结论，关闭时必填。检测质量的 precision 只能由它算出。
+	Verdict       string `gorm:"column:verdict;type:varchar(30);index" json:"verdict,omitempty"`
+	VerdictReason string `gorm:"column:verdict_reason;type:text" json:"verdict_reason,omitempty"`
+
+	// Escalated 升级标记。升级必须留下对象与原因，否则"升级了"无从追溯。
+	Escalated   bool       `gorm:"column:escalated;default:false;index" json:"escalated"`
+	EscalatedAt *LocalTime `gorm:"column:escalated_at;type:timestamp" json:"escalated_at,omitempty"`
+	EscalatedTo string     `gorm:"column:escalated_to;type:varchar(100)" json:"escalated_to,omitempty"`
+
+	// CloseReason 关闭原因，必填。"关掉了"和"判过了"是两件事。
+	CloseReason string `gorm:"column:close_reason;type:text" json:"close_reason,omitempty"`
 
 	FirstSeenAt LocalTime  `gorm:"column:first_seen_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"first_seen_at"`
 	LastSeenAt  LocalTime  `gorm:"column:last_seen_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"last_seen_at"`

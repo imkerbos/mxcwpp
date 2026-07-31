@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
+	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz/casework"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -256,8 +257,15 @@ func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutof
 		return false
 	}
 
+	// 事件创建时即算出响应时限，否则"超时"无从识别——没有截止时间就没有 SLA。
+	ackDue, resolveDue := casework.SLADeadlines(maxSeverity, time.Now())
+	ackDueAt := model.ToLocalTime(ackDue)
+	resolveDueAt := model.ToLocalTime(resolveDue)
+
 	inc := model.Incident{
 		IncidentID:         fmt.Sprintf("inc-%s-%d", hostID, time.Now().Unix()),
+		AckDueAt:           &ackDueAt,
+		ResolveDueAt:       &resolveDueAt,
 		HostID:             hostID,
 		Hostname:           hostname,
 		Status:             model.IncidentStatusActive,
