@@ -34,6 +34,12 @@ type DefaultActionExecutor struct {
 	logger       *zap.Logger
 }
 
+// host_isolations.status 状态机取值（见 model.HostIsolation）。
+const (
+	isolationStatusActive = "active"
+	isolationStatusFailed = "failed"
+)
+
 // NewDefaultActionExecutor 构造.
 func NewDefaultActionExecutor(db *gorm.DB, acDispatcher *sd.ACDispatcher, logger *zap.Logger) *DefaultActionExecutor {
 	if logger == nil {
@@ -85,13 +91,27 @@ func (a *DefaultActionExecutor) isolateHost(ctx context.Context, hostID, operato
 	if reason == "" {
 		reason = "SOAR Playbook 自动隔离"
 	}
-	// 创建 host_isolation 记录 (Manager API 流程一致)
+	// 同一主机同时只能有一条 active 隔离（见 model.HostIsolation 注释）。
+	// 与 Manager API 流程一致，避免 SOAR 绕过该约束写出重复 active 记录。
+	var existing model.HostIsolation
+	if err := a.db.WithContext(ctx).
+		Where("host_id = ? AND status = ?", hostID, isolationStatusActive).
+		First(&existing).Error; err == nil {
+		return nil, fmt.Errorf("主机已处于隔离状态 (isolation_id=%d)", existing.ID)
+	}
+
+	// 创建 host_isolation 记录 (Manager API 流程一致)。
+	// 状态必须取自 model.HostIsolation 定义的状态机 pending/active/released/failed：
+	// 原实现写的 "isolated" 不在状态机内，既让 status='active' 查询漏掉这条记录，
+	// 也绕过了"同时只能一条 active 隔离"的约束。
+	now := model.Now()
 	iso := model.HostIsolation{
-		HostID:    hostID,
-		Status:    "isolated",
-		Reason:    reason,
-		CreatedBy: operator,
-		CreatedAt: model.LocalTime(time.Now()),
+		HostID:     hostID,
+		Status:     isolationStatusActive,
+		Reason:     reason,
+		Source:     "auto_response",
+		CreatedBy:  operator,
+		IsolatedAt: &now,
 	}
 	if err := a.db.WithContext(ctx).Create(&iso).Error; err != nil {
 		return nil, fmt.Errorf("create isolation: %w", err)
@@ -103,10 +123,15 @@ func (a *DefaultActionExecutor) isolateHost(ctx context.Context, hostID, operato
 		"isolation_id": iso.ID,
 	}
 	if err := a.dispatchCommand(ctx, hostID, "host_isolation", cmd); err != nil {
-		a.logger.Warn("dispatch isolation command failed (record kept)",
-			zap.String("host", hostID), zap.Error(err))
+		// 下发失败即隔离未生效。记录必须落 failed 并把错误返回，绝不能像原实现那样
+		// 降级成 warning 还保留 "已隔离" 记录并返回 success——那会让值班以为主机已隔离
+		// 而停止处置，攻击者仍在运行。
+		a.db.WithContext(ctx).Model(&iso).Update("status", isolationStatusFailed)
+		a.logger.Error("SOAR isolate_host 下发失败，隔离未生效",
+			zap.String("host", hostID), zap.Uint("isolation_id", iso.ID), zap.Error(err))
+		return nil, fmt.Errorf("下发隔离命令失败 (isolation_id=%d): %w", iso.ID, err)
 	}
-	a.logger.Info("SOAR isolate_host applied",
+	a.logger.Warn("SOAR isolate_host applied",
 		zap.String("host", hostID), zap.String("operator", operator))
 	return map[string]any{"isolation_id": iso.ID, "host_id": hostID}, nil
 }
@@ -248,24 +273,34 @@ func (a *DefaultActionExecutor) triggerAVScan(ctx context.Context, hostID string
 	return map[string]any{"av_task_id": task.ID, "scan_type": scanType}, nil
 }
 
+// snapshotForensic 取证快照 (memory dump + disk snapshot) 尚未实现。
+// 原实现返回 status="skeleton_only" 且 err=nil，Playbook 因此记为 success——
+// 界面会显示已完成取证快照，而实际没有任何快照产生。
 func (a *DefaultActionExecutor) snapshotForensic(_ context.Context, hostID string) (interface{}, error) {
-	// 当前仅返回占位; 完整实现 (memory dump + disk snapshot) 留 M2
-	a.logger.Info("SOAR snapshot_forensic (skeleton)", zap.String("host", hostID))
-	return map[string]any{"host": hostID, "status": "skeleton_only", "note": "M2 实现 memory+disk 快照"}, nil
+	a.logger.Error("SOAR snapshot_forensic 未实现，未产生任何快照", zap.String("host", hostID))
+	return nil, fmt.Errorf("取证快照未实现 (memory dump + disk snapshot): %w", ErrActionNotImplemented)
 }
 
+// ErrActionNotImplemented 表示该处置动作尚未接线，命令不会到达主机。
+//
+// 返回错误而非 nil 是刻意的：这些动作原本 return nil，于是 Playbook 记 success、
+// 界面显示"已处置"，而实际什么都没发生。在安全产品里这是最坏的一种失败——
+// 值班看到"已隔离/已阻断"就停止响应，攻击者却仍在运行。未接线就必须报未接线。
+var ErrActionNotImplemented = errors.New("该处置动作尚未接线到 AC 下发链路，命令不会到达主机")
+
 // dispatchCommand 通过 ACDispatcher 下发命令到 Agent (经 AC 实例分发).
+//
+// 尚未接线：ACDispatcher.Dispatch 为私有方法，接入留后续 PR。在接通之前一律返回
+// ErrActionNotImplemented，绝不返回 nil 让调用方误以为命令已下发。
 func (a *DefaultActionExecutor) dispatchCommand(_ context.Context, hostID, cmdType string, payload map[string]any) error {
 	if a.acDispatcher == nil {
 		return errors.New("ACDispatcher 未注入, 命令无法下发")
 	}
-	// 实际接 ACDispatcher.Dispatch (API 因 ACDispatcher 私有方法暂占位)
-	a.logger.Info("dispatch command (skeleton wiring)",
+	a.logger.Error("SOAR 动作未接线，命令未下发",
 		zap.String("host", hostID),
 		zap.String("type", cmdType),
-		zap.Any("payload", payload),
-		zap.String("note", "完整接 ACDispatcher.Dispatch 后续 PR"))
-	return nil
+		zap.Any("payload", payload))
+	return ErrActionNotImplemented
 }
 
 // 编译期 sanity check.
