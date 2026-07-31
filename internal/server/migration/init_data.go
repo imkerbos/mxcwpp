@@ -891,7 +891,22 @@ type builtinRuleYAML struct {
 		MitreID     string   `mapstructure:"mitre_id"`
 		DataTypes   []string `mapstructure:"data_types"`
 		Description string   `mapstructure:"description"`
+		// Fidelity 保真度。此前 YAML 里写了 fidelity 却没有这个字段，
+		// 值被静默丢弃：标成 low 的规则照样以 high 导入并独立告警，
+		// 也就是说 YAML 里那行配置从来没生效过。
+		Fidelity string `mapstructure:"fidelity"`
 	} `mapstructure:"rules"`
+}
+
+// ruleFidelity 归一化 YAML 里的保真度，未写或写错时按 high 处理。
+//
+// 默认 high 而不是 low：保真度缺失时让规则照常告警，是把「配置没写」
+// 和「刻意降噪」区分开——静默降级会让一条本该告警的规则悄悄失声。
+func ruleFidelity(v string) string {
+	if v == model.RuleFidelityLow {
+		return model.RuleFidelityLow
+	}
+	return model.RuleFidelityHigh
 }
 
 // initBuiltinDetectionRules 初始化内置 CEL 检测规则
@@ -929,6 +944,7 @@ func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
 					"mitre_id":    r.MitreID,
 					"description": r.Description,
 					"data_types":  model.StringArray(r.DataTypes),
+					"fidelity":    ruleFidelity(r.Fidelity),
 				})
 				updated++
 			}
@@ -943,6 +959,7 @@ func initBuiltinDetectionRules(db *gorm.DB, logger *zap.Logger) error {
 			MitreID:     r.MitreID,
 			Description: r.Description,
 			DataTypes:   model.StringArray(r.DataTypes),
+			Fidelity:    ruleFidelity(r.Fidelity),
 			Enabled:     true,
 			Builtin:     true,
 		}
