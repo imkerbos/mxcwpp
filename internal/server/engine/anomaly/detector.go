@@ -78,8 +78,10 @@ const (
 	// sampleWindowSize is the max number of recent samples kept for training.
 	sampleWindowSize = 2000
 
-	// anomalyThreshold is the score above which a sample is flagged.
-	anomalyThreshold = 0.65
+	// defaultAnomalyThreshold is the default score above which a sample is flagged.
+	// 可经 feature flag anomaly.score_threshold 覆盖（见 threshold.go）——
+	// 不同环境的"正常"离散程度差别很大，写死一个数意味着某些环境必然长期误报或长期漏报。
+	defaultAnomalyThreshold = 0.65
 
 	// correlationThreshold is ratio threshold for a metric to be "elevated".
 	// 调整 2.0 → 3.0:prod 实际正常业务服务(db/mq)波动经常 >2x 均值,但 <3x。
@@ -106,8 +108,10 @@ type Detector struct {
 	chConn chdriver.Conn // 可为 nil；nil 时跳过 IOC 回查，仅写入 metric_snapshot
 	forest *IForest
 
-	mu           sync.Mutex
-	sampleBuffer [][]float64          // recent samples for training
+	mu sync.Mutex
+	// sampleBuffer 按主机分组的训练样本，每台主机配额受限（详见 sampling.go）。
+	// 原为一条全局 FIFO，高频主机会按样本数主导"什么算正常"。
+	sampleBuffer *hostSampleBuffer
 	hostMeans    map[string][]float64 // per-host running mean for z-score
 	hostCounts   map[string]int       // sample count per host
 	// reference 是不随滑动窗口移动的长期参照，用于识别环境漂移与训练投毒。
@@ -117,6 +121,8 @@ type Detector struct {
 	lastTrainedAt time.Time
 	// scores 累积每台主机的异常分供 ranking 档排序使用，周期落库（见 ranking.go）。
 	scores *scoreRecorder
+	// threshold 是可配置的异常分阈值（见 threshold.go）；未配置时用默认值。
+	threshold thresholdHolder
 	// persistMu synchronizes safety-mode/schema transitions with anomaly_alerts writes.
 	// A writer holds RLock through the DB upsert; SetMode/VerifySchema take Lock, so once
 	// a transition to off/shadow returns, no write admitted under the previous mode can remain in flight.
@@ -149,6 +155,7 @@ func NewDetector(db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) *Detecto
 		schemaReady: false,
 		dnsValid:    false,
 	}
+	d.sampleBuffer = newHostSampleBuffer()
 	d.scores = newScoreRecorder(db, logger)
 	d.suppress.reload(db, logger) // 启动即加载一次白名单 + 反馈抑制
 	return d
@@ -294,7 +301,7 @@ func (d *Detector) Status() Status {
 		SchemaReady:   d.schemaReady,
 		DNSFieldReady: d.dnsValid,
 		Trained:       d.forest.Trained(),
-		SampleCount:   len(d.sampleBuffer),
+		SampleCount:   d.sampleBuffer.count(),
 		HostCount:     len(d.hostMeans),
 	}
 }
@@ -336,11 +343,8 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 		d.mu.Unlock()
 		return
 	}
-	// Add to sample buffer.
-	d.sampleBuffer = append(d.sampleBuffer, metrics)
-	if len(d.sampleBuffer) > sampleWindowSize {
-		d.sampleBuffer = d.sampleBuffer[len(d.sampleBuffer)-sampleWindowSize:]
-	}
+	// Add to sample buffer（按主机配额，单机无法主导训练集）。
+	d.sampleBuffer.add(hostID, metrics)
 
 	// Update per-host running mean (for correlation z-score).
 	d.updateHostMean(hostID, metrics)
@@ -365,7 +369,7 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 		if rank && d.scores != nil {
 			d.scores.record(hostID, score, time.Now())
 		}
-		if score >= anomalyThreshold {
+		if score >= d.scoreThreshold() {
 			d.emitForestAlert(hostID, hostname, metrics, score)
 		}
 	}
@@ -385,7 +389,7 @@ func (d *Detector) Trained() bool {
 func (d *Detector) SampleCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.sampleBuffer)
+	return d.sampleBuffer.count()
 }
 
 // HostCount returns the number of unique hosts tracked.
@@ -399,8 +403,8 @@ func (d *Detector) HostCount() int {
 
 func (d *Detector) retrain() {
 	d.mu.Lock()
-	data := make([][]float64, len(d.sampleBuffer))
-	copy(data, d.sampleBuffer)
+	data := d.sampleBuffer.flatten()
+	trainHosts := d.sampleBuffer.hosts()
 	d.mu.Unlock()
 
 	if len(data) < 64 {
@@ -428,8 +432,10 @@ func (d *Detector) retrain() {
 		d.SaveState()
 	}
 
+	driftSigma := 0.0
 	if ref != nil {
 		rep := ref.evaluateDrift(data)
+		driftSigma = rep.MaxDrift
 		for i, v := range rep.PerFeature {
 			anomalyDriftScore.WithLabelValues(featureName(i)).Set(v)
 		}
@@ -457,8 +463,12 @@ func (d *Detector) retrain() {
 	d.mu.Unlock()
 	d.publishModelAge()
 	d.SaveState()
+	// 每次成功训练留一个可回滚版本。没有版本就没有退路：
+	// 某轮学坏了只能等下一个 30 分钟周期，而在那之前检测一直在用坏模型打分。
+	d.saveModelVersion(len(data), driftSigma)
 	d.logger.Info("IForest retrained",
 		zap.Int("samples", len(data)),
+		zap.Int("hosts", trainHosts),
 		zap.Bool("trained", d.forest.Trained()))
 }
 
@@ -541,7 +551,7 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 	d.mu.Unlock()
 
 	// 拼描述：让 UI drawer 至少有一行有意义内容，避免 v-if 空白
-	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, anomalyThreshold)
+	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, d.scoreThreshold())
 	if topMetric != "" {
 		description = fmt.Sprintf("指标 %s 偏离主机历史均值，当前值 %.2f；Isolation Forest 异常评分 %.2f",
 			topMetric, topValue, score)

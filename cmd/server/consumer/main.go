@@ -226,6 +226,10 @@ func main() {
 	// 恢复上次的参照基线。参照必须来自一段未被污染的历史，丢了就再也长不回来；
 	// 不恢复的话每次重启都以"无参照"运行，投毒防护静默失效。
 	anomalyDet.LoadState()
+	// 恢复上次训练出的模型。不恢复的话每次重启都要重新攒样本 + 等一个完整重训周期
+	// 才恢复评分能力，这段时间检测器照常运行却什么都发现不了。
+	anomalyDet.LoadActiveModel()
+	anomalyDet.LoadScoreThreshold(db)
 	consumermetrics.RegisterReadiness("anomaly_schema", func() bool {
 		return anomalyDet.Status().SchemaReady
 	})
