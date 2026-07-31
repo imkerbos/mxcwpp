@@ -36,6 +36,10 @@ func TestCriticalMetricsHaveAlerts(t *testing.T) {
 		"mxcwpp_vulnsync_last_success_timestamp_seconds": "漏洞库停更 = 界面显示的是旧数据",
 		"mxcwpp_incident_sla_breached":                   "事件超时无人认领 = 检测到了但没人处置",
 		"mxcwpp_incident_unowned":                        "无主事件堆积 = 即将变成超时",
+		"mxcwpp_anomaly_reference_baseline_ready":        "参照基线缺失 = ML 训练投毒防护未生效",
+		"mxcwpp_anomaly_model_version":                   "模型版本停滞 = 模型停止学习，分数越来越不反映当前环境",
+		"mxcwpp_anomaly_training_hosts":                  "训练集变窄 = 模型向少数主机收敛，其余主机的正常行为被判异常",
+		"mxcwpp_anomaly_score_flush_failed_total":        "异常分落库失败 = ranking 档静默失效但显示已启用",
 	}
 
 	for metric, why := range critical {
