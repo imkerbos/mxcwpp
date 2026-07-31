@@ -602,12 +602,18 @@ func (h *FixHandler) CancelFixTask(c *gin.Context) {
 		return
 	}
 
-	// 向 Agent 发送取消信号（尽力而为）
+	// 向 Agent 发送取消信号（尽力而为）。
+	//
+	// 保持尽力而为：任务状态已在库中置为取消，下发失败不回滚。但失败必须可见——
+	// 原实现 `_ = SendCommand` 把错误连同主机一起吞掉，一旦全部下发失败，界面显示
+	// "取消成功"而 agent 仍在以 root 继续执行修复，且没有任何线索可查。
 	if task.Status == model.FixTaskStatusRunning && h.acDispatcher != nil {
 		go func() {
 			var hostStatuses []model.FixTaskHostStatus
 			if err := h.db.Where("task_id = ? AND status = ?", taskID, model.FixTaskHostStatusDispatched).
 				Find(&hostStatuses).Error; err != nil {
+				h.logger.Error("查询待取消主机失败，取消信号未下发（任务已在库中置为取消）",
+					zap.String("task_id", taskID), zap.Error(err))
 				return
 			}
 			cancelCmd := &grpcProto.Command{
@@ -617,8 +623,20 @@ func (h *FixHandler) CancelFixTask(c *gin.Context) {
 					Token:      taskID,
 				}},
 			}
+			var failed []string
 			for _, hs := range hostStatuses {
-				_ = h.acDispatcher.SendCommand(hs.HostID, cancelCmd)
+				if err := h.acDispatcher.SendCommand(hs.HostID, cancelCmd); err != nil {
+					failed = append(failed, hs.HostID)
+					h.logger.Warn("下发取消信号失败，该主机可能仍在执行修复",
+						zap.String("task_id", taskID), zap.String("host_id", hs.HostID), zap.Error(err))
+				}
+			}
+			if len(failed) > 0 {
+				h.logger.Error("部分主机未收到取消信号，仍可能继续执行修复",
+					zap.String("task_id", taskID),
+					zap.Int("failed_count", len(failed)),
+					zap.Int("total_count", len(hostStatuses)),
+					zap.Strings("failed_hosts", failed))
 			}
 		}()
 	}
