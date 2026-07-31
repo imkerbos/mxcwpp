@@ -1991,6 +1991,8 @@ export interface DetectionRule {
   enabled: boolean;
   builtin?: boolean;
   userModified?: boolean;
+  /** 生命周期阶段。空值为尚未回填的存量规则，行为等同 alert。 */
+  stage?: RuleStage | "";
   createdAt: string;
   updatedAt: string;
 }
@@ -2247,4 +2249,41 @@ export interface OncallCurrent {
   oncall: Partial<Record<OncallTier, string>>;
   /** 当前无人值班的层级。排班缺口本身就是要处理的问题，不隐藏。 */
   uncovered_tiers: OncallTier[];
+}
+
+/** 规则生命周期阶段：只有 alert 会独立产生告警。 */
+export type RuleStage = "draft" | "shadow" | "context" | "alert";
+
+/** 规则检测质量，由人工研判结论计算。 */
+export interface RuleQuality {
+  rule_id: string;
+  true_positive: number;
+  false_positive: number;
+  /** 检测正确但行为无害。计入分母，但不算作误报。 */
+  benign_true_positive: number;
+  /** 尚未研判，不参与精确率计算。 */
+  undetermined: number;
+  /** null 表示样本不足、无法计算——不是 0。缺失不等于不达标。 */
+  precision: number | null;
+  judged: number;
+}
+
+/** 影子期观测量，仅 shadow → context 这一跳有值。 */
+export interface RuleShadowStat {
+  rule_id: string;
+  hits: number;
+  hosts: number;
+  observed_since: string;
+  last_hit_at?: string;
+}
+
+/** 晋级判定结果。不满足时 reasons 说明差在哪。 */
+export interface PromotionDecision {
+  rule_id: string;
+  from: RuleStage | "";
+  to: RuleStage | "";
+  eligible: boolean;
+  reasons: string[];
+  quality: RuleQuality | null;
+  shadow?: RuleShadowStat;
 }

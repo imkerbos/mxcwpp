@@ -21,6 +21,7 @@ import { Input, Textarea } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { StatCard } from "@/components/ui/StatCard";
 import { StatusTag, SeverityTag } from "@/components/ui/Tag";
+import { RuleLifecycle, StageBadge } from "./_components/RuleLifecycle";
 import { toast } from "@/components/ui/toast";
 
 interface ListParams {
@@ -173,6 +174,11 @@ export default function DetectionRulesPage() {
   const columns: Column<DetectionRule>[] = [
     { key: "name", title: t("detection.rules.colName"), render: (r) => <span className="font-medium text-ink">{r.name}</span> },
     { key: "severity", title: t("common.level"), render: (r) => <SeverityTag level={r.severity} /> },
+    {
+      key: "stage",
+      title: t("detection.rules.colStage"),
+      render: (r) => <StageBadge stage={r.stage} />,
+    },
     { key: "category", title: t("detection.rules.colCategory"), render: (r) => <StatusTag tone="neutral">{r.category || "—"}</StatusTag> },
     {
       key: "mitreId",
@@ -329,6 +335,9 @@ export default function DetectionRulesPage() {
               <Field label={t("detection.rules.fieldMitreId")} value={<span className="font-mono">{detail.mitreId || "—"}</span>} />
               <Field label={t("detection.rules.fieldDataTypes")} value={detail.dataTypes?.length ? detail.dataTypes.join(", ") : "—"} />
             </div>
+            {/* 生命周期与检测质量：决定这条规则会不会打扰到人，
+                以及凭什么认为它够格。 */}
+            <RuleLifecycle rule={detail} />
             {detail.description && (
               <div>
                 <div className="mb-1.5 text-sm font-medium text-ink">{t("detection.rules.description")}</div>

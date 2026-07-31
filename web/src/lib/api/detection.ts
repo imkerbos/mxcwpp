@@ -22,6 +22,8 @@ import type {
   BdeBaseline,
   BdeBaselineStats,
   BdeAlert,
+  RuleQuality,
+  PromotionDecision,
 } from "./types";
 
 // 端点镜像 ui/src/api（edr/detection-rules/threat-intel/storyline/hunting/anomaly/bde），全部 /api/v1。
@@ -56,6 +58,12 @@ export const detectionApi = {
   updateRule: (id: number, body: Partial<DetectionRule>) => put<DetectionRule>(`/detection-rules/${id}`, body),
   deleteRule: (id: number) => del<void>(`/detection-rules/${id}`),
   toggleRule: (id: number) => post<void>(`/detection-rules/${id}/toggle`),
+  // 规则生命周期与检测质量
+  ruleQuality: (id: number) => get<RuleQuality>(`/detection-rules/${id}/quality`),
+  rulePromotion: (id: number) => get<PromotionDecision>(`/detection-rules/${id}/promotion`),
+  promoteRule: (id: number) => post<PromotionDecision>(`/detection-rules/${id}/promote`),
+  demoteRule: (id: number, stage: string, reason: string) =>
+    post<{ stage: string }>(`/detection-rules/${id}/demote`, { stage, reason }),
   ruleCategories: () => get<string[]>("/detection-rules/categories"),
   ruleMitreIds: () => get<string[]>("/detection-rules/mitre-ids"),
   ruleStats: () => get<DetectionRuleStats>("/detection-rules/statistics"),

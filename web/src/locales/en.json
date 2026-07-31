@@ -1872,7 +1872,8 @@
       "description": "Description",
       "expression": "Expression",
       "deleteTitle": "Delete Rule",
-      "deleteConfirmDesc": "Delete rule \"{{name}}\"? This cannot be undone."
+      "deleteConfirmDesc": "Delete rule \"{{name}}\"? This cannot be undone.",
+      "colStage": "Stage"
     },
     "threatIntel": {
       "statIp": "IP",
@@ -1998,6 +1999,35 @@
       "colRiskScore": "Risk Score",
       "emptyStates": "No baseline learning data",
       "emptyAlerts": "No behavior alerts"
+    },
+    "stage": {
+      "draft": "Draft",
+      "shadow": "Shadow",
+      "context": "Context",
+      "alert": "Alert"
+    },
+    "lifecycle": {
+      "title": "Lifecycle stage",
+      "stageHint": "Only the Alert stage raises alerts on its own. Promotion is decided by data, and each hop has its own gate.",
+      "quality": "Detection quality",
+      "transition": "Promote / Demote",
+      "tp": "True positive",
+      "fp": "False positive",
+      "benign": "Benign hit",
+      "undetermined": "Unjudged",
+      "benignHint": "A benign hit means the detection fired correctly but the behaviour is harmless. It counts toward the denominator, not as an error.",
+      "judgedCount": "{{count}} judged",
+      "precisionUnknown": "Too few samples",
+      "precisionUnknownHint": "Not enough judged samples to compute precision — this is not \"precision is zero\".",
+      "loadFailed": "Failed to load detection quality",
+      "promoteTo": "Promote to {{stage}}",
+      "atTop": "Already at highest stage",
+      "promoted": "Promoted to {{stage}}",
+      "demote": "Demote",
+      "demoted": "Demoted",
+      "demoteTitle": "Demote rule",
+      "demoteHint": "Demotion has no evidence gate: a noisy rule should be suppressible immediately. A reason is still required.",
+      "demoteReasonPlaceholder": "Why is this rule being demoted?"
     }
   },
   "operations": {
