@@ -2202,3 +2202,49 @@ export interface BdeAlert {
   created_at: string;
   updated_at: string;
 }
+
+/** 处置动作生命周期。处置是不可逆或代价高昂的操作，执行必须在审批之后。 */
+export type ResponseStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "executed"
+  | "failed"
+  | "rolled_back";
+
+export interface ResponseAction {
+  id: number;
+  idempotency_key: string;
+  action: "isolate_host" | "release_host";
+  target: string;
+  incident_id?: string;
+  status: ResponseStatus;
+  reason: string;
+  requested_by: string;
+  requested_at: string;
+  approved_by?: string;
+  approved_at?: string | null;
+  reject_reason?: string;
+  executed_at?: string | null;
+  result?: string;
+  error_msg?: string;
+  rolled_back_at?: string | null;
+  rolled_back_by?: string;
+}
+
+/** 值班层级：升级沿 l1 → l2 → security 向上。 */
+export type OncallTier = "l1" | "l2" | "security";
+
+export interface OncallShift {
+  id: number;
+  tier: OncallTier;
+  username: string;
+  starts_at: string;
+  ends_at: string;
+}
+
+export interface OncallCurrent {
+  oncall: Partial<Record<OncallTier, string>>;
+  /** 当前无人值班的层级。排班缺口本身就是要处理的问题，不隐藏。 */
+  uncovered_tiers: OncallTier[];
+}

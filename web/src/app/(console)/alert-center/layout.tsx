@@ -11,6 +11,8 @@ export default function AlertCenterLayout({ children }: { children: React.ReactN
   const navItems = [
     { key: "alerts", label: t("alerts.tab.alerts"), href: "/alert-center/alerts" },
     { key: "incidents", label: t("alerts.tab.incidents"), href: "/alert-center/incidents" },
+    { key: "response", label: t("alerts.tab.response"), href: "/alert-center/response" },
+    { key: "oncall", label: t("alerts.tab.oncall"), href: "/alert-center/oncall" },
     { key: "whitelist", label: t("alerts.tab.whitelist"), href: "/alert-center/whitelist" },
     { key: "suggestions", label: t("alerts.tab.suggestions"), href: "/alert-center/suggestions" },
   ];
