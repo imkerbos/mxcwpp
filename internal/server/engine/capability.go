@@ -30,8 +30,9 @@ const (
 	SinkAlertsTable AlertSink = "alerts_table"
 	// SinkStorylineTopic 落攻击故事线专用 topic，有独立消费者。
 	SinkStorylineTopic AlertSink = "storyline_topic"
-	// SinkEngineAlertTopic 落 mxcwpp.engine.alert。**该 topic 目前无任何消费者**，
-	// 发进去的告警永远不会出现在界面上。
+	// SinkEngineAlertTopic 落 mxcwpp.engine.alert。该 topic 至今无任何消费者，
+	// 因此不能作为告警的唯一去处。流水线仍会向它发布（供未来外部订阅），
+	// 但所有 Stage 的告警落库已改走 alerts 表，不再依赖它。
 	SinkEngineAlertTopic AlertSink = "engine_alert_topic"
 	// SinkNone 未接线，无从谈及去向。
 	SinkNone AlertSink = "none"
@@ -69,13 +70,11 @@ var Capabilities = []Capability{
 	{Name: "port_scan", Constructor: "NewScanStage", Status: StatusActive, Sink: SinkAlertsTable},
 	{Name: "storyline", Constructor: "NewStorylineStage", Status: StatusActive, Sink: SinkStorylineTopic},
 
-	// --- 已接线但告警无人消费：跑了也到不了界面 ---
-	{Name: "privilege", Constructor: "NewPrivilegeStage", Status: StatusDeadEnd, Sink: SinkEngineAlertTopic,
-		Note: "告警发往 mxcwpp.engine.alert，该 topic 无消费者；接上消费端前不得宣称可用"},
-	{Name: "rasp", Constructor: "NewRASPStage", Status: StatusDeadEnd, Sink: SinkEngineAlertTopic,
-		Note: "同 privilege：engine.alert 无消费者"},
-	{Name: "anti_rootkit", Constructor: "NewAntiRootkitStage", Status: StatusDeadEnd, Sink: SinkEngineAlertTopic,
-		Note: "同 privilege：engine.alert 无消费者；出路径亦未经端到端验证"},
+	// 以下三个此前只把告警推到 mxcwpp.engine.alert（无消费者），现由流水线统一落库。
+	{Name: "privilege", Constructor: "NewPrivilegeStage", Status: StatusActive, Sink: SinkAlertsTable},
+	{Name: "rasp", Constructor: "NewRASPStage", Status: StatusActive, Sink: SinkAlertsTable},
+	{Name: "anti_rootkit", Constructor: "NewAntiRootkitStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "落库路径已通；检出逻辑本身尚未经端到端验证"},
 
 	// --- 有代码但从未接线 ---
 	{Name: "ml_anomaly", Constructor: "NewMLStage", Status: StatusUnwired, Sink: SinkNone,

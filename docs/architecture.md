@@ -450,6 +450,7 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
 |---|---|---|
 | `active` | 已接线且告警有实际去处 | ✅ |
 | `dead_end` | 已接线但告警无人消费 | ❌ 必须注明缺什么 |
+
 | `unwired` | 有构造器但从未接线 | ❌ |
 
 清单经 `GET /capabilities`（Engine HTTP）以 JSON 发布，供运维与交付流程核对。
@@ -459,6 +460,21 @@ CI 闸 `capability_test.go` 双向比对清单与真实代码：新增构造器�
 `engine.alert` 出现消费者，测试会提示把状态改回 `active`——避免修好了却忘了更新清单。
 
 **对外宣称以清单为准**：只有 `active` 档的能力允许出现在方案、官网或 POC 中。
+
+### 单一告警落库链路（E-DET-1）
+
+流水线里每个 Stage 的告警都会发往 `mxcwpp.engine.alert`，而该 topic 至今无消费者。
+CEL / Sequence / IOC 之所以能出现在界面上，是因为它们额外挂了 `AlertGenerator`
+自行落库；Privilege / RASP / AntiRootkit 没挂——检测在跑、告警在发、界面永远看不到。
+
+现由流水线统一落库：不实现 `PersistsOwnAlerts()` 的 Stage，其告警经
+`StageAlertWriter` 写入 `alerts` 表，`result_id = engine-{ruleID}-{hostID}`（不含
+时间戳，重复命中累加 `hit_count` 而非刷行），已处置告警复发会回到活跃态。
+
+自带落库的 Stage 通过 `PersistsOwnAlerts()` 显式声明，流水线据此跳过，避免同一次
+命中被写两遍。不复用 `AlertGenerator` 是因为它与 CEL 深度耦合（数字 `rule.ID`、
+`cel-%d` 结果键、依赖规则字段的低保真与观察期判定），给硬编码 Stage 合成假规则
+会让它们伪装成 CEL 规则并误用只对 CEL 有意义的治理语义。
 
 ### Agent 身份信任链（E-SEC-3）
 
