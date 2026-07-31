@@ -390,6 +390,15 @@ func setupHostIsolationAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Log
 	handler := api.NewHostIsolationHandler(db, logger, acDispatcher)
 	router.POST("/hosts/isolate", handler.IsolateHost)
 	router.POST("/hosts/release", handler.ReleaseHost)
+
+	// 处置审批：隔离/解除隔离只提申请，执行必须经他人审批。
+	// 闸门不接线等于没建，所以隔离接口不再直接下发命令。
+	respHandler := api.NewResponseActionHandler(db, logger, acDispatcher)
+	router.GET("/response-actions", respHandler.ListResponseActions)
+	router.POST("/response-actions/:id/approve", respHandler.ApproveResponseAction)
+	router.POST("/response-actions/:id/reject", respHandler.RejectResponseAction)
+	router.POST("/response-actions/:id/execute", respHandler.ExecuteResponseAction)
+	router.POST("/response-actions/:id/rollback", respHandler.RollbackResponseAction)
 	router.GET("/hosts/:host_id/isolation-status", handler.GetIsolationStatus)
 	router.GET("/hosts/isolations", handler.ListIsolations)
 }

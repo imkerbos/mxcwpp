@@ -1,15 +1,15 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/sd"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -19,21 +19,33 @@ type HostIsolationHandler struct {
 	db           *gorm.DB
 	logger       *zap.Logger
 	acDispatcher *sd.ACDispatcher
+	responses    *ResponseActionHandler
 }
 
 // NewHostIsolationHandler creates a new host isolation handler.
 func NewHostIsolationHandler(db *gorm.DB, logger *zap.Logger, acDispatcher *sd.ACDispatcher) *HostIsolationHandler {
-	return &HostIsolationHandler{db: db, logger: logger, acDispatcher: acDispatcher}
+	return &HostIsolationHandler{
+		db: db, logger: logger, acDispatcher: acDispatcher,
+		responses: NewResponseActionHandler(db, logger, acDispatcher),
+	}
 }
 
 type isolateHostReq struct {
 	HostID  string `json:"host_id" binding:"required"`
 	Level   string `json:"level"`   // standard (default) / complete
-	Reason  string `json:"reason"`  // isolation reason
-	Timeout int    `json:"timeout"` // timeout in seconds (default 14400 = 4h)
+	Reason  string `json:"reason"`  // 隔离理由，必填
+	Timeout int    `json:"timeout"` // 超时秒数，默认 14400 (4h)
+	// IncidentID 关联事件，处置过程回流为该事件的证据。
+	IncidentID string `json:"incident_id"`
+	// IdempotencyKey 由调用方提供，避免重复点击产生多条待审批申请。
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
-// IsolateHost enables network isolation on a host.
+// IsolateHost 提交主机隔离申请。**不再直接执行。**
+//
+// 隔离会切断业务流量。原实现是一次调用即刻生效，没有第二个人看过，事后也回答不了
+// "这台机器当时为什么被隔离、谁批的"。现在统一走处置闸门：提申请 → 他人审批 → 执行。
+//
 // POST /api/v1/hosts/isolate
 func (h *HostIsolationHandler) IsolateHost(c *gin.Context) {
 	var req isolateHostReq
@@ -41,7 +53,6 @@ func (h *HostIsolationHandler) IsolateHost(c *gin.Context) {
 		BadRequest(c, "参数错误")
 		return
 	}
-
 	if req.Level == "" {
 		req.Level = "standard"
 	}
@@ -50,66 +61,42 @@ func (h *HostIsolationHandler) IsolateHost(c *gin.Context) {
 		return
 	}
 	if req.Timeout <= 0 {
-		req.Timeout = 14400 // 4 hours default
+		req.Timeout = 14400 // 默认 4 小时
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "隔离申请必须写明理由")
+		return
 	}
 
-	// Check host exists.
 	var host model.Host
 	if err := h.db.Where("host_id = ?", req.HostID).First(&host).Error; err != nil {
 		NotFound(c, "主机不存在")
 		return
 	}
-
-	// Check for existing active isolation.
 	var existing model.HostIsolation
-	if err := h.db.Where("host_id = ? AND status = ?", req.HostID, "active").First(&existing).Error; err == nil {
+	if err := h.db.Where("host_id = ? AND status = ?", req.HostID, "active").
+		First(&existing).Error; err == nil {
 		BadRequest(c, fmt.Sprintf("主机已处于隔离状态 (level=%s)", existing.Level))
 		return
 	}
 
-	username, _ := c.Get("username")
-	now := model.Now()
-
-	record := model.HostIsolation{
-		HostID:     req.HostID,
-		Hostname:   host.Hostname,
-		Level:      req.Level,
-		Reason:     req.Reason,
-		Timeout:    req.Timeout,
-		Status:     "active",
-		Source:     "manual",
-		CreatedBy:  fmt.Sprintf("%v", username),
-		IsolatedAt: &now,
-	}
-
-	if err := h.db.Create(&record).Error; err != nil {
-		h.logger.Error("创建隔离记录失败", zap.Error(err))
-		InternalError(c, "创建隔离记录失败")
-		return
-	}
-
-	// Dispatch isolation command to Agent via AC.
-	if err := h.dispatchIsolateCommand(req.HostID, req.Level, req.Reason, req.Timeout); err != nil {
-		h.logger.Error("下发隔离命令失败", zap.Error(err))
-		h.db.Model(&record).Update("status", "failed")
-		InternalError(c, "下发隔离命令失败: "+err.Error())
-		return
-	}
-
-	h.logger.Warn("主机隔离命令已下发",
-		zap.String("host_id", req.HostID),
-		zap.String("level", req.Level),
-		zap.String("reason", req.Reason))
-
-	Success(c, record)
+	h.responses.requestHostResponse(c, model.ResponseActionIsolateHost, req.HostID, req.Reason,
+		isolationParams{Level: req.Level, Timeout: req.Timeout, Reason: req.Reason},
+		req.IncidentID, isolationIdemKey("isolate", req.HostID, req.IdempotencyKey))
 }
 
 type releaseHostReq struct {
-	HostID string `json:"host_id" binding:"required"`
-	Reason string `json:"reason"`
+	HostID         string `json:"host_id" binding:"required"`
+	Reason         string `json:"reason"`
+	IncidentID     string `json:"incident_id"`
+	IdempotencyKey string `json:"idempotency_key"`
 }
 
-// ReleaseHost removes network isolation from a host.
+// ReleaseHost 提交解除隔离申请。
+//
+// 解除隔离同样走审批：错误地解除会把仍在失陷的主机放回网络，
+// 后果不比误隔离轻。
+//
 // POST /api/v1/hosts/release
 func (h *HostIsolationHandler) ReleaseHost(c *gin.Context) {
 	var req releaseHostReq
@@ -117,32 +104,29 @@ func (h *HostIsolationHandler) ReleaseHost(c *gin.Context) {
 		BadRequest(c, "参数错误")
 		return
 	}
-
+	if strings.TrimSpace(req.Reason) == "" {
+		BadRequest(c, "解除隔离申请必须写明理由")
+		return
+	}
 	var record model.HostIsolation
-	if err := h.db.Where("host_id = ? AND status = ?", req.HostID, "active").First(&record).Error; err != nil {
+	if err := h.db.Where("host_id = ? AND status = ?", req.HostID, "active").
+		First(&record).Error; err != nil {
 		NotFound(c, "主机不在隔离状态")
 		return
 	}
 
-	username, _ := c.Get("username")
-	now := model.Now()
+	h.responses.requestHostResponse(c, model.ResponseActionReleaseHost, req.HostID, req.Reason,
+		isolationParams{Reason: req.Reason}, req.IncidentID,
+		isolationIdemKey("release", req.HostID, req.IdempotencyKey))
+}
 
-	record.Status = "released"
-	record.ReleasedAt = &now
-	record.ReleasedBy = fmt.Sprintf("%v", username)
-	h.db.Save(&record)
-
-	// Dispatch release command to Agent.
-	if err := h.dispatchReleaseCommand(req.HostID, req.Reason); err != nil {
-		h.logger.Error("下发解除隔离命令失败", zap.Error(err))
-		// Don't revert — the DB record is updated, AC may retry.
+// isolationIdemKey 生成幂等键。调用方未提供时按 动作+主机+当前隔离轮次 派生，
+// 避免同一主机的重复点击产生多条待审批申请。
+func isolationIdemKey(action, hostID, provided string) string {
+	if k := strings.TrimSpace(provided); k != "" {
+		return k
 	}
-
-	h.logger.Warn("主机隔离解除命令已下发",
-		zap.String("host_id", req.HostID),
-		zap.String("reason", req.Reason))
-
-	Success(c, record)
+	return fmt.Sprintf("%s:%s:%d", action, hostID, time.Now().Unix()/60)
 }
 
 // GetIsolationStatus returns the isolation status of a host.
@@ -201,53 +185,4 @@ func (h *HostIsolationHandler) ListIsolations(c *gin.Context) {
 	}
 
 	Success(c, PaginatedData{Total: total, Items: records})
-}
-
-// --- Command dispatch ---
-
-func (h *HostIsolationHandler) dispatchIsolateCommand(hostID, level, reason string, timeout int) error {
-	if h.acDispatcher == nil {
-		h.logger.Warn("隔离命令未下发: AC dispatcher 未初始化")
-		return nil
-	}
-
-	taskData := map[string]any{
-		"action":  "isolate",
-		"level":   level,
-		"reason":  reason,
-		"timeout": timeout,
-	}
-	taskJSON, _ := json.Marshal(taskData)
-
-	cmd := &grpcProto.Command{
-		Tasks: []*grpcProto.Task{{
-			DataType:   9997,
-			ObjectName: "edr",
-			Data:       string(taskJSON),
-		}},
-	}
-
-	return h.acDispatcher.SendCommand(hostID, cmd)
-}
-
-func (h *HostIsolationHandler) dispatchReleaseCommand(hostID, reason string) error {
-	if h.acDispatcher == nil {
-		return nil
-	}
-
-	taskData := map[string]any{
-		"action": "release",
-		"reason": reason,
-	}
-	taskJSON, _ := json.Marshal(taskData)
-
-	cmd := &grpcProto.Command{
-		Tasks: []*grpcProto.Task{{
-			DataType:   9997,
-			ObjectName: "edr",
-			Data:       string(taskJSON),
-		}},
-	}
-
-	return h.acDispatcher.SendCommand(hostID, cmd)
 }

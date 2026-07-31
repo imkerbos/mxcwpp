@@ -170,6 +170,8 @@ var modulePrefixes = func() []modulePrefix {
 		{"/api/v1/alerts", "alerts"},
 		// 值班表属事件运营的一部分，与事件同权限域：能处置事件的人才该改排班。
 		{"/api/v1/oncall", "alerts"},
+		// 处置审批属处置权限域：能执行处置的人才该审批处置。
+		{"/api/v1/response-actions", "alerts"},
 		{"/api/v1/incidents", "alerts"},
 		{"/api/v1/storylines", "alerts"},
 		{"/api/v1/anomalies", "alerts"},
