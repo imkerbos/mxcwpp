@@ -126,6 +126,18 @@ groups:
 
       # DLQ 写入失败 = 数据保全的最后一米失守：消息处理失败已转 DLQ 保底，连 DLQ 也没写进去。
       # 与错误率不同，这里没有阈值可言——任何一条都是不可恢复的丢失，出现即告警。
+      # ClickHouse 刷盘失败会让提交屏障暂停推进 offset（刻意如此：宁可重放produce重复行，
+      # 也不能提交"已落盘"却其实没落盘）。代价是 lag 会持续增长，必须能被看见。
+      - alert: MxCwppConsumerCHFlushBlockingOffset
+        expr: increase(mxcwpp_consumer_ch_write_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: consumer
+        annotations:
+          summary: "ClickHouse 刷盘失败，Consumer offset 已暂停推进"
+          description: "op={{ $labels.op }} 持续写入失败；offset 不再推进以避免丢证据，lag 将增长直至 CH 恢复。"
+
       - alert: MxCwppConsumerDLQWriteFailure
         expr: increase(mxcwpp_consumer_dlq_write_failures_total[5m]) > 0
         for: 0m

@@ -3,14 +3,17 @@ package writer
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"go.uber.org/zap"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
+	consumermetrics "github.com/matrixplusio/mxcwpp/internal/server/consumer/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/sanitize"
 )
 
@@ -88,6 +91,13 @@ type ClickHouseWriter struct {
 
 	flushCh chan struct{}
 	done    chan struct{}
+
+	// flushFailed 记录"自上次成功的提交屏障以来是否发生过刷盘失败"。
+	//
+	// 只看屏障当次的 flush 结果是不够的：周期 flusher 失败时批次已从内存取走并丢弃，
+	// 屏障再刷时无待写内容，会"成功"而放行 offset —— 那批行就永久没了。
+	// 因此失败必须黏住，直到某次屏障刷盘确实成功才清除。
+	flushFailed atomic.Bool
 }
 
 // NewClickHouseWriter 创建 ClickHouseWriter
@@ -285,10 +295,15 @@ func (w *ClickHouseWriter) Close() {
 // ebpf/fim/metrics 事件在分区重分配前落盘，避免重平衡/部署丢在途批次。
 // 注意：这不能消除 kill -9/OOM 硬崩溃在两次 flush 之间(≤flushTimeout)的丢失窗口——
 // 彻底 at-least-once 需 offset 提交与批 flush 协调(见架构评估 C1，属专项)。
-func (w *ClickHouseWriter) Flush() {
-	if w.conn != nil {
-		w.flush()
+func (w *ClickHouseWriter) Flush() error {
+	if w.conn == nil {
+		return nil
 	}
+	w.flush()
+	if w.flushFailed.Load() {
+		return errors.New("ClickHouse 刷盘存在未成功的批次，offset 不得推进")
+	}
+	return nil
 }
 
 // WriteHostMetrics 将 DataType 1000/1001 消息追加到 host_metrics 批次
@@ -383,26 +398,38 @@ func (w *ClickHouseWriter) flush() {
 	w.ebpfRows = w.ebpfRows[:0]
 	w.mu.Unlock()
 
+	attempted, failed := false, false
 	if len(metrics) > 0 {
-		w.flushHostMetrics(metrics)
+		attempted = true
+		failed = !w.flushHostMetrics(metrics) || failed
 	}
 	if len(fim) > 0 {
-		w.flushFIMEvents(fim)
+		attempted = true
+		failed = !w.flushFIMEvents(fim) || failed
 	}
 	if len(ebpf) > 0 {
-		w.flushEBPFEvents(ebpf)
+		attempted = true
+		failed = !w.flushEBPFEvents(ebpf) || failed
+	}
+	// 只有"确实写了东西且全部成功"才清除失败标记。
+	// 空刷盘不能清：失败批次已从内存取走丢弃，只有 offset 不推进、消息被重新投递
+	// 才能补回来；此时若因一次无内容的刷盘就放行 offset，那批行会永久消失。
+	if attempted && !failed {
+		w.flushFailed.Store(false)
 	}
 }
 
 // flushHostMetrics 批量写入 host_metrics 表
-func (w *ClickHouseWriter) flushHostMetrics(rows []hostMetricRow) {
+// 返回是否全部落盘成功。失败置黏性标记，阻止提交屏障推进 offset。
+func (w *ClickHouseWriter) flushHostMetrics(rows []hostMetricRow) bool {
 	ctx := context.Background()
 	batch, err := w.conn.PrepareBatch(ctx,
 		"INSERT INTO host_metrics (timestamp, host_id, hostname, cpu_usage, mem_usage, disk_usage, load_1, load_5, load_15, net_in, net_out, disk_read_bytes, disk_write_bytes)",
 	)
 	if err != nil {
 		w.logger.Error("ClickHouse PrepareBatch host_metrics 失败", zap.Error(err))
-		return
+		w.markFlushFailed("host_metrics", len(rows))
+		return false
 	}
 	for _, r := range rows {
 		if err := batch.Append(
@@ -420,20 +447,24 @@ func (w *ClickHouseWriter) flushHostMetrics(rows []hostMetricRow) {
 			zap.Int("rows", len(rows)),
 			zap.Error(err),
 		)
-	} else {
-		w.logger.Debug("ClickHouse host_metrics 写入成功", zap.Int("rows", len(rows)))
+		w.markFlushFailed("host_metrics", len(rows))
+		return false
 	}
+	w.logger.Debug("ClickHouse host_metrics 写入成功", zap.Int("rows", len(rows)))
+	return true
 }
 
 // flushFIMEvents 批量写入 fim_events 表
-func (w *ClickHouseWriter) flushFIMEvents(rows []fimEventRow) {
+// 返回是否全部落盘成功。失败置黏性标记，阻止提交屏障推进 offset。
+func (w *ClickHouseWriter) flushFIMEvents(rows []fimEventRow) bool {
 	ctx := context.Background()
 	batch, err := w.conn.PrepareBatch(ctx,
 		"INSERT INTO fim_events (timestamp, host_id, hostname, file_path, change_type, severity, category, detail, trace_id)",
 	)
 	if err != nil {
 		w.logger.Error("ClickHouse PrepareBatch fim_events 失败", zap.Error(err))
-		return
+		w.markFlushFailed("fim_events", len(rows))
+		return false
 	}
 	for _, r := range rows {
 		if err := batch.Append(
@@ -449,20 +480,24 @@ func (w *ClickHouseWriter) flushFIMEvents(rows []fimEventRow) {
 			zap.Int("rows", len(rows)),
 			zap.Error(err),
 		)
-	} else {
-		w.logger.Debug("ClickHouse fim_events 写入成功", zap.Int("rows", len(rows)))
+		w.markFlushFailed("fim_events", len(rows))
+		return false
 	}
+	w.logger.Debug("ClickHouse fim_events 写入成功", zap.Int("rows", len(rows)))
+	return true
 }
 
 // flushEBPFEvents 批量写入 ebpf_events 表
-func (w *ClickHouseWriter) flushEBPFEvents(rows []ebpfEventRow) {
+// 返回是否全部落盘成功。失败置黏性标记，阻止提交屏障推进 offset。
+func (w *ClickHouseWriter) flushEBPFEvents(rows []ebpfEventRow) bool {
 	ctx := context.Background()
 	batch, err := w.conn.PrepareBatch(ctx,
 		"INSERT INTO ebpf_events (timestamp, host_id, hostname, event_type, data_type, pid, ppid, exe, cmdline, parent_exe, file_path, remote_addr, remote_port, local_addr, local_port, protocol, uid, gid, return_code, username, login_uid, login_user, content_hash, file_size)",
 	)
 	if err != nil {
 		w.logger.Error("ClickHouse PrepareBatch ebpf_events 失败", zap.Error(err))
-		return
+		w.markFlushFailed("ebpf_events", len(rows))
+		return false
 	}
 	for _, r := range rows {
 		if err := batch.Append(
@@ -481,9 +516,11 @@ func (w *ClickHouseWriter) flushEBPFEvents(rows []ebpfEventRow) {
 			zap.Int("rows", len(rows)),
 			zap.Error(err),
 		)
-	} else {
-		w.logger.Debug("ClickHouse ebpf_events 写入成功", zap.Int("rows", len(rows)))
+		w.markFlushFailed("ebpf_events", len(rows))
+		return false
 	}
+	w.logger.Debug("ClickHouse ebpf_events 写入成功", zap.Int("rows", len(rows)))
+	return true
 }
 
 // parseEBPFEvent 从 MQMessage 解析出 ebpfEventRow
@@ -598,4 +635,17 @@ func parseUint64(s string) uint64 {
 		return 0
 	}
 	return v
+}
+
+// markFlushFailed 记录一次刷盘失败：置黏性标记并计量。
+//
+// 标记会一直保持到某次刷盘全部成功为止，期间提交屏障拒绝推进 offset，
+// 让这些消息被重新投递。ClickHouse 是追加式归档，重放会产生重复行——
+// 但归档里多几行远好过证据凭空消失。
+func (w *ClickHouseWriter) markFlushFailed(table string, rows int) {
+	w.flushFailed.Store(true)
+	consumermetrics.RecordCHWriteError(table)
+	w.logger.Error("ClickHouse 刷盘失败，offset 将暂停推进直至写入成功",
+		zap.String("table", table),
+		zap.Int("rows", rows))
 }
