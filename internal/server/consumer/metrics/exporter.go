@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/engine/anomaly"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -284,6 +286,12 @@ func init() {
 		AnomalySampleCount,
 		AnomalyHostCount,
 	)
+
+	// 模型健康指标（漂移/投毒防护、版本、训练集、排序通路）定义在 anomaly 包内，
+	// 因为它们是事件驱动的计数器，无法用"周期性把状态拷过来"的方式表达。
+	// 必须显式注册到本 registry：anomaly 包若用 promauto，指标会落到默认 registry，
+	// /metrics 永远抓不到，而告警规则的存在会让人以为已被监控覆盖。
+	registry.MustRegister(anomaly.Collectors()...)
 }
 
 // StartHTTPServer 启动独立的 /metrics HTTP server。

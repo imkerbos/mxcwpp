@@ -2,7 +2,6 @@ package anomaly
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // 训练样本的按主机配额。
@@ -32,7 +31,7 @@ const (
 // trainingSampleHosts 当前参与训练的主机数。
 //
 // 这个数字掉下来意味着训练集变窄了——模型正在向少数主机的行为收敛。
-var trainingSampleHosts = promauto.NewGauge(prometheus.GaugeOpts{
+var trainingSampleHosts = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name: "mxcwpp_anomaly_training_hosts",
 	Help: "Number of hosts contributing samples to anomaly model training",
 })
