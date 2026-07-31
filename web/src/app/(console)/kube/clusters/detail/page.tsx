@@ -87,7 +87,9 @@ export default function ClusterDetailPage() {
 
 function OverviewTab({ clusterId }: { clusterId: number }) {
   const { t } = useTranslation();
-  const { data: c } = useQuery({ queryKey: ["kube-cluster", clusterId], queryFn: () => kubeApi.getCluster(clusterId) });
+  const { data: c, isError: cError } = useQuery({ queryKey: ["kube-cluster", clusterId], queryFn: () => kubeApi.getCluster(clusterId) });
+  // 取不到集群概览时整块不渲染数字，避免"0 节点 0 Pod"被读成集群是空的。
+  if (cError) return <div className="text-muted text-sm">{t("common.loadError")}</div>;
   if (!c) return null;
   const health = c.healthScore ?? 0;
   const healthTone: "success" | "warning" | "danger" = health >= 80 ? "success" : health >= 50 ? "warning" : "danger";
@@ -96,9 +98,9 @@ function OverviewTab({ clusterId }: { clusterId: number }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard compact label={t("kube.clusters.colNodeCount")} value={s?.nodes ?? 0} icon={Server} />
-        <StatCard compact label={t("kube.clusters.colPodCount")} value={s?.pods ?? 0} icon={Layers} />
-        <StatCard compact label={t("kube.clusters.colNamespaceCount")} value={s?.namespaces ?? 0} icon={Boxes} />
+        <StatCard compact label={t("kube.clusters.colNodeCount")} value={s?.nodes ?? 0} error={cError} icon={Server} />
+        <StatCard compact label={t("kube.clusters.colPodCount")} value={s?.pods ?? 0} error={cError} icon={Layers} />
+        <StatCard compact label={t("kube.clusters.colNamespaceCount")} value={s?.namespaces ?? 0} error={cError} icon={Boxes} />
         <StatCard compact label={t("kube.clusters.colHealth")} value={health} icon={Activity} tone={healthTone} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

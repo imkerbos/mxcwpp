@@ -68,7 +68,8 @@
     },
     "poweredBy": "Powered by {{brand}}",
     "refresh": "Refresh",
-    "ip": "IP Address"
+    "ip": "IP Address",
+    "loadError": "Failed to load"
   },
   "nav": {
     "section": "Navigation",

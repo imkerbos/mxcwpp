@@ -19,10 +19,13 @@ export default function InspectionPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["ops-inspection"],
     queryFn: () => operationsApi.inspectionOverview(),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成"0 台离线、0 个插件异常"，
+  // 值班读到的是环境健康，实际是数据没拿到。
+  const statState = { error: isError, loading: isLoading };
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -161,12 +164,12 @@ export default function InspectionPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-4 mb-5 lg:grid-cols-6">
-        <StatCard label={t("operations.inspection.statTotal")} value={summary?.total_hosts ?? 0} icon={Server} />
-        <StatCard label={t("operations.inspection.statOnline")} value={summary?.online_hosts ?? 0} icon={Wifi} tone="success" />
-        <StatCard label={t("operations.inspection.statOffline")} value={summary?.offline_hosts ?? 0} icon={WifiOff} tone="warning" />
-        <StatCard label={t("operations.inspection.statAgentOutdated")} value={summary?.agent_outdated_count ?? 0} icon={ArrowUpCircle} tone="warning" />
-        <StatCard label={t("operations.inspection.statPluginError")} value={summary?.plugin_error_count ?? 0} icon={AlertTriangle} tone="danger" />
-        <StatCard label={t("operations.inspection.statPluginOutdated")} value={summary?.plugin_outdated_count ?? 0} icon={PackageX} tone="warning" />
+        <StatCard label={t("operations.inspection.statTotal")} value={summary?.total_hosts ?? 0} {...statState} icon={Server} />
+        <StatCard label={t("operations.inspection.statOnline")} value={summary?.online_hosts ?? 0} {...statState} icon={Wifi} tone="success" />
+        <StatCard label={t("operations.inspection.statOffline")} value={summary?.offline_hosts ?? 0} {...statState} icon={WifiOff} tone="warning" />
+        <StatCard label={t("operations.inspection.statAgentOutdated")} value={summary?.agent_outdated_count ?? 0} {...statState} icon={ArrowUpCircle} tone="warning" />
+        <StatCard label={t("operations.inspection.statPluginError")} value={summary?.plugin_error_count ?? 0} {...statState} icon={AlertTriangle} tone="danger" />
+        <StatCard label={t("operations.inspection.statPluginOutdated")} value={summary?.plugin_outdated_count ?? 0} {...statState} icon={PackageX} tone="warning" />
       </div>
 
       <div className="space-y-4">

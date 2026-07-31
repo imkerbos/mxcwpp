@@ -180,7 +180,7 @@ export default function VirusScanPage() {
     action: "",
   });
 
-  const { data: stats } = useQuery({ queryKey: ["virus-stats"], queryFn: () => virusApi.statistics() });
+  const { data: stats, isError: statsError } = useQuery({ queryKey: ["virus-stats"], queryFn: () => virusApi.statistics() });
 
   const { data: taskData, isLoading: tasksLoading } = useQuery({
     queryKey: ["virus-tasks", taskParams],
@@ -403,10 +403,10 @@ export default function VirusScanPage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("virus.scan.statTasks")} value={stats?.tasks.total ?? 0} icon={ShieldAlert} tone="default" />
-        <StatCard compact label={t("virus.scan.statThreats")} value={stats?.threats.total ?? 0} icon={Bug} tone="danger" />
-        <StatCard compact label={t("virus.scan.statHandled")} value={stats?.threats.quarantined ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("virus.scan.statAffectedHosts")} value={stats?.affectedHosts ?? 0} icon={Server} tone="success" />
+        <StatCard compact label={t("virus.scan.statTasks")} value={stats?.tasks.total ?? 0} error={statsError} icon={ShieldAlert} tone="default" />
+        <StatCard compact label={t("virus.scan.statThreats")} value={stats?.threats.total ?? 0} error={statsError} icon={Bug} tone="danger" />
+        <StatCard compact label={t("virus.scan.statHandled")} value={stats?.threats.quarantined ?? 0} error={statsError} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("virus.scan.statAffectedHosts")} value={stats?.affectedHosts ?? 0} error={statsError} icon={Server} tone="success" />
       </div>
 
       <div className="mb-4">

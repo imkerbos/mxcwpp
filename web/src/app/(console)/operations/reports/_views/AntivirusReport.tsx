@@ -49,10 +49,13 @@ export function AntivirusReport({ range }: Props) {
     ignored: t("virus.disposition.ignored"),
   };
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["reports-antivirus", range.start, range.end],
     queryFn: () => reportsApi.antivirusModule(range),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   function handleExportPdf() {
     void reportsApi.downloadPdf(
@@ -178,26 +181,29 @@ export function AntivirusReport({ range }: Props) {
 
       {/* 5 StatCards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        <StatCard label={t("operations.reports.avStatTotalTasks")} value={summary.totalTasks} icon={ListChecks} />
+        <StatCard label={t("operations.reports.avStatTotalTasks")} value={summary.totalTasks} {...statState} icon={ListChecks} />
         <StatCard
+          {...statState}
           label={t("operations.reports.avStatTotalThreats")}
           value={summary.totalThreats}
           icon={Bug}
           tone="danger"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.avStatDetected")}
           value={summary.detectedThreats}
           icon={Clock}
           tone="warning"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.avStatQuarantined")}
           value={summary.quarantinedThreats}
           icon={Lock}
           tone="success"
         />
-        <StatCard label={t("operations.reports.avStatAffectedHosts")} value={summary.affectedHosts} icon={Server} />
+        <StatCard label={t("operations.reports.avStatAffectedHosts")} value={summary.affectedHosts} {...statState} icon={Server} />
       </div>
 
       {/* 3 Charts */}

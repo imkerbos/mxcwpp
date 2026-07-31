@@ -117,7 +117,7 @@ export default function AnomalyPage() {
     host_id: "",
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["anomaly-stats"],
     queryFn: () => detectionApi.anomalyStats(),
   });
@@ -233,9 +233,9 @@ export default function AnomalyPage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3">
-        <StatCard compact label={t("detection.anomaly.statTotal")} value={stats?.total ?? 0} icon={Activity} tone="default" />
-        <StatCard compact label={t("detection.anomaly.statOpen")} value={stats?.open ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("detection.anomaly.statCritical")} value={stats?.critical ?? 0} icon={ShieldAlert} tone="danger" />
+        <StatCard compact label={t("detection.anomaly.statTotal")} value={stats?.total ?? 0} error={statsError} icon={Activity} tone="default" />
+        <StatCard compact label={t("detection.anomaly.statOpen")} value={stats?.open ?? 0} error={statsError} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("detection.anomaly.statCritical")} value={stats?.critical ?? 0} error={statsError} icon={ShieldAlert} tone="danger" />
       </div>
 
       <div className="space-y-4">

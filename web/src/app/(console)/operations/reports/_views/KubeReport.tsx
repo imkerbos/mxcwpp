@@ -35,10 +35,13 @@ export function KubeReport({ range }: Props) {
     low: t("common.severity.low"),
   };
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["reports-kube", range.start, range.end],
     queryFn: () => reportsApi.kubeModule(range),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   function handleExportPdf() {
     void reportsApi.downloadPdf(
@@ -181,29 +184,34 @@ export function KubeReport({ range }: Props) {
       {/* Row 1: 运行时告警 StatCards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatTotalAlarms")}
           value={summary.totalAlarms}
           icon={AlertTriangle}
           tone="danger"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatPending")}
           value={summary.pendingAlarms}
           icon={Server}
           tone="warning"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatProcessed")}
           value={summary.processedAlarms}
           icon={CheckCircle2}
           tone="success"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatIgnored")}
           value={summary.ignoredAlarms}
           icon={MinusCircle}
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatClusters")}
           value={summary.clusterCount}
           icon={Network}
@@ -213,29 +221,34 @@ export function KubeReport({ range }: Props) {
       {/* Row 2: CIS 基线 StatCards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatBaselineChecks")}
           value={baselineOverview.totalChecks}
           icon={ShieldCheck}
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatPassed")}
           value={baselineOverview.passed}
           icon={CheckCircle2}
           tone="success"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatFailed")}
           value={baselineOverview.failed}
           icon={XCircle}
           tone="danger"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatPassRate")}
           value={`${baselineOverview.passRate.toFixed(1)}%`}
           icon={ShieldCheck}
           tone="success"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.kubeStatActiveAlerts")}
           value={baselineAlerts.active}
           icon={AlertTriangle}

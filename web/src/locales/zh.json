@@ -68,7 +68,8 @@
     },
     "poweredBy": "由 {{brand}} 提供",
     "refresh": "刷新",
-    "ip": "IP 地址"
+    "ip": "IP 地址",
+    "loadError": "数据加载失败"
   },
   "nav": {
     "section": "导航",

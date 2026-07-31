@@ -72,7 +72,7 @@ export default function KubeAlarmsPage() {
   const statusMeta = buildStatusMeta(t);
   const statusTag = (s: string) => statusMeta[s] ?? { tone: "neutral" as Tone, label: s };
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["kube-alarms", params],
     queryFn: () =>
       kubeApi.listAlarms({
@@ -83,6 +83,9 @@ export default function KubeAlarmsPage() {
         cluster_id: params.cluster_id || undefined,
       }),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const stats = data?.stats;
 
   const [detail, setDetail] = useState<KubeAlarm | null>(null);
@@ -137,10 +140,10 @@ export default function KubeAlarmsPage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("kube.alarms.statCritical")} value={stats?.critical ?? 0} icon={ShieldAlert} tone="danger" />
-        <StatCard compact label={t("kube.alarms.statHigh")} value={stats?.high ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("kube.alarms.statMedium")} value={stats?.medium ?? 0} icon={AlertCircle} tone="default" />
-        <StatCard compact label={t("kube.alarms.statLow")} value={stats?.low ?? 0} icon={Info} tone="default" />
+        <StatCard compact label={t("kube.alarms.statCritical")} value={stats?.critical ?? 0} {...statState} icon={ShieldAlert} tone="danger" />
+        <StatCard compact label={t("kube.alarms.statHigh")} value={stats?.high ?? 0} {...statState} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("kube.alarms.statMedium")} value={stats?.medium ?? 0} {...statState} icon={AlertCircle} tone="default" />
+        <StatCard compact label={t("kube.alarms.statLow")} value={stats?.low ?? 0} {...statState} icon={Info} tone="default" />
       </div>
 
       <div className="space-y-4">

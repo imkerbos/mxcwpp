@@ -70,10 +70,13 @@ export default function HostMonitorPage() {
   const { t } = useTranslation();
   const rangeItems = buildRangeItems(t);
   const [range, setRange] = useState<MonitorRange>("1h");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["mon-host", range],
     queryFn: () => monitorApi.hostMetrics(range),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   const ov = data?.overview;
   const cpu = data?.cpu ?? [];
@@ -107,12 +110,12 @@ export default function HostMonitorPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-        <StatCard label={t("monitoring.host.statCpu")} value={`${(ov?.cpu ?? 0).toFixed(1)}%`} icon={Cpu} tone={pctTone(ov?.cpu ?? 0)} />
-        <StatCard label={t("monitoring.host.statMemory")} value={`${(ov?.memory ?? 0).toFixed(1)}%`} icon={MemoryStick} tone={pctTone(ov?.memory ?? 0)} />
-        <StatCard label={t("monitoring.host.statDisk")} value={`${(ov?.disk ?? 0).toFixed(1)}%`} icon={HardDrive} tone={pctTone(ov?.disk ?? 0)} />
-        <StatCard label={t("monitoring.host.statLoad")} value={(ov?.load ?? 0).toFixed(2)} icon={Gauge} tone="default" />
-        <StatCard label={t("monitoring.host.statAgentCpu")} value={`${(ov?.agentCpu ?? 0).toFixed(1)}%`} icon={Activity} tone={pctTone(ov?.agentCpu ?? 0)} />
-        <StatCard label={t("monitoring.host.statAgentMem")} value={`${(ov?.agentMemMB ?? 0).toFixed(1)} MB`} icon={Boxes} tone="default" />
+        <StatCard label={t("monitoring.host.statCpu")} value={`${(ov?.cpu ?? 0).toFixed(1)}%`} {...statState} icon={Cpu} tone={pctTone(ov?.cpu ?? 0)} />
+        <StatCard label={t("monitoring.host.statMemory")} value={`${(ov?.memory ?? 0).toFixed(1)}%`} {...statState} icon={MemoryStick} tone={pctTone(ov?.memory ?? 0)} />
+        <StatCard label={t("monitoring.host.statDisk")} value={`${(ov?.disk ?? 0).toFixed(1)}%`} {...statState} icon={HardDrive} tone={pctTone(ov?.disk ?? 0)} />
+        <StatCard label={t("monitoring.host.statLoad")} value={(ov?.load ?? 0).toFixed(2)} {...statState} icon={Gauge} tone="default" />
+        <StatCard label={t("monitoring.host.statAgentCpu")} value={`${(ov?.agentCpu ?? 0).toFixed(1)}%`} {...statState} icon={Activity} tone={pctTone(ov?.agentCpu ?? 0)} />
+        <StatCard label={t("monitoring.host.statAgentMem")} value={`${(ov?.agentMemMB ?? 0).toFixed(1)} MB`} {...statState} icon={Boxes} tone="default" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

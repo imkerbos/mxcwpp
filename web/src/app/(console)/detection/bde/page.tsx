@@ -175,7 +175,7 @@ export default function BdePage() {
   const [alertPage, setAlertPage] = useState(1);
   const pageSize = 20;
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["bde-stats"],
     queryFn: () => detectionApi.bdeStats(),
   });
@@ -195,10 +195,10 @@ export default function BdePage() {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("detection.bde.statTotalHosts")} value={stats?.total_hosts ?? 0} icon={Server} tone="default" />
-        <StatCard compact label={t("detection.bde.statLearning")} value={stats?.learning_hosts ?? 0} icon={GraduationCap} tone="warning" />
-        <StatCard compact label={t("detection.bde.statActive")} value={stats?.active_hosts ?? 0} icon={ShieldCheck} tone="success" />
-        <StatCard compact label={t("detection.bde.statOpenAlerts")} value={stats?.open_alerts ?? 0} icon={AlertTriangle} tone="danger" />
+        <StatCard compact label={t("detection.bde.statTotalHosts")} value={stats?.total_hosts ?? 0} error={statsError} icon={Server} tone="default" />
+        <StatCard compact label={t("detection.bde.statLearning")} value={stats?.learning_hosts ?? 0} error={statsError} icon={GraduationCap} tone="warning" />
+        <StatCard compact label={t("detection.bde.statActive")} value={stats?.active_hosts ?? 0} error={statsError} icon={ShieldCheck} tone="success" />
+        <StatCard compact label={t("detection.bde.statOpenAlerts")} value={stats?.open_alerts ?? 0} error={statsError} icon={AlertTriangle} tone="danger" />
       </div>
 
       <Tabs items={tabs} active={tab} onChange={setTab} />
