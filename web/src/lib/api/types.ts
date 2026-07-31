@@ -119,6 +119,40 @@ export interface Incident {
   last_seen_at: string;
   resolved_at: string | null;
   resolved_by: string;
+
+  // 运营闭环字段
+  owner?: string;
+  assigned_at?: string | null;
+  assigned_by?: string;
+  acked_at?: string | null;
+  acked_by?: string;
+  ack_due_at?: string | null;
+  resolve_due_at?: string | null;
+  verdict?: IncidentVerdict;
+  verdict_reason?: string;
+  escalated?: boolean;
+  escalated_at?: string | null;
+  escalated_to?: string;
+  close_reason?: string;
+}
+
+/**
+ * 研判结论。关闭事件必须给出其中之一。
+ *
+ * benign_true_positive（检测正确但行为无害）单列一档很关键：
+ * 把它算进误报会让本来工作正常的规则被错误地调松。
+ */
+export type IncidentVerdict = "true_positive" | "false_positive" | "benign_true_positive";
+
+/** 事件时间线条目：状态变更、研判备注、证据引用都在这里。 */
+export interface IncidentEvent {
+  id: number;
+  incident_id: string;
+  type: "assigned" | "acked" | "comment" | "evidence" | "escalated" | "verdict" | "resolved";
+  actor: string;
+  body: string;
+  ref?: string;
+  created_at: string;
 }
 
 export interface IncidentStage {
