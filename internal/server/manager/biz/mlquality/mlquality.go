@@ -92,10 +92,16 @@ func (s *Service) Measure() (*Quality, error) {
 		N           int
 	}
 	var rows []row
+	// GROUP BY 必须重复整个表达式，不能用 SELECT 里的别名。
+	//
+	// MySQL 默认开启 only_full_group_by，按别名分组会被判为
+	// "alert_type 不在 GROUP BY 中"（Error 1055）直接拒绝；而 sqlite 接受别名分组。
+	// 单测跑在 sqlite 上因而全绿，真库上第一次调用就 500 —— 两边必须用同一种写法。
+	const patternExpr = "COALESCE(NULLIF(pattern_name, ''), alert_type)"
 	err := s.db.Model(&model.AnomalyAlert{}).
-		Select("COALESCE(NULLIF(pattern_name, ''), alert_type) AS pattern_name, status, COUNT(*) AS n").
+		Select(patternExpr+" AS pattern_name, status, COUNT(*) AS n").
 		Where("created_at >= ?", since).
-		Group("pattern_name, status").Scan(&rows).Error
+		Group(patternExpr + ", status").Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("统计异常告警研判结论失败: %w", err)
 	}
