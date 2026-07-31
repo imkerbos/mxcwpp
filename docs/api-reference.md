@@ -457,6 +457,30 @@
 | PUT | `/api/v1/detection-rules/:id` | 更新检测规则 |
 | DELETE | `/api/v1/detection-rules/:id` | 删除检测规则（内置规则不可删除） |
 | POST | `/api/v1/detection-rules/:id/toggle` | 启用或禁用规则 |
+| GET | `/api/v1/detection-rules/:id/quality` | 规则检测质量（由人工研判结论计算的精确率） |
+| GET | `/api/v1/detection-rules/:id/promotion` | 晋级条件评估：能否晋级，不能则给出差距 |
+| POST | `/api/v1/detection-rules/:id/promote` | 晋级规则一级（不满足条件时拒绝） |
+| POST | `/api/v1/detection-rules/:id/demote` | 降级规则（须写明原因） |
+
+### 规则生命周期
+
+规则按 `draft → shadow → context → alert` 逐级放开，只有 `alert` 阶段会独立产生告警。
+
+晋级门槛按跳区分，因为每一跳能拿到的证据不同：
+
+| 跳转 | 门槛 | 为什么 |
+|------|------|--------|
+| draft → shadow | 无 | 影子阶段本就是为了收集数据，要求它先有数据是循环依赖 |
+| shadow → context | 观察 ≥ 7 天且日均命中 ≤ 50 次 | 影子规则不告警，也就没有研判结论；这一跳先回答"它会响多少次" |
+| context → alert | 已研判 ≥ 20 条且精确率 ≥ 85% | 上下文阶段的命中参与事件聚合，因而有人工研判结论可依 |
+
+精确率只由人工研判结论计算（`true_positive` / `false_positive` / `benign_true_positive`），
+其中 `benign_true_positive`（检测正确但行为无害）计入分母但不算作错误。
+样本不足时精确率返回 `null` 表示"未知"，不是 0——缺失不等于不达标。
+
+降级不设证据门槛，只要求写明原因：噪声规则应能被立刻按下去，先止损再排查。
+
+存量规则一律回填为 `alert`，保持升级前的行为。
 
 ---
 

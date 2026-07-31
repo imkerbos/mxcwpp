@@ -21,9 +21,63 @@ type DetectionRule struct {
 	UserModified bool        `gorm:"column:user_modified;default:false" json:"userModified"`
 	CreatedAt    LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
 	UpdatedAt    LocalTime   `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	// Stage 规则生命周期阶段，控制命中后的处理强度。
+	//
+	// draft → shadow → context → alert 逐级放开：新规则不该一上来就打扰值班，
+	// 而"什么时候可以晋级"必须由数据回答，不是由人觉得差不多了。
+	Stage string `gorm:"column:stage;type:varchar(16);not null;default:'alert';index" json:"stage"`
+
 	// EffectiveAt 规则上线时间，用户新增自定义规则的 detect-only 观察期(P3)起点。
 	// 内置规则不受观察期约束（见 celengine.graceDecision）。可空：存量规则由迁移回填为 created_at。
 	EffectiveAt *LocalTime `gorm:"column:effective_at;type:timestamp;null" json:"effectiveAt"`
+}
+
+// 规则生命周期阶段。
+//
+// 每一级只放开一点点，因为误报的代价是累积的：一条噪声规则不会立刻压垮值班，
+// 但十条会，而到那时已经分不清是哪条造成的。
+const (
+	// RuleStageDraft 草稿：不参与评估，仅保存。
+	RuleStageDraft = "draft"
+	// RuleStageShadow 影子：评估并记录命中，但不产生任何告警与关联信号。
+	// 用来在真实流量上量它到底会响多少次。
+	RuleStageShadow = "shadow"
+	// RuleStageContext 上下文：命中作为关联信号参与事件聚合，仍不独立告警。
+	RuleStageContext = "context"
+	// RuleStageAlert 告警：独立产生告警，会打扰到人。
+	RuleStageAlert = "alert"
+)
+
+// ruleStageOrder 定义晋级顺序。
+var ruleStageOrder = map[string]int{
+	RuleStageDraft:   0,
+	RuleStageShadow:  1,
+	RuleStageContext: 2,
+	RuleStageAlert:   3,
+}
+
+// NextRuleStage 返回下一阶段，已在最高级返回空串。
+func NextRuleStage(stage string) string {
+	switch stage {
+	case RuleStageDraft:
+		return RuleStageShadow
+	case RuleStageShadow:
+		return RuleStageContext
+	case RuleStageContext:
+		return RuleStageAlert
+	default:
+		return ""
+	}
+}
+
+// RuleStageAtLeast 判断阶段是否达到指定级别。
+func RuleStageAtLeast(stage, min string) bool {
+	return ruleStageOrder[stage] >= ruleStageOrder[min]
+}
+
+// AlertsIndependently 该阶段是否会独立产生告警（即会打扰到人）。
+func (r *DetectionRule) AlertsIndependently() bool {
+	return r.Stage == RuleStageAlert || r.Stage == ""
 }
 
 // BeforeCreate 新增规则时若未显式指定上线时间，默认置为当前时间，作为 detect-only 观察期起点。
