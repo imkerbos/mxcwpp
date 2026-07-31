@@ -66,6 +66,13 @@ cp "$PROJECT_ROOT/deploy/config/"* "$PACKAGE_DIR/config/"
 
 chmod +x "$PACKAGE_DIR/deploy.sh"
 
+# SBOM：客户合规审计需要知道产品里装了哪些第三方组件。
+# 出现 Log4Shell 这类事件时，它决定的是十分钟答出有没有受影响，还是翻两天源码。
+if [ -x "$PROJECT_ROOT/scripts/gen-sbom.sh" ]; then
+    "$PROJECT_ROOT/scripts/gen-sbom.sh" "$PACKAGE_DIR/sbom.cdx.json" || \
+        echo "警告: SBOM 生成失败，发布包缺少物料清单" >&2
+fi
+
 # docker-compose.yml：直接复用官方拓扑，只把 image 换成发布镜像。
 #
 # 此前这里内嵌生成一份独立的 compose，服务集与 deploy/docker-compose.yml 不同——

@@ -63,6 +63,7 @@ var (
 	buildTime     string // 构建时间（构建时嵌入）
 	signPublicKey string // Plugin 签名验证公钥（base64，构建时嵌入）
 	caFingerprint string // AC CA 证书 SHA256 指纹（构建时嵌入，首连 pin AC 防中间人）
+	gitCommit     string // 构建所用源码 commit，供交付后与源码对账
 	enrollToken   string // enroll 引导令牌（构建时嵌入，换取单机证书）
 )
 
@@ -161,6 +162,7 @@ func main() {
 	}
 	// 设置构建时嵌入的插件签名公钥
 	cfg.SignPublicKey = signPublicKey
+	cfg.GitCommit = gitCommit
 
 	// Agent↔AC 信任链：CA 指纹 + enroll 令牌。
 	cfg.Local.TLS.CAFingerprint, cfg.Local.TLS.EnrollToken = resolveTrustConfig(caFingerprint, enrollToken)

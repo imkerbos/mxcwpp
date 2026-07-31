@@ -20,6 +20,9 @@ type Config struct {
 	remoteMu      sync.RWMutex // 保护 Remote 字段的并发读写
 	BuildVersion  string       // 构建时嵌入的版本（优先级最高）
 	SignPublicKey string       // Ed25519 公钥（base64），构建时嵌入
+	// GitCommit 构建所用源码 commit。交付后据此确认"跑的确实是这份代码"，
+	// 是可复现构建的对账依据。
+	GitCommit string
 }
 
 // LocalConfig 是本地配置（最小配置）
