@@ -121,7 +121,8 @@ export default function ResponseActionsPage() {
       render: (r) => (
         <div className="text-sm">
           <div className="text-ink">{r.requested_by}</div>
-          <div className="text-xs text-faint">{new Date(r.requested_at).toLocaleString()}</div>
+          {/* 直接渲染后端返回的本地时间串，与全站一致。*/}
+          <div className="text-xs text-faint tabular-nums">{r.requested_at}</div>
         </div>
       ),
     },

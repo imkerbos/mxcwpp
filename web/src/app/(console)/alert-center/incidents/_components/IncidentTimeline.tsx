@@ -50,7 +50,8 @@ export function IncidentTimeline({ events, disabled, submitting, onComment }: Pr
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-ink">{e.body}</div>
                 <div className="text-xs text-faint">
-                  {e.actor} · {new Date(e.created_at).toLocaleString()}
+                  {/* 直接渲染后端返回的本地时间串，与全站一致。*/}
+                  {e.actor} · <span className="tabular-nums">{e.created_at}</span>
                   {e.ref && <span className="ml-1 font-mono">· {e.ref}</span>}
                 </div>
               </div>
