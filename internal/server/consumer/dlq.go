@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
+	consumermetrics "github.com/matrixplusio/mxcwpp/internal/server/consumer/metrics"
 )
 
 // DLQHandler 将消费失败的消息写入 Dead Letter Queue Topic
@@ -49,8 +50,12 @@ func (h *DLQHandler) Send(sourceTopic string, msg *kafka.MQMessage, cause error,
 	}
 
 	if err := h.producer.Send(dlqTopic, msg.AgentID, dlqMQMsg); err != nil {
-		h.logger.Error("写入 DLQ 失败",
+		// 数据保全的最后一米失守：处理失败已转 DLQ 保底，连 DLQ 也没写进去，这条消息真的没了。
+		// 只打日志无法计量也无法告警，必须计数——该指标非零即代表已发生不可恢复的丢失。
+		consumermetrics.RecordDLQWriteFailure(dlqTopic)
+		h.logger.Error("写入 DLQ 失败，消息已不可恢复地丢失",
 			zap.String("dlq_topic", dlqTopic),
+			zap.Int32("data_type", msg.DataType),
 			zap.String("agent_id", msg.AgentID),
 			zap.Error(err),
 		)
