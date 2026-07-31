@@ -10,6 +10,7 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
+	"github.com/matrixplusio/mxcwpp/internal/server/notify"
 )
 
 // StartAlertScheduler 启动定期告警调度器
@@ -191,10 +192,25 @@ func processNotificationAlerts(db *gorm.DB, logger *zap.Logger, notification *mo
 			continue
 		}
 
+		// 先原子占用这次通知机会，再发送。AgentCenter 在告警产生时也会内联通知，
+		// 若两边都"先发后写"，新告警会被同时命中并发送两次。
+		claimed, claimErr := notify.ClaimAlertNotification(db, alert.ID, cutoffTime)
+		if claimErr != nil {
+			logger.Warn("占用告警通知机会失败",
+				zap.Uint("alert_id", alert.ID), zap.Error(claimErr))
+			failedCount++
+			continue
+		}
+		if !claimed {
+			logger.Debug("告警通知已被其它触发占用，跳过",
+				zap.Uint("alert_id", alert.ID))
+			continue
+		}
+
 		// 发送通知
 		sent, err := notificationService.SendAlertNotificationForAlert(&alert)
 		if err != nil {
-			logger.Warn("发送定期告警通知失败",
+			logger.Warn("发送定期告警通知失败（已占用的通知机会将在下个周期重试）",
 				zap.Uint("alert_id", alert.ID),
 				zap.Error(err))
 			failedCount++
@@ -202,13 +218,6 @@ func processNotificationAlerts(db *gorm.DB, logger *zap.Logger, notification *mo
 		}
 
 		if sent {
-			// 更新告警的通知时间和通知次数
-			now := model.Now()
-			db.Model(&model.Alert{}).Where("id = ?", alert.ID).Updates(map[string]interface{}{
-				"last_notified_at": &now,
-				"notify_count":     gorm.Expr("notify_count + 1"),
-			})
-
 			logger.Info("定期告警通知已发送",
 				zap.Uint("alert_id", alert.ID),
 				zap.String("host_id", alert.HostID),
