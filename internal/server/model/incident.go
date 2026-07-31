@@ -33,6 +33,46 @@ const (
 	IncidentEventResolved  = "resolved"
 )
 
+// 值班层级。升级沿层级向上，每层对应一组值班人。
+const (
+	OncallTierL1       = "l1"       // 一线值班：默认接单
+	OncallTierL2       = "l2"       // 二线：L1 升级目标
+	OncallTierSecurity = "security" // 安全负责人：最终升级目标
+)
+
+// OncallShift 是一条值班安排。
+//
+// 没有值班表，新事件就永远是"无人负责"，超时告警只会天天响而没人知道该找谁。
+// 排班按时间窗而非固定人：值班是轮换的，把负责人写死在配置里意味着换班要改配置。
+type OncallShift struct {
+	TenantID string    `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
+	ID       uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Tier     string    `gorm:"column:tier;type:varchar(20);not null;index" json:"tier"`
+	Username string    `gorm:"column:username;type:varchar(100);not null" json:"username"`
+	StartsAt LocalTime `gorm:"column:starts_at;type:timestamp;not null;index" json:"starts_at"`
+	EndsAt   LocalTime `gorm:"column:ends_at;type:timestamp;not null;index" json:"ends_at"`
+
+	CreatedAt LocalTime `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt LocalTime `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" json:"updated_at"`
+}
+
+// TableName 指定表名
+func (OncallShift) TableName() string { return "oncall_shifts" }
+
+// NextTier 返回升级链上的下一层。已在最高层则返回空串。
+//
+// 升级必须有确定的下一站：让人自己填"升级给谁"，在半夜三点是行不通的。
+func NextTier(tier string) string {
+	switch tier {
+	case OncallTierL1:
+		return OncallTierL2
+	case OncallTierL2:
+		return OncallTierSecurity
+	default:
+		return ""
+	}
+}
+
 // IncidentEvent 是一条事件时间线记录：状态变更、研判备注、证据附加都落在这里。
 //
 // 单表承载而非拆成评论/审计/证据三张：调查过程本身就是一条连续的叙事，

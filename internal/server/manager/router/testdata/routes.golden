@@ -170,6 +170,8 @@ GET	/api/v1/monitor/slo	authenticated-perm	monitoring:view
 GET	/api/v1/network-block/rules	authenticated-perm	operations:view
 GET	/api/v1/notifications	authenticated-perm	system_config:view
 GET	/api/v1/notifications/:id	authenticated-perm	system_config:view
+GET	/api/v1/oncall/current	authenticated-perm	alerts:view
+GET	/api/v1/oncall/shifts	authenticated-perm	alerts:view
 GET	/api/v1/plugins/download/:name	public	-
 GET	/api/v1/policies	authenticated-perm	baseline:view
 GET	/api/v1/policies/:policy_id	authenticated-perm	baseline:view
@@ -386,6 +388,7 @@ POST	/api/v1/network-block/rules	authenticated-perm	operations:manage
 POST	/api/v1/network-block/rules/:id/remove	authenticated-perm	operations:manage
 POST	/api/v1/notifications	authenticated-perm	system_config:manage
 POST	/api/v1/notifications/test	authenticated-perm	system_config:manage
+POST	/api/v1/oncall/shifts	authenticated-perm	alerts:manage
 POST	/api/v1/policies	authenticated-perm	baseline:manage
 POST	/api/v1/policies/:policy_id/rules	authenticated-perm	baseline:manage
 POST	/api/v1/policies/batch/delete	authenticated-perm	baseline:manage

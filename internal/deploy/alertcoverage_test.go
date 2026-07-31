@@ -34,6 +34,8 @@ func TestCriticalMetricsHaveAlerts(t *testing.T) {
 		"mxcwpp_consumer_ch_write_errors_total":          "CH 写失败 = offset 暂停推进，需人工介入",
 		"mxcwpp_ac_unrouted_datatype_total":              "DataType 未登记路由 = 消息被静默忽略",
 		"mxcwpp_vulnsync_last_success_timestamp_seconds": "漏洞库停更 = 界面显示的是旧数据",
+		"mxcwpp_incident_sla_breached":                   "事件超时无人认领 = 检测到了但没人处置",
+		"mxcwpp_incident_unowned":                        "无主事件堆积 = 即将变成超时",
 	}
 
 	for metric, why := range critical {

@@ -706,6 +706,13 @@ func setupIncidentAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 	router.GET("/incidents", handler.ListIncidents)
 	router.GET("/incidents/:id", handler.GetIncident)
 	router.GET("/incidents/:id/timeline", handler.GetIncidentTimeline)
+
+	// 值班表：没有它，新事件永远无人负责，超时告警只会天天响而没人知道该找谁。
+	oncallHandler := api.NewOncallHandler(db, logger)
+	router.GET("/oncall/current", oncallHandler.CurrentOncall)
+	router.GET("/oncall/shifts", oncallHandler.ListShifts)
+	router.POST("/oncall/shifts", oncallHandler.SaveShift)
+
 	// 运营闭环：指派 → 认领 → 研判/证据 → 升级 → 带结论关闭。
 	router.POST("/incidents/:id/assign", handler.AssignIncident)
 	router.POST("/incidents/:id/ack", handler.AckIncident)

@@ -168,6 +168,8 @@ var modulePrefixes = func() []modulePrefix {
 		{"/api/v1/business-lines", "assets"},
 		// —— 告警中心 alerts（含事件/攻击链/异常）——
 		{"/api/v1/alerts", "alerts"},
+		// 值班表属事件运营的一部分，与事件同权限域：能处置事件的人才该改排班。
+		{"/api/v1/oncall", "alerts"},
 		{"/api/v1/incidents", "alerts"},
 		{"/api/v1/storylines", "alerts"},
 		{"/api/v1/anomalies", "alerts"},

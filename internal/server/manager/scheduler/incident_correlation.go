@@ -286,6 +286,13 @@ func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutof
 		return false
 	}
 
+	// 自动派给当前一线值班人：新事件默认无人负责，超时告警只会天天响而没人知道该找谁。
+	// 派单失败不影响事件本身已经落库——把创建和派单绑成一体，会让排班缺口变成"事件也没了"。
+	if err := casework.NewService(db, logger).AutoAssign(inc.IncidentID); err != nil {
+		logger.Warn("事件自动派单失败，该事件当前无负责人",
+			zap.String("incident_id", inc.IncidentID), zap.Error(err))
+	}
+
 	// 关联事件是去重聚合后的视图，本该是最值得通知的一层，此前却是唯一完全没有出口的一层。
 	// 抑制身份取 incident_id：同一事件后续更新走的是上面的 update 分支，不会重复发布。
 	alertbus.Publish(alertbus.Event{
