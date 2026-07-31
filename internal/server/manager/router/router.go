@@ -19,7 +19,6 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/kube"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/api"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz/mssp"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/middleware"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/sd"
 	"github.com/matrixplusio/mxcwpp/internal/server/metrics"
@@ -204,22 +203,16 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV2.Use(authHandler.AuthMiddleware())
 	apiV2Admin := apiV2.Group("/admin")
 	apiV2Admin.Use(tenant.AdminMiddleware())
-	adminTenantsHandler := api.NewAdminTenantsHandler(db, logger)
-	apiV2Admin.GET("/tenants", adminTenantsHandler.ListTenants)
-	apiV2Admin.GET("/tenants/:id", adminTenantsHandler.GetTenant)
-	apiV2Admin.POST("/tenants", adminTenantsHandler.CreateTenant)
-	apiV2Admin.POST("/tenants/:id/suspend", adminTenantsHandler.SuspendTenant)
-	apiV2Admin.POST("/tenants/:id/resume", adminTenantsHandler.ResumeTenant)
+	// 单租户产品：多租户管理面（租户 CRUD / 停用恢复 / MSSP 跨租户视图）已移除。
+	// 底层 tenant_id 保留并统一传默认租户，见 docs/architecture.md「单租户收敛」。
 
-	// Sprint 2 PR38: /api/v2/system/mode (用户级查询) + /api/v2/admin/tenants/:id/mode (超管切换)
-	// MemoryResolver 启动时从 tenants 表加载初始 mode (后续 PR 加 Redis Pub/Sub 同步多副本)
+	// /api/v2/system/mode：运行模式查询。按租户切换随多租户管理面一并移除，
+	// 模式现在是部署级设置，由 MemoryResolver 持有默认值。
 	modeResolver := mode.NewMemoryResolver(mode.Observe)
 	loadTenantModes(db, modeResolver, logger)
 	systemModeHandler := api.NewSystemModeHandler(db, logger, modeResolver)
 
 	apiV2.GET("/system/mode", systemModeHandler.GetCurrentMode)
-	apiV2Admin.POST("/tenants/:id/mode", systemModeHandler.SetTenantMode)
-	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
 
 	// P1-1: 配置中心变更审批 /api/v2/config/change-requests/*
 	// 配置变更审批属管理动作，deny-by-default：仅 admin 可访问（此前仅需登录，是越权空洞）。
@@ -232,19 +225,6 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	configChangeGroup.POST("/:id/approve", configChangeHandler.Approve)
 	configChangeGroup.POST("/:id/reject", configChangeHandler.Reject)
 	configChangeGroup.POST("/:id/cancel", configChangeHandler.Cancel)
-
-	// A3: MSSP 控制台路由 /api/v2/mssp/*
-	// 跨租户视图属平台管理面，deny-by-default：仅 admin 可访问（此前仅需登录，是越权空洞）。
-	msspSvc := mssp.NewService(db, logger)
-	msspHandler := api.NewMSSPHandler(msspSvc, logger)
-	msspGroup := apiV2.Group("/mssp", api.RoleMiddleware("admin"))
-	msspGroup.GET("/dashboard", msspHandler.Dashboard)
-	msspGroup.GET("/child-tenants", msspHandler.ListChildTenants)
-	msspGroup.POST("/child-tenants", msspHandler.CreateChildTenant)
-	msspGroup.GET("/child-tenants/:id", msspHandler.GetChildTenant)
-	msspGroup.POST("/child-tenants/:id/suspend", msspHandler.SuspendChildTenant)
-	msspGroup.POST("/child-tenants/:id/resume", msspHandler.ResumeChildTenant)
-	msspGroup.GET("/alerts", msspHandler.CrossTenantAlerts)
 
 	return router
 }
