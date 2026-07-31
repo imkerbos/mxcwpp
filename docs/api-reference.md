@@ -323,6 +323,33 @@
 
 ---
 
+## 处置审批
+
+处置动作（隔离主机等）**不再直接执行**，统一走申请 → 审批 → 执行 → 可回滚。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/hosts/isolate` | 提交隔离**申请**（须写明理由），不立即生效 |
+| POST | `/api/v1/hosts/release` | 提交解除隔离申请 |
+| GET | `/api/v1/response-actions` | 处置申请列表，可按 `status` 过滤 |
+| POST | `/api/v1/response-actions/:id/approve` | 审批通过（申请人不可自审批） |
+| POST | `/api/v1/response-actions/:id/reject` | 驳回（须写明原因） |
+| POST | `/api/v1/response-actions/:id/execute` | 执行已审批的处置 |
+| POST | `/api/v1/response-actions/:id/rollback` | 回滚已执行的处置 |
+
+隔离会切断业务流量。原实现是一次调用即刻生效，没有第二个人看过，事后也回答不了
+"这台机器当时为什么被隔离、谁批的"。
+
+`idempotency_key` 由调用方提供，同一键只产生一次执行——处置重复执行的后果不对称：
+多隔离一次可能切断本已恢复的业务。
+
+`system` / `auto` / `scheduler` 等系统身份**不得发起处置申请**：自动处置在申请入口
+即被拒绝，而不是依赖"目前没有自动路径"这种碰巧成立的状态。
+
+关联 `incident_id` 后，申请/审批/执行会作为证据写入该事件时间线。
+
+---
+
 ## 安全事件与运营闭环
 
 事件（Incident）把同主机、同时间窗内的多源信号关联成一条攻击叙事，运营闭环建在其上。
