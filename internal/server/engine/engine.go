@@ -43,6 +43,18 @@ func NewHTTPHandler(logger *zap.Logger) http.Handler {
 	// (process_cpu_seconds_total / process_resident_memory_bytes / go_goroutines)。
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	// 运行时能力清单：机器可读地说明每项检测能力当前处于哪一档
+	// （active 在跑且告警可达 / dead_end 在跑但告警无人消费 / unwired 纯代码）。
+	// 对外宣称能力必须以此为准，CI 保证它与代码一致（见 capability_test.go）。
+	r.GET("/capabilities", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"service":      "engine",
+			"version":      Version,
+			"summary":      SummarizeCapabilities(),
+			"capabilities": Capabilities,
+		})
+	})
+
 	r.NoRoute(func(c *gin.Context) {
 		payload, _ := json.Marshal(gin.H{
 			"error":   "not implemented",

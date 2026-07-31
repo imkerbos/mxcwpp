@@ -438,6 +438,28 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
 - **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
 - 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
 
+### 运行时能力清单（E-WIRE-1）
+
+代码里有 19 个检测 Stage 构造器，实际接进流水线的只有 8 个；接进去的里面还有 3 个把
+告警发往 `mxcwpp.engine.alert`，而该 topic **无任何消费者**——跑了也到不了界面。
+"有代码"与"能力在跑"之间隔着两道口子，此前只能靠人工 grep 分辨，数字还互相对不上。
+
+`internal/server/engine/capability.go` 是权威清单，把每项能力归入三档之一：
+
+| 档位 | 含义 | 可否对外宣称 |
+|---|---|---|
+| `active` | 已接线且告警有实际去处 | ✅ |
+| `dead_end` | 已接线但告警无人消费 | ❌ 必须注明缺什么 |
+| `unwired` | 有构造器但从未接线 | ❌ |
+
+清单经 `GET /capabilities`（Engine HTTP）以 JSON 发布，供运维与交付流程核对。
+
+CI 闸 `capability_test.go` 双向比对清单与真实代码：新增构造器未登记、声明已接线
+但入口没接、声明未接线却接了，三种都会失败。`dead_end` 条目必须写明原因，且一旦
+`engine.alert` 出现消费者，测试会提示把状态改回 `active`——避免修好了却忘了更新清单。
+
+**对外宣称以清单为准**：只有 `active` 档的能力允许出现在方案、官网或 POC 中。
+
 ### Agent 身份信任链（E-SEC-3）
 
 Agent 接入的信任建立在三段上，任一段缺失都会被 fail-closed 拒绝：
