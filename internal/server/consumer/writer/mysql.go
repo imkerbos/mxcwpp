@@ -604,12 +604,31 @@ func (w *MySQLWriter) WriteScanTaskComplete(msg *kafka.MQMessage) error {
 	taskID, _ := strconv.ParseUint(fields["task_id"], 10, 64)
 	now := model.LocalTime(time.Now())
 
+	// scan_status 区分主机是真的扫过还是引擎根本不可用。
+	// clean/infected 才算扫过；partial/unavailable 说明覆盖不全，
+	// 把它们混进"已扫描"会让任务看起来全覆盖零威胁，而那些主机从未被扫。
+	scanStatus := fields["scan_status"]
+	degraded := scanStatus == "partial" || scanStatus == "unavailable"
+	if degraded {
+		w.logger.Warn("主机扫描覆盖不完整，结果不足以判定其干净",
+			zap.String("host_id", msg.AgentID),
+			zap.String("scan_status", scanStatus),
+			zap.String("engine_reports", fields["engine_reports"]))
+	}
+
 	return w.db.Transaction(func(tx *gorm.DB) error {
 		// 递增已扫描主机数
 		if err := tx.Model(&model.AntivirusScanTask{}).
 			Where("id = ?", taskID).
 			UpdateColumn("scanned_hosts", gorm.Expr("scanned_hosts + 1")).Error; err != nil {
 			return err
+		}
+		if degraded {
+			if err := tx.Model(&model.AntivirusScanTask{}).
+				Where("id = ?", taskID).
+				UpdateColumn("degraded_hosts", gorm.Expr("degraded_hosts + 1")).Error; err != nil {
+				return err
+			}
 		}
 
 		// 检查是否所有主机都已完成
