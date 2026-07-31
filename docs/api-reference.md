@@ -6,7 +6,7 @@
 
 - **Base URL**:
   - `/api/v1` — v1 业务 API（向后兼容）
-  - `/api/v2` — v2 多租户 / 配置中心 / mode / MSSP / SOAR 等新功能
+  - `/api/v2` — 平台管理面：配置变更审批 / 运行模式 / SOAR 等
 - **认证方式**: JWT Bearer Token（公开接口除外）
 - **请求头**: `Authorization: Bearer <token>`，`Content-Type: application/json`
 - **OpenAPI 规范**: 见 [`docs/openapi/openapi.yaml`](openapi/openapi.yaml)（包含 v1+v2 全部端点的标准定义，是本文档的权威来源）
@@ -718,25 +718,16 @@ CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed /
 
 ---
 
-## v2 多租户与平台管理
+## v2 平台管理
 
 ### 系统模式（observe / protect）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET  | `/api/v2/system/mode` | 当前租户的模式（observe/protect） |
-| GET  | `/api/v2/admin/tenants/modes` | 列出全部租户的模式（超管） |
-| POST | `/api/v2/admin/tenants/:id/mode` | 切换租户模式（超管） |
+| GET  | `/api/v2/system/mode` | 当前生效的模式（observe/protect） |
 
-### 租户管理（超管）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET  | `/api/v2/admin/tenants` | 租户列表 |
-| GET  | `/api/v2/admin/tenants/:id` | 租户详情 |
-| POST | `/api/v2/admin/tenants` | 创建租户 |
-| POST | `/api/v2/admin/tenants/:id/suspend` | 暂停租户 |
-| POST | `/api/v2/admin/tenants/:id/resume` | 恢复租户 |
+> 单租户收敛后，按租户切换模式的接口已移除——模式是部署级设置。
+> 详见 [架构](architecture.md)「单租户收敛」。
 
 ### 配置变更审批
 
@@ -749,18 +740,6 @@ CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed /
 | POST | `/api/v2/config/change-requests/:id/approve` | 审批通过 |
 | POST | `/api/v2/config/change-requests/:id/reject` | 审批拒绝 |
 | POST | `/api/v2/config/change-requests/:id/cancel` | 撤销请求 |
-
-### MSSP 控制台（多租户托管）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET  | `/api/v2/mssp/dashboard` | MSSP 总览面板 |
-| GET  | `/api/v2/mssp/child-tenants` | 子租户列表 |
-| POST | `/api/v2/mssp/child-tenants` | 创建子租户 |
-| GET  | `/api/v2/mssp/child-tenants/:id` | 子租户详情 |
-| POST | `/api/v2/mssp/child-tenants/:id/suspend` | 暂停子租户 |
-| POST | `/api/v2/mssp/child-tenants/:id/resume` | 恢复子租户 |
-| GET  | `/api/v2/mssp/alerts` | 跨租户告警视图 |
 
 ### 其它 v2 子领域
 

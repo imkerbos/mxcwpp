@@ -438,6 +438,25 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
 - **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
 - 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
 
+### 单租户收敛（E-TEN-1）
+
+产品定位是**单租户** Linux/K8s CWPP。曾存在的多租户/托管产品面已移除：
+
+| 已删除 | 说明 |
+|---|---|
+| `biz/billing`、`biz/federation` | 删除时均为零外部引用的死代码 |
+| `biz/mssp` + `/api/v2/mssp/*` | MSSP 跨租户控制台，属托管服务产品线 |
+| `/api/v2/admin/tenants/*` | 租户 CRUD、停用/恢复、按租户切换运行模式 |
+
+共移除 14 条路由。运行模式查询 `/api/v2/system/mode` 保留，但**不再按租户切换**——
+模式是部署级设置。
+
+**底层 `tenant_id` 刻意保留**：262 处过滤点统一传默认租户 `t-default`。删列是高风险
+数据迁移，收益只是少一个字段；收敛的是产品面，不是数据模型。将来若真要多租户，
+数据侧不必从头再来。
+
+`router/single_tenant_test.go` 守住这条边界：多租户路由或已删包重新出现即失败。
+
 ### 可观测性与告警覆盖（E-OBS-1）
 
 平台此前的典型形态是"埋了点、没人报警"：agent 丢事件、engine 背压丢弃、Stage 报错
