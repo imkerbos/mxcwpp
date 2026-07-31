@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/matrixplusio/mxcwpp/internal/common/jsonx"
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
 	consumermetrics "github.com/matrixplusio/mxcwpp/internal/server/consumer/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/writer"
@@ -633,6 +634,21 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 					}),
 				}).Create(&ba).Error; err != nil {
 					r.logger.Warn("写 behavior_alerts 失败", zap.Error(err))
+				} else {
+					// behavior_alerts 此前只入库、无通知出口。默认类别未开启时只计量不发送。
+					// 抑制身份取 (host, 指标)，与上面的 upsert 维度一致。
+					alertbus.Publish(alertbus.Event{
+						Category: model.NotifyCategoryBehaviorAlert,
+						Source:   "behavior",
+						HostID:   msg.AgentID,
+						Hostname: msg.Hostname,
+						Severity: bdeSeverity(result.RiskScore),
+						Title:    "行为基线偏离：" + dev.Metric,
+						Description: fmt.Sprintf("值 %.2f 偏离基线均值 %.2f（σ=%.2f, z=%.2f），风险分 %.1f",
+							dev.Value, dev.Mean, dev.Stddev, dev.ZScore, result.RiskScore),
+						DedupKey: "behavior|" + msg.AgentID + "|" + dev.Metric,
+						RefTable: "behavior_alerts",
+					})
 				}
 			}
 		}
@@ -693,5 +709,20 @@ func (r *Router) writeAgentACMapping(msg *kafka.MQMessage) {
 			zap.String("ac_id", msg.ACID),
 			zap.Error(err),
 		)
+	}
+}
+
+// bdeSeverity 把 BDE 风险分映射到通知等级。
+// 分档与 alertbus 的最低通知等级配合：默认只有 high 及以上才会打扰值班。
+func bdeSeverity(riskScore float64) string {
+	switch {
+	case riskScore >= 90:
+		return "critical"
+	case riskScore >= 70:
+		return "high"
+	case riskScore >= 40:
+		return "medium"
+	default:
+		return "low"
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/gctune"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
@@ -97,6 +98,12 @@ func main() {
 		logger.Fatal("初始化数据库失败", zap.Error(err))
 	}
 	defer database.Close()
+
+	// 4.1 告警发布点：Consumer 产出的行为基线偏离经此走通知出口。
+	// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库。
+	alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
+		alertbus.FromConfig(cfg.Alerting.NotifyCategories,
+			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)))
 
 	// 5. 初始化写入器
 	mysqlWriter := writer.NewMySQLWriter(db, logger)

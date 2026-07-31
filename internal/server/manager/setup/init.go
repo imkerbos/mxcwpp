@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	acservice "github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kms"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
 	"github.com/matrixplusio/mxcwpp/internal/server/database"
@@ -98,6 +99,12 @@ func Initialize(configPath string) (*ManagerServices, error) {
 		logger.Fatal("初始化数据库失败", zap.Error(err))
 		return nil, err
 	}
+
+	// 告警发布点：Manager 产出的关联事件与 K8s 基线告警经此走通知出口。
+	// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库、列表与大屏可见。
+	alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
+		alertbus.FromConfig(cfg.Alerting.NotifyCategories,
+			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)))
 
 	// 5.1 初始化默认数据（策略和规则）
 	// policyDir 传空字符串，让 InitDefaultData 自动检测生产/开发环境路径

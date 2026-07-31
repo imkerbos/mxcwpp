@@ -66,6 +66,11 @@ const buildCategoryLabels = (t: TFunction): Record<string, string> => ({
   detection: t("system.notifications.categoryDetection"),
   kube_alert: t("system.notifications.categoryKubeAlert"),
   vuln_bulletin: t("system.notifications.categoryVulnBulletin"),
+  infra_alert: t("system.notifications.categoryInfraAlert"),
+  anomaly_alert: t("system.notifications.categoryAnomalyAlert"),
+  behavior_alert: t("system.notifications.categoryBehaviorAlert"),
+  ad_audit_alert: t("system.notifications.categoryAdAuditAlert"),
+  incident: t("system.notifications.categoryIncident"),
 });
 
 const buildSeverityChips = (t: TFunction): { value: Severity; label: string }[] => [

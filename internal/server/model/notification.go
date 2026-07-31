@@ -33,6 +33,13 @@ const (
 	NotifyCategoryKubeAlert     NotifyCategory = "kube_alert"     // K8s 安全告警通知
 	NotifyCategoryVulnBulletin  NotifyCategory = "vuln_bulletin"  // 漏洞通报通知
 	NotifyCategoryInfraAlert    NotifyCategory = "infra_alert"    // 基础设施告警（Prometheus webhook 入）
+
+	// 以下四类此前缺失，导致对应检测只入库、无出口——检测跑了值班不知道。
+	// 经 alertbus 发布，默认不开启，按类灰度。
+	NotifyCategoryAnomalyAlert  NotifyCategory = "anomaly_alert"  // ML 异常检测告警（anomaly_alerts）
+	NotifyCategoryBehaviorAlert NotifyCategory = "behavior_alert" // 行为基线偏离告警（behavior_alerts）
+	NotifyCategoryADAuditAlert  NotifyCategory = "ad_audit_alert" // AD 审计规则命中告警（ad_audit_alerts）
+	NotifyCategoryIncident      NotifyCategory = "incident"       // 关联事件（incidents，去重后的聚合视图）
 )
 
 // NotificationSeverity 通知等级

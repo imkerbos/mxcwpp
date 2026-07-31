@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -276,6 +277,22 @@ func upsertIncidentForHost(db *gorm.DB, logger *zap.Logger, hostID string, cutof
 		logger.Warn("创建 incident 失败", zap.String("host_id", hostID), zap.Error(err))
 		return false
 	}
+
+	// 关联事件是去重聚合后的视图，本该是最值得通知的一层，此前却是唯一完全没有出口的一层。
+	// 抑制身份取 incident_id：同一事件后续更新走的是上面的 update 分支，不会重复发布。
+	alertbus.Publish(alertbus.Event{
+		Category: model.NotifyCategoryIncident,
+		Source:   "incident",
+		HostID:   hostID,
+		Hostname: hostname,
+		Severity: maxSeverity,
+		Title:    title,
+		Description: fmt.Sprintf("关联 %d 条告警、%d 个战术，风险分 %.0f",
+			len(rows), len(tactics), risk),
+		DedupKey: "incident|" + inc.IncidentID,
+		RefTable: "incidents",
+		RefID:    inc.IncidentID,
+	})
 	return true
 }
 

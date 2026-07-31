@@ -365,6 +365,38 @@ metrics:
     timeout: 10s
 ```
 
+### alerting
+
+```yaml
+alerting:
+  notify_categories: []          # 灰度开启通知的类别，留空即全部不通知
+  min_severity: "high"           # 低于此等级不通知
+  suppress_window_minutes: 30    # 相同告警在窗口内只通知一次
+```
+
+控制检测产出经 `internal/server/alertbus` 发往通知渠道的行为。
+
+此前 ML 异常（`anomaly_alerts`）、行为基线（`behavior_alerts`）、关联事件（`incidents`）、
+K8s 基线告警（`kube_baseline_alerts`）四类检测**只入库、没有任何通知出口**——检测跑了、
+写进表了、值班不知道。现在它们统一经发布点出去。
+
+`notify_categories` 可填 `anomaly_alert` / `behavior_alert` / `incident` / `kube_alert`
+（以及既有的 `baseline_alert` 等）。**留空是默认值，即一条都不通知**，告警仍照常入库，
+列表与大屏可见。这是刻意的：这些链路从未通知过，一次全开会淹没值班（ML 异常曾一次
+产出数千条 critical 假信标）。确认某类误报已收敛后再逐个加入。
+
+开启前需在「系统 → 通知」为对应类别建好通知配置，否则发布点会记 `no_recipient`——
+类别开了却通不到人。
+
+指标 `mxcwpp_alert_publish_total{source,category,outcome}` 给出每条告警的去向：
+`notified` / `category_disabled` / `below_severity` / `suppressed` / `no_recipient` /
+`error` / `invalid` / `no_publisher`。收敛成成功率会让"类别没开"和"发送失败"无法区分。
+
+> 抑制状态保存在进程内，多副本部署时各副本独立抑制，同一告警最多被通知副本数次。
+> 灰度开启类别时需把副本数计入通知量预估。
+
+---
+
 ### mtls
 
 ```yaml
