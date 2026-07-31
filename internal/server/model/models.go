@@ -191,6 +191,7 @@ var (
 		&Incident{},
 		&IncidentEvent{},
 		&OncallShift{},
+		&ResponseAction{},
 		&AuditLog{},
 		&PluginConfig{},
 		&Component{},
