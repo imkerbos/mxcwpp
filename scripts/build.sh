@@ -55,7 +55,24 @@ PKG_DIR="dist/packages"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# BUILD_TIME 取 git 提交时间而非当前时间。
+#
+# 用 date 会让同一份源码每次构建产出不同的二进制：客户拿到的包无法与源码对账，
+# 出了问题也无法确认"跑的到底是不是这份代码"。提交时间对同一 commit 恒定，
+# 既保留了版本信息，又不破坏可复现。
+# SOURCE_DATE_EPOCH 是可复现构建的通行约定，允许外部覆盖。
+if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
+    BUILD_TIME=$(date -u -d "@${SOURCE_DATE_EPOCH}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+        || date -u -r "${SOURCE_DATE_EPOCH}" +"%Y-%m-%dT%H:%M:%SZ")
+elif GIT_TS=$(git log -1 --format=%cI 2>/dev/null) && [ -n "$GIT_TS" ]; then
+    BUILD_TIME="$GIT_TS"
+else
+    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "警告: 非 git 环境，回退到当前时间，本次构建不可复现" >&2
+fi
+
+# GIT_COMMIT 嵌入二进制，供交付后与源码对账。
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
 mkdir -p "$PKG_DIR"
 
@@ -138,8 +155,8 @@ package_agent() {
     if [ -n "$ca_fingerprint" ]; then
         fp_flag="-X main.caFingerprint=$ca_fingerprint"
     fi
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.serverHost=$SERVER_HOST -X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME $sign_flag $fp_flag -s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.serverHost=$SERVER_HOST -X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT $sign_flag $fp_flag -s -w" \
         -o "$bin" ./cmd/agent
 
     # 准备打包目录
@@ -284,8 +301,8 @@ build_plugin() {
 
     # 编译二进制文件（注入版本号和构建时间）
     local output_name="${name}-linux-${arch}"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT -s -w" \
         -o "$plugin_dir/$output_name" ./plugins/$name
 
     chmod +x "$plugin_dir/$output_name"
@@ -307,8 +324,8 @@ build_scanner() {
     rm -rf "$staging"
     mkdir -p "$staging/bin" "$staging/etc"
 
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT -s -w" \
         -o "$staging/scanner" ./plugins/scanner
 
     chmod +x "$staging/scanner"
