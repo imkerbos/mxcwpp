@@ -47,7 +47,11 @@ export default function OncallPage() {
       title: t("alerts.oncall.colWindow"),
       render: (r) => (
         <span className="text-sm text-muted">
-          {new Date(r.starts_at).toLocaleString()} → {new Date(r.ends_at).toLocaleString()}
+          {/* 后端 LocalTime 已是本地时间的可读串，直接渲染：
+              再过一道 new Date() 既与全站格式不一致，空格分隔的日期时间
+              也不在 ECMAScript 规范内（部分引擎会得到 Invalid Date）。*/}
+          <span className="tabular-nums">{r.starts_at}</span> →{" "}
+          <span className="tabular-nums">{r.ends_at}</span>
         </span>
       ),
     },
