@@ -575,19 +575,26 @@ func (c *Coordinator) upsertVuln(cveID string, entry *mergedVuln) error {
 			MatchedFixedVersion: a.FixedVersion,
 			Status:              "unpatched",
 		}
+		// Assign 只刷新客观观测事实（装了什么版本、匹配到哪个包）。
+		// status 走 Attrs：Assign 命中已有记录时同样会应用，那会让每轮同步把
+		// ignored / false_positive 这些人工处置直接抹成 unpatched——用户判过的
+		// 误报四小时后原样复活。Attrs 仅在新建时生效。
 		if err := c.db.Where("vuln_id = ? AND host_id = ?", vuln.ID, a.HostID).
 			Assign(map[string]any{
 				"current_version":       hv.CurrentVersion,
 				"matched_component":     hv.MatchedComponent,
 				"matched_fixed_version": hv.MatchedFixedVersion,
-				"status":                hv.Status,
 			}).
+			Attrs(map[string]any{"status": hv.Status}).
 			FirstOrCreate(hv).Error; err != nil {
 			c.logger.Warn("upsert host_vuln 失败",
 				zap.Uint("vuln_id", vuln.ID),
 				zap.String("host_id", a.HostID),
 				zap.Error(err))
+			continue
 		}
+		// 重新检出：仅把"已修复/已消失"翻回待修复，人工处置态不动。
+		c.reopenIfPreviouslyResolved(vuln.ID, a.HostID)
 	}
 
 	// 触发可选回调（异步通报 / 通知）
@@ -829,15 +836,33 @@ func (c *Coordinator) relinkHostVulnByOsvID(osvID string, affected []AffectedHos
 				CurrentVersion: a.InstalledVer,
 				Status:         "unpatched",
 			}
+			// 同上：status 只在新建时写，避免覆盖人工处置。
 			if err := c.db.Where("vuln_id = ? AND host_id = ?", vid, a.HostID).
-				Assign(map[string]any{
-					"current_version": hv.CurrentVersion,
-					"status":          hv.Status,
-				}).
+				Assign(map[string]any{"current_version": hv.CurrentVersion}).
+				Attrs(map[string]any{"status": hv.Status}).
 				FirstOrCreate(hv).Error; err == nil {
+				c.reopenIfPreviouslyResolved(vid, a.HostID)
 				added++
 			}
 		}
 	}
 	return added
+}
+
+// reopenIfPreviouslyResolved 在漏洞被重新检出时，把"已修复/已消失"翻回待修复。
+//
+// 只作用于系统自行判定的状态。ignored 与 false_positive 是人工研判结论，
+// 同步不得推翻——否则用户每判一次误报，四小时后它就回来一次，判到最后没人再判。
+// resurfaced 已是"修复后回归"的终态，同样不覆盖。
+func (c *Coordinator) reopenIfPreviouslyResolved(vulnID uint, hostID string) {
+	if err := c.db.Model(&model.HostVulnerability{}).
+		Where("vuln_id = ? AND host_id = ? AND status IN ?", vulnID, hostID,
+			[]string{model.HostVulnStatusPatched, model.HostVulnStatusVanished}).
+		Updates(map[string]any{
+			"status":     model.HostVulnStatusResurfaced,
+			"patched_at": nil,
+		}).Error; err != nil {
+		c.logger.Warn("重新检出状态回写失败",
+			zap.Uint("vuln_id", vulnID), zap.String("host_id", hostID), zap.Error(err))
+	}
 }
