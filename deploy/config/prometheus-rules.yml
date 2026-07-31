@@ -124,6 +124,30 @@ groups:
           summary: "Consumer 错误率 > 5%"
           description: "{{ $value | humanizePercentage }} 消息处理失败或进入 DLQ。"
 
+      # DLQ 写入失败 = 数据保全的最后一米失守：消息处理失败已转 DLQ 保底，连 DLQ 也没写进去。
+      # 与错误率不同，这里没有阈值可言——任何一条都是不可恢复的丢失，出现即告警。
+      - alert: MxCwppConsumerDLQWriteFailure
+        expr: increase(mxcwpp_consumer_dlq_write_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: consumer
+        annotations:
+          summary: "Consumer DLQ 写入失败，消息已丢失"
+          description: "dlq_topic={{ $labels.dlq_topic }} 近 5 分钟丢失 {{ $value }} 条，不可恢复。"
+
+      # AgentCenter 投递到未登记路由的 DataType：消息进心跳兜底 Topic，消费者不认识 → 静默丢弃。
+      # 非零即代表存在接线缺口（缺 RouteDataType 或缺 Consumer handler）。
+      - alert: MxCwppUnroutedDataType
+        expr: increase(mxcwpp_ac_unrouted_datatype_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: agentcenter
+        annotations:
+          summary: "存在未登记 Kafka 路由的 DataType"
+          description: "data_type={{ $labels.data_type }} 走了心跳兜底，会被消费者静默忽略；需补 RouteDataType 与 Consumer handler。"
+
       - alert: MxCwppConsumerNoMembers
         expr: mxcwpp_consumer_group_members == 0
         for: 2m

@@ -66,6 +66,14 @@ var (
 		Name: "mxcwpp_consumer_unknown_data_type_total",
 		Help: "Number of messages with an unrouted/unknown DataType consumed (sent to DLQ).",
 	}, []string{"data_type"})
+
+	// DLQ 写入失败次数。这是数据保全的最后一米：消息处理失败 → 转 DLQ 保底 → 连 DLQ 也没写进去，
+	// 此时消息真的没了。异步 producer 在 burst 下会丢（prod 曾一次丢 24709 条），原先只有一条
+	// 日志，无法计量也无法告警。任何非零值都意味着已发生不可恢复的数据丢失。
+	DLQWriteFailuresTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mxcwpp_consumer_dlq_write_failures_total",
+		Help: "Number of messages lost because writing them to the dead letter queue failed.",
+	}, []string{"dlq_topic"})
 )
 
 // --- ML 异常检测器（IForest + correlation）安全状态指标 ---
@@ -147,6 +155,11 @@ func RecordCHWriteError(op string) {
 }
 
 // RecordUnknownDataType 记录一次未知 DataType（已转 DLQ）。
+// RecordDLQWriteFailure 记录一次 DLQ 写入失败——即一条消息的最终丢失。
+func RecordDLQWriteFailure(dlqTopic string) {
+	DLQWriteFailuresTotal.WithLabelValues(dlqTopic).Inc()
+}
+
 func RecordUnknownDataType(dataType string) {
 	UnknownDataTypeTotal.WithLabelValues(dataType).Inc()
 }
