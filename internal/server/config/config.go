@@ -29,6 +29,22 @@ type Config struct {
 	SIEM       SIEMConfig       `mapstructure:"siem"`
 	PDF        PDFConfig        `mapstructure:"pdf"`
 	Vuln       VulnConfig       `mapstructure:"vuln"`
+	Alerting   AlertingConfig   `mapstructure:"alerting"`
+}
+
+// AlertingConfig 控制检测产出经 alertbus 发往通知渠道的行为。
+//
+// 此前 ML 异常、行为基线、AD 审计、关联事件、K8s 基线告警五类检测只入库、无通知出口。
+// 接通它们必须配灰度开关：这些链路从未通知过，一次全开会淹没值班。
+type AlertingConfig struct {
+	// NotifyCategories 是已灰度开启通知的类别（anomaly_alert / behavior_alert /
+	// ad_audit_alert / incident / kube_alert）。**留空即全部不通知**，告警仍照常入库、
+	// 列表与大屏可见。确认某类误报已收敛后再逐个加入。
+	NotifyCategories []string `mapstructure:"notify_categories"`
+	// MinSeverity 低于此等级不通知，留空按 high。
+	MinSeverity string `mapstructure:"min_severity"`
+	// SuppressWindowMinutes 相同告警在此窗口内只通知一次，<=0 按 30 分钟。
+	SuppressWindowMinutes int `mapstructure:"suppress_window_minutes"`
 }
 
 // VulnConfig 漏洞数据相关配置。

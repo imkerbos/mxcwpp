@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/kube"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -669,6 +670,19 @@ func (c *KubeBaselineChecker) syncBaselineAlerts(clusterID uint, clusterName str
 				}
 				if createErr := c.db.Create(&alert).Error; createErr != nil {
 					c.logger.Error("创建基线告警失败", zap.String("check_id", r.CheckID), zap.Error(createErr))
+				} else {
+					// kube_baseline_alerts 此前只入库、无通知出口（本文件里的 notify 字段是
+					// worker 唤醒 channel，不是通知）。抑制身份取指纹，与去重维度一致。
+					alertbus.Publish(alertbus.Event{
+						Category:    model.NotifyCategoryKubeAlert,
+						Source:      "kube_baseline",
+						Severity:    r.Severity,
+						Title:       "K8s 基线不合规：" + r.CheckName,
+						Description: r.Description,
+						DedupKey:    "kube_baseline|" + fingerprint,
+						RefTable:    "kube_baseline_alerts",
+						RefID:       fingerprint,
+					})
 				}
 			} else {
 				// 已存在，更新 lastSeenAt 和受影响资源；如果之前是 resolved 则重新激活

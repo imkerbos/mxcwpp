@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -485,6 +486,21 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		zap.Float64("score", score),
 		zap.String("top_metric", topMetric),
 		zap.String("severity", severity))
+
+	// 已落库的异常发往通知出口。anomaly_alerts 此前没有任何通知链路——检测跑了、
+	// 写进表了、值班不知道。默认类别未开启时这里只计量不发送。
+	// 抑制身份取 (host, 指标)：同一主机同一指标持续异常不重复打扰。
+	alertbus.Publish(alertbus.Event{
+		Category:    model.NotifyCategoryAnomalyAlert,
+		Source:      "anomaly",
+		HostID:      hostID,
+		Hostname:    hostname,
+		Severity:    severity,
+		Title:       "主机指标异常：" + topMetric,
+		Description: description,
+		DedupKey:    "anomaly|" + hostID + "|" + topMetric,
+		RefTable:    "anomaly_alerts",
+	})
 }
 
 // topDeviations 返回 metrics 与 mean 差异最大的 N 个指标。

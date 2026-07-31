@@ -230,3 +230,55 @@ func (p *Publisher) record(e Event, outcome Outcome) Outcome {
 	IncPublish(e.Source, string(e.Category), string(outcome))
 	return outcome
 }
+
+// --- 进程级默认发布点 ---
+//
+// 产出方分布在 AC / engine / consumer / manager 三类进程、五处写入点，多数拿不到统一的
+// 构造入口。把 Publisher 穿过每条构造链，只要漏掉一处，那条检测就继续没有出口——正是
+// 本包要消灭的失效。因此按进程设一次，产出方直接调用包级 Publish。
+
+var (
+	defaultMu sync.RWMutex
+	defaultP  *Publisher
+)
+
+// SetDefault 由持有配置的进程初始化调用一次。
+func SetDefault(p *Publisher) {
+	defaultMu.Lock()
+	defaultP = p
+	defaultMu.Unlock()
+}
+
+// OutcomeNoPublisher 表示所在进程没有初始化发布点。
+//
+// 单独一个去向而不是静默返回：产出方以为自己已经接上了通知，实际所在进程根本没配
+// 发布点——这种"看着接线了其实没有"必须能从指标上直接看出来。
+const OutcomeNoPublisher Outcome = "no_publisher"
+
+// Publish 经进程默认发布点发布告警。未初始化时计量并返回 OutcomeNoPublisher。
+func Publish(e Event) Outcome {
+	defaultMu.RLock()
+	p := defaultP
+	defaultMu.RUnlock()
+	if p == nil {
+		IncPublish(e.Source, string(e.Category), string(OutcomeNoPublisher))
+		return OutcomeNoPublisher
+	}
+	return p.Publish(e)
+}
+
+// FromConfig 由 AlertingConfig 构造发布点配置。
+// 未在 notifyCategories 中列出的类别一律不通知。
+func FromConfig(notifyCategories []string, minSeverity string, suppressWindowMinutes int) Config {
+	enabled := make(map[model.NotifyCategory]bool, len(notifyCategories))
+	for _, c := range notifyCategories {
+		if c = strings.TrimSpace(c); c != "" {
+			enabled[model.NotifyCategory(c)] = true
+		}
+	}
+	return Config{
+		EnabledCategories: enabled,
+		MinSeverity:       minSeverity,
+		SuppressWindow:    time.Duration(suppressWindowMinutes) * time.Minute,
+	}
+}
