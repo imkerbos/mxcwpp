@@ -323,6 +323,31 @@
 
 ---
 
+## 安全事件与运营闭环
+
+事件（Incident）把同主机、同时间窗内的多源信号关联成一条攻击叙事，运营闭环建在其上。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/incidents` | 事件列表 |
+| GET | `/api/v1/incidents/:id` | 事件详情 |
+| GET | `/api/v1/incidents/:id/timeline` | 时间线（指派/认领/研判/证据/升级/关闭） |
+| POST | `/api/v1/incidents/:id/assign` | 指派负责人 |
+| POST | `/api/v1/incidents/:id/ack` | 认领事件（MTTA 终点） |
+| POST | `/api/v1/incidents/:id/comments` | 追加研判备注；带 `ref` 即记为证据 |
+| POST | `/api/v1/incidents/:id/escalate` | 升级（须指定 `to` 与 `reason`） |
+| POST | `/api/v1/incidents/:id/resolve` | 关闭（须给出 `verdict` 与 `reason`） |
+
+**关闭必须给出研判结论**：`true_positive` / `false_positive` / `benign_true_positive`，
+并写明原因。原实现关闭不需要任何理由、`resolved_by` 实际只会是 `auto`，于是无法回答
+"这条是不是真威胁"与"当时为什么关掉它"——前者是检测质量的唯一可信来源，后者是复盘的前提。
+
+`benign_true_positive`（检测正确但行为无害）单列一档：把它算进误报会让规则被错误地调松。
+
+指派与认领分开：被指派不等于有人开始看。重复认领不刷新时间戳，MTTA 记的是第一个真正开始看的人。
+
+---
+
 ## 告警管理
 
 | 方法 | 路径 | 说明 |
