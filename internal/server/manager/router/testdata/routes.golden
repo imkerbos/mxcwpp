@@ -135,6 +135,7 @@ GET	/api/v1/images/scans/:id	authenticated-perm	vuln:view
 GET	/api/v1/images/scans/:id/vulns	authenticated-perm	vuln:view
 GET	/api/v1/incidents	authenticated-perm	alerts:view
 GET	/api/v1/incidents/:id	authenticated-perm	alerts:view
+GET	/api/v1/incidents/:id/timeline	authenticated-perm	alerts:view
 GET	/api/v1/inspection/overview	authenticated-perm	operations:view
 GET	/api/v1/kube/alarms	authenticated-perm	kube:view
 GET	/api/v1/kube/baseline	authenticated-perm	kube:view
@@ -354,6 +355,10 @@ POST	/api/v1/hunting/query	authenticated-perm	detection:manage
 POST	/api/v1/images/registries	authenticated-perm	vuln:manage
 POST	/api/v1/images/registries/:id/scan	authenticated-perm	vuln:manage
 POST	/api/v1/images/scan	authenticated-perm	vuln:manage
+POST	/api/v1/incidents/:id/ack	authenticated-perm	alerts:manage
+POST	/api/v1/incidents/:id/assign	authenticated-perm	alerts:manage
+POST	/api/v1/incidents/:id/comments	authenticated-perm	alerts:manage
+POST	/api/v1/incidents/:id/escalate	authenticated-perm	alerts:manage
 POST	/api/v1/incidents/:id/resolve	authenticated-perm	alerts:respond
 POST	/api/v1/internal/ac/heartbeat	internal	-
 POST	/api/v1/internal/ac/register	internal	-

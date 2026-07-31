@@ -2,12 +2,13 @@
 package api
 
 import (
-	"time"
+	"errors"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz/casework"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -15,11 +16,12 @@ import (
 type IncidentHandler struct {
 	db     *gorm.DB
 	logger *zap.Logger
+	cases  *casework.Service
 }
 
 // NewIncidentHandler 创建安全事件 API 处理器
 func NewIncidentHandler(db *gorm.DB, logger *zap.Logger) *IncidentHandler {
-	return &IncidentHandler{db: db, logger: logger}
+	return &IncidentHandler{db: db, logger: logger, cases: casework.NewService(db, logger)}
 }
 
 // ListIncidentsRequest 查询事件列表请求
@@ -113,27 +115,111 @@ func (h *IncidentHandler) GetIncident(c *gin.Context) {
 
 // ResolveIncident 人工关闭事件
 // POST /api/v1/incidents/:id/resolve
+// AssignIncidentRequest POST /api/v1/incidents/:id/assign
+type AssignIncidentRequest struct {
+	Owner string `json:"owner" binding:"required"`
+}
+
+// AssignIncident 指派负责人。
+func (h *IncidentHandler) AssignIncident(c *gin.Context) {
+	var req AssignIncidentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "请指定负责人")
+		return
+	}
+	h.caseResult(c, h.cases.Assign(c.Param("id"), req.Owner, actorOf(c)), "已指派")
+}
+
+// AckIncident 认领事件。POST /api/v1/incidents/:id/ack
+func (h *IncidentHandler) AckIncident(c *gin.Context) {
+	h.caseResult(c, h.cases.Ack(c.Param("id"), actorOf(c)), "已认领")
+}
+
+// CommentIncidentRequest POST /api/v1/incidents/:id/comments
+type CommentIncidentRequest struct {
+	Body string `json:"body" binding:"required"`
+	Ref  string `json:"ref"`
+}
+
+// CommentIncident 追加研判备注或证据。
+func (h *IncidentHandler) CommentIncident(c *gin.Context) {
+	var req CommentIncidentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "备注内容不能为空")
+		return
+	}
+	h.caseResult(c, h.cases.Comment(c.Param("id"), actorOf(c), req.Body, req.Ref), "已记录")
+}
+
+// EscalateIncidentRequest POST /api/v1/incidents/:id/escalate
+type EscalateIncidentRequest struct {
+	To     string `json:"to" binding:"required"`
+	Reason string `json:"reason" binding:"required"`
+}
+
+// EscalateIncident 升级事件。
+func (h *IncidentHandler) EscalateIncident(c *gin.Context) {
+	var req EscalateIncidentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "升级需指定对象与原因")
+		return
+	}
+	h.caseResult(c, h.cases.Escalate(c.Param("id"), req.To, req.Reason, actorOf(c)), "已升级")
+}
+
+// GetIncidentTimeline 返回事件时间线。GET /api/v1/incidents/:id/timeline
+func (h *IncidentHandler) GetIncidentTimeline(c *gin.Context) {
+	events, err := h.cases.Timeline(c.Param("id"))
+	if err != nil {
+		h.logger.Error("查询事件时间线失败", zap.Error(err))
+		InternalError(c, "查询事件时间线失败")
+		return
+	}
+	Success(c, gin.H{"items": events, "total": len(events)})
+}
+
+// ResolveIncidentRequest POST /api/v1/incidents/:id/resolve
+//
+// verdict 与 reason 均必填：原实现关闭事件不需要任何理由，于是无法回答
+// "这条到底是不是真威胁"和"当时为什么关掉它"——前者是检测质量的唯一可信来源，
+// 后者是复盘的前提。
+type ResolveIncidentRequest struct {
+	Verdict string `json:"verdict" binding:"required"`
+	Reason  string `json:"reason" binding:"required"`
+}
+
+// ResolveIncident 关闭事件，必须给出研判结论与原因。
 func (h *IncidentHandler) ResolveIncident(c *gin.Context) {
-	id := c.Param("id")
-	operator := c.GetString("username")
-	if operator == "" {
-		operator = "unknown"
-	}
-	now := model.ToLocalTime(time.Now())
-	result := h.db.Model(&model.Incident{}).
-		Where("incident_id = ? AND status <> ?", id, model.IncidentStatusResolved).
-		Updates(map[string]any{
-			"status":      model.IncidentStatusResolved,
-			"resolved_at": now,
-			"resolved_by": operator,
-		})
-	if result.Error != nil {
-		InternalError(c, "关闭事件失败")
+	var req ResolveIncidentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "关闭事件必须给出研判结论(verdict)与原因(reason)")
 		return
 	}
-	if result.RowsAffected == 0 {
-		BadRequest(c, "事件不存在或已关闭")
-		return
+	h.caseResult(c, h.cases.Resolve(c.Param("id"), req.Verdict, req.Reason, actorOf(c)), "已关闭")
+}
+
+// caseResult 统一把运营闭环操作的错误映射为 HTTP 响应。
+func (h *IncidentHandler) caseResult(c *gin.Context, err error, okMsg string) {
+	switch {
+	case err == nil:
+		SuccessWithMessage(c, okMsg, nil)
+	case errors.Is(err, casework.ErrNotFound):
+		NotFound(c, "事件不存在")
+	case errors.Is(err, casework.ErrAlreadyResolved):
+		BadRequest(c, "事件已关闭")
+	case errors.Is(err, casework.ErrVerdictRequired),
+		errors.Is(err, casework.ErrCloseReasonRequired):
+		BadRequest(c, err.Error())
+	default:
+		h.logger.Error("事件运营操作失败", zap.Error(err))
+		BadRequest(c, err.Error())
 	}
-	SuccessWithMessage(c, "已关闭", nil)
+}
+
+// actorOf 取当前操作者。运营闭环的每一步都要能追溯到人。
+func actorOf(c *gin.Context) string {
+	if u := c.GetString("username"); u != "" {
+		return u
+	}
+	return "unknown"
 }

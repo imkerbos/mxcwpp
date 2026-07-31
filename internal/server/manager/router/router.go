@@ -705,6 +705,12 @@ func setupIncidentAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 	handler := api.NewIncidentHandler(db, logger)
 	router.GET("/incidents", handler.ListIncidents)
 	router.GET("/incidents/:id", handler.GetIncident)
+	router.GET("/incidents/:id/timeline", handler.GetIncidentTimeline)
+	// 运营闭环：指派 → 认领 → 研判/证据 → 升级 → 带结论关闭。
+	router.POST("/incidents/:id/assign", handler.AssignIncident)
+	router.POST("/incidents/:id/ack", handler.AckIncident)
+	router.POST("/incidents/:id/comments", handler.CommentIncident)
+	router.POST("/incidents/:id/escalate", handler.EscalateIncident)
 	router.POST("/incidents/:id/resolve", handler.ResolveIncident)
 }
 
