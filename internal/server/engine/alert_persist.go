@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/sanitize"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
@@ -106,7 +107,27 @@ func (w *StageAlertWriter) Persist(stage string, ev PipelineEvent, a Alert) erro
 		zap.String("rule_id", ruleID),
 		zap.String("host_id", hostID),
 		zap.String("severity", a.Severity))
+	w.egress(stage, ruleID, hostID, a, detail)
 	return nil
+}
+
+// egress 把告警交给外发出口（客户自有 SIEM）。
+//
+// EgressOnly：alerts 表这条链路的通知由 AgentCenter 内联与 Manager 定时器负责，
+// 此处只负责让客户 SIEM 收到记录，不重复通知。
+func (w *StageAlertWriter) egress(stage, ruleID, hostID string, a Alert, detail string) {
+	alertbus.Publish(alertbus.Event{
+		Category:    model.NotifyCategoryDetection,
+		Source:      stage,
+		HostID:      hostID,
+		Severity:    a.Severity,
+		Title:       alertTitle(stage, ruleID),
+		Description: detail,
+		DedupKey:    stageAlertResultID(ruleID, hostID),
+		RefTable:    "alerts",
+		RefID:       stageAlertResultID(ruleID, hostID),
+		EgressOnly:  true,
+	})
 }
 
 // refresh 刷新已有告警的最后命中时间与累计次数。

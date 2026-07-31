@@ -131,3 +131,13 @@ alerting:
   notify_categories: []
   min_severity: "high"
   suppress_window_minutes: 30
+
+# 客户自有 SIEM 外发（CEF over Syslog）
+#
+# 与通知渠道是两件事：通知叫醒人、可被抑制；外发是把记录交给客户日志系统，必须全量。
+# 未启用时不影响任何功能，告警照常入库并按 alerting 配置通知。
+siem:
+  enabled: false
+  protocol: "tcp"            # tcp / udp
+  address: ""                # 如 siem.example.com:514
+  facility: 1

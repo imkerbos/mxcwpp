@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/sanitize"
-	"github.com/matrixplusio/mxcwpp/internal/server/consumer/siem"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 	"github.com/matrixplusio/mxcwpp/internal/server/notify"
 )
@@ -30,10 +30,9 @@ const (
 
 // AlertGenerator 负责将 CEL 引擎匹配结果写入 alerts 表（去重模式）
 type AlertGenerator struct {
-	db            *gorm.DB
-	log           *zap.Logger
-	siemForwarder *siem.Forwarder // SIEM 转发器（可选）
-	throttler     *HitThrottler   // (host, rule) 频率限制器
+	db        *gorm.DB
+	log       *zap.Logger
+	throttler *HitThrottler // (host, rule) 频率限制器
 	// dbWhitelist 是 alert_whitelists 表中 exe/cmdline/host 维度条目的原子快照，
 	// 由 StartWhitelistReload 周期刷新；热路径零锁读，承接 P2-B 自动调优采纳的 exception。
 	dbWhitelist atomic.Pointer[[]model.AlertWhitelist]
@@ -60,11 +59,6 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 	g.reloadAssetWeightCache()
 	g.reloadCorrelationBoostCache()
 	return g
-}
-
-// SetSIEMForwarder 设置 SIEM 转发器
-func (g *AlertGenerator) SetSIEMForwarder(f *siem.Forwarder) {
-	g.siemForwarder = f
 }
 
 // Generate 根据匹配的规则和事件字段生成或更新告警
@@ -283,22 +277,24 @@ func (g *AlertGenerator) sendNotification(alert *model.Alert) {
 
 // forwardToSIEM 将告警转发到 SIEM 系统
 func (g *AlertGenerator) forwardToSIEM(alert *model.Alert, fields map[string]string) {
-	if g.siemForwarder == nil {
-		return
-	}
-	go g.siemForwarder.SendAlert(siem.AlertEvent{
-		EventID:  "rule_match",
-		Name:     alert.Title,
-		Severity: alert.Severity,
-		HostID:   alert.HostID,
-		Hostname: fields["hostname"],
-		SourceIP: fields["src_ip"],
-		DestIP:   fields["dst_ip"],
-		PID:      fields["pid"],
-		Exe:      fields["exe"],
-		Cmdline:  fields["cmdline"],
-		RuleID:   alert.RuleID,
-		MITRE:    fields["mitre_id"],
+	// 统一走 alertbus 的外发出口，不再每条告警起一个 goroutine 去抢同一把锁——
+	// 告警风暴下那会堆出大量阻塞协程。外发本身是有界异步队列，满则丢弃并计量。
+	//
+	// EgressOnly：alerts 表这条链路的通知由 AgentCenter 内联与 Manager 定时器负责，
+	// 此处只保证客户 SIEM 收到记录，不重复通知。
+	alertbus.Publish(alertbus.Event{
+		Category:    model.NotifyCategoryDetection,
+		Source:      "cel_rule",
+		HostID:      alert.HostID,
+		Hostname:    fields["hostname"],
+		IP:          fields["src_ip"],
+		Severity:    alert.Severity,
+		Title:       alert.Title,
+		Description: alert.Description,
+		DedupKey:    alert.ResultID,
+		RefTable:    "alerts",
+		RefID:       alert.ResultID,
+		EgressOnly:  true,
 	})
 }
 

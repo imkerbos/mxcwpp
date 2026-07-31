@@ -31,6 +31,17 @@ type EngineConfig struct {
 	// Alerting 与 server.yaml 的 alerting 段同构，供 Engine 初始化告警发布点。
 	// 缺省即全部类别不通知（告警仍照常入库）。
 	Alerting AlertingConfig `mapstructure:"alerting"`
+	// SIEM 与 server.yaml 的 siem 段同构。Engine 是检测告警的主要来源，
+	// 缺了外发接线，客户 SIEM 会漏掉绝大部分告警。
+	SIEM SIEMConfig `mapstructure:"siem"`
+}
+
+// SIEMConfig 客户自有 SIEM 的外发配置，与 server config 的同名结构同构。
+type SIEMConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Protocol string `mapstructure:"protocol"`
+	Address  string `mapstructure:"address"`
+	Facility int    `mapstructure:"facility"`
 }
 
 // AlertingConfig 检测产出的通知灰度配置，与 server config 的同名结构同构。
