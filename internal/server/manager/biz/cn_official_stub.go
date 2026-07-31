@@ -39,7 +39,8 @@ func checkChinaOfficialAvailable(ctx context.Context, url, name string) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("%s HTTP %d", name, resp.StatusCode)
 	}
-	// 可达但未实现 fetcher — 写 success 标识"上游连通"
+	// 可达但未实现 fetcher：仍返回错误，绝不因"网络通"就当作同步成功——
+	// 否则漏洞库看起来同步正常，实际一条数据都没拉到。
 	zap.L().Info("国内官方漏洞库可达但未实现数据拉取",
 		zap.String("source", name),
 		zap.Int("http_status", resp.StatusCode),
