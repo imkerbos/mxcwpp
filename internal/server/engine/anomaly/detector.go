@@ -115,6 +115,8 @@ type Detector struct {
 	reference *referenceBaseline
 	// lastTrainedAt 上次成功训练的时间。拒绝重训不更新它，模型年龄因而能反映真实情况。
 	lastTrainedAt time.Time
+	// scores 累积每台主机的异常分供 ranking 档排序使用，周期落库（见 ranking.go）。
+	scores *scoreRecorder
 	// persistMu synchronizes safety-mode/schema transitions with anomaly_alerts writes.
 	// A writer holds RLock through the DB upsert; SetMode/VerifySchema take Lock, so once
 	// a transition to off/shadow returns, no write admitted under the previous mode can remain in flight.
@@ -147,6 +149,7 @@ func NewDetector(db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) *Detecto
 		schemaReady: false,
 		dnsValid:    false,
 	}
+	d.scores = newScoreRecorder(db, logger)
 	d.suppress.reload(db, logger) // 启动即加载一次白名单 + 反馈抑制
 	return d
 }
@@ -226,7 +229,9 @@ func (d *Detector) effectiveModeLocked() Mode {
 }
 
 // officialCeilingLocked 返回当前允许的最高严重度：仅生效 alert 模式才允许 critical，
-// 其余（off/shadow/context 及降级）封顶 high —— 结构性禁止 ML 信号被当作正式高危定罪。
+// 其余（off/shadow/context/ranking 及降级）封顶 high —— 结构性禁止 ML 信号被当作正式高危定罪。
+//
+// ranking 档同样封顶 high：它只改变告警被看到的顺序，不改变告警的严重程度。
 func (d *Detector) officialCeilingLocked() string {
 	if d.effectiveModeLocked() == ModeAlert {
 		return "critical"
@@ -239,7 +244,23 @@ func (d *Detector) officialCeilingLocked() string {
 // persistAnomalyIfEligible，在 persistMu 保护下做最终检查，不能依赖早先的模式快照。
 func (d *Detector) persistEligibleLocked() bool {
 	em := d.effectiveModeLocked()
-	return em == ModeContext || em == ModeAlert
+	return em == ModeContext || em == ModeRanking || em == ModeAlert
+}
+
+// rankingEligibleLocked 判断异常分是否参与已有告警的排序。
+//
+// 仅 ranking / alert 两档为真。排序不新建告警，只改已存在告警的 risk_score——
+// 让分析师在异常主机上的告警先被看到。调用方必须持 d.mu。
+func (d *Detector) rankingEligibleLocked() bool {
+	em := d.effectiveModeLocked()
+	return em == ModeRanking || em == ModeAlert
+}
+
+// RankingEligible 报告异常分当前是否参与告警排序。
+func (d *Detector) RankingEligible() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.rankingEligibleLocked()
 }
 
 // persistAnomalyIfEligible 在真正写库前再次检查生效模式，并把检查与 upsert 放在同一个
@@ -281,6 +302,11 @@ func (d *Detector) Status() Status {
 // StartRetrain begins periodic retraining in the background.
 // Call after Consumer startup.
 func (d *Detector) StartRetrain(stop <-chan struct{}) {
+	// 异常分落库与重训同一处启动：两者都是检测器的后台循环，
+	// 分开启动容易出现"重训在跑但分数没人落库"的半启动状态。
+	if d.scores != nil {
+		d.scores.StartScoreFlush(stop)
+	}
 	go func() {
 		ticker := time.NewTicker(retrainInterval)
 		defer ticker.Stop()
@@ -330,6 +356,15 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 	// 1. Isolation Forest scoring.
 	if d.forest.Trained() {
 		score := d.forest.Score(metrics)
+		// ranking 档：记录分数供已有告警排序。**所有评分都记**，不只是超阈值的——
+		// 排序需要知道"这台主机现在多正常"，只记异常的那些会让正常主机没有分数，
+		// 从而无法与异常主机比较。
+		d.mu.Lock()
+		rank := d.rankingEligibleLocked()
+		d.mu.Unlock()
+		if rank && d.scores != nil {
+			d.scores.record(hostID, score, time.Now())
+		}
 		if score >= anomalyThreshold {
 			d.emitForestAlert(hostID, hostname, metrics, score)
 		}

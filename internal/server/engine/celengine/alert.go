@@ -41,6 +41,9 @@ type AlertGenerator struct {
 	hostCreatedAt atomic.Pointer[map[string]time.Time]
 	// shadow 累计影子阶段规则的命中量，周期落库供晋级决策使用。
 	shadow *shadowRecorder
+	// mlRankCache 是 host_id → ML 排序加权的原子快照（详见 ml_rank.go）。
+	// 由 StartRiskCacheReload 周期刷新；只影响告警排序，不产生告警。
+	mlRankCache atomic.Pointer[map[string]float64]
 	// assetWeightCache（host_id → 资产权重）、correlationBoostCache（host_id → 关联加权）
 	// 是风险打分两项输入的原子快照，由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）。
 	// 消除 computeRiskScore 每事件两次 DB 查（assetWeight / correlationBoost），engine CPU 高根因。
@@ -62,6 +65,7 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 	g.reloadHostCreatedAt()
 	g.reloadAssetWeightCache()
 	g.reloadCorrelationBoostCache()
+	g.reloadMLRankCache()
 	return g
 }
 

@@ -260,3 +260,76 @@ func TestGroupByRepeatsExpressionNotAlias(t *testing.T) {
 		t.Fatal("SELECT 与 GROUP BY 必须复用同一个表达式常量，避免两处写法漂移")
 	}
 }
+
+// ranking 档的门槛必须高于 context 档。
+//
+// ranking 会改变分析师**先看到什么**。排错顺序的代价不是多看一条，而是把真实威胁
+// 推到列表后面——在告警多到看不完的环境里，排在后面等于没被看到。
+func TestRankingGateIsStricterThanContext(t *testing.T) {
+	if MinPrecisionForRanking <= MinPrecisionForContext {
+		t.Fatalf("ranking 精确率门槛 %.2f 应高于 context 的 %.2f",
+			MinPrecisionForRanking, MinPrecisionForContext)
+	}
+	if MinSamplesForRanking <= MinSamplesForPromotion {
+		t.Fatalf("ranking 样本门槛 %d 应高于 context 的 %d",
+			MinSamplesForRanking, MinSamplesForPromotion)
+	}
+}
+
+// 达到 context 门槛但不够 ranking 门槛时，只能升到 context。
+func TestContextPassesButRankingBlocked(t *testing.T) {
+	db := newTestDB(t)
+	s := NewService(db, nil)
+	// 36 对 / 9 错 = 80% 精确率、45 条已研判：
+	// 过 context（≥30 条 / ≥70%），但样本数不到 ranking 要求的 50 条。
+	seedAlerts(t, db, "priv_esc", "confirmed", 36)
+	seedAlerts(t, db, "priv_esc", "false_positive", 9)
+
+	ctxD, err := s.EvaluateModeChange(anomaly.ModeShadow, anomaly.ModeContext)
+	if err != nil {
+		t.Fatalf("EvaluateModeChange(context): %v", err)
+	}
+	if !ctxD.Allowed {
+		t.Fatalf("应允许升到 context，实际被拒: %v", ctxD.Reasons)
+	}
+
+	rankD, err := s.EvaluateModeChange(anomaly.ModeContext, anomaly.ModeRanking)
+	if err != nil {
+		t.Fatalf("EvaluateModeChange(ranking): %v", err)
+	}
+	if rankD.Allowed {
+		t.Fatal("样本数不足 ranking 门槛时不该放行")
+	}
+}
+
+// ranking 仍然低于 alert：从 ranking 升 alert 依旧硬拒。
+func TestAlertStillBlockedFromRanking(t *testing.T) {
+	db := newTestDB(t)
+	s := NewService(db, nil)
+	seedAlerts(t, db, "priv_esc", "confirmed", 500)
+
+	d, err := s.EvaluateModeChange(anomaly.ModeRanking, anomaly.ModeAlert)
+	if err != nil {
+		t.Fatalf("EvaluateModeChange: %v", err)
+	}
+	if d.Allowed || !d.Blocking {
+		t.Fatal("1.0 封顶在 ranking，从 ranking 升 alert 必须硬拒")
+	}
+}
+
+// 从 ranking 降回 context / shadow 无条件允许。
+func TestDowngradeFromRankingAlwaysAllowed(t *testing.T) {
+	db := newTestDB(t)
+	s := NewService(db, nil)
+	seedAlerts(t, db, "c2_beacon", "false_positive", 999)
+
+	for _, to := range []anomaly.Mode{anomaly.ModeContext, anomaly.ModeShadow, anomaly.ModeOff} {
+		d, err := s.EvaluateModeChange(anomaly.ModeRanking, to)
+		if err != nil {
+			t.Fatalf("EvaluateModeChange(%s): %v", to, err)
+		}
+		if !d.Allowed {
+			t.Fatalf("ranking → %s 降档应无条件允许", to)
+		}
+	}
+}

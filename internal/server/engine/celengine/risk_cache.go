@@ -113,6 +113,9 @@ func (g *AlertGenerator) StartRiskCacheReload(ctx context.Context) {
 				g.reloadAssetWeightCache()
 			case <-corrTicker.C:
 				g.reloadCorrelationBoostCache()
+				// 异常分与关联加权同频刷新：两者都是分钟级变化的排序输入，
+				// 各自起一个 ticker 只是多一份定时器开销。
+				g.reloadMLRankCache()
 			}
 		}
 	}()
