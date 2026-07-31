@@ -1650,20 +1650,30 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 
 	// 发送通知（异步，不阻塞）
 	go func() {
+		// 先原子占用这次通知机会，再发送。Manager 的定时补发会扫描
+		// last_notified_at IS NULL 的告警，若此处仍是"先发后写"，两边会把同一条发两次。
+		claimed, err := notify.ClaimAlertNotification(s.db, alert.ID, time.Now())
+		if err != nil {
+			s.logger.Warn("占用告警通知机会失败",
+				zap.Uint("alert_id", alert.ID), zap.Error(err))
+			return
+		}
+		if !claimed {
+			s.logger.Debug("告警通知已被定时补发占用，跳过内联通知",
+				zap.Uint("alert_id", alert.ID))
+			return
+		}
+
 		notificationService := notify.NewNotificationService(s.db, s.logger)
 		sent, err := notificationService.SendAlertNotification(alertData)
 		if err != nil {
-			s.logger.Warn("发送告警通知失败",
+			// 机会已消耗，但告警仍 active，下个周期会因 last_notified_at 早于 cutoff
+			// 而重新可被占用——退化为延迟一个周期，不会丢失。
+			s.logger.Warn("发送告警通知失败（已占用的通知机会将在下个周期重试）",
 				zap.Uint("alert_id", alert.ID),
 				zap.Error(err),
 			)
 		} else if sent {
-			// 只有实际发送了通知才更新通知时间和通知次数
-			now := model.Now()
-			s.db.Model(&model.Alert{}).Where("id = ?", alert.ID).Updates(map[string]interface{}{
-				"last_notified_at": &now,
-				"notify_count":     gorm.Expr("notify_count + 1"),
-			})
 			s.logger.Info("告警通知已发送",
 				zap.Uint("alert_id", alert.ID),
 				zap.String("host_id", alert.HostID),

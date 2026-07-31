@@ -2231,3 +2231,31 @@ func (s *NotificationService) BuildTestLarkCard(notification *model.Notification
 		return nil
 	}
 }
+
+// ClaimAlertNotification 原子地占用一条告警的一次通知机会。
+//
+// alerts 有两个通知触发：AgentCenter 在告警产生时立即通知（首次），Manager 定时器
+// 补发从未通知成功的、并对仍活跃的做周期重复提醒。两者靠 last_notified_at 协调，
+// 但原先都是"先发送、后写回"，中间存在窗口：新告警的内联 goroutine 尚未写回时，
+// 定时器扫到 last_notified_at IS NULL 就会把同一条再发一次。
+//
+// 改为"先占用、后发送"：用带条件的 UPDATE 抢占，RowsAffected==0 表示已被另一方占走，
+// 直接跳过。占用后若发送失败，这次机会被消耗，但告警仍是 active，下个周期
+// last_notified_at 会早于 cutoff 而重新可被占用——退化成延迟一个周期，不会丢失。
+// 相比之下重复打扰值班是更难接受的一侧。
+//
+// notBefore 语义：仅当 last_notified_at 为空或早于该时刻时占用成功。
+func ClaimAlertNotification(db *gorm.DB, alertID uint, notBefore time.Time) (bool, error) {
+	now := model.Now()
+	res := db.Model(&model.Alert{}).
+		Where("id = ?", alertID).
+		Where("last_notified_at IS NULL OR last_notified_at < ?", notBefore).
+		Updates(map[string]interface{}{
+			"last_notified_at": &now,
+			"notify_count":     gorm.Expr("notify_count + 1"),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
