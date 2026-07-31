@@ -159,9 +159,18 @@ type AlertResolvedData struct {
 // 注：此方法只在新告警创建时调用，已存在的告警由定期调度器处理
 // 返回值：是否成功发送了至少一个通知，以及错误信息
 func (s *NotificationService) SendAlertNotification(alertData *AlertData) (bool, error) {
-	// 查询所有启用的、类别为 baseline_alert 的通知配置
+	return s.SendCategoryAlertNotification(model.NotifyCategoryBaselineAlert, alertData)
+}
+
+// SendCategoryAlertNotification 按指定通知类别发送告警。
+//
+// 与 SendAlertNotification 的唯一区别是类别可指定：原实现把 baseline_alert 写死，
+// 于是 ML 异常、行为基线、AD 审计、关联事件这些检测产出即便写进了各自的表，
+// 也没有任何通道能把它们送出去。类别参数化是接通这些哑巴链路的前提。
+func (s *NotificationService) SendCategoryAlertNotification(category model.NotifyCategory, alertData *AlertData) (bool, error) {
+	// 查询所有启用的、指定类别的通知配置
 	var notifications []model.Notification
-	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryBaselineAlert).Find(&notifications).Error; err != nil {
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, category).Find(&notifications).Error; err != nil {
 		s.logger.Error("查询通知配置失败", zap.Error(err))
 		return false, err
 	}
