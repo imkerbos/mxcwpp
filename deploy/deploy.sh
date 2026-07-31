@@ -634,6 +634,12 @@ logs() {
     dc logs -f "$@"
 }
 
+# BACKUP_MIN_BYTES 是**解压后**内容的合理下限。
+#
+# 刻意不用压缩后大小：SQL 转储重复度极高，一个几 MB 的真实库压完可能只有几百字节，
+# 拿压缩后大小设阈值会把正常备份误判为失败，反而挡住升级。
+BACKUP_MIN_BYTES=512
+
 backup() {
     source "$ENV_FILE"
     local BACKUP_DIR="$SCRIPT_DIR/backup"
@@ -641,12 +647,172 @@ backup() {
     BACKUP_FILE="$BACKUP_DIR/mxcwpp_$(date +%Y%m%d_%H%M%S).sql.gz"
 
     log_step "备份数据库..."
-    dc exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction mxcwpp | gzip > "$BACKUP_FILE"
+    # pipefail 必须开：mysqldump 失败时 gzip 依然成功，管道整体返回 0，
+    # 于是留下一个 20 字节的"备份文件"、脚本继续升级。能骗人的备份比没有备份更危险。
+    if ! ( set -o pipefail; dc exec -T mysql mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" \
+            --single-transaction --routines --triggers mxcwpp | gzip > "$BACKUP_FILE" ); then
+        rm -f "$BACKUP_FILE"
+        log_error "数据库备份失败，已删除不完整的备份文件"
+        return 1
+    fi
+
+    if ! verify_backup "$BACKUP_FILE"; then
+        rm -f "$BACKUP_FILE"
+        log_error "备份文件校验未通过，已删除"
+        return 1
+    fi
 
     log_info "备份完成: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
 
     # 清理 30 天前的备份
     find "$BACKUP_DIR" -name "mxcwpp_*.sql.gz" -mtime +30 -delete 2>/dev/null || true
+}
+
+# verify_backup 校验备份文件确实可用，而不只是"文件存在"。
+# 三关：大小下限、gzip 完整性、内容含建表语句。任一不过即视为无效备份。
+verify_backup() {
+    local file="$1"
+    [ -f "$file" ] || { log_error "备份文件不存在: $file"; return 1; }
+
+    if ! gzip -t "$file" 2>/dev/null; then
+        log_error "备份文件 gzip 校验失败（内容被截断或不是 gzip）"
+        return 1
+    fi
+
+    local size
+    size=$(gzip -dc "$file" 2>/dev/null | wc -c | tr -d ' ')
+    if [ "${size:-0}" -lt "$BACKUP_MIN_BYTES" ]; then
+        log_error "备份解压后仅 ${size} 字节，远小于合理下限（dump 很可能失败了）"
+        return 1
+    fi
+
+    if ! gzip -dc "$file" 2>/dev/null | head -c 1000000 | grep -q "CREATE TABLE"; then
+        log_error "备份内容不含任何建表语句，不是有效的数据库转储"
+        return 1
+    fi
+    return 0
+}
+
+# restore 从备份还原数据库。
+#
+# 此前只有 backup 没有 restore：备份做了却用不上，等于心理安慰。
+# 还原是破坏性操作，必须显式确认，且先校验备份可用再动现有数据——
+# 用一个坏备份覆盖掉还能用的库是最坏结果。
+restore() {
+    source "$ENV_FILE"
+    local file="$1"
+    local BACKUP_DIR="$SCRIPT_DIR/backup"
+
+    if [ -z "$file" ]; then
+        log_error "用法: ./deploy.sh restore <备份文件>"
+        echo ""
+        echo "可用备份："
+        ls -1t "$BACKUP_DIR"/mxcwpp_*.sql.gz 2>/dev/null | head -10 || echo "  （无）"
+        return 1
+    fi
+    [ -f "$file" ] || file="$BACKUP_DIR/$file"
+
+    log_step "校验备份文件..."
+    verify_backup "$file" || return 1
+
+    echo ""
+    log_warn "即将用 $(basename "$file") 覆盖当前数据库 mxcwpp"
+    log_warn "现有数据将被替换，此操作不可撤销。"
+    read -p "确认还原请输入 yes: " confirm
+    if [ "$confirm" != "yes" ]; then
+        log_info "已取消"
+        return 1
+    fi
+
+    # 还原前先给当前状态留一份，避免"还原错了备份"变成不可逆事故。
+    log_step "还原前先备份当前数据库..."
+    if ! backup; then
+        log_error "还原前备份失败，中止还原（不在无退路的情况下覆盖数据）"
+        return 1
+    fi
+
+    log_step "停止应用服务（避免还原期间写入）..."
+    dc stop manager agentcenter consumer engine vulnsync llmproxy 2>/dev/null || true
+
+    log_step "还原数据库..."
+    if ! ( set -o pipefail; gzip -dc "$file" | dc exec -T mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" mxcwpp ); then
+        log_error "还原失败。当前库可能处于不一致状态，请用刚才的还原前备份重试。"
+        dc start manager agentcenter consumer engine vulnsync llmproxy 2>/dev/null || true
+        return 1
+    fi
+
+    log_step "重启应用服务..."
+    dc start manager agentcenter consumer engine vulnsync llmproxy 2>/dev/null || true
+
+    log_info "还原完成: $(basename "$file")"
+}
+
+# rollback 回退到上一个版本。
+#
+# 升级会把 PREV_VERSION 与 PREV_BACKUP 写入 .env，回滚据此把版本号改回去并重启。
+# **默认不还原数据库**：升级后可能已经写入新数据，一并回滚会把它们抹掉。
+# 数据库还原是独立决定，需要时显式跑 restore。
+rollback() {
+    source "$ENV_FILE"
+    if [ -z "${PREV_VERSION:-}" ]; then
+        log_error "没有可回退的版本记录（.env 中无 PREV_VERSION）"
+        log_error "仅在通过 ./deploy.sh upgrade 升级后才能回滚。"
+        return 1
+    fi
+
+    echo ""
+    log_warn "回退版本: ${VERSION:-unknown} → ${PREV_VERSION}"
+    if [ -n "${PREV_BACKUP:-}" ] && [ -f "${PREV_BACKUP}" ]; then
+        log_warn "升级前的数据库备份: $(basename "${PREV_BACKUP}")"
+        log_warn "本次回滚**不会**还原数据库；如确需还原，回滚后执行："
+        log_warn "  ./deploy.sh restore ${PREV_BACKUP}"
+    else
+        log_warn "未找到升级前的数据库备份，回滚仅切换镜像版本。"
+    fi
+    read -p "确认回退请输入 yes: " confirm
+    if [ "$confirm" != "yes" ]; then
+        log_info "已取消"
+        return 1
+    fi
+
+    persist_env_kv VERSION "$PREV_VERSION"
+    source "$ENV_FILE"
+    log_step "以 ${PREV_VERSION} 重启服务..."
+    # shellcheck disable=SC2046
+    dc up -d $(scale_args)
+
+    if wait_healthy 120; then
+        log_info "回退完成，当前版本: ${PREV_VERSION}"
+    else
+        log_error "回退后服务仍未就绪，请检查 ./deploy.sh logs"
+        return 1
+    fi
+}
+
+# wait_healthy 等待所有服务健康，超时返回非零。
+#
+# 升级/回滚此前是 sleep 10 后无条件打印"完成"——服务起没起来都一样。
+# 部署脚本说了"成功"就必须真的成功，否则运维会带着错误的结论离开现场。
+wait_healthy() {
+    local timeout="${1:-180}"
+    local waited=0
+    log_step "等待服务就绪（最多 ${timeout}s）..."
+    while [ "$waited" -lt "$timeout" ]; do
+        local unhealthy
+        unhealthy=$(dc ps --format '{{.Service}} {{.Health}}' 2>/dev/null \
+            | awk '$2 != "" && $2 != "healthy" {print $1}' | tr '\n' ' ')
+        if [ -z "$unhealthy" ]; then
+            log_info "全部服务已就绪"
+            return 0
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    local still
+    still=$(dc ps --format '{{.Service}} {{.Health}}' 2>/dev/null \
+        | awk '$2 != "" && $2 != "healthy" {print $1}' | tr '\n' ' ')
+    log_error "以下服务未在 ${timeout}s 内就绪: ${still:-未知}"
+    return 1
 }
 
 # ============================================================
@@ -673,23 +839,30 @@ upgrade() {
         exit 1
     fi
 
-    # 1. 备份
-    log_step "[1/4] 备份数据库..."
-    backup
+    local OLD_VERSION="${VERSION:-unknown}"
 
-    # 2. 更新版本号
-    log_step "[2/4] 更新版本号: $VERSION → $NEW_VERSION..."
-    sed -i.bak "s/^VERSION=.*/VERSION=$NEW_VERSION/" "$ENV_FILE"
-    rm -f "$ENV_FILE.bak"
+    # 1. 备份。失败即中止——没有退路就不该往前走。
+    log_step "[1/5] 备份数据库..."
+    if ! backup; then
+        log_error "备份失败，升级中止。当前部署未做任何改动。"
+        exit 1
+    fi
+
+    # 2. 记录回滚点，供 ./deploy.sh rollback 使用。
+    log_step "[2/5] 记录回滚点..."
+    persist_env_kv PREV_VERSION "$OLD_VERSION"
+    persist_env_kv PREV_BACKUP "$BACKUP_FILE"
+    persist_env_kv VERSION "$NEW_VERSION"
+    log_info "回滚点已记录: ${OLD_VERSION} / $(basename "$BACKUP_FILE")"
 
     # 3. 重新生成配置（从模板）
-    log_step "[3/4] 更新配置..."
+    log_step "[3/5] 更新配置..."
     if [ -f "$SCRIPT_DIR/config/server.yaml.tpl" ]; then
         init_config
     fi
 
     # 4. 重新构建并启动
-    log_step "[4/4] 构建镜像并重启..."
+    log_step "[4/5] 构建镜像并重启..."
     source "$ENV_FILE"
     local m="${MANAGER_REPLICAS:-1}"
     local a="${AGENTCENTER_REPLICAS:-1}"
@@ -707,10 +880,19 @@ upgrade() {
         dc up -d $(scale_args)
     fi
 
-    sleep 10
-    status
-
-    log_info "升级完成! 版本: $NEW_VERSION"
+    # 5. 验证升级结果。此前是 sleep 10 后无条件打印"升级完成"——
+    #    服务起没起来都一样，运维会带着错误结论离开现场。
+    log_step "[5/5] 验证服务状态..."
+    if wait_healthy 180; then
+        status
+        log_info "升级完成! 版本: $NEW_VERSION"
+    else
+        status
+        log_error "升级后服务未全部就绪。版本已切到 ${NEW_VERSION}，但系统可能不可用。"
+        log_error "回退命令: ./deploy.sh rollback"
+        log_error "如需一并还原数据库: ./deploy.sh restore ${BACKUP_FILE}"
+        exit 1
+    fi
 }
 
 # ============================================================
@@ -787,8 +969,10 @@ show_help() {
     echo "  restart     重启服务 (可指定服务名: restart agentcenter)"
     echo "  status      查看服务状态"
     echo "  logs        查看日志 (可指定服务名: logs agentcenter)"
-    echo "  backup      备份数据库 (gzip 压缩，自动清理 30 天前备份)"
-    echo "  upgrade     升级服务 (自动备份 → 更新版本 → 重启)"
+    echo "  backup      备份数据库 (gzip 压缩，校验后保留，自动清理 30 天前备份)"
+    echo "  restore     从备份还原数据库: restore <备份文件>"
+    echo "  upgrade     升级服务 (备份 → 记录回滚点 → 更新版本 → 重启 → 健康校验)"
+    echo "  rollback    回退到升级前的版本 (不自动还原数据库)"
     echo "  clean-logs  清理旧日志 (默认保留 ${LOG_RETENTION_DAYS:-7} 天)"
     echo "  build       构建镜像"
     echo "  help        显示帮助"
@@ -821,6 +1005,13 @@ main() {
             ;;
         backup)
             backup
+            ;;
+        restore)
+            shift
+            restore "$@"
+            ;;
+        rollback)
+            rollback
             ;;
         upgrade)
             upgrade
