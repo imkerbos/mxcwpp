@@ -400,7 +400,9 @@
       "alerts": "告警列表",
       "whitelist": "白名单",
       "suggestions": "调优建议",
-      "incidents": "事件"
+      "incidents": "事件",
+      "response": "处置审批",
+      "oncall": "值班表"
     },
     "status": {
       "active": "待处理",
@@ -550,6 +552,44 @@
       "event_escalated": "升级",
       "event_verdict": "研判",
       "event_resolved": "关闭"
+    },
+    "response": {
+      "intro": "处置动作（隔离主机等）不会立即生效：提交申请后需由他人审批，再执行。隔离会切断业务流量，申请人不能审批自己的申请。",
+      "colAction": "处置动作",
+      "colReason": "申请理由",
+      "colRequester": "申请人",
+      "colApprover": "审批人",
+      "approve": "审批通过",
+      "reject": "驳回",
+      "execute": "执行",
+      "rollback": "回滚",
+      "approved": "已审批",
+      "rejected": "已驳回",
+      "executed": "已执行",
+      "rolledBack": "已回滚",
+      "rejectTitle": "驳回处置申请",
+      "rejectPlaceholder": "写明驳回原因，便于申请人调整",
+      "empty": "暂无处置申请",
+      "action_isolate_host": "隔离主机",
+      "action_release_host": "解除隔离",
+      "status_pending": "待审批",
+      "status_approved": "待执行",
+      "status_rejected": "已驳回",
+      "status_executed": "已执行",
+      "status_failed": "执行失败",
+      "status_rolled_back": "已回滚"
+    },
+    "oncall": {
+      "intro": "新事件自动派给当班的一线值班人。没有排班就没有负责人，超时告警只会天天响而没人知道该找谁。",
+      "tierL1": "一线值班",
+      "tierL2": "二线值班",
+      "tierSecurity": "安全负责人",
+      "colTier": "层级",
+      "colUser": "值班人",
+      "colWindow": "值班时段",
+      "uncovered": "无人值班",
+      "gapWarning": "存在无人值班的层级：该时段新事件将无人负责，升级也无处可去。",
+      "empty": "暂无排班"
     }
   },
   "vuln": {

@@ -400,7 +400,9 @@
       "alerts": "Alert List",
       "whitelist": "Whitelist",
       "suggestions": "Tuning",
-      "incidents": "Incidents"
+      "incidents": "Incidents",
+      "response": "Response",
+      "oncall": "On call"
     },
     "status": {
       "active": "Pending",
@@ -550,6 +552,44 @@
       "event_escalated": "Escalated",
       "event_verdict": "Verdict",
       "event_resolved": "Resolved"
+    },
+    "response": {
+      "intro": "Containment actions do not take effect immediately: a request must be approved by someone else, then executed. Isolation cuts a host's traffic, and requesters cannot approve their own requests.",
+      "colAction": "Action",
+      "colReason": "Reason",
+      "colRequester": "Requested by",
+      "colApprover": "Approved by",
+      "approve": "Approve",
+      "reject": "Reject",
+      "execute": "Execute",
+      "rollback": "Roll back",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "executed": "Executed",
+      "rolledBack": "Rolled back",
+      "rejectTitle": "Reject request",
+      "rejectPlaceholder": "State why, so the requester knows what to change",
+      "empty": "No response requests",
+      "action_isolate_host": "Isolate host",
+      "action_release_host": "Release host",
+      "status_pending": "Pending approval",
+      "status_approved": "Awaiting execution",
+      "status_rejected": "Rejected",
+      "status_executed": "Executed",
+      "status_failed": "Failed",
+      "status_rolled_back": "Rolled back"
+    },
+    "oncall": {
+      "intro": "New incidents are assigned to whoever is on first-line duty. Without a roster there is no owner, and overdue alerts fire daily with nobody to pick them up.",
+      "tierL1": "First line",
+      "tierL2": "Second line",
+      "tierSecurity": "Security lead",
+      "colTier": "Tier",
+      "colUser": "On call",
+      "colWindow": "Shift",
+      "uncovered": "Uncovered",
+      "gapWarning": "Some tiers have nobody on duty: new incidents in that window will have no owner and escalation has nowhere to go.",
+      "empty": "No shifts scheduled"
     }
   },
   "vuln": {
