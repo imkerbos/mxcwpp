@@ -107,7 +107,8 @@ Kafka 异步消费服务，**仅负责数据持久化**（v2.0 起检测能力�
 - 批量优化：ClickHouse 5000 条/10s
 - 写入失败进 Dead Letter Queue（`{sourceTopic}.dlq` Topic）
 - DLQ 消息保留原始消息体、错误信息、重试次数、失败时间
-- 不论成功失败均标记 offset，失败消息走 DLQ 而非重试阻塞
+- 消费失败走 DLQ 而非重试阻塞；但 **ClickHouse 刷盘失败时提交屏障不推进 offset**，
+  消息会被重新投递（宁可归档里多出重复行，也不能提交"已落盘"却其实没落盘）
 - Kafka ConsumerGroup 配置：RoundRobin rebalance 策略，OffsetNewest
 - 消费心跳时维护 Redis `agent:ac:{agentID}` 映射，检查 pending 任务触发补发
 - GCP Pub/Sub 消费（`internal/server/consumer/gcppubsub/`）：从 Cloud Logging 接收 GKE 审计日志
@@ -284,7 +285,19 @@ Engine 与 Consumer 使用不同 ConsumerGroup，**offset 独立**，任一方�
 
 Partition Key 为 AgentID，保证同一 Agent 数据有序。Replication Factor = 2，`min.insync.replicas = 1`。
 
-各 Topic 配套 DLQ：`mxcwpp.agent.{topic-name}.dlq`。DLQ 消息结构包含原始消息体、错误描述、已重试次数和失败时间戳，便于事后排查和重放。
+各 Topic 配套 DLQ：`mxcwpp.agent.{topic-name}.dlq`。DLQ 消息结构包含原始消息体、错误描述、已重试次数和失败时间戳。
+
+**重放**：`cmd/tools/dlq-replay` 把 DLQ 消息投回原 Topic 交回正常消费链路。
+
+```bash
+dlq-replay -config /etc/mxcwpp/server.yaml -topic mxcwpp.agent.events           # 预演
+dlq-replay -config /etc/mxcwpp/server.yaml -topic mxcwpp.agent.events -apply    # 执行
+```
+
+刻意做成人工触发而非自动重放：DLQ 里既有下游临时故障导致、重放即可恢复的消息，
+也有字段非法这类重放多少次都会再失败的毒消息；自动重放会让后者在队列间无限循环。
+默认预演不投递也不推进位点，`-max-retry`（默认 3）之上的消息视为毒消息跳过，
+投递用同步生产者确认成功后才推进位点，中途失败可直接重跑。
 
 ## 存储分层
 
