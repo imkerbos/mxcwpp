@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -19,7 +18,7 @@ const modelStateName = "iforest_host_metrics"
 //
 // 没有参照就没有投毒防护。这件事必须能在监控上直接看到，
 // 否则"防护未生效"和"防护生效且一切正常"在外部表现完全一样。
-var anomalyReferenceLoaded = promauto.NewGauge(prometheus.GaugeOpts{
+var anomalyReferenceLoaded = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name: "mxcwpp_anomaly_reference_baseline_ready",
 	Help: "Whether the long-term reference baseline used for drift and poisoning detection is loaded",
 })

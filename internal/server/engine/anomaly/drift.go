@@ -5,7 +5,6 @@ import (
 	"sort"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // 模型漂移与训练投毒。
@@ -23,7 +22,7 @@ import (
 
 var (
 	// driftScore 当前训练窗口相对长期基线的偏移程度。
-	anomalyDriftScore = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	anomalyDriftScore = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mxcwpp_anomaly_feature_drift",
 		Help: "Per-feature drift of the current training window versus the long-term reference",
 	}, []string{"feature"})
@@ -32,7 +31,7 @@ var (
 	//
 	// 用 Counter：这类事件必须留下历史痕迹。只看当前状态会漏掉
 	// "半夜拒了 20 次、早上恢复正常"这种最需要复盘的情况。
-	anomalyRetrainRejected = promauto.NewCounterVec(prometheus.CounterOpts{
+	anomalyRetrainRejected = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "mxcwpp_anomaly_retrain_rejected_total",
 		Help: "Retrains rejected because the training window drifted too far from the reference baseline",
 	}, []string{"reason"})
@@ -41,7 +40,7 @@ var (
 	//
 	// 拒绝重训会让模型变旧。旧模型仍然工作，但"上次学习是什么时候"必须可见，
 	// 否则连续拒绝会表现为"一切正常"。
-	anomalyModelAge = promauto.NewGauge(prometheus.GaugeOpts{
+	anomalyModelAge = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "mxcwpp_anomaly_model_age_seconds",
 		Help: "Seconds since the anomaly model was last successfully trained",
 	})

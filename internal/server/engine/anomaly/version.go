@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -21,7 +20,7 @@ import (
 //
 // 版本号停滞说明模型长期没有更新（可能被漂移闸持续拒绝），
 // 这与「一切正常」在其它指标上看起来一样。
-var anomalyModelVersion = promauto.NewGauge(prometheus.GaugeOpts{
+var anomalyModelVersion = prometheus.NewGauge(prometheus.GaugeOpts{
 	Name: "mxcwpp_anomaly_model_version",
 	Help: "Currently active anomaly model version",
 })

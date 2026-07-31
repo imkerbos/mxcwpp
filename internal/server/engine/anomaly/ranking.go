@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -31,7 +30,7 @@ const rankingFlushInterval = time.Minute
 // anomalyScoreFlushFailed 异常分落库失败次数。
 //
 // 落库失败会让排序悄悄退回"没有 ML 参与"的状态——功能看起来还在，实际不起作用。
-var anomalyScoreFlushFailed = promauto.NewCounter(prometheus.CounterOpts{
+var anomalyScoreFlushFailed = prometheus.NewCounter(prometheus.CounterOpts{
 	Name: "mxcwpp_anomaly_score_flush_failed_total",
 	Help: "Failures writing per-host anomaly scores used for alert ranking",
 })
