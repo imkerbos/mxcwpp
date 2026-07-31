@@ -317,6 +317,134 @@ services:
         limits:
           memory: 2G
 
+  # ===== Engine 检测引擎 =====
+  # 官方单机拓扑此前缺失 engine/vulnsync/llmproxy/gotenberg 四个服务：
+  # deploy.sh 一键装出来的系统没有检测引擎（不产告警）、没有漏洞同步（库不更新）、
+  # 没有 PDF 渲染（报告导出坏）。装起来"能跑"，但核心能力都不在。
+  engine:
+    image: mxcwpp-engine:${VERSION:-latest}
+    container_name: mxcwpp-engine
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-1:
+        condition: service_healthy
+    volumes:
+      - ./config/server.yaml:/etc/mxcwpp/server.yaml:ro
+      - ${DATA_DIR:-./data}/logs/engine:/var/log/mxcwpp
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8082/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mxcwpp-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ===== VulnSync 漏洞库同步 =====
+  vulnsync:
+    image: mxcwpp-vulnsync:${VERSION:-latest}
+    container_name: mxcwpp-vulnsync
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka-1:
+        condition: service_healthy
+    volumes:
+      - ./config/server.yaml:/etc/mxcwpp/server.yaml:ro
+      - ${DATA_DIR:-./data}/logs/vulnsync:/var/log/mxcwpp
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8083/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - mxcwpp-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ===== LLMProxy 多 LLM 厂商适配网关 =====
+  llmproxy:
+    image: mxcwpp-llmproxy:${VERSION:-latest}
+    container_name: mxcwpp-llmproxy
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./config/server.yaml:/etc/mxcwpp/server.yaml:ro
+      - ${DATA_DIR:-./data}/logs/llmproxy:/var/log/mxcwpp
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8085/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - mxcwpp-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ===== Gotenberg PDF 渲染 =====
+  # 报告导出依赖它；缺失时导出的是损坏的 .pdf 而非报错，属静默失败。
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: mxcwpp-gotenberg
+    restart: always
+    command:
+      - "gotenberg"
+      - "--api-port=3000"
+      - "--chromium-disable-web-security"
+      - "--chromium-allow-list=.*"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mxcwpp-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
   ui:
     image: mxcwpp-ui:${VERSION:-latest}
     container_name: mxcwpp-ui

@@ -35,7 +35,7 @@
 | 模式 | 配置文件 | 特点 | 适用场景 |
 |------|---------|------|---------|
 | 开发环境 | `docker-compose.dev.yml` | 源码热重载（Air），单 Kafka 节点，包含 engine/llmproxy/vulnsync 全 6 微服务 | 日常开发调试 |
-| 完整 v2 编排 | `docker-compose.v2.yml` | 预构建镜像，**完整 6 微服务**（manager + agentcenter + consumer + engine + llmproxy + vulnsync + ui）+ 基础设施 | 单机 v2 部署、验证联调 |
+| **官方单机部署** | `docker-compose.yml`（经 `deploy.sh`） | **唯一官方单机拓扑**：全部服务端微服务 + 基础设施 + gotenberg | 单机生产、POC、离线交付 |
 | 压测环境 | `docker-compose.pret.yml` | 预构建镜像，3 Kafka 节点，支持 `--scale` 多副本 | 性能压测、预发布验证 |
 | 生产环境 | `cluster.example.yaml` + `mxctl deploy` | 多节点角色分离，完整 HA | 正式生产部署 |
 
@@ -76,34 +76,6 @@ make web-dev             # 本机启动前端 (端口 3000, 热更新快)
 
 ---
 
-## v2 完整微服务编排
-
-`docker-compose.v2.yml` 提供 v2.0 完整六微服务架构的单机编排，可在单台机器上启动全部 6 个 mxcwpp 服务 + 基础设施，用于联调和功能验证。
-
-```bash
-cd deploy/
-cp env.example .env
-vim .env  # 修改密码、SERVER_IP 等
-
-docker compose -f docker-compose.v2.yml up -d
-```
-
-包含的 mxcwpp 服务：
-
-| 服务 | 端口 | 职责 |
-|------|------|------|
-| manager | 8080 | HTTP API + 控制台后端 |
-| agentcenter | 6751/6752 | Agent gRPC 接入 |
-| consumer | - | Kafka 持久化（无对外端口） |
-| engine | 8090 | 检测分析引擎（16 stages） |
-| llmproxy | 8091 | LLM 适配网关 |
-| vulnsync | 8092 | 漏洞情报融合 |
-| web | 3000 | Next.js (React) SPA, 静态导出 |
-
-基础设施服务：mysql / redis / kafka(KRaft) / clickhouse / prometheus / grafana。
-
----
-
 ## 压测环境
 
 压测环境采用 `docker-compose.pret.yml`，使用预构建镜像，配置 3 个 Kafka 节点，支持通过 `--scale` 参数启动多副本。
@@ -115,6 +87,33 @@ make pret-docker-down    # 停止压测环境
 ```
 
 ---
+
+## 唯一官方单机拓扑
+
+`deploy/docker-compose.yml` 是唯一的官方单机部署拓扑，`deploy.sh` 与离线发布包都用它。
+
+此前存在三份互不相同的拓扑：`docker-compose.yml`（缺 engine / vulnsync / llmproxy /
+gotenberg）、`docker-compose.v2.yml`，以及打包脚本内嵌生成的第三份（**只有
+mysql / agentcenter / manager / ui**，没有 Kafka、ClickHouse、Redis、Consumer）。
+客户拿到哪一份取决于走了哪条路径，而一键部署恰好用的是缺检测引擎那份——
+装得起来、界面能开，核心能力都不在。
+
+现在只有一份，打包只做镜像前缀替换（去 `build` 段、给 `mxcwpp-*` 镜像加仓库前缀，
+第三方镜像不动）。
+
+包含的服务：
+
+| 类别 | 服务 |
+|------|------|
+| 服务端微服务 | manager、agentcenter、consumer、engine、vulnsync、llmproxy |
+| 前端 | ui |
+| 支撑 | gotenberg（报告 PDF 渲染） |
+| 基础设施 | mysql、redis、kafka ×3、clickhouse |
+
+**闸门**：`internal/deploy/topology_test.go` 把 `cmd/server/*` 与本拓扑绑定——
+新增服务端微服务未加进部署即测试失败；打包脚本若改回内嵌生成也会失败。
+缺服务不是"少个容器"，而是该能力在客户环境里从未运行过。
+
 
 ## 生产部署
 

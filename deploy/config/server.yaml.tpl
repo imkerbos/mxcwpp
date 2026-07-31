@@ -114,3 +114,20 @@ agent:
 plugins:
   dir: "__PLUGINS_DIR__"
   base_url: "__PLUGINS_BASE_URL__"
+
+# PDF 服务端渲染（Gotenberg sidecar）
+#
+# 此前模板缺这一段：全新部署渲染出的配置没有 gotenberg_url，报告导出得到的是
+# 一个损坏的 .pdf 而不是明确报错——典型的静默失败。
+pdf:
+  gotenberg_url: "http://gotenberg:3000"   # 同 mxcwpp-net 网络内的服务别名
+  internal_url: "http://manager:8080"      # Gotenberg 回拉 manager 静态资源
+
+# 检测产出的通知灰度（见 docs/configuration.md「alerting」）
+#
+# 留空即全部类别不通知，告警仍照常入库、列表与大屏可见。
+# 这些链路此前从未通知过，一次全开会淹没值班，因此确认某类误报收敛后再逐个加入。
+alerting:
+  notify_categories: []
+  min_severity: "high"
+  suppress_window_minutes: 30
