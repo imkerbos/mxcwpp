@@ -174,6 +174,52 @@ groups:
   - name: mxcwpp_saturation
     interval: 60s
     rules:
+      # Agent 侧丢事件：背压或 WAL 满时事件被丢弃。指标一直存在但从无告警——
+      # 数据在丢，图表上看得见，没人被叫醒。丢事件等于检测面出现盲区。
+      - alert: MxCwppAgentEventDrop
+        expr: sum(increase(mxcwpp_agent_event_dropped_total[10m])) by (host_id) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: agent
+        annotations:
+          summary: "Agent 丢弃事件，该主机存在检测盲区"
+          description: "host_id={{ $labels.host_id }} 近 10 分钟丢弃 {{ $value }} 条事件（背压或 WAL 满）。"
+
+      # Engine 背压丢弃：检测流水线来不及处理而主动丢事件。
+      - alert: MxCwppEngineBackpressureDrop
+        expr: increase(mxcwpp_engine_backpressure_drop_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          service: engine
+        annotations:
+          summary: "Engine 背压丢弃事件，检测出现漏检"
+          description: "近 10 分钟丢弃 {{ $value }} 条；被丢的事件不会经任何 Stage 检测。"
+
+      # Stage 报错：某个检测 Stage 持续异常，等于该项能力静默失效。
+      - alert: MxCwppEngineStageErrors
+        expr: sum(increase(mxcwpp_engine_stage_errors_total[10m])) by (stage) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: engine
+        annotations:
+          summary: "检测 Stage 持续报错"
+          description: "stage={{ $labels.stage }} 近 10 分钟报错 {{ $value }} 次；该能力可能已静默失效。"
+
+      # 漏洞库停更：同步挂了或上游拒服后，界面照常显示旧数据，看不出区别。
+      # 判据是"距上次成功多久"而非"跑了多少次"——后者在反复失败时同样在增长。
+      - alert: MxCwppVulnDataStale
+        expr: (time() - mxcwpp_vulnsync_last_success_timestamp_seconds) > 86400
+        for: 30m
+        labels:
+          severity: critical
+          service: vulnsync
+        annotations:
+          summary: "漏洞库超过 24 小时未成功同步"
+          description: "source={{ $labels.source }} 已 {{ $value | humanizeDuration }} 未成功同步；界面上的漏洞数据已停在那之前。"
+
       - alert: MxCwppHighCPU
         expr: 100 * rate(process_cpu_seconds_total{job=~"mxcwpp-.+"}[5m]) > 80
         for: 10m

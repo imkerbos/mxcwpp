@@ -171,6 +171,9 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 	for r := range resultsCh {
 		if r.err != nil {
 			c.logger.Warn("source fetch 失败，跳过", zap.String("source", r.src.Name()), zap.Error(r.err))
+			// 失败不更新新鲜度时间戳：让"上次成功"停在真正成功的那一刻，
+			// 否则漏洞库停更时告警永远不会触发。
+			RecordSyncFailure(r.src.Name())
 			if c.checker != nil {
 				c.checker.MarkFailed(r.src.Name(), r.err)
 			}
@@ -195,6 +198,7 @@ func (c *Coordinator) Sync(ctx context.Context, since time.Time, hosts []HostSof
 			zap.Int("count", len(r.advs)),
 			zap.Duration("cost", r.cost),
 		)
+		RecordSyncSuccess(r.src.Name(), len(r.advs))
 		if c.checker != nil {
 			c.checker.MarkSuccess(r.src.Name(), int64(len(r.advs)), r.cost)
 			// 推进 watermark 给下次增量 sync 用（仅在拉到 advisory 时推进）
