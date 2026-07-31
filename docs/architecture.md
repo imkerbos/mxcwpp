@@ -129,7 +129,8 @@ v2.0 新增的检测分析引擎，独立服务，与 Consumer 并行消费 Kafk
   - `kube/` — K8s Audit Event 检测（PSS 等）
   - `rasp/` — RASP 事件汇聚（Java / Python / PHP / Node / Go）
   - `honeypot/` — 反勒索 / 蜜罐告警归并
-  - `ml/` — ONNX Runtime CPU 推理（IForest 等）
+  - `ml/` — Go 原生 IForest + Registry。**未接线**（capability 清单 `ml_anomaly` = unwired），
+    且**没有 ONNX**：go.mod 无 onnxruntime 依赖，ONNX 适配仍是 TODO
   - `anomaly/` — 行为基线异常检测
   - `storyline/` — ATT&CK 攻击链关联与时间线
   - `ruleimport/` / `rulesync/` — Sigma/Falco/Tetragon 规则导入与同步
@@ -722,7 +723,7 @@ internal/server/engine/celengine/       # CEL 规则引擎 + 端口扫描检测
 internal/server/engine/intrusion/       # 入侵检测 4 大类
 internal/server/engine/microseg/        # 微隔离 + K8s NetworkPolicy 推荐
 internal/server/engine/storyline/       # ATT&CK 攻击链时间线
-internal/server/engine/ml/              # ONNX ML 推理
+internal/server/engine/ml/              # Go 原生 IForest（未接线，无 ONNX）
 internal/server/engine/scheduler/       # IOC/规则/漏洞情报同步调度
 internal/server/llmproxy/        # LLMProxy: provider / router / cache / quota / audit
 internal/server/vulnsync/        # VulnSync: sources / leader / publisher

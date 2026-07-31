@@ -3,7 +3,7 @@
 // 本包目前是 PR3 引入的空骨架,后续 PR 将逐步搬入:
 //   - rule/      CEL + Sigma + Falco + Tetragon 转换规则
 //   - sequence/  Markov 转移 / n-gram 序列异常 / 端口扫描滑动窗口
-//   - ml/        ONNX Runtime CPU 推理 (IForest / LightGBM / MiniLM)
+//   - ml/        Go 原生 IForest + Registry（未接线；ONNX/LightGBM/MiniLM 均为 TODO，go.mod 无相关依赖）
 //   - storyline/ 攻击链关联 + ATT&CK 战术映射
 //   - kube/      K8s Audit Event 检测 (从 manager.biz.kube_detector 搬入)
 //   - response/  observe/protect 模式下的响应动作
