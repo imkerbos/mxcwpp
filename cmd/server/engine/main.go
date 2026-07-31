@@ -117,11 +117,17 @@ func main() {
 				}
 				stageAlertWriter = engine.NewStageAlertWriter(db, logger.Named("stage_alert"))
 
+				// SIEM 外发出口：Engine 是检测告警的主要来源，缺了它客户 SIEM 会漏掉大头。
+				siemEgress, closeSIEM := alertbus.NewSIEMEgress(logger.Named("siem"),
+					cfg.SIEM.Enabled, cfg.SIEM.Protocol, cfg.SIEM.Address, cfg.SIEM.Facility, 0)
+				defer closeSIEM()
+
 				// 告警发布点：Engine 产出的 ML 异常经此走通知出口。
 				// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库。
 				alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
 					alertbus.FromConfig(cfg.Alerting.NotifyCategories,
-						cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)))
+						cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)).
+					WithEgress(siemEgress))
 
 				celEng, err := celengine.New(db, logger.Named("cel"))
 				if err != nil {

@@ -102,9 +102,13 @@ func Initialize(configPath string) (*ManagerServices, error) {
 
 	// 告警发布点：Manager 产出的关联事件与 K8s 基线告警经此走通知出口。
 	// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库、列表与大屏可见。
+	// SIEM 外发出口：Manager 产出关联事件与 K8s 基线告警，同样要进客户 SIEM。
+	siemEgress, _ := alertbus.NewSIEMEgress(logger.Named("siem"),
+		cfg.SIEM.Enabled, cfg.SIEM.Protocol, cfg.SIEM.Address, cfg.SIEM.Facility, 0)
 	alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
 		alertbus.FromConfig(cfg.Alerting.NotifyCategories,
-			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)))
+			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)).
+		WithEgress(siemEgress))
 
 	// 5.1 初始化默认数据（策略和规则）
 	// policyDir 传空字符串，让 InitDefaultData 自动检测生产/开发环境路径

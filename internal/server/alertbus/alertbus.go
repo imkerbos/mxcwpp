@@ -39,6 +39,7 @@ const (
 	OutcomeNoRecipient      Outcome = "no_recipient"      // 类别已开但没有匹配的通知配置
 	OutcomeError            Outcome = "error"             // 发送过程出错
 	OutcomeInvalid          Outcome = "invalid"           // 事件本身不合法（缺必填字段）
+	OutcomeEgressOnly       Outcome = "egress_only"       // 仅外发，通知由 alerts 链路负责
 )
 
 // Event 是一条待发布的告警。调用方在写完自己的存储后构造它。
@@ -66,6 +67,14 @@ type Event struct {
 	RefID    string
 
 	OccurredAt time.Time
+
+	// EgressOnly 表示这条告警的通知已由别处负责，本次只需外发。
+	//
+	// alerts 表那条链路自带通知（AgentCenter 内联 + Manager 定时器，经
+	// last_notified_at 协调）。把它们也接进来是为了让外发覆盖全部告警源——
+	// 只导一部分会让客户 SIEM 出现看不见的缺口，比不导更危险。
+	// 但通知不能走两遍，否则值班对同一条告警收到两次。
+	EgressOnly bool
 }
 
 // dedupIdentity 返回用于抑制的稳定身份。
@@ -117,6 +126,9 @@ type Publisher struct {
 	cfg      Config
 	notifier notifier
 
+	// egress 外发出口（客户自有 SIEM）。可为 nil（未配置）。
+	egress Egress
+
 	mu   sync.Mutex
 	seen map[string]time.Time // dedupIdentity → 上次通知时间
 
@@ -142,6 +154,15 @@ func New(db *gorm.DB, logger *zap.Logger, cfg Config) *Publisher {
 	}
 }
 
+// WithEgress 注入外发出口。
+//
+// 外发与通知是两件事：通知叫醒人、可以被抑制；外发是把记录交给客户 SIEM、必须全量。
+// 因此外发发生在所有通知门槛**之前**，不受类别灰度、等级门槛与抑制窗口影响。
+func (p *Publisher) WithEgress(e Egress) *Publisher {
+	p.egress = e
+	return p
+}
+
 // Publish 发布一条告警，返回它的去向。
 //
 // 永远不返回 error：调用方已经把告警写进了自己的存储，通知失败不应回滚业务流程。
@@ -151,6 +172,17 @@ func (p *Publisher) Publish(e Event) Outcome {
 		p.logger.Error("拒绝发布不合法的告警事件（缺少 category 或 title）",
 			zap.String("source", e.Source), zap.String("host_id", e.HostID))
 		return p.record(e, OutcomeInvalid)
+	}
+
+	// 外发先行且不受门槛限制：抑制是为了少打扰人，不是为了让客户 SIEM 少收记录。
+	// 若外发也走抑制，客户侧就会出现平台单方面造成的缺口，而他们无从知道少了什么。
+	if p.egress != nil {
+		p.egress.Forward(e)
+	}
+
+	if e.EgressOnly {
+		// 通知由 alerts 表那条链路负责，此处只做外发。
+		return p.record(e, OutcomeEgressOnly)
 	}
 
 	if !p.cfg.EnabledCategories[e.Category] {
