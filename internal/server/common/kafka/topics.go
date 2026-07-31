@@ -67,7 +67,19 @@ func DLQTopic(topic string) string {
 
 // RouteDataType 根据 DataType 返回对应的 Kafka Topic
 func RouteDataType(dataType int32, topicPrefix string) string {
+	topic, _ := RouteDataTypeChecked(dataType, topicPrefix)
+	return topic
+}
+
+// RouteDataTypeChecked 与 RouteDataType 相同，但额外返回该 DataType 是否**显式登记**了路由。
+//
+// routed=false 表示走了兜底：消息会被投递到心跳 Topic，而心跳消费者不认识它，于是被
+// 静默忽略——数据没了，却没有任何错误。本项目已经因此丢过一次数据（9200 路由缺口）。
+// 兜底本身不能去掉（去掉就成了直接丢弃），但"是否走了兜底"必须是调用方能判定的状态，
+// 否则这类缺口只能等到有人发现数据缺失才暴露。
+func RouteDataTypeChecked(dataType int32, topicPrefix string) (string, bool) {
 	var topic string
+	routed := true
 	switch {
 	case dataType == 1000 || dataType == 1001:
 		topic = TopicHeartbeat
@@ -100,12 +112,14 @@ func RouteDataType(dataType int32, topicPrefix string) string {
 	case dataType >= DataTypeMeteringUsageMin && dataType <= DataTypeMeteringUsageMax:
 		topic = TopicMeteringUsage
 	default:
-		topic = TopicHeartbeat // 兜底：未知类型归入心跳 Topic
+		// 兜底：未知类型归入心跳 Topic，并向调用方标明"未登记"。
+		topic = TopicHeartbeat
+		routed = false
 	}
 	if topicPrefix != "" {
-		return topicPrefix + topic
+		return topicPrefix + topic, routed
 	}
-	return topic
+	return topic, routed
 }
 
 // IsEngineCommand 判断 DataType 是否落在 Engine→AC 命令段。
