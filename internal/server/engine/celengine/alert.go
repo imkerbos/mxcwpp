@@ -39,6 +39,8 @@ type AlertGenerator struct {
 	// hostCreatedAt 是 host_id → created_at 的原子快照，由 StartHostGraceReload 周期刷新。
 	// created_at 不可变，缓存即可消除 hostInGrace 每事件一次的 DB 查（详见 host_grace.go）。
 	hostCreatedAt atomic.Pointer[map[string]time.Time]
+	// shadow 累计影子阶段规则的命中量，周期落库供晋级决策使用。
+	shadow *shadowRecorder
 	// assetWeightCache（host_id → 资产权重）、correlationBoostCache（host_id → 关联加权）
 	// 是风险打分两项输入的原子快照，由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）。
 	// 消除 computeRiskScore 每事件两次 DB 查（assetWeight / correlationBoost），engine CPU 高根因。
@@ -53,6 +55,8 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 		log:       logger,
 		throttler: NewHitThrottler(defaultHitBurstThreshold, defaultHitRefillWindow, defaultHitThrottleCapacity),
 	}
+	g.shadow = newShadowRecorder(db, logger)
+	g.shadow.StartShadowFlush(shadowFlushInterval)
 	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload / StartRiskCacheReload 周期刷新
 	g.reloadDBWhitelist()
 	g.reloadHostCreatedAt()
@@ -75,6 +79,16 @@ func (g *AlertGenerator) Generate(hostID string, matchedRules []model.DetectionR
 		// 低保真单信号规则降级为 indicator：不独立出告警(否则在繁忙业务负载上刷屏,
 		// 实测高频外连/DNS/枚举类单条 hit 数十万)。事件仍经 anomaly/storyline 关联,
 		// 多信号关联命中才升级为告警(CrowdStrike IOA 模型)。
+		// 生命周期阶段先于一切其他判断：draft 不该被评估，shadow/context
+		// 不该独立告警。放在后面等于让未验证的规则先打扰到人再补救。
+		if !rule.AlertsIndependently() {
+			if rule.Stage == model.RuleStageShadow && g.shadow != nil {
+				// 影子命中必须留痕，否则它永远凑不齐晋级所需的观察数据，
+				// 会卡死在影子阶段。
+				g.shadow.record(fmt.Sprintf("cel-%d", rule.ID), hostID)
+			}
+			continue
+		}
 		if rule.IsLowFidelity() {
 			continue
 		}

@@ -1132,6 +1132,16 @@ func setupDetectionRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Lo
 	router.PUT("/detection-rules/:id", handler.UpdateRule)
 	router.DELETE("/detection-rules/:id", handler.DeleteRule)
 	router.POST("/detection-rules/:id/toggle", handler.ToggleRule)
+
+	// 规则生命周期与检测质量。
+	// 走同一 /detection-rules 前缀，因而沿用 detection 模块权限：
+	// 读→detection:view，晋级/降级→detection:manage。改变一条规则会不会打扰值班，
+	// 与改它的表达式是同级别的操作，不该更容易。
+	stage := api.NewRuleStageHandler(db, logger)
+	router.GET("/detection-rules/:id/quality", stage.GetRuleQuality)
+	router.GET("/detection-rules/:id/promotion", stage.GetPromotionReadiness)
+	router.POST("/detection-rules/:id/promote", stage.PromoteRule)
+	router.POST("/detection-rules/:id/demote", stage.DemoteRule)
 }
 
 // setupThreatIntelAPI 设置威胁情报 API 路由

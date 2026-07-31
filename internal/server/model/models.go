@@ -224,6 +224,7 @@ var (
 		&AntivirusScanResult{},
 		&QuarantineFile{},
 		&DetectionRule{},
+		&RuleShadowStat{},
 		&NetworkBlockRule{},
 		&SecurityDBSyncRecord{},
 		&GeneratedReport{},

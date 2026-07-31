@@ -94,6 +94,8 @@ GET	/api/v1/dashboard/stats	authenticated-perm	dashboard:view
 GET	/api/v1/dependency/download/:name	public	-
 GET	/api/v1/detection-rules	authenticated-perm	detection:view
 GET	/api/v1/detection-rules/:id	authenticated-perm	detection:view
+GET	/api/v1/detection-rules/:id/promotion	authenticated-perm	detection:view
+GET	/api/v1/detection-rules/:id/quality	authenticated-perm	detection:view
 GET	/api/v1/detection-rules/categories	authenticated-perm	detection:view
 GET	/api/v1/detection-rules/mitre-ids	authenticated-perm	detection:view
 GET	/api/v1/detection-rules/statistics	authenticated-perm	detection:view
@@ -331,6 +333,8 @@ POST	/api/v1/components/agent/push-update	authenticated-perm	operations:manage
 POST	/api/v1/components/plugins/broadcast	authenticated-perm	operations:manage
 POST	/api/v1/components/plugins/sync-latest	authenticated-perm	operations:manage
 POST	/api/v1/detection-rules	authenticated-perm	detection:manage
+POST	/api/v1/detection-rules/:id/demote	authenticated-perm	detection:manage
+POST	/api/v1/detection-rules/:id/promote	authenticated-perm	detection:manage
 POST	/api/v1/detection-rules/:id/toggle	authenticated-perm	detection:manage
 POST	/api/v1/fim/baselines/:id/approve	authenticated-perm	fim:manage
 POST	/api/v1/fim/baselines/:id/reject	authenticated-perm	fim:manage
