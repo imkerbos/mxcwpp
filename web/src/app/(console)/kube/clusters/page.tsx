@@ -54,10 +54,13 @@ export default function KubeClustersPage() {
   const queryClient = useQueryClient();
   const [params, setParams] = useUrlState({ page: 1, page_size: 20 });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["kube-clusters", params],
     queryFn: () => kubeApi.listClusters(params),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const stats = data?.stats;
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -193,10 +196,10 @@ export default function KubeClustersPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
-        <StatCard compact label={t("kube.clusters.statTotal")} value={stats?.total ?? 0} icon={Boxes} tone="default" />
-        <StatCard compact label={t("kube.clusters.statRunning")} value={stats?.running ?? 0} icon={CheckCircle2} tone="success" />
-        <StatCard compact label={t("kube.clusters.statNodes")} value={stats?.nodes ?? 0} icon={Server} tone="default" />
-        <StatCard compact label={t("kube.clusters.statPods")} value={stats?.pods ?? 0} icon={Layers} tone="default" />
+        <StatCard compact label={t("kube.clusters.statTotal")} value={stats?.total ?? 0} {...statState} icon={Boxes} tone="default" />
+        <StatCard compact label={t("kube.clusters.statRunning")} value={stats?.running ?? 0} {...statState} icon={CheckCircle2} tone="success" />
+        <StatCard compact label={t("kube.clusters.statNodes")} value={stats?.nodes ?? 0} {...statState} icon={Server} tone="default" />
+        <StatCard compact label={t("kube.clusters.statPods")} value={stats?.pods ?? 0} {...statState} icon={Layers} tone="default" />
       </div>
 
       <div className="space-y-4">

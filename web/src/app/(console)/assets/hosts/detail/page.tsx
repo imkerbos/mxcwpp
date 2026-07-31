@@ -477,7 +477,7 @@ function VulnTab({ hostId }: { hostId: string }) {
   const [detail, setDetail] = useState<Vulnerability | null>(null);
   const pageSize = 20;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["host-vulns", hostId, page, search, severity, status],
     queryFn: () =>
       vulnApi.listVulns({
@@ -491,6 +491,8 @@ function VulnTab({ hostId }: { hostId: string }) {
   });
 
   const stats = data?.stats;
+  // 漏洞统计取不到时不得显示 0，否则主机详情看起来"没有漏洞"。
+  const statState = { error: isError, loading: isLoading };
 
   const columns: Column<Vulnerability>[] = [
     {
@@ -523,10 +525,10 @@ function VulnTab({ hostId }: { hostId: string }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("assets.hostDetail.statVulnTotal")} value={stats?.total ?? 0} icon={Bug} />
-        <StatCard compact label={t("assets.hostDetail.statVulnCritical")} value={stats?.critical ?? 0} icon={ShieldAlert} tone="danger" />
-        <StatCard compact label={t("assets.hostDetail.statVulnHigh")} value={stats?.high ?? 0} icon={ShieldAlert} tone="warning" />
-        <StatCard compact label={t("assets.hostDetail.statAffectedHosts")} value={stats?.affectedHosts ?? 0} icon={Boxes} />
+        <StatCard compact label={t("assets.hostDetail.statVulnTotal")} value={stats?.total ?? 0} {...statState} icon={Bug} />
+        <StatCard compact label={t("assets.hostDetail.statVulnCritical")} value={stats?.critical ?? 0} {...statState} icon={ShieldAlert} tone="danger" />
+        <StatCard compact label={t("assets.hostDetail.statVulnHigh")} value={stats?.high ?? 0} {...statState} icon={ShieldAlert} tone="warning" />
+        <StatCard compact label={t("assets.hostDetail.statAffectedHosts")} value={stats?.affectedHosts ?? 0} {...statState} icon={Boxes} />
       </div>
       <FilterBar>
         <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder={t("assets.hostDetail.vulnSearch")} />
@@ -738,12 +740,14 @@ function pctTone(v: number): "default" | "danger" | "warning" | "success" {
 function PerformanceTab() {
   const { t } = useTranslation();
   const [range, setRange] = useState<MonitorRange>("1h");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["host-perf", range],
     queryFn: () => monitorApi.hostMetrics(range),
   });
 
   const ov = data?.overview;
+  // 指标取不到时不得渲染 0%：那会让一台失联主机看起来 CPU/内存都很健康。
+  const ovState = { error: isError, loading: isLoading };
   const cpu = data?.cpu ?? [];
   const memory = data?.memory ?? [];
   const disk = data?.disk ?? [];
@@ -774,12 +778,12 @@ function PerformanceTab() {
         <Tabs items={rangeItems} active={range} onChange={(k) => setRange(k as MonitorRange)} />
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-        <StatCard label={t("monitoring.host.statCpu")} value={`${(ov?.cpu ?? 0).toFixed(1)}%`} icon={Cpu} tone={pctTone(ov?.cpu ?? 0)} />
-        <StatCard label={t("monitoring.host.statMemory")} value={`${(ov?.memory ?? 0).toFixed(1)}%`} icon={MemoryStick} tone={pctTone(ov?.memory ?? 0)} />
-        <StatCard label={t("monitoring.host.statDisk")} value={`${(ov?.disk ?? 0).toFixed(1)}%`} icon={HardDrive} tone={pctTone(ov?.disk ?? 0)} />
-        <StatCard label={t("monitoring.host.statLoad")} value={(ov?.load ?? 0).toFixed(2)} icon={Gauge} tone="default" />
-        <StatCard label={t("monitoring.host.statAgentCpu")} value={`${(ov?.agentCpu ?? 0).toFixed(1)}%`} icon={Activity} tone={pctTone(ov?.agentCpu ?? 0)} />
-        <StatCard label={t("monitoring.host.statAgentMem")} value={`${(ov?.agentMemMB ?? 0).toFixed(1)} MB`} icon={Boxes} tone="default" />
+        <StatCard label={t("monitoring.host.statCpu")} value={`${(ov?.cpu ?? 0).toFixed(1)}%`} {...ovState} icon={Cpu} tone={pctTone(ov?.cpu ?? 0)} />
+        <StatCard label={t("monitoring.host.statMemory")} value={`${(ov?.memory ?? 0).toFixed(1)}%`} {...ovState} icon={MemoryStick} tone={pctTone(ov?.memory ?? 0)} />
+        <StatCard label={t("monitoring.host.statDisk")} value={`${(ov?.disk ?? 0).toFixed(1)}%`} {...ovState} icon={HardDrive} tone={pctTone(ov?.disk ?? 0)} />
+        <StatCard label={t("monitoring.host.statLoad")} value={(ov?.load ?? 0).toFixed(2)} {...ovState} icon={Gauge} tone="default" />
+        <StatCard label={t("monitoring.host.statAgentCpu")} value={`${(ov?.agentCpu ?? 0).toFixed(1)}%`} {...ovState} icon={Activity} tone={pctTone(ov?.agentCpu ?? 0)} />
+        <StatCard label={t("monitoring.host.statAgentMem")} value={`${(ov?.agentMemMB ?? 0).toFixed(1)} MB`} {...ovState} icon={Boxes} tone="default" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title={t("monitoring.host.chartCpu")} option={lineOption(cpu.map((d) => d.time), [{ name: t("monitoring.host.seriesCpu"), data: cpu.map((d) => d.usage) }], "%")} />

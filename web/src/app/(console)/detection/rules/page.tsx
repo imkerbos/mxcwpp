@@ -84,7 +84,7 @@ export default function DetectionRulesPage() {
     enabled: "",
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["det-rules-stats"],
     queryFn: () => detectionApi.ruleStats(),
   });
@@ -224,10 +224,10 @@ export default function DetectionRulesPage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("detection.rules.statTotal")} value={stats?.total ?? 0} icon={ShieldCheck} tone="default" />
-        <StatCard compact label={t("detection.rules.statEnabled")} value={stats?.enabled ?? 0} icon={CheckCircle} tone="success" />
-        <StatCard compact label={t("detection.rules.statDisabled")} value={stats?.disabled ?? 0} icon={PauseCircle} tone="warning" />
-        <StatCard compact label={t("detection.rules.statCritical")} value={stats?.severity?.critical ?? 0} icon={AlertTriangle} tone="danger" />
+        <StatCard compact label={t("detection.rules.statTotal")} value={stats?.total ?? 0} error={statsError} icon={ShieldCheck} tone="default" />
+        <StatCard compact label={t("detection.rules.statEnabled")} value={stats?.enabled ?? 0} error={statsError} icon={CheckCircle} tone="success" />
+        <StatCard compact label={t("detection.rules.statDisabled")} value={stats?.disabled ?? 0} error={statsError} icon={PauseCircle} tone="warning" />
+        <StatCard compact label={t("detection.rules.statCritical")} value={stats?.severity?.critical ?? 0} error={statsError} icon={AlertTriangle} tone="danger" />
       </div>
 
       <div className="space-y-4">

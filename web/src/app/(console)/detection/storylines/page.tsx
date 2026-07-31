@@ -90,7 +90,7 @@ export default function StorylinesPage() {
     host_id: "",
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["storyline-stats"],
     queryFn: () => detectionApi.storylineStats(),
   });
@@ -173,9 +173,9 @@ export default function StorylinesPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 mb-5">
-        <StatCard compact label={t("detection.storylines.statTotal")} value={stats?.total ?? 0} icon={GitBranch} tone="default" />
-        <StatCard compact label={t("detection.storylines.statActive")} value={stats?.active ?? 0} icon={Activity} tone="warning" />
-        <StatCard compact label={t("detection.storylines.statCriticalActive")} value={stats?.critical_active ?? 0} icon={AlertTriangle} tone="danger" />
+        <StatCard compact label={t("detection.storylines.statTotal")} value={stats?.total ?? 0} error={statsError} icon={GitBranch} tone="default" />
+        <StatCard compact label={t("detection.storylines.statActive")} value={stats?.active ?? 0} error={statsError} icon={Activity} tone="warning" />
+        <StatCard compact label={t("detection.storylines.statCriticalActive")} value={stats?.critical_active ?? 0} error={statsError} icon={AlertTriangle} tone="danger" />
       </div>
 
       <div className="space-y-4">

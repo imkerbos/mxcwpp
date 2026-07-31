@@ -89,7 +89,7 @@ export default function VulnListPage() {
     package_type: "os",
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["vuln-list", params],
     queryFn: () =>
       vulnApi.listVulns({
@@ -102,6 +102,9 @@ export default function VulnListPage() {
         package_type: params.package_type || undefined,
       }),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const stats = data?.stats;
 
   const [ignoring, setIgnoring] = useState<Vulnerability | null>(null);
@@ -173,16 +176,16 @@ export default function VulnListPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5 mb-3">
-        <StatCard compact label={t("vuln.list.statTotal")} value={stats?.total ?? 0} icon={ShieldAlert} tone="default" />
-        <StatCard compact label={t("vuln.list.statHostInstances")} value={stats?.hostInstances ?? 0} icon={Layers} tone="default" />
-        <StatCard compact label={t("vuln.list.statPatched")} value={stats?.patched ?? 0} icon={ShieldCheck} tone="success" />
-        <StatCard compact label={t("vuln.list.statUnpatched")} value={stats?.unpatched ?? 0} icon={ShieldX} tone="danger" />
-        <StatCard compact label={t("vuln.list.statRate")} value={`${(stats?.remediationRate ?? 0).toFixed(1)}%`} icon={Percent} tone="success" />
+        <StatCard compact label={t("vuln.list.statTotal")} value={stats?.total ?? 0} {...statState} icon={ShieldAlert} tone="default" />
+        <StatCard compact label={t("vuln.list.statHostInstances")} value={stats?.hostInstances ?? 0} {...statState} icon={Layers} tone="default" />
+        <StatCard compact label={t("vuln.list.statPatched")} value={stats?.patched ?? 0} {...statState} icon={ShieldCheck} tone="success" />
+        <StatCard compact label={t("vuln.list.statUnpatched")} value={stats?.unpatched ?? 0} {...statState} icon={ShieldX} tone="danger" />
+        <StatCard compact label={t("vuln.list.statRate")} value={`${(stats?.remediationRate ?? 0).toFixed(1)}%`} {...statState} icon={Percent} tone="success" />
       </div>
       <div className="grid grid-cols-3 gap-3 md:grid-cols-3 mb-5">
-        <StatCard compact label={t("vuln.list.statCritical")} value={stats?.critical ?? 0} icon={AlertOctagon} tone="danger" />
-        <StatCard compact label={t("vuln.list.statHigh")} value={stats?.high ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("vuln.list.statAffectedHosts")} value={stats?.affectedHosts ?? 0} icon={Server} tone="default" />
+        <StatCard compact label={t("vuln.list.statCritical")} value={stats?.critical ?? 0} {...statState} icon={AlertOctagon} tone="danger" />
+        <StatCard compact label={t("vuln.list.statHigh")} value={stats?.high ?? 0} {...statState} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("vuln.list.statAffectedHosts")} value={stats?.affectedHosts ?? 0} {...statState} icon={Server} tone="default" />
       </div>
 
       <div className="space-y-4">

@@ -28,11 +28,14 @@ export default function KubeBaselinePage() {
   const queryClient = useQueryClient();
   const [params, setParams] = useUrlState({ page: 1, page_size: 20, cluster_id: "" });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["kube-baseline-tasks", params],
     queryFn: () =>
       kubeApi.listBaselineTasks({ page: params.page, page_size: params.page_size, cluster_id: params.cluster_id || undefined }),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const latest = data?.items?.[0];
 
   const [detecting, setDetecting] = useState(false);
@@ -78,10 +81,10 @@ export default function KubeBaselinePage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("kube.baseline.statTotalChecks")} value={latest?.total ?? 0} icon={ListChecks} tone="default" />
-        <StatCard compact label={t("kube.baseline.statPassed")} value={latest?.passed ?? 0} icon={CheckCircle2} tone="success" />
-        <StatCard compact label={t("kube.baseline.statFailed")} value={latest?.failed ?? 0} icon={XCircle} tone="danger" />
-        <StatCard compact label={t("kube.baseline.statPassRate")} value={fmtRate(latest?.passRate)} icon={Percent} tone="success" />
+        <StatCard compact label={t("kube.baseline.statTotalChecks")} value={latest?.total ?? 0} {...statState} icon={ListChecks} tone="default" />
+        <StatCard compact label={t("kube.baseline.statPassed")} value={latest?.passed ?? 0} {...statState} icon={CheckCircle2} tone="success" />
+        <StatCard compact label={t("kube.baseline.statFailed")} value={latest?.failed ?? 0} {...statState} icon={XCircle} tone="danger" />
+        <StatCard compact label={t("kube.baseline.statPassRate")} value={fmtRate(latest?.passRate)} {...statState} icon={Percent} tone="success" />
       </div>
 
       <div className="space-y-4">

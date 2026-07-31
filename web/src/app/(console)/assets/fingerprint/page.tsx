@@ -308,6 +308,8 @@ export default function FingerprintPage() {
     queryFn: () => assetsApi.overview(),
   });
   const ov = overviewQuery.data;
+  // 概览取不到时不得渲染成 0，否则"0 台未覆盖"读起来像资产全都纳管了。
+  const ovState = { error: overviewQuery.isError, loading: overviewQuery.isLoading };
 
   const current = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
 
@@ -324,12 +326,12 @@ export default function FingerprintPage() {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <StatCard compact label={t("assets.fingerprint.statManaged")} value={ov?.total_hosts ?? 0} icon={Server} />
-        <StatCard compact label={t("assets.fingerprint.statCovered")} value={ov?.covered_hosts ?? 0} icon={CheckCircle2} tone="success" />
-        <StatCard compact label={t("assets.fingerprint.statUncovered")} value={ov?.uncovered_hosts ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("common.online")} value={ov?.online_hosts ?? 0} icon={Wifi} tone="success" />
-        <StatCard compact label={t("common.offline")} value={ov?.offline_hosts ?? 0} icon={WifiOff} tone="warning" />
-        <StatCard compact label={t("assets.fingerprint.statBusinessLines")} value={ov?.business_line_count ?? 0} icon={Layers} />
+        <StatCard compact label={t("assets.fingerprint.statManaged")} value={ov?.total_hosts ?? 0} {...ovState} icon={Server} />
+        <StatCard compact label={t("assets.fingerprint.statCovered")} value={ov?.covered_hosts ?? 0} {...ovState} icon={CheckCircle2} tone="success" />
+        <StatCard compact label={t("assets.fingerprint.statUncovered")} value={ov?.uncovered_hosts ?? 0} {...ovState} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("common.online")} value={ov?.online_hosts ?? 0} {...ovState} icon={Wifi} tone="success" />
+        <StatCard compact label={t("common.offline")} value={ov?.offline_hosts ?? 0} {...ovState} icon={WifiOff} tone="warning" />
+        <StatCard compact label={t("assets.fingerprint.statBusinessLines")} value={ov?.business_line_count ?? 0} {...ovState} icon={Layers} />
       </div>
 
       <Tabs items={tabItems} active={activeTab} onChange={onTabChange} />

@@ -80,7 +80,7 @@ export default function EdrEventsPage() {
     value: v,
   }));
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["edr-stats"],
     queryFn: () => detectionApi.edrEventStats(),
   });
@@ -162,10 +162,10 @@ export default function EdrEventsPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
-        <StatCard compact label={t("detection.edrEvents.statTotal")} value={(stats?.total ?? 0).toLocaleString()} icon={Activity} tone="default" />
-        <StatCard compact label={t("detection.edrEvents.statProcessExec")} value={(stats?.process_exec ?? 0).toLocaleString()} icon={Cpu} tone="default" />
-        <StatCard compact label={t("detection.edrEvents.statFileOp")} value={(stats?.file_open ?? 0).toLocaleString()} icon={FileText} tone="default" />
-        <StatCard compact label={t("detection.edrEvents.statNetwork")} value={(stats?.network_connect ?? 0).toLocaleString()} icon={Network} tone="default" />
+        <StatCard compact label={t("detection.edrEvents.statTotal")} value={(stats?.total ?? 0).toLocaleString()} error={statsError} icon={Activity} tone="default" />
+        <StatCard compact label={t("detection.edrEvents.statProcessExec")} value={(stats?.process_exec ?? 0).toLocaleString()} error={statsError} icon={Cpu} tone="default" />
+        <StatCard compact label={t("detection.edrEvents.statFileOp")} value={(stats?.file_open ?? 0).toLocaleString()} error={statsError} icon={FileText} tone="default" />
+        <StatCard compact label={t("detection.edrEvents.statNetwork")} value={(stats?.network_connect ?? 0).toLocaleString()} error={statsError} icon={Network} tone="default" />
       </div>
 
       <div className="space-y-4">

@@ -22,10 +22,13 @@ export default function FimDashboardPage() {
     log: t("fim.category.log"),
     other: t("fim.category.other"),
   };
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["fim-stats"],
     queryFn: () => fimApi.getEventStats(),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   if (isLoading) {
     return <Card className="p-10 text-center text-muted">{t("fim.dashboard.loading")}</Card>;
@@ -66,13 +69,13 @@ export default function FimDashboardPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-        <StatCard compact label={t("fim.dashboard.statTotal")} value={fmtNum(data.total)} icon={FileText} tone="default" />
-        <StatCard compact label={t("fim.dashboard.statPending")} value={fmtNum(data.pending)} icon={Clock} tone="warning" />
-        <StatCard compact label={t("fim.dashboard.statCritical")} value={fmtNum(data.critical)} icon={ShieldAlert} tone="danger" />
-        <StatCard compact label={t("fim.dashboard.statHigh")} value={fmtNum(data.high)} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("fim.dashboard.statAdded")} value={fmtNum(data.added)} icon={FilePlus} tone="default" />
-        <StatCard compact label={t("fim.dashboard.statRemoved")} value={fmtNum(data.removed)} icon={FileMinus} tone="danger" />
-        <StatCard compact label={t("fim.dashboard.statChanged")} value={fmtNum(data.changed)} icon={FileEdit} tone="default" />
+        <StatCard compact label={t("fim.dashboard.statTotal")} value={fmtNum(data.total)} {...statState} icon={FileText} tone="default" />
+        <StatCard compact label={t("fim.dashboard.statPending")} value={fmtNum(data.pending)} {...statState} icon={Clock} tone="warning" />
+        <StatCard compact label={t("fim.dashboard.statCritical")} value={fmtNum(data.critical)} {...statState} icon={ShieldAlert} tone="danger" />
+        <StatCard compact label={t("fim.dashboard.statHigh")} value={fmtNum(data.high)} {...statState} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("fim.dashboard.statAdded")} value={fmtNum(data.added)} {...statState} icon={FilePlus} tone="default" />
+        <StatCard compact label={t("fim.dashboard.statRemoved")} value={fmtNum(data.removed)} {...statState} icon={FileMinus} tone="danger" />
+        <StatCard compact label={t("fim.dashboard.statChanged")} value={fmtNum(data.changed)} {...statState} icon={FileEdit} tone="default" />
       </div>
 
       <ChartCard title={t("fim.dashboard.trendTitle")} option={trendOption} height={300} />
