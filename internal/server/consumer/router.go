@@ -120,7 +120,20 @@ func (r *Router) flushAndCommit(session sarama.ConsumerGroupSession) {
 		return
 	}
 	if r.ch != nil {
-		r.ch.Flush()
+		if err := r.ch.Flush(); err != nil {
+			// 刷盘未成功即不推进 offset：提交了就等于宣布"这些消息已安全落盘"，
+			// 而实际 ClickHouse 里没有它们，消息又不会再被投递——证据永久消失且无人知晓。
+			// 不提交则这批消息会被重新消费，ClickHouse 侧可能多出重复行；
+			// 归档多几行远好过安全事件凭空不见。
+			//
+			// 注意：ClickHouse 长时间不可用会让 offset 持续不推进、lag 累积，
+			// 这是刻意的——它把"存储故障"变成一个看得见的运维问题，
+			// 而不是一段悄无声息的数据空洞。
+			r.logger.Error("ClickHouse 刷盘失败，暂停推进 offset（消息将被重新投递）",
+				zap.Int("pending_partitions", len(snap)),
+				zap.Error(err))
+			return
+		}
 	}
 	for tp, off := range snap {
 		// sarama 约定：标记"下一条待消费"位点 = 已处理 offset + 1。
