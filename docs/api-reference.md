@@ -484,6 +484,60 @@
 
 ---
 
+## ML 异常检测
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/anomalies` | 异常告警列表 |
+| GET | `/api/v1/anomalies/stats` | 异常统计 |
+| PUT | `/api/v1/anomalies/:id/resolve` | 研判异常（confirmed / false_positive）|
+| GET | `/api/v1/anomalies/quality` | ML 检测质量（由人工研判计算的精确率）+ 当前档位 |
+| GET | `/api/v1/anomalies/mode-readiness` | 档位变更可行性评估 |
+| POST | `/api/v1/anomalies/mode` | 变更 ML 档位 |
+
+### 档位与升档门槛
+
+ML 异常检测按 `off → shadow → context → alert` 分档：
+
+| 档位 | 行为 |
+|------|------|
+| off | 不消费、不打分 |
+| shadow | 打分并记录指标，**不落库** |
+| context | 落库供 SOC 分析上下文，不独立告警 |
+| alert | 独立告警 |
+
+**1.0 不开放 alert 档。** 无监督异常检测给出的是「少见」而不是「恶意」——
+季度结算、批量导数、临时扩容都少见。让它独立定罪的结果是值班被无害事件淹没，
+从此不再看告警。ML 的位置是排序与佐证。
+
+升到 context 档需要：已研判 ≥ 30 条、总体精确率 ≥ 70%，且**没有任何单个模式精确率低于 50%**。
+最后一条是必要的：总体精确率会掩盖单模式塌陷，而值班感受到的是那个模式在刷屏。
+
+精确率只由人工研判计算（`confirmed` / `false_positive`），未研判的 `open` 不计入。
+样本不足时返回 `null`（未知），不是 0。
+
+**降档（off / shadow）无条件允许，不需要任何证据**——出问题时必须能立刻按回去。
+
+### 模型漂移与训练投毒
+
+IForest 每 30 分钟用滑动窗口重训。这带来一个固有弱点：攻击者只要把动作放慢到
+跨越多个训练窗口，每窗只比上窗高一点，逐窗比较永远正常，最后攻击行为成为基线。
+
+对策是保留一份**不随滑窗移动**的长期参照基线，训练窗口偏离超过 3σ 时
+**拒绝本轮重训**，继续使用旧模型。相关指标：
+
+| 指标 | 含义 |
+|------|------|
+| `mxcwpp_anomaly_reference_baseline_ready` | 参照基线是否就绪（0 = 投毒防护未生效）|
+| `mxcwpp_anomaly_feature_drift` | 各维度相对参照的偏移（σ）|
+| `mxcwpp_anomaly_retrain_rejected_total` | 被拒绝的重训次数 |
+| `mxcwpp_anomaly_model_age_seconds` | 距上次成功训练的时长 |
+
+参照基线持久化在 `anomaly_model_states`，跨重启保留——它必须来自一段未被污染的历史，
+丢了就再也长不回来。
+
+---
+
 ## 威胁情报
 
 | 方法 | 路径 | 说明 |

@@ -275,6 +275,7 @@ var (
 		&HuntQuery{},
 		&HostIsolation{},
 		&AnomalyAlert{},
+		&AnomalyModelState{},
 		// RBAC: 启动 AutoMigrate 时建 permissions / role_permissions 表
 		// 缺这两个 model 导致 /api/v1/rbac/permissions 直接 500（Table doesn't exist）
 		&Permission{},

@@ -48,6 +48,8 @@ GET	/api/v1/alerts/statistics	authenticated-perm	alerts:view
 GET	/api/v1/alerts/whitelist	authenticated-perm	alerts:view
 GET	/api/v1/alerts/whitelist/suggestions	authenticated-perm	alerts:view
 GET	/api/v1/anomalies	authenticated-perm	alerts:view
+GET	/api/v1/anomalies/mode-readiness	authenticated-perm	alerts:view
+GET	/api/v1/anomalies/quality	authenticated-perm	alerts:view
 GET	/api/v1/anomalies/stats	authenticated-perm	alerts:view
 GET	/api/v1/antivirus/results	authenticated-perm	virus:view
 GET	/api/v1/antivirus/results/:id	authenticated-perm	virus:view
@@ -315,6 +317,7 @@ POST	/api/v1/alerts/whitelist	authenticated-perm	alerts:manage
 POST	/api/v1/alerts/whitelist/suggestions/:id/adopt	authenticated-perm	alerts:manage
 POST	/api/v1/alerts/whitelist/suggestions/:id/dismiss	authenticated-perm	alerts:manage
 POST	/api/v1/alerts/whitelist/suggestions/:id/revoke	authenticated-perm	alerts:manage
+POST	/api/v1/anomalies/mode	authenticated-perm	alerts:manage
 POST	/api/v1/antivirus/results/:id/delete-file	authenticated-perm	virus:manage
 POST	/api/v1/antivirus/results/:id/ignore	authenticated-perm	virus:respond
 POST	/api/v1/antivirus/results/:id/quarantine	authenticated-perm	virus:respond

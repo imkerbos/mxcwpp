@@ -110,6 +110,11 @@ type Detector struct {
 	sampleBuffer [][]float64          // recent samples for training
 	hostMeans    map[string][]float64 // per-host running mean for z-score
 	hostCounts   map[string]int       // sample count per host
+	// reference 是不随滑动窗口移动的长期参照，用于识别环境漂移与训练投毒。
+	// 一经建立不再更新（见 drift.go）。
+	reference *referenceBaseline
+	// lastTrainedAt 上次成功训练的时间。拒绝重训不更新它，模型年龄因而能反映真实情况。
+	lastTrainedAt time.Time
 	// persistMu synchronizes safety-mode/schema transitions with anomaly_alerts writes.
 	// A writer holds RLock through the DB upsert; SetMode/VerifySchema take Lock, so once
 	// a transition to off/shadow returns, no write admitted under the previous mode can remain in flight.
@@ -369,10 +374,71 @@ func (d *Detector) retrain() {
 		return
 	}
 
+	// 首次积够样本时固定一份长期参照。它此后不再跟随滑动窗口移动——
+	// 一旦参照也跟着漂，就和被它监督的对象一起漂走了。
+	newRef := false
+	d.mu.Lock()
+	if d.reference == nil {
+		if ref := newReferenceBaseline(trimOutliers(data)); ref != nil {
+			d.reference = ref
+			d.logger.Info("已建立异常检测长期参照基线",
+				zap.Int("samples", ref.samples))
+			newRef = true
+		}
+	}
+	ref := d.reference
+	d.mu.Unlock()
+	if newRef {
+		// 参照一建立就落库：它必须来自一段未被污染的历史，丢了就再也长不回来。
+		d.SaveState()
+	}
+
+	if ref != nil {
+		rep := ref.evaluateDrift(data)
+		for i, v := range rep.PerFeature {
+			anomalyDriftScore.WithLabelValues(featureName(i)).Set(v)
+		}
+		if rep.Poisoned {
+			// 拒绝用这批数据重训，继续使用旧模型。
+			//
+			// 滑窗重训的固有弱点是：攻击者只要把动作放慢到跨越多个窗口，
+			// 每一窗都只比上一窗高一点，最后攻击行为会成为基线。
+			// 这里宁可让模型变旧，也不要学一个可能已被污染的新模型。
+			anomalyRetrainRejected.WithLabelValues("drift").Inc()
+			d.recordRejectedRetrain()
+			d.logger.Warn("训练窗口偏离长期基线过大，已拒绝本轮重训（继续使用旧模型）",
+				zap.Float64("max_drift_sigma", rep.MaxDrift),
+				zap.String("worst_feature", featureName(rep.WorstFeature)),
+				zap.Float64("threshold_sigma", driftThreshold),
+				zap.Int("samples", len(data)))
+			d.publishModelAge()
+			return
+		}
+	}
+
 	d.forest.Train(data)
+	d.mu.Lock()
+	d.lastTrainedAt = time.Now()
+	d.mu.Unlock()
+	d.publishModelAge()
+	d.SaveState()
 	d.logger.Info("IForest retrained",
 		zap.Int("samples", len(data)),
 		zap.Bool("trained", d.forest.Trained()))
+}
+
+// publishModelAge 上报模型自上次成功训练以来的时长。
+//
+// 连续拒绝重训会让模型悄悄变旧，而"拒绝"本身在指标上表现为一个计数器增长，
+// 不看历史就看不出来。模型年龄让这件事随时可见。
+func (d *Detector) publishModelAge() {
+	d.mu.Lock()
+	last := d.lastTrainedAt
+	d.mu.Unlock()
+	if last.IsZero() {
+		return
+	}
+	anomalyModelAge.Set(time.Since(last).Seconds())
 }
 
 func (d *Detector) updateHostMean(hostID string, metrics []float64) {

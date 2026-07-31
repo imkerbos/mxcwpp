@@ -382,3 +382,51 @@ groups:
         annotations:
           summary: "Kafka 生产者降级队列积压 ({{ $labels.instance }})"
           description: "降级队列长度 {{ $value }}，接近溢出阈值，生产者排空速率跟不上到达速率。"
+
+      # --- ML 异常检测：模型健康与投毒防护 ---
+      #
+      # 这几条监督的是"防护是否还在生效"，而不是"是否有攻击"。
+      # 防护失效与一切正常在外部表现完全一样，不主动告警就永远不会被发现。
+
+      - alert: MxCwppAnomalyReferenceBaselineMissing
+        expr: mxcwpp_anomaly_reference_baseline_ready == 0
+        for: 30m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测缺少参照基线（投毒防护未生效）"
+          description: |
+            长期参照基线未就绪，模型漂移与训练投毒防护当前不生效。
+            滑窗重训在无参照时会把任何缓慢变化学成新常态——攻击者放慢动作即可让
+            恶意行为成为基线。
+            刚部署时属正常（需积累样本），持续 30 分钟以上需排查：
+            anomaly_model_states 表是否可写、样本量是否长期不足。
+
+      - alert: MxCwppAnomalyRetrainRejected
+        expr: increase(mxcwpp_anomaly_retrain_rejected_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测拒绝重训（训练窗口偏离基线）"
+          description: |
+            过去 1 小时有 {{ $value }} 次重训被拒绝：训练窗口偏离长期参照超过 3σ。
+            两种可能，处理方式相反：
+              1. 业务确实变了（扩容/迁移/新业务上线）→ 需要人工重建参照基线；
+              2. 环境中正在发生持续异常 → 这是信号本身，应当排查。
+            模型此刻仍在用旧参数工作，不会漏报，但也学不进新数据。
+
+      - alert: MxCwppAnomalyModelStale
+        expr: mxcwpp_anomaly_model_age_seconds > 14400
+        for: 10m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测模型超过 4 小时未成功训练"
+          description: |
+            重训周期为 30 分钟，连续 8 次以上未训练成功说明这不是偶发。
+            模型仍在工作但已停止学习，对新出现的正常行为会逐渐开始误报。
+            结合 mxcwpp_anomaly_retrain_rejected_total 判断是被漂移闸拦下还是样本不足。
