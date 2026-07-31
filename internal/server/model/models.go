@@ -190,6 +190,7 @@ var (
 		&AlertWhitelistSuggestion{},
 		&Incident{},
 		&IncidentEvent{},
+		&OncallShift{},
 		&AuditLog{},
 		&PluginConfig{},
 		&Component{},

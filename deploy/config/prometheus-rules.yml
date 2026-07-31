@@ -128,6 +128,29 @@ groups:
       # 与错误率不同，这里没有阈值可言——任何一条都是不可恢复的丢失，出现即告警。
       # ClickHouse 刷盘失败会让提交屏障暂停推进 offset（刻意如此：宁可重放produce重复行，
       # 也不能提交"已落盘"却其实没落盘）。代价是 lag 会持续增长，必须能被看见。
+      # 事件超过认领时限仍无人认领。一条无人认领的高危事件与一条未被检出的攻击，
+      # 对客户来说结果是一样的——检测做到了，处置没接上。
+      - alert: MxCwppIncidentAckOverdue
+        expr: sum(mxcwpp_incident_sla_breached{kind="ack",severity=~"critical|high"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: manager
+        annotations:
+          summary: "有高危事件超过认领时限仍无人认领"
+          description: "当前 {{ $value }} 条 critical/high 事件已过认领时限；无人开始处置。"
+
+      # 无主事件堆积：还没到时限但已经没人认领，是即将变成超时的前兆。
+      - alert: MxCwppIncidentUnownedBacklog
+        expr: mxcwpp_incident_unowned > 20
+        for: 30m
+        labels:
+          severity: warning
+          service: manager
+        annotations:
+          summary: "无负责人的事件正在堆积"
+          description: "当前 {{ $value }} 条未关闭事件没有负责人。"
+
       - alert: MxCwppConsumerCHFlushBlockingOffset
         expr: increase(mxcwpp_consumer_ch_write_errors_total[5m]) > 0
         for: 5m

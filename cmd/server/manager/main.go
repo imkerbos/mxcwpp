@@ -77,6 +77,8 @@ func main() {
 	go managerscheduler.StartBaselineMaintenanceScheduler(services.DB, services.Logger)
 	// P2: Incident 关联调度器 (同主机多源信号 → 攻击链事件)
 	go managerscheduler.StartIncidentCorrelationScheduler(services.DB, services.Logger)
+	// 事件响应超时检查：没人读的截止时间只是一列数据。
+	go managerscheduler.StartIncidentSLAScheduler(services.DB, services.Logger)
 
 	// 启动漏洞扫描定时调度器
 	vulnScanner := biz.NewVulnScanner(services.DB, services.Logger)
