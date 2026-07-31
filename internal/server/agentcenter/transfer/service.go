@@ -106,6 +106,10 @@ type Service struct {
 	// 优雅关闭标志：Server 自身重启时跳过离线通知，避免假告警
 	shutdownFlag atomic.Bool
 
+	// unroutedLogged 记录已就"未登记路由"报过错的 DataType，每种只报一次。
+	// 指标负责计量，日志只负责提示存在缺口——高频类型逐条打日志会撑爆磁盘。
+	unroutedLogged sync.Map
+
 	// P1-3: 异步通知 ctx + semaphore 限并发, 服务关闭时取消所有 dangling goroutine.
 	notifyCtx    context.Context
 	notifyCancel context.CancelFunc
@@ -1074,7 +1078,18 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 			Version:      conn.GetVersion(),
 			ACID:         s.cfg.Server.InstanceID,
 		}
-		topic := kafka.RouteDataType(record.DataType, s.cfg.Kafka.TopicPrefix)
+		topic, routed := kafka.RouteDataTypeChecked(record.DataType, s.cfg.Kafka.TopicPrefix)
+		if !routed {
+			// 走兜底 = 消息进心跳 Topic 被消费者静默忽略，等于数据丢失。仍然投递（丢弃更糟），
+			// 但必须让它可见：指标持续计数，日志每种 DataType 只报一次以免高频类型刷爆磁盘。
+			metrics.IncUnroutedDataType(record.DataType)
+			if _, seen := s.unroutedLogged.LoadOrStore(record.DataType, struct{}{}); !seen {
+				s.logger.Error("DataType 未登记 Kafka 路由，已走心跳兜底（消费者会静默忽略，等同丢数据）",
+					zap.Int32("data_type", record.DataType),
+					zap.String("fallback_topic", topic),
+					zap.String("fix", "同步更新 kafka.RouteDataType 与 Consumer handleMessage，并登记 docs/datatype-allocation.md"))
+			}
+		}
 		// 基线任务完成信号（8001/8004）是控制面关键低频消息：被丢弃会导致主机永不计完成、
 		// 任务超时。改用 SendReliable（Input 满时有界阻塞→退降级队列重试），避免 eBPF 高频
 		// 遥测 burst 把完成信号首先挤丢。其余高频遥测仍用 Send（非阻塞）。

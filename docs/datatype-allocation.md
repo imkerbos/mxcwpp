@@ -26,7 +26,19 @@
 9400-9499 ─────────── 规则分发（Agent 检测规则）
 9500-9899 ─────────── (保留，未来安全模块)
 9900-9999 ─────────── 控制指令 / 命令回包
+10000-10999 ────────── (保留，未来扩展)
+11001-11099 ────────── Engine 告警产出（服务端内部）
+11100-11199 ────────── Engine 攻击故事线（服务端内部）
+11200-11799 ────────── (保留，Engine 扩展)
+11800-11899 ────────── Engine→AC 命令（服务端内部）
+11900-11999 ────────── Engine 反馈闭环（服务端内部）
+12001-12099 ────────── 漏洞通告同步（服务端内部）
+13001-13099 ────────── LLM 调用审计（服务端内部）
+14001-14099 ────────── 多租户计量（服务端内部）
 ```
+
+> 11000 以上为**服务端内部**数据流（Engine / VulnSync / LLMProxy / 计量），不经 Agent。
+> 与 Agent 段同处一个 DataType 空间，分配时同样不得冲突。
 
 ---
 
@@ -157,6 +169,50 @@
 
 ---
 
+### Engine 告警 (11001-11099) → Kafka: `TopicEngineAlert`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 11001-11099 | Engine→Server | Engine 检测告警产出 | Engine | Consumer→MySQL |
+
+### Engine 攻击故事线 (11100-11199) → Kafka: `TopicEngineStoryline`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 11100-11199 | Engine→Server | 攻击链聚合故事线 | Engine | Consumer→MySQL |
+
+### Engine→AC 命令 (11800-11899) → Kafka: `TopicEngineCommand`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 11800-11899 | Engine→AC | Engine 决策产出的下发命令（解耦决策与接入） | Engine | AC→Agent |
+
+### Engine 反馈闭环 (11900-11999) → Kafka: `TopicEngineFeedback`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 11900-11999 | Server→Engine | 处置反馈回流（供规则调优/抑制） | Manager | Engine |
+
+### 漏洞通告同步 (12001-12099) → Kafka: `TopicVulnAdvisory`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 12001-12099 | VulnSync→Server | 漏洞通告数据 | VulnSync | Consumer→MySQL |
+
+### LLM 调用审计 (13001-13099) → Kafka: `TopicLLMAudit`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 13001-13099 | LLMProxy→Server | LLM 调用审计记录 | LLMProxy | Consumer |
+
+### 多租户计量 (14001-14099) → Kafka: `TopicMeteringUsage`
+
+| DataType | 方向 | 说明 | 生产者 | 消费者 |
+|----------|------|------|--------|--------|
+| 14001-14099 | Server→Server | 用量计量事件 | Manager | Consumer |
+
+---
+
 ## Kafka Topic 路由映射
 
 路由函数: `internal/server/common/kafka/topics.go` → `RouteDataType()`
@@ -171,10 +227,21 @@
 | 8000-8004 | `mxcwpp.agent.baseline` | 7d | 6 |
 | 9100-9299 | `mxcwpp.agent.remediation` | 7d | 6 |
 | 9999 | `mxcwpp.agent.command-ack` | 7d | 6 |
+| 11001-11099 | `mxcwpp.engine.alert` | 7d | 6 |
+| 11100-11199 | `mxcwpp.engine.storyline` | 14d | 6 |
+| 11800-11899 | `mxcwpp.engine.command` | 24h | 6 |
+| 11900-11999 | `mxcwpp.engine.feedback` | 30d | 6 |
+| 12001-12099 | `mxcwpp.vuln.advisory` | 30d | 6 |
+| 13001-13099 | `mxcwpp.llm.audit` | 90d | 6 |
+| 14001-14099 | `mxcwpp.metering.usage` | 365d | 6 |
 | **其他** | **`mxcwpp.agent.heartbeat`（兜底）** | 24h | 6 |
 
 > **兜底陷阱**: 未注册的 DataType 会默认路由到心跳 Topic，被 Consumer 静默忽略。
 > 这就是本次 9200 路由缺口的根因 — 新增 DataType 必须同步更新 `RouteDataType()` 和 Consumer `handleMessage()`。
+>
+> **已加 CI 闸门**: `internal/server/common/kafka/routing_doc_test.go` 双向比对本表与
+> `RouteDataTypeChecked()`——文档有而代码未路由、代码路由而本表未登记，均使测试失败。
+> 运行时另有 `mxcwpp_ac_unrouted_datatype_total` 指标：任何非零值都代表存在接线缺口。
 
 ---
 
