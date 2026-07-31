@@ -223,6 +223,9 @@ func main() {
 	// fail-closed（落库模式降级 shadow，只观测不落库），进程仍存活；就绪状态经 /readyz 暴露。
 	anomalyDet.SetMode(anomaly.LoadMode(db, logger.Named("anomaly")))
 	anomalyDet.VerifySchema()
+	// 恢复上次的参照基线。参照必须来自一段未被污染的历史，丢了就再也长不回来；
+	// 不恢复的话每次重启都以"无参照"运行，投毒防护静默失效。
+	anomalyDet.LoadState()
 	consumermetrics.RegisterReadiness("anomaly_schema", func() bool {
 		return anomalyDet.Status().SchemaReady
 	})
@@ -234,6 +237,7 @@ func main() {
 		zap.String("effective_mode", string(st.EffectiveMode)),
 		zap.Bool("schema_ready", st.SchemaReady),
 		zap.Bool("dns_field_ready", st.DNSFieldReady),
+		zap.Bool("reference_baseline_ready", anomalyDet.HasReference()),
 	)
 
 	// ML 异常检测器状态指标：启动即初始化一次，随后周期刷新（trained/sample/host 会随消费变化）。

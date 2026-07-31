@@ -383,6 +383,13 @@ func setupAnomalyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/anomalies", handler.ListAnomalies)
 	router.GET("/anomalies/stats", handler.GetAnomalyStats)
 	router.PUT("/anomalies/:id/resolve", handler.ResolveAnomaly)
+
+	// ML 检测质量与档位。走同一 /anomalies 前缀，因而沿用该模块权限。
+	// 档位决定 ML 信号是否落库、是否进入分析上下文，与规则晋级同级别，不该更容易。
+	quality := api.NewMLQualityHandler(db, logger)
+	router.GET("/anomalies/quality", quality.GetMLQuality)
+	router.GET("/anomalies/mode-readiness", quality.GetMLModeReadiness)
+	router.POST("/anomalies/mode", quality.SetMLMode)
 }
 
 // setupHostIsolationAPI 设置主机隔离 API 路由
