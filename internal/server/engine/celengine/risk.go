@@ -6,13 +6,18 @@ import (
 
 // 风险分级（P2-A，对齐 CrowdStrike risk-based alerting）：
 //
-//	risk = base(severity) × fidelityWeight × assetWeight × correlationBoost，封顶 100。
+//	risk = base(severity) × fidelityWeight × assetWeight × correlationBoost × mlRankBoost，封顶 100。
+//
+// mlRankBoost 是 ML 异常分带来的排序加权（仅 ranking/alert 档生效，见 ml_rank.go）。
+// 它封顶 1.15，够不到相邻严重度档之间 20 分的基础分差——**ML 只能在同级之间调顺序，
+// 不能把一条告警顶进更高的档**。
 //
 // 单信号低保真规则已被 P1 在 Generate 拦截（不入此路径）；保留 fidelity 权重以防
 // 未来低保真经关联升级后仍走打分。correlationBoost 体现 IOA「多信号关联升级」。
 func (g *AlertGenerator) computeRiskScore(hostID string, rule *model.DetectionRule) int {
 	base := severityBase(rule.Severity)
-	score := float64(base) * fidelityWeight(rule.Fidelity) * g.assetWeight(hostID) * g.correlationBoost(hostID)
+	score := float64(base) * fidelityWeight(rule.Fidelity) * g.assetWeight(hostID) *
+		g.correlationBoost(hostID) * g.mlRankBoost(hostID)
 	if score > 100 {
 		score = 100
 	}
@@ -25,7 +30,8 @@ func (g *AlertGenerator) computeRiskScore(hostID string, rule *model.DetectionRu
 // computeRiskScoreForExisting 重算已存在告警的风险分（重触发时）。
 // 已在告警 = 已过 P1 保真闸门，fidelity 视为 high；用告警自身 severity + 主机 + 关联。
 func (g *AlertGenerator) computeRiskScoreForExisting(a *model.Alert) int {
-	score := float64(severityBase(a.Severity)) * g.assetWeight(a.HostID) * g.correlationBoost(a.HostID)
+	score := float64(severityBase(a.Severity)) * g.assetWeight(a.HostID) *
+		g.correlationBoost(a.HostID) * g.mlRankBoost(a.HostID)
 	if score > 100 {
 		score = 100
 	}

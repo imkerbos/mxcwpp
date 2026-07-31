@@ -31,6 +31,15 @@ const MinSamplesForPromotion = 30
 // 但不会直接把人叫醒，因此门槛低于告警档。
 const MinPrecisionForContext = 0.70
 
+// MinPrecisionForRanking 升到 ranking 档所需的最低精确率。
+//
+// 高于 context：ranking 会改变分析师**先看到什么**。排错顺序的代价不是多看一条，
+// 而是把真实威胁推到列表后面——在告警多到看不完的环境里，排在后面等于没被看到。
+const MinPrecisionForRanking = 0.80
+
+// MinSamplesForRanking 升到 ranking 档所需的最少已研判样本数。
+const MinSamplesForRanking = 50
+
 // Quality 是 ML 异常检测的质量。
 type Quality struct {
 	Confirmed     int `json:"confirmed"`
@@ -155,12 +164,12 @@ func (s *Service) EvaluateModeChange(current, target anomaly.Mode) (*ModeDecisio
 		return d, nil
 	}
 
-	// alert 档在 1.0 一律不开。
+	// alert 档在 1.0 一律不开。1.0 封顶在 ranking。
 	//
 	// 无监督异常检测给出的是"少见"，不是"恶意"。少见的东西在任何真实环境里
 	// 每天都有一堆——季度结算、批量导数、临时扩容都少见。让它直接定罪，
 	// 结果就是值班被一堆"确实少见但完全无害"的事情叫醒，然后不再看告警。
-	// ML 的位置是排序与佐证，不是定罪。
+	// ML 的位置是排序与佐证，不是定罪——这正是 ranking 档的意义。
 	if target == anomaly.ModeAlert {
 		d.Reasons = append(d.Reasons,
 			"1.0 不开放 alert 档：无监督异常检测给出的是「少见」而不是「恶意」，不能独立定罪")
@@ -174,15 +183,21 @@ func (s *Service) EvaluateModeChange(current, target anomaly.Mode) (*ModeDecisio
 	}
 	d.Quality = q
 
-	if q.Judged < MinSamplesForPromotion {
-		d.Reasons = append(d.Reasons, fmt.Sprintf(
-			"已研判样本 %d 条，少于升档所需的 %d 条（样本太少时精确率没有意义）",
-			q.Judged, MinSamplesForPromotion))
+	// 门槛按目标档位区分：越是会影响分析师看到什么的档位，要求越高。
+	minSamples, minPrecision := MinSamplesForPromotion, MinPrecisionForContext
+	if target == anomaly.ModeRanking {
+		minSamples, minPrecision = MinSamplesForRanking, MinPrecisionForRanking
 	}
-	if q.Precision != nil && *q.Precision < MinPrecisionForContext {
+
+	if q.Judged < minSamples {
 		d.Reasons = append(d.Reasons, fmt.Sprintf(
-			"精确率 %.1f%%，低于升档门槛 %.0f%%",
-			*q.Precision*100, MinPrecisionForContext*100))
+			"已研判样本 %d 条，少于升到 %s 档所需的 %d 条（样本太少时精确率没有意义）",
+			q.Judged, target, minSamples))
+	}
+	if q.Precision != nil && *q.Precision < minPrecision {
+		d.Reasons = append(d.Reasons, fmt.Sprintf(
+			"精确率 %.1f%%，低于升到 %s 档的门槛 %.0f%%",
+			*q.Precision*100, target, minPrecision*100))
 	}
 
 	// 单个模式塌陷也要拦：总体精确率会掩盖它，而值班感受到的是那个模式在刷屏。
@@ -211,8 +226,10 @@ func modeRank(m anomaly.Mode) int {
 		return 1
 	case anomaly.ModeContext:
 		return 2
-	case anomaly.ModeAlert:
+	case anomaly.ModeRanking:
 		return 3
+	case anomaly.ModeAlert:
+		return 4
 	default:
 		// 未知档位按最保守处理：任何切向它的动作都视为降档（允许），
 		// 从它切出的动作都视为升档（要证据）。
