@@ -145,10 +145,18 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		return fmt.Errorf("解析 FIM 事件失败: %w", err)
 	}
 
-	eventID := fields["event_id"]
-	if eventID == "" {
+	rawEventID := fields["event_id"]
+	if rawEventID == "" {
 		return fmt.Errorf("FIM 事件缺少 event_id")
 	}
+	detectedAt := msg.AgentTime
+
+	// 插件给的 event_id 是每轮扫描重置的局部计数器（evt-000001…），而 event_id 是
+	// fim_events 的全局主键、写入又 DoNothing 忽略冲突——直接用它会让全舰队每个序号
+	// 只留下第一条，其余静默丢弃。改用消息各维度推导的全局唯一键，详见 DeriveFIMEventID。
+	eventID := model.DeriveFIMEventID(
+		msg.AgentID, fields["task_id"], fields["file_path"],
+		fields["change_type"], rawEventID, detectedAt)
 
 	event := &model.FIMEvent{
 		EventID:    eventID,
@@ -159,7 +167,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		ChangeType: fields["change_type"],
 		Severity:   fields["severity"],
 		Category:   fields["category"],
-		DetectedAt: model.LocalTime(time.Unix(msg.AgentTime, 0)),
+		DetectedAt: model.LocalTime(time.Unix(detectedAt, 0)),
 	}
 
 	// 解析 change_detail（可选字段）
@@ -170,7 +178,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		}
 	}
 
-	// 忽略重复插入（Consumer 重放时可能重复）
+	// 忽略重复插入：主键已是全局唯一派生键，此处只剩它原本的用途——Consumer 重放去重。
 	result := w.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "event_id"}},
 		DoNothing: true,

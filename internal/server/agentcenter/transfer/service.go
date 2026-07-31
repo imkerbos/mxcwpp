@@ -2802,8 +2802,11 @@ func (s *Service) handleFIMEvent(ctx context.Context, record *grpcProto.EncodedR
 		}
 	}
 
+	// 与 Kafka 写入路径共用同一派生规则：插件的 event_id 每轮扫描重置，
+	// 直接当主键会让不同主机/不同扫描的同序号事件互相冲突而丢失。
 	fimEvent := &model.FIMEvent{
-		EventID:      eventID,
+		EventID: model.DeriveFIMEventID(
+			conn.AgentID, taskID, filePath, changeType, eventID, detectedAt.Time().Unix()),
 		HostID:       conn.AgentID,
 		Hostname:     conn.GetHostname(),
 		TaskID:       taskID,
