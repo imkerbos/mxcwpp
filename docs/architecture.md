@@ -438,6 +438,29 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
 - **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
 - 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
 
+### 可观测性与告警覆盖（E-OBS-1）
+
+平台此前的典型形态是"埋了点、没人报警"：agent 丢事件、engine 背压丢弃、Stage 报错
+三个指标一直在采集，图表上看得见，却没有任何规则会把人叫醒。数据在丢而无人知晓，
+与没有这些指标没有区别。
+
+关键指标必须有对应告警，由 `internal/deploy/alertcoverage_test.go` 把清单钉住——
+新增关键指标未补规则即失败：
+
+| 指标 | 含义 |
+|---|---|
+| `mxcwpp_agent_event_dropped_total` | Agent 丢事件 = 该主机检测盲区 |
+| `mxcwpp_engine_backpressure_drop_total` | Engine 背压丢弃 = 漏检 |
+| `mxcwpp_engine_stage_errors_total` | Stage 持续报错 = 该项能力静默失效 |
+| `mxcwpp_consumer_dlq_write_failures_total` | DLQ 写失败 = 消息不可恢复地丢失 |
+| `mxcwpp_consumer_ch_write_errors_total` | CH 写失败 = offset 暂停推进 |
+| `mxcwpp_ac_unrouted_datatype_total` | DataType 未登记路由 = 消息被静默忽略 |
+| `mxcwpp_vulnsync_last_success_timestamp_seconds` | 漏洞库停更 = 界面显示的是旧数据 |
+
+漏洞库新鲜度刻意计量"距上次成功多久"而非"跑了多少次"：后者在任务反复失败时同样
+在增长，只有前者能回答"我现在看到的漏洞数据可信到什么时候"。同步失败**不更新**
+该时间戳，否则停更时告警永远不会触发。
+
 ### 运行时能力清单（E-WIRE-1）
 
 代码里有 19 个检测 Stage 构造器，实际接进流水线的只有 8 个；接进去的里面还有 3 个把
