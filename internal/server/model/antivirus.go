@@ -12,11 +12,16 @@ type AntivirusScanTask struct {
 	TotalHosts   int         `gorm:"column:total_hosts;default:0" json:"totalHosts"`
 	ScannedHosts int         `gorm:"column:scanned_hosts;default:0" json:"scannedHosts"`
 	ThreatCount  int         `gorm:"column:threat_count;default:0" json:"threatCount"`
-	CreatedBy    string      `gorm:"column:created_by;type:varchar(100)" json:"createdBy"`
-	StartedAt    *LocalTime  `gorm:"column:started_at;type:timestamp" json:"startedAt"`
-	FinishedAt   *LocalTime  `gorm:"column:finished_at;type:timestamp" json:"finishedAt"`
-	CreatedAt    LocalTime   `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
-	UpdatedAt    LocalTime   `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
+	// DegradedHosts 是扫描覆盖不完整的主机数（引擎不可用或执行出错）。
+	//
+	// 此前引擎缺失时同样上报 completed / threat_count=0，任务看起来"全部扫完、零威胁"，
+	// 而实际上那些主机根本没被扫过。非零值意味着本次结果不足以判定这些主机干净。
+	DegradedHosts int        `gorm:"column:degraded_hosts;default:0" json:"degradedHosts"`
+	CreatedBy     string     `gorm:"column:created_by;type:varchar(100)" json:"createdBy"`
+	StartedAt     *LocalTime `gorm:"column:started_at;type:timestamp" json:"startedAt"`
+	FinishedAt    *LocalTime `gorm:"column:finished_at;type:timestamp" json:"finishedAt"`
+	CreatedAt     LocalTime  `gorm:"column:created_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"createdAt"`
+	UpdatedAt     LocalTime  `gorm:"column:updated_at;type:timestamp;default:CURRENT_TIMESTAMP" json:"updatedAt"`
 
 	// 关联
 	Results []AntivirusScanResult `gorm:"foreignKey:TaskID" json:"results,omitempty"`
