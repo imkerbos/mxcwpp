@@ -1,6 +1,8 @@
 package mlquality
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -226,5 +228,35 @@ func TestDowngradeWritesTheColumnLoadModeReads(t *testing.T) {
 	}
 	if got != string(anomaly.ModeShadow) {
 		t.Fatalf("档位应写入 shadow，实际 %q", got)
+	}
+}
+
+// 分组必须重复整个表达式，不能用 SELECT 里的别名。
+//
+// MySQL 默认开启 only_full_group_by，按别名分组会被判为 "alert_type 不在 GROUP BY 中"
+// （Error 1055）直接拒绝；sqlite 却接受别名分组。也就是说这个 bug 在本包的其余用例里
+// 永远不会暴露——本地起真 manager 打接口时才 500。
+//
+// 这里退而求其次做源码断言：跑一个 MySQL 实例代价太大，但至少能钉住"别名分组"不再出现。
+func TestGroupByRepeatsExpressionNotAlias(t *testing.T) {
+	src, err := os.ReadFile("mlquality.go")
+	if err != nil {
+		t.Fatalf("read source: %v", err)
+	}
+	body := string(src)
+
+	idx := strings.Index(body, "func (s *Service) Measure()")
+	if idx < 0 {
+		t.Fatal("找不到 Measure")
+	}
+	fn := body[idx:]
+	if end := strings.Index(fn, "\nfunc "); end > 0 {
+		fn = fn[:end]
+	}
+	if strings.Contains(fn, `Group("pattern_name`) {
+		t.Fatal("不得按别名 pattern_name 分组：MySQL only_full_group_by 会拒绝（Error 1055）")
+	}
+	if !strings.Contains(fn, "patternExpr") {
+		t.Fatal("SELECT 与 GROUP BY 必须复用同一个表达式常量，避免两处写法漂移")
 	}
 }

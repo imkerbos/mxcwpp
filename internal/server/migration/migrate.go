@@ -30,9 +30,17 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		var migrateErr error
 		for attempt := range 3 {
 			if attempt > 0 {
-				// 重试前探活连接，必要时让连接池重建
+				// 重试前必须真正清空连接池，否则重试拿到的还是那个已失效的连接。
+				//
+				// 原写法用 SetConnMaxLifetime(0)，注释说"强制回收旧连接"，但 database/sql
+				// 里 0 表示连接**永不因年龄被关闭**——语义正好相反，池子一条都没清掉。
+				// 实测：大表 ALTER（如 incidents 加列）结束后连接被服务端断开，
+				// 下一个模型迁移报 "invalid connection"，三次重试都在 1ms 内以同样方式失败，
+				// manager 直接 fatal 退出。表越大越容易触发。
+				//
+				// 用极小的 lifetime 让池中所有连接立即到期被关闭，Ping 建立新连接后再恢复。
 				if sqlDB, err := db.DB(); err == nil {
-					sqlDB.SetConnMaxLifetime(0) // 强制回收旧连接
+					sqlDB.SetConnMaxLifetime(time.Nanosecond)
 					_ = sqlDB.Ping()
 					sqlDB.SetConnMaxLifetime(time.Hour)
 				}
