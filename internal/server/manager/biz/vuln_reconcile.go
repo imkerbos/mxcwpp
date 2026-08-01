@@ -19,6 +19,31 @@ func effectiveFixedVersion(hv *model.HostVulnerability, cveFixed string) string 
 	return cveFixed
 }
 
+// purlIdentity 去掉 PURL 里的版本与限定符，只保留「这是哪个包」。
+//
+// 漏洞记录里的 PURL 嵌的是**易受攻击版本**（如 …/buildkit@v0.23.2），
+// 主机 software 表里的 PURL 嵌的是**已安装版本**（如 …/buildkit@v0.23.5）。
+// 两者只有在「装的正好是被记录的那个版本」时才相等——也就是说，
+// 按完整 PURL 判断包是否还在，绝大多数情况下都会得到「不在」。
+//
+// 生产实测：228 台首次核对，误标 vanished 16321 条，真正 patched 仅 206 条，
+// 横跨 os / app / middleware / unknown 全部资产类型。
+//
+// 因此存在性只按名称判断，版本另行用 software.version 列比较。
+func purlIdentity(purl string) string {
+	if i := strings.IndexByte(purl, '?'); i >= 0 { // 去限定符 ?arch=x86_64
+		purl = purl[:i]
+	}
+	if i := strings.IndexByte(purl, '#'); i >= 0 { // 去子路径
+		purl = purl[:i]
+	}
+	// 版本分隔符是最后一个 '@'：包名本身可能含 '@'（如 npm scope @scope/name）。
+	if i := strings.LastIndexByte(purl, '@'); i >= 0 {
+		purl = purl[:i]
+	}
+	return purl
+}
+
 // isOSPackagePURL 判断是否 OS 系统包（RPM/dpkg/apk）。仅这类适用 NEVRA 权威比较；
 // 语言包（golang/npm/pypi 等 semver，带 v 前缀等）走通用比较器。
 func isOSPackagePURL(purl string) bool {
@@ -65,7 +90,32 @@ func NewVulnReconciler(db *gorm.DB, logger *zap.Logger) *VulnReconciler {
 //  1. 一次性 load 这些 host 的 software 快照（按 host_id+purl 索引）
 //  2. 分批 load 这些 host 的 unpatched host_vulnerabilities
 //  3. 逐条判定状态迁移并 UPDATE
+//
+// HostBatchSize 单批处理的主机数。
+//
+// 核对要把这批主机的 software 快照整个读进内存（每台数百到上千个包），
+// 内存占用随主机数线性增长。分批让占用与机群规模脱钩，
+// 调用方因此不必再自己切批——此前 228 台的机群必须手工拆成 200+28 两次调用。
+const HostBatchSize = 200
+
+// ReconcileHosts 对指定 host_id 集合做陈旧核对，内部自动分批。
 func (r *VulnReconciler) ReconcileHosts(hostIDs []string) (*ReconcileResult, error) {
+	total := &ReconcileResult{}
+	for start := 0; start < len(hostIDs); start += HostBatchSize {
+		end := min(start+HostBatchSize, len(hostIDs))
+		batch, err := r.reconcileBatch(hostIDs[start:end])
+		if err != nil {
+			// 已完成批次的结果已经落库，直接返回错误会让调用方以为一条都没处理。
+			return total, err
+		}
+		total.Scanned += batch.Scanned
+		total.Patched += batch.Patched
+		total.Vanished += batch.Vanished
+	}
+	return total, nil
+}
+
+func (r *VulnReconciler) reconcileBatch(hostIDs []string) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	if len(hostIDs) == 0 {
 		return result, nil
@@ -134,7 +184,7 @@ func (r *VulnReconciler) reconcileOne(
 	}
 
 	hostPkgs := currentPkgs[hv.HostID]
-	currentVersion, exists := hostPkgs[vuln.PURL]
+	currentVersion, exists := hostPkgs[purlIdentity(vuln.PURL)]
 
 	if !exists {
 		r.markVanished(hv, model.PatchedReasonPackageRemoved)
@@ -204,8 +254,11 @@ func (r *VulnReconciler) loadCurrentPURLsByHosts(hostIDs []string) (map[string]m
 		if _, ok := result[rec.HostID]; !ok {
 			result[rec.HostID] = make(map[string]string)
 		}
-		if existing, ok := result[rec.HostID][rec.PURL]; !ok || compareVersionStrings(rec.Version, existing) > 0 {
-			result[rec.HostID][rec.PURL] = rec.Version
+		// 按包身份（去版本、去限定符）建索引；同名多版本时保留最高版本，
+		// 与「主机是否已经装上了修复版」这个判断口径一致。
+		key := purlIdentity(rec.PURL)
+		if existing, ok := result[rec.HostID][key]; !ok || compareVersionStrings(rec.Version, existing) > 0 {
+			result[rec.HostID][key] = rec.Version
 		}
 	}
 
@@ -254,7 +307,7 @@ func (r *VulnReconciler) DetectResurfaced(hostIDs []string) int {
 		}
 
 		hostPkgs := currentPkgs[hv.HostID]
-		currentVersion, exists := hostPkgs[vuln.PURL]
+		currentVersion, exists := hostPkgs[purlIdentity(vuln.PURL)]
 		if !exists {
 			continue
 		}

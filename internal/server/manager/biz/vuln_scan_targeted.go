@@ -16,7 +16,7 @@ import (
 
 // 配置常量
 const (
-	// MaxTargetedHostIDs 单次 targeted 扫描的 host 上限，保护 server
+	// MaxTargetedHostIDs 单次 OSV 关联的分批大小（原为对调用方的硬上限）。
 	MaxTargetedHostIDs = 200
 	// TargetedScanTimeout 单次 targeted 扫描总超时
 	TargetedScanTimeout = 30 * time.Minute
@@ -105,9 +105,9 @@ func (m *ScanTaskManager) resolveHostIDs(opts CreateTaskOpts) ([]string, error) 
 		if len(opts.HostIDs) == 0 {
 			return nil, fmt.Errorf("scope=hosts 时 host_ids 不能为空")
 		}
-		if len(opts.HostIDs) > MaxTargetedHostIDs {
-			return nil, fmt.Errorf("host_ids 数量 %d 超过上限 200", len(opts.HostIDs))
-		}
+		// 不再限制数量：核对与 OSV 关联都已在内部分批，
+		// 内存占用与主机数无关。此前的 200 上限迫使调用方自己拆批，
+		// 一个 228 台的机群要发两次请求，而两次之间的结果无法合并成一次任务。
 		return opts.HostIDs, nil
 	case model.ScanScopeBusinessLine:
 		if opts.BusinessLine == "" {
@@ -119,9 +119,6 @@ func (m *ScanTaskManager) resolveHostIDs(opts CreateTaskOpts) ([]string, error) 
 		}
 		if len(hosts) == 0 {
 			return nil, fmt.Errorf("业务线 %s 下无主机", opts.BusinessLine)
-		}
-		if len(hosts) > MaxTargetedHostIDs {
-			return nil, fmt.Errorf("业务线 %s 主机数 %d 超过上限 200", opts.BusinessLine, len(hosts))
 		}
 		ids := make([]string, len(hosts))
 		for i, h := range hosts {
@@ -200,20 +197,38 @@ func (m *ScanTaskManager) Execute(ctx context.Context, taskID string) error {
 		})
 	}()
 
-	// global scope 直接转回旧路径
+	// global scope 先跑全库同步/增量扫描，再对全部主机做陈旧核对。
+	//
+	// 此前这里直接 return，reconcile 完全被跳过：全局扫描永远返回
+	// scanned=0 / patched=0 且状态是成功——已修复的漏洞永远不会被核销，
+	// 而调用方看到的是"扫过了，没什么要改的"。
+	var hostIDs []string
 	if task.Scope == model.ScanScopeGlobal {
 		if task.SyncDB {
 			execErr = m.scanner.ScanAll()
 		} else {
 			execErr = m.scanner.ScanIncremental()
 		}
+		if execErr != nil {
+			return execErr
+		}
+		ids, err := m.allHostIDs()
+		if err != nil {
+			execErr = fmt.Errorf("取全部主机失败: %w", err)
+			return execErr
+		}
+		hostIDs = ids
+	} else if err := json.Unmarshal(task.TargetHostIDs, &hostIDs); err != nil {
+		execErr = fmt.Errorf("解析 target_host_ids 失败: %w", err)
 		return execErr
 	}
 
-	var hostIDs []string
-	if err := json.Unmarshal(task.TargetHostIDs, &hostIDs); err != nil {
-		execErr = fmt.Errorf("解析 target_host_ids 失败: %w", err)
-		return execErr
+	if len(hostIDs) == 0 {
+		// 没有主机就没有可核对的东西。这不是错误，但要说清楚，
+		// 否则又会退化成"成功且什么都没做"。
+		m.logger.Info("扫描任务无目标主机，跳过核对",
+			zap.Uint("task_id", task.ID), zap.String("scope", string(task.Scope)))
+		return nil
 	}
 
 	// Targeted: reconcile → OSV → resurface
@@ -229,23 +244,47 @@ func (m *ScanTaskManager) Execute(ctx context.Context, taskID string) error {
 		})
 	}
 
-	purls, purlInfoMap, err := m.loadPURLsForHosts(hostIDs)
-	if err != nil {
-		execErr = err
-		return execErr
-	}
-	if len(purls) > 0 {
-		purls = advisory.FilterOSVPURLs(purls)
-		coord := m.scanner.buildOSVCoordinator()
-		scanCtx, cancel := context.WithTimeout(ctx, TargetedScanTimeout)
-		defer cancel()
-		_, vulnCount, _, syncErr := coord.SyncByPURLs(
-			scanCtx, "osv-targeted", purls, purlInfoMap, m.scanner.loadKnownVulnIDs())
-		if syncErr != nil {
-			execErr = fmt.Errorf("OSV 关联失败: %w", syncErr)
+	// OSV 关联同样按主机分批：一次性载入整个机群的 software 快照
+	// 会让内存随机群规模线性增长，这正是此前设 200 台硬上限的原因。
+	scanCtx, cancel := context.WithTimeout(ctx, TargetedScanTimeout)
+	defer cancel()
+
+	totalNewVulns := 0
+	var osvErr error
+	for start := 0; start < len(hostIDs); start += MaxTargetedHostIDs {
+		end := min(start+MaxTargetedHostIDs, len(hostIDs))
+		purls, purlInfoMap, err := m.loadPURLsForHosts(hostIDs[start:end])
+		if err != nil {
+			execErr = err
 			return execErr
 		}
-		m.db.Model(&task).Update("new_vulns", vulnCount)
+		if len(purls) == 0 {
+			continue
+		}
+		purls = advisory.FilterOSVPURLs(purls)
+		coord := m.scanner.buildOSVCoordinator()
+		// source 名必须是 "osv"：注册表里只有这一个 PURLSource。
+		// 此前这里写的是 "osv-targeted"，一个从未注册过的名字，
+		// 于是每一次 host-scoped 扫描都在这里报错。
+		_, vulnCount, _, syncErr := coord.SyncByPURLs(
+			scanCtx, "osv", purls, purlInfoMap, m.scanner.loadKnownVulnIDs())
+		if syncErr != nil {
+			osvErr = syncErr
+			break
+		}
+		totalNewVulns += vulnCount
+	}
+
+	if osvErr != nil {
+		// OSV 关联失败不推翻整个任务：reconcile 阶段的 patched/vanished
+		// 已经落库并且是正确的，把任务整体标成 failed 会让运维以为
+		// 那部分结果也不可信，从而重复执行一次代价很高的全量核对。
+		// 与全库扫描路径的处理保持一致（那里同样只记录不中断）。
+		m.logger.Error("OSV 关联失败，reconcile 结果仍然有效",
+			zap.Uint("task_id", task.ID), zap.Error(osvErr))
+		m.db.Model(&task).Update("error_msg", "OSV 关联失败: "+osvErr.Error())
+	} else if totalNewVulns > 0 {
+		m.db.Model(&task).Update("new_vulns", totalNewVulns)
 	}
 
 	if task.ReconcileStale {
@@ -270,4 +309,14 @@ func (m *ScanTaskManager) loadPURLsForHosts(hostIDs []string) ([]string, map[str
 	}
 	purls, infoMap := buildPURLPkgInfo(packages)
 	return purls, infoMap, nil
+}
+
+// allHostIDs 取全部主机 ID，供 global scope 的陈旧核对使用。
+//
+// 只取在线与离线主机，不含已删除：对已删主机做核对没有意义，
+// 而且会把它们的历史漏洞记录一并改状态。
+func (m *ScanTaskManager) allHostIDs() ([]string, error) {
+	var ids []string
+	err := m.db.Model(&model.Host{}).Pluck("host_id", &ids).Error
+	return ids, err
 }
