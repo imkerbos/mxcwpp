@@ -166,3 +166,97 @@ func TestClaudeMdReferencesExist(t *testing.T) {
 			strings.Join(missing, ", "))
 	}
 }
+
+// TestArchitectureDocCoversAllServices 校验架构文档与 CLAUDE.md 覆盖了全部服务。
+//
+// 新增一个服务却不写进架构文档，是文档腐烂最典型的入口：服务会一直跑下去，
+// 而读文档的人不知道它存在——这一轮清理前，7 个服务里入口文档只提了 2 个。
+func TestArchitectureDocCoversAllServices(t *testing.T) {
+	root := repoRootFromDeploy(t)
+
+	entries, err := os.ReadDir(filepath.Join(root, "cmd", "server"))
+	if err != nil {
+		t.Fatalf("读取 cmd/server 失败: %v", err)
+	}
+	var services []string
+	for _, e := range entries {
+		if e.IsDir() {
+			services = append(services, e.Name())
+		}
+	}
+	if len(services) == 0 {
+		t.Fatal("cmd/server 下没有服务，检查测试假设是否已失效")
+	}
+
+	for _, doc := range []string{"docs/architecture.md", "CLAUDE.md"} {
+		data, err := os.ReadFile(filepath.Join(root, doc))
+		if err != nil {
+			t.Fatalf("读取 %s 失败: %v", doc, err)
+		}
+		body := string(data)
+		var missing []string
+		for _, svc := range services {
+			if !strings.Contains(body, svc) {
+				missing = append(missing, svc)
+			}
+		}
+		if len(missing) > 0 {
+			t.Errorf("%s 没有提到这些服务：%s\n"+
+				"  服务在跑而文档不提它，读文档的人就不知道它存在。",
+				doc, strings.Join(missing, ", "))
+		}
+	}
+}
+
+// TestRoadmapExistsAndIsDated 校验路线图存在且带核实日期。
+//
+// 状态文档没有日期，读的人无法判断它是上周写的还是去年写的，
+// 于是只能默认它是旧的——那它就等于不存在。
+func TestRoadmapExistsAndIsDated(t *testing.T) {
+	root := repoRootFromDeploy(t)
+	data, err := os.ReadFile(filepath.Join(root, "docs", "roadmap.md"))
+	if err != nil {
+		t.Fatalf("docs/roadmap.md 缺失：交付状态需要一个仓库内的权威来源，"+
+			"放在 gitignore 目录里等于没有: %v", err)
+	}
+	if !regexp.MustCompile(`最后核实：\d{4}-\d{2}-\d{2}`).Match(data) {
+		t.Fatal("docs/roadmap.md 缺少「最后核实：YYYY-MM-DD」。" +
+			"状态文档没有日期，读的人无法判断它还作不作数。")
+	}
+}
+
+// TestConfigKeysDocumented 校验 server.yaml 模板里的配置节都在配置文档里出现过。
+//
+// 只校验顶层节：逐个字段校验会把测试变成配置文件的副本，
+// 改一个字段要改两处，最后大家会把测试删掉而不是维护它。
+func TestConfigKeysDocumented(t *testing.T) {
+	root := repoRootFromDeploy(t)
+	tpl, err := os.ReadFile(filepath.Join(root, "deploy", "config", "server.yaml.tpl"))
+	if err != nil {
+		t.Skipf("读取 server.yaml.tpl 失败: %v", err)
+	}
+	doc, err := os.ReadFile(filepath.Join(root, "docs", "configuration.md"))
+	if err != nil {
+		t.Fatalf("读取 configuration.md 失败: %v", err)
+	}
+	docBody := string(doc)
+
+	sectionRe := regexp.MustCompile(`(?m)^([a-z][a-z0-9_]*):`)
+	seen := map[string]bool{}
+	var missing []string
+	for _, m := range sectionRe.FindAllStringSubmatch(string(tpl), -1) {
+		key := m[1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if !strings.Contains(docBody, key) {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("配置模板里有这些顶层配置节，但 docs/configuration.md 从未提及：%s\n"+
+			"  没写进文档的配置项，部署时只能靠读模板猜。",
+			strings.Join(missing, ", "))
+	}
+}
