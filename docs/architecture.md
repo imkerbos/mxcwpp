@@ -71,7 +71,7 @@ MxCwpp Platform 采用 **Agent + Plugin + 六服务后端** 分层架构。后�
 - 提供 100+ 个 REST API 端点，JWT 认证
 - 策略、规则、任务、告警、报告、用户等业务 CRUD
 - 漏洞管理：多源漏洞库同步（OSV.dev / NVD / Red Hat）+ 主机漏洞扫描
-- LLM 告警辅助分析（`internal/server/manager/biz/llm_assist.go`）
+- LLM 告警辅助分析（`internal/server/llmproxy/llm_assist.go`）
 - SBOM 导出（CycloneDX 格式，`internal/server/manager/api/sbom.go`）
 - 通知服务：告警通知推送与管理
 - 内嵌 AC Registry / SD 模块，负责 AgentCenter 注册、主动健康探测、服务发现
@@ -122,7 +122,10 @@ v2.0 新增的检测分析引擎，独立服务，与 Consumer 并行消费 Kafk
 - 订阅 `mxcwpp.agent.*` 全部业务 Topic（ConsumerGroup B "mxcwpp-engine"），与 Consumer 互不影响 offset
 - **16 个检测 Stage**（`internal/server/engine/stage_*.go`）：CEL / Sequence / Anomaly / ML / Audit / Honeypot / Intrusion / Kube / Privilege / RASP / Anti-Rootkit / Rootkit / Storyline / Webshell / Revshell+Priv / AbnormalLogin
 - 多层检测子包：
-  - `celengine/` — CEL 规则引擎，eBPF 事件实时匹配 + 自动响应触发
+  - `celengine/` — CEL 规则引擎，eBPF 事件实时匹配 + 自动响应触发。
+    规则按 `draft → shadow → context → alert` 分级，晋级门槛由人工研判结论决定
+    （见 [API · 规则生命周期](api-reference.md#规则生命周期)）；
+    ML 异常分经 `host_anomaly_scores` 参与告警排序，加权封顶 1.15，跨不过严重度档
   - `intrusion/` — 入侵检测合集（abnormal_login / reverse_shell / rootkit / webshell）
   - `adaudit/` — AD/LDAP 域控审计 7 条规则（DCSync / Kerberoasting / 暴破等）
   - `microseg/` — 微隔离流量识别 + 策略生成 + Kubernetes NetworkPolicy 推荐
@@ -131,7 +134,9 @@ v2.0 新增的检测分析引擎，独立服务，与 Consumer 并行消费 Kafk
   - `honeypot/` — 反勒索 / 蜜罐告警归并
   - `ml/` — Go 原生 IForest + Registry。**未接线**（capability 清单 `ml_anomaly` = unwired），
     且**没有 ONNX**：go.mod 无 onnxruntime 依赖，ONNX 适配仍是 TODO
-  - `anomaly/` — 行为基线异常检测
+  - `anomaly/` — 行为基线异常检测（IForest + 多指标关联）。四档 `off/shadow/context/ranking`，
+    **1.0 不开放 alert 档**；含长期参照基线（抗训练投毒）、模型版本与回滚、按主机配额的训练采样。
+    详见 [ML 异常检测安全说明](ml-anomaly-safety.md)
   - `storyline/` — ATT&CK 攻击链关联与时间线
   - `ruleimport/` / `rulesync/` — Sigma/Falco/Tetragon 规则导入与同步
   - `scheduler/` — IOC 同步、规则同步、漏洞情报同步等调度器
@@ -166,7 +171,7 @@ v2.0 新增的漏洞情报融合服务，定时拉取 OS 厂商权威 advisory�
 > 注：Engine 对 `mxcwpp.vuln.advisory` 的 consumer 当前为 noop 占位；关联检测由后续 PR 引入。
 > NVD/KEV/EPSS 等元数据融合（3 级 confidence 仲裁）为后续工作，当前 VulnSync 聚焦 OS advisory 匹配路径。
 
-入口：`cmd/server/vulnsync/main.go`｜迁移记录：`docs/vulnsync-migration.md`
+入口：`cmd/server/vulnsync/main.go`
 
 ### Agent
 
@@ -456,7 +461,7 @@ AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
 数据迁移，收益只是少一个字段；收敛的是产品面，不是数据模型。将来若真要多租户，
 数据侧不必从头再来。
 
-`router/single_tenant_test.go` 守住这条边界：多租户路由或已删包重新出现即失败。
+`internal/server/manager/router/single_tenant_test.go` 守住这条边界：多租户路由或已删包重新出现即失败。
 
 ### 事件运营闭环（E-OPS-1）
 
