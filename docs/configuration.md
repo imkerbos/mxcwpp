@@ -472,6 +472,48 @@ llm:
 
 ---
 
+### pdf（报表导出）
+
+报表导出 PDF 依赖 Gotenberg 服务。**不配置时导出会产出损坏的 .pdf 文件**，
+且不会有明显报错——历史上踩过这个坑。
+
+```yaml
+pdf:
+  gotenberg_url: "http://gotenberg:3000"   # Gotenberg 服务地址（compose 网络内别名）
+  internal_url: "http://manager:8080"      # Gotenberg 回拉 manager 静态资源用
+```
+
+| 字段 | 说明 |
+|------|------|
+| `gotenberg_url` | Gotenberg 渲染服务地址。留空 = PDF 导出不可用 |
+| `internal_url` | 供 Gotenberg 反向拉取 manager 静态资源；须是 Gotenberg 容器可达的地址 |
+
+---
+
+### siem（CEF-over-syslog 外发）
+
+把告警以 CEF 格式转发到外部 SIEM。默认关闭。
+
+```yaml
+siem:
+  enabled: false
+  protocol: "tcp"          # tcp / udp
+  address: ""              # 如 siem.example.com:514
+  facility: 1
+```
+
+| 字段 | 说明 |
+|------|------|
+| `enabled` | 关闭时不建立任何连接 |
+| `protocol` | `tcp`（可靠，推荐）或 `udp`（丢包不可知）|
+| `address` | 目标 `host:port`；`enabled=true` 时必填 |
+| `facility` | syslog facility 编号 |
+
+> `udp` 下投递失败不会有任何反馈：SIEM 侧收不到而平台侧一切正常。
+> 对合规留存有要求时用 `tcp`。
+
+---
+
 ## Agent 配置
 
 Agent 配置分为编译时嵌入和运行时服务端下发两部分。运行时不依赖本地配置文件。
