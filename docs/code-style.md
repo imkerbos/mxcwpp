@@ -143,7 +143,9 @@ db.Find(&hosts)                                  // ❌ 跨租户穿越
 db.Where("host_id = ?", id).First(&host)         // ❌
 ```
 
-详见 [`multi-tenant-rollout.md`](multi-tenant-rollout.md)。
+产品定位是单租户，多租户/MSSP 产品面已移除，但 `tenant_id` 列与 Scope 约束保留：
+去掉它们等于让所有历史数据失去归属，而恢复归属比保留一个恒为默认值的列贵得多。
+详见 [架构文档 · 单租户收敛](architecture.md#单租户收敛e-ten-1)。
 
 ### 4.2 全局表豁免
 

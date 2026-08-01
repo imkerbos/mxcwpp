@@ -1,136 +1,42 @@
-# Engine Schedulers (PR12 占位 + Sprint 2 迁移规划)
+# Engine Schedulers（未接线的占位实现）
 
-> **当前状态**:仅占位 + interface + 设计文档。实际 scheduler 仍在 `internal/server/agentcenter/scheduler/` 下运行。
+> **当前状态（2026-08-01 核实）**：本包**没有任何调用方**。
+> 真正在跑的调度器全部位于 `internal/server/agentcenter/scheduler/`，
+> 由 `internal/server/agentcenter/init/init.go` 启动。
 >
-> **迁移目标**:Sprint 2 通过 Kafka 解耦把 3 个 scheduler 从 AC 迁过来。
+> 本包提供两个基于 Kafka 的实现（`ioc_sync.go` / `rule_sync.go`）与
+> `EngineCommander` interface —— 后者被 `agentcenter/commandsub/consumer.go` 实现，
+> 但生产端从未被构造启动。
 
----
+## 原计划与实际
 
-## 1. 为何 PR12 不直接搬迁
+v2.0 微服务拆分原本要把 IOC 同步与规则同步从 AgentCenter 迁到 Engine，
+经 Kafka 解耦，避免 AC 既做接入又做检测产物分发。
 
-3 个 scheduler 当前直接持有 `transfer.Service`(Agent 连接池),通过 `stream.Send` 推送命令:
+理由仍然成立：AC 侧的 scheduler 直接持有 `transfer.Service`（Agent 连接池），
+经 `stream.Send` 推命令；把这套直接搬进 Engine 会让 Engine 反向 import AC 的
+`transfer` 包，或者被迫也维护一份连接池。
 
-```
-AC scheduler.PushAgentUpdate(agents)
-  └─→ transfer.Service.GetStream(agentID)
-       └─→ stream.Send(Command)
-```
+但**迁移没有完成**。当前形态是：接口、Kafka 生产端、消费端都写好了，
+没有任何地方把它们接起来。
 
-直接搬到 Engine 会:
-- Engine 反向 import AC `transfer` 包(违反 v2.0 微服务边界)
-- 或者 Engine 也启动 Agent 连接池(违反单一职责)
-- 都不符合"Engine 做决策,AC 做接入"的专精化原则
+## 现状对照
 
----
+| 能力 | 实际运行位置 | 本包的对应实现 |
+|------|--------------|----------------|
+| IOC 同步 | `agentcenter/scheduler/ioc_sync_scheduler.go` | `ioc_sync.go`（未接线）|
+| 规则同步 | `agentcenter/scheduler/rule_sync_scheduler.go` | `rule_sync.go`（未接线）|
+| 告警通知 | `agentcenter/scheduler/` 下若干 | 无 |
 
-## 2. Sprint 2 迁移设计 (Kafka 解耦)
+## 要么接上，要么删掉
 
-```
-Engine 决策 (调度器)
-   │
-   │ Kafka Produce
-   v
-mxcwpp.engine.command  ─→ AC 订阅
-                         │
-                         v
-                      transfer.Service
-                         │
-                         v
-                      Agent (gRPC stream)
-```
+未接线的代码有两重代价：读代码的人会以为它在工作；
+而它一旦真被接上，行为是否与经过生产验证的 AC 实现一致，谁也说不准。
 
-### 2.1 数据流
+推进方向二选一：
 
-```
-Engine.RuleSyncScheduler
-  └─→ kafka.Produce(Topic="mxcwpp.engine.command", Key=agent_id, Value=Command{...})
+1. **接上** —— 在 Engine 启动路径构造这两个 scheduler，AC 侧对应实现下线，
+   并跑通「IOC / 规则真正下发到 agent」的端到端验证；
+2. **删掉** —— 连同 `commandsub/consumer.go` 里对应的 `EngineCommander` 实现一并移除。
 
-AC.CommandConsumer (订阅 mxcwpp-ac-command CG)
-  └─→ 解码 Command
-       └─→ transfer.Service.PushToAgent(agent_id, command)
-```
-
-### 2.2 Topic 设计
-
-新增 `mxcwpp.engine.command` Topic (待 PR 在 `docs/datatype-allocation.md` 登记):
-
-| 字段 | 值 |
-|------|------|
-| DataType | 11800-11899 (Engine→AC 命令预留段) |
-| Partitions | 12 |
-| Retention | 24h |
-| Partition Key | `{tenant_id}:{agent_id}` |
-| 上游 | Engine (本包 scheduler) |
-| 下游 | AC `command_consumer.go` |
-
-### 2.3 EngineCommander interface (已在 doc.go 定义)
-
-```go
-type EngineCommander interface {
-    PushToAgent(agentID string, command []byte) (bool, error)
-    PushToAgents(agentIDs []string, command []byte) (succeeded, failed int, err error)
-}
-```
-
-AC 端实现:`internal/server/agentcenter/command_consumer/kafka_consumer.go` (Sprint 2 新增)
-
----
-
-## 3. 迁移路线 (Sprint 2 PR 拆解)
-
-| PR | 范围 | 依赖 |
-|----|------|------|
-| Sprint 2 PR1 | 新增 `mxcwpp.engine.command` Topic + DataType 登记 | - |
-| Sprint 2 PR2 | AC `command_consumer` 实现 EngineCommander interface | PR1 |
-| Sprint 2 PR3 | `alert_scheduler` 迁 engine/scheduler + AlarmNotifier 解耦 biz | PR2 |
-| Sprint 2 PR4 | `rule_sync_scheduler` 迁 engine/scheduler | PR2 |
-| Sprint 2 PR5 | `ioc_sync_scheduler` 迁 engine/scheduler | PR2 |
-| Sprint 2 PR6 | AC scheduler 目录瘦身,移除 3 个文件 | PR3/4/5 |
-
----
-
-## 4. 受影响的代码 (Sprint 2)
-
-### 4.1 AC 侧
-
-- `internal/server/agentcenter/scheduler/alert_scheduler.go` → 删
-- `internal/server/agentcenter/scheduler/rule_sync_scheduler.go` → 删
-- `internal/server/agentcenter/scheduler/ioc_sync_scheduler.go` → 删
-- `internal/server/agentcenter/setup/init.go` → 删 scheduler 启动代码
-- `internal/server/agentcenter/init/init.go` → 同上
-- `internal/server/agentcenter/command_consumer/kafka_consumer.go` → 新增 (Sprint 2)
-
-### 4.2 Engine 侧
-
-- `internal/server/engine/scheduler/alert_scheduler.go` → 新 (迁自 AC)
-- `internal/server/engine/scheduler/rule_sync_scheduler.go` → 新
-- `internal/server/engine/scheduler/ioc_sync_scheduler.go` → 新
-- `cmd/server/engine/main.go` → 启动 3 scheduler + Kafka producer
-
-### 4.3 Manager 侧 (Notifier 解耦)
-
-- `alert_scheduler` 当前依赖 `biz.NotificationService`,需通过类似 PR9 的 `AlarmNotifier` interface 解耦
-- `internal/server/engine/scheduler/notifier.go` → 新 (interface 定义)
-- `internal/server/manager/biz/scheduler_notifier.go` → 新 (adapter,类似 KubeAlarmNotifier)
-
----
-
-## 5. 风险与缓解
-
-| 风险 | 缓解 |
-|------|------|
-| Kafka 延迟引入命令下发延迟 | 测试场景下 P95 ≤ 100ms,生产可接受 |
-| 命令丢失 (Kafka broker 故障) | ConsumerGroup 自动 rebalance + DLQ |
-| Engine 与 AC 部署分离后 IOC/规则推送链路变长 | 用 OTel trace 串联 Engine→Kafka→AC→Agent 全链路 |
-| AC scheduler 删除时漏改 setup/init.go | PR6 必须配 grep 检查所有 scheduler refs |
-
----
-
-## 6. 验收 (Sprint 2 完成时)
-
-- [ ] AC `scheduler/` 目录只剩 `canary / heartbeat_timeout / task_timeout / plugin_update / agent_update / agent_restart` 等 AC 自身职责的 scheduler
-- [ ] Engine `scheduler/` 目录含 `alert / rule_sync / ioc_sync` 3 个
-- [ ] `mxcwpp.engine.command` Topic 在 docs/datatype-allocation.md 登记
-- [ ] EngineCommander interface 有真实 AC 实现 + 单元测试
-- [ ] 端到端测试:Engine 推规则 → AC 收 Kafka → Agent gRPC 收到 → 应用规则
-- [ ] Prometheus 指标:engine_command_pushed_total / ac_command_consumed_total / agent_command_applied_total 全链路对账
+在做出选择之前，**不要按本包的实现去理解线上行为** —— 线上跑的是 AC 那套。
