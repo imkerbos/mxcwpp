@@ -1,4 +1,4 @@
-.PHONY: proto test test-ui test-all test-race security clean help build-server build-consumer build-engine build-vulnsync build-llmproxy build-all-services package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart web-dev pret-docker-up pret-docker-up-d pret-docker-down
+.PHONY: hooks proto test test-ui test-all test-race security clean help build-server build-consumer build-engine build-vulnsync build-llmproxy build-all-services package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart web-dev pret-docker-up pret-docker-up-d pret-docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -121,6 +121,11 @@ package-all-arch:
 	@./scripts/build.sh all --arch=all --version=$(VERSION) --server=$(SERVER_HOST)
 
 # ============ 测试与质量 ============
+
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "已启用 .githooks/（提交前自动检查 gofmt / 冲突标记 / 明文令牌）"
+	@echo "跳过单次检查：git commit --no-verify"
 
 test:
 	go test ./...
