@@ -2,6 +2,7 @@ package biz
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -129,23 +130,31 @@ func TestCreateScanTask_PendingState(t *testing.T) {
 	assert.Equal(t, 2, task.ProgressTotal)
 }
 
-func TestCreateScanTask_HostIDsExceedsLimit_Rejected(t *testing.T) {
+// 超过单批大小的主机数必须被受理，由内部分批处理。
+//
+// 此前这里是硬上限：228 台的机群要手工拆成 200+28 两次请求，
+// 而两次的结果无法合并成一次任务。核对与 OSV 关联都已按主机分批，
+// 内存占用与机群规模无关，上限因此没有存在理由。
+func TestCreateScanTask_LargeFleetAccepted(t *testing.T) {
 	db := setupTargetedScanDB(t)
-	logger := zap.NewNop()
-	mgr := NewScanTaskManager(db, logger)
+	mgr := NewScanTaskManager(db, zap.NewNop())
 
-	hostIDs := make([]string, 201)
+	hostIDs := make([]string, 228)
 	for i := range hostIDs {
-		hostIDs[i] = "host-" + string(rune('a'+i%26))
+		hostIDs[i] = fmt.Sprintf("host-%03d", i)
 	}
 
-	_, err := mgr.Create(CreateTaskOpts{
+	task, err := mgr.Create(CreateTaskOpts{
 		Scope:       model.ScanScopeHosts,
 		HostIDs:     hostIDs,
 		TriggeredBy: "admin",
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "上限 200")
+	require.NoError(t, err, "228 台的机群应能一次受理")
+	require.NotNil(t, task)
+
+	var stored []string
+	require.NoError(t, json.Unmarshal(task.TargetHostIDs, &stored))
+	assert.Len(t, stored, 228, "全部主机都应记入任务，不能被截断")
 }
 
 func TestCreateScanTask_ConcurrentOverlap_Rejected(t *testing.T) {
