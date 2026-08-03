@@ -122,7 +122,7 @@ func (h *KubeClusterHandler) ListClusters(c *gin.Context) {
 func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 	var req struct {
 		Name       string `json:"name" binding:"required"`
-		ApiServer  string `json:"apiServer" binding:"required"`
+		APIServer  string `json:"apiServer" binding:"required"`
 		KubeConfig string `json:"kubeConfig" binding:"required"`
 		Remark     string `json:"remark"`
 	}
@@ -149,7 +149,7 @@ func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 
 	cluster := model.KubeCluster{
 		Name:       req.Name,
-		ApiServer:  req.ApiServer,
+		APIServer:  req.APIServer,
 		KubeConfig: req.KubeConfig,
 		AuditToken: auditToken,
 		Status:     model.KubeClusterStatusOffline,
@@ -184,7 +184,7 @@ func (h *KubeClusterHandler) CreateCluster(c *gin.Context) {
 	SuccessWithMessage(c, "集群接入成功", gin.H{
 		"id":         cluster.ID,
 		"name":       cluster.Name,
-		"apiServer":  cluster.ApiServer,
+		"apiServer":  cluster.APIServer,
 		"status":     cluster.Status,
 		"version":    cluster.Version,
 		"auditToken": cluster.AuditToken,
@@ -259,7 +259,7 @@ func (h *KubeClusterHandler) GetCluster(c *gin.Context) {
 	result := gin.H{
 		"id":            cluster.ID,
 		"name":          cluster.Name,
-		"apiServer":     cluster.ApiServer,
+		"apiServer":     cluster.APIServer,
 		"status":        cluster.Status,
 		"version":       cluster.Version,
 		"healthScore":   cluster.HealthScore,
@@ -310,7 +310,7 @@ func (h *KubeClusterHandler) UpdateCluster(c *gin.Context) {
 
 	var req struct {
 		Name       string `json:"name"`
-		ApiServer  string `json:"apiServer"`
+		APIServer  string `json:"apiServer"`
 		KubeConfig string `json:"kubeConfig"`
 		Remark     string `json:"remark"`
 	}
@@ -330,8 +330,8 @@ func (h *KubeClusterHandler) UpdateCluster(c *gin.Context) {
 		cluster.Name = req.Name
 	}
 
-	if req.ApiServer != "" {
-		cluster.ApiServer = req.ApiServer
+	if req.APIServer != "" {
+		cluster.APIServer = req.APIServer
 	}
 	if req.Remark != "" {
 		cluster.Remark = req.Remark

@@ -101,7 +101,7 @@ func (c *Client) QueryInstant(ctx context.Context, query string, queryTime *time
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Prometheus API 返回错误: status=%d, body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("prometheus API 返回错误: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
 	var result QueryResult
@@ -110,7 +110,7 @@ func (c *Client) QueryInstant(ctx context.Context, query string, queryTime *time
 	}
 
 	if result.Status != "success" {
-		return nil, fmt.Errorf("Prometheus 查询失败: status=%s", result.Status)
+		return nil, fmt.Errorf("prometheus 查询失败: status=%s", result.Status)
 	}
 
 	return &result, nil
@@ -147,7 +147,7 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Prometheus API 返回错误: status=%d, body=%s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("prometheus API 返回错误: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
 	var result RangeQueryResult
@@ -156,7 +156,7 @@ func (c *Client) QueryRange(ctx context.Context, query string, start, end time.T
 	}
 
 	if result.Status != "success" {
-		return nil, fmt.Errorf("Prometheus 查询失败: status=%s", result.Status)
+		return nil, fmt.Errorf("prometheus 查询失败: status=%s", result.Status)
 	}
 
 	return &result, nil

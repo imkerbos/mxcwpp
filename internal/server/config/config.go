@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -662,19 +663,19 @@ func (c *Config) Validate() error {
 	}
 	if c.MTLS.ServerCert != "" {
 		if _, err := os.Stat(c.MTLS.ServerCert); os.IsNotExist(err) {
-			return fmt.Errorf("Server 证书文件不存在: %s", c.MTLS.ServerCert)
+			return fmt.Errorf("server 证书文件不存在: %s", c.MTLS.ServerCert)
 		}
 	}
 	if c.MTLS.ServerKey != "" {
 		if _, err := os.Stat(c.MTLS.ServerKey); os.IsNotExist(err) {
-			return fmt.Errorf("Server 私钥文件不存在: %s", c.MTLS.ServerKey)
+			return fmt.Errorf("server 私钥文件不存在: %s", c.MTLS.ServerKey)
 		}
 	}
 
 	// 验证 Prometheus 配置
 	if c.Metrics.Prometheus.Enabled {
 		if c.Metrics.Prometheus.QueryURL == "" && c.Metrics.Prometheus.RemoteWriteURL == "" && c.Metrics.Prometheus.PushgatewayURL == "" {
-			return fmt.Errorf("Prometheus 已启用但未配置 URL，请配置 query_url 或 remote_write_url")
+			return errors.New("prometheus 已启用但未配置 URL，请配置 query_url 或 remote_write_url")
 		}
 	}
 

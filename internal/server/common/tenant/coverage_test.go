@@ -39,13 +39,30 @@ func TestTenantIDColumnCoverage(t *testing.T) {
 		t.Skipf("model dir not found at %s (run from package dir)", abs)
 	}
 
+	// 逐文件解析而不用 parser.ParseDir：后者 Go 1.25 起废弃，
+	// 且它不识别 build tag。这里只需要非测试文件的 AST，自己遍历即可，
+	// 不必为此引入 golang.org/x/tools 依赖。
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, abs, func(fi os.FileInfo) bool {
-		name := fi.Name()
-		return !strings.HasSuffix(name, "_test.go")
-	}, parser.AllErrors)
+	entries, err := os.ReadDir(abs)
 	if err != nil {
-		t.Fatalf("parser: %v", err)
+		t.Fatalf("readdir: %v", err)
+	}
+	// 扁平存文件即可：下面只是遍历全部 AST 找 struct，不需要按包分组，
+	// 而 ast.Package 自 Go 1.22 起已废弃。
+	var files []*ast.File
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, filepath.Join(abs, name), nil, parser.AllErrors)
+		if perr != nil {
+			t.Fatalf("parser %s: %v", name, perr)
+		}
+		files = append(files, f)
+	}
+	if len(files) == 0 {
+		t.Fatalf("在 %s 下没有解析到任何非测试 go 文件", abs)
 	}
 
 	// 白名单: 全局表 (不分租户), 无 tenant_id 是预期.
@@ -81,34 +98,32 @@ func TestTenantIDColumnCoverage(t *testing.T) {
 
 	missing := []string{}
 	checked := 0
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				ts, ok := n.(*ast.TypeSpec)
-				if !ok {
-					return true
-				}
-				st, ok := ts.Type.(*ast.StructType)
-				if !ok {
-					return true
-				}
-				structName := ts.Name.Name
-				// 只看 model 表 struct (带 TableName 即可, 但简单按命名约定: 首字母大写 + 有 ID 字段)
-				if !isLikelyTableStruct(st) {
-					return true
-				}
-				if globalTables[structName] {
-					return true
-				}
-				checked++
-				if !hasTenantIDField(st) {
-					missing = append(missing, structName+": no TenantID field")
-				} else if !tenantTagOk(st) {
-					missing = append(missing, structName+": TenantID tag missing tenant_id / not null")
-				}
+	for _, file := range files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok {
 				return true
-			})
-		}
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			structName := ts.Name.Name
+			// 只看 model 表 struct (带 TableName 即可, 但简单按命名约定: 首字母大写 + 有 ID 字段)
+			if !isLikelyTableStruct(st) {
+				return true
+			}
+			if globalTables[structName] {
+				return true
+			}
+			checked++
+			if !hasTenantIDField(st) {
+				missing = append(missing, structName+": no TenantID field")
+			} else if !tenantTagOk(st) {
+				missing = append(missing, structName+": TenantID tag missing tenant_id / not null")
+			}
+			return true
+		})
 	}
 	if checked == 0 {
 		t.Skip("no model structs scanned")

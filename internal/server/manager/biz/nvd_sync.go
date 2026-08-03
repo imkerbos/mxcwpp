@@ -197,7 +197,7 @@ func (v *VulnScanner) SyncNVDWithSoftware(softwareByName map[string][]installedS
 			DiscoveredAt:     model.LocalTime(time.Now()),
 			CurrentVersion:   firstMatch.Version,
 			FixedVersion:     fixedVersion,
-			ReferenceUrl:     referenceURL,
+			ReferenceURL:     referenceURL,
 			Confidence:       model.VulnConfidenceLow, // NVD CPE 匹配 → low（OS Advisory 优先级更高）
 		}
 

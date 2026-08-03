@@ -46,7 +46,7 @@ type KubeCluster struct {
 	TenantID       string            `gorm:"column:tenant_id;type:varchar(64);not null;index;default:'t-default'" json:"tenant_id"`
 	ID             uint              `gorm:"primaryKey;column:id;autoIncrement" json:"id"`
 	Name           string            `gorm:"column:name;type:varchar(255);not null;uniqueIndex" json:"name"`
-	ApiServer      string            `gorm:"column:api_server;type:varchar(500)" json:"apiServer"`
+	APIServer      string            `gorm:"column:api_server;type:varchar(500)" json:"apiServer"`
 	KubeConfig     string            `gorm:"column:kube_config;type:text" json:"-"`
 	AuditToken     string            `gorm:"column:audit_token;type:varchar(64);uniqueIndex" json:"auditToken"`
 	Status         KubeClusterStatus `gorm:"column:status;type:varchar(20);default:'offline'" json:"status"`

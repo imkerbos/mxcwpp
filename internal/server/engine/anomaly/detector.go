@@ -75,9 +75,6 @@ const (
 	// retrainInterval is how often the forest is retrained from recent data.
 	retrainInterval = 30 * time.Minute
 
-	// sampleWindowSize is the max number of recent samples kept for training.
-	sampleWindowSize = 2000
-
 	// defaultAnomalyThreshold is the default score above which a sample is flagged.
 	// 可经 feature flag anomaly.score_threshold 覆盖（见 threshold.go）——
 	// 不同环境的"正常"离散程度差别很大，写死一个数意味着某些环境必然长期误报或长期漏报。

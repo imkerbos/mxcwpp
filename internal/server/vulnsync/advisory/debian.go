@@ -80,17 +80,17 @@ func (d *DebianSource) Fetch(ctx context.Context, _ time.Time) ([]*Advisory, err
 	}
 	resp, err := DoWithBackoff(ctx, d.client, req, 3)
 	if err != nil {
-		return nil, fmt.Errorf("Debian tracker HTTP: %w", err)
+		return nil, fmt.Errorf("debian tracker HTTP: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Debian tracker HTTP %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("debian tracker HTTP %d: %s", resp.StatusCode, body)
 	}
 
 	var data debianTrackerData
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("Debian tracker decode: %w", err)
+		return nil, fmt.Errorf("debian tracker decode: %w", err)
 	}
 
 	return d.parseAdvisories(data), nil
