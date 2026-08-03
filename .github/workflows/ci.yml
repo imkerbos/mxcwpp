@@ -71,7 +71,7 @@ jobs:
           version: latest
 
   race:
-    name: Race detector（非阻塞）
+    name: Race detector
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,11 +80,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # plugins/lib/go 存在已知 flaky race（zaptest logger 在测试结束后仍被
-      # 后台 goroutine 使用，纯测试问题非生产 race）。修复该泄漏后应移除
-      # continue-on-error 使其成为阻塞门禁。
+      # 阻塞门禁：plugins/lib/go 的 goroutine 泄漏已于 2026-08-04 修复
+      # （测试起的 ReceiveTaskLoop 在测试返回后仍向 zaptest logger 写日志，
+      # 与 testing 内部状态竞争）。修复后 48 次施压运行零命中。
       - name: Test (race)
-        continue-on-error: true
         run: go test -race -short ./...
 
   web:
