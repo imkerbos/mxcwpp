@@ -175,7 +175,6 @@
 
 | 项 | 说明 |
 |----|------|
-| race detector flaky | `plugins/lib/go` 的 zaptest logger 在测试结束后仍被后台 goroutine 使用。修掉后 race job 可改为阻塞 |
 | `UncoveredTechniques()` 未接门禁 | 已实现，缺「应覆盖技术清单」作为输入 |
 
 ### 漏洞情报：跨发行版标签污染（已根治，存量待回填）
