@@ -178,6 +178,51 @@
 | race detector flaky | `plugins/lib/go` 的 zaptest logger 在测试结束后仍被后台 goroutine 使用。修掉后 race job 可改为阻塞 |
 | `UncoveredTechniques()` 未接门禁 | 已实现，缺「应覆盖技术清单」作为输入 |
 
+### 合规率在没有数据时显示 100%
+
+`manager/api/dashboard.go:615`：一条基线扫描结果都没有时，合规率返回 **100%**。
+
+新部署、扫描任务从未跑过、或表被清空，大屏都会显示「完全合规」。零数据与
+全部通过在界面上无法区分，而这两者的处置完全相反——前者要去查为什么没扫，
+后者不用管。
+
+同一处还忽略了查询错误：`.Scan(&result)` 的返回值未检查，数据库查询失败时
+`result` 保持零值，同样走到 100% 分支。
+
+修法与 E-DQ-1 一致：区分「没有数据」与「数据是 0」，前者向上返回不可用状态，
+由前端渲染成占位符而不是数字。`web/src/lib/utils/stat.ts` 的 `statFromQuery`
+已经是这个模式，缺的是后端把「无数据」如实表达出来。
+
+> 相关但已修复：`plugins/scanner/engine/engine.go:88` 曾在引擎缺失时返回
+> (nil, nil)，与「扫过且干净」无法区分；现在会如实报 `OutcomeUnavailable`。
+
+### 漏洞情报：跨发行版标签污染（未根治）
+
+现象：一条 CVE 的 `source` 与 `fixed_version` 是 CVE 级的塌缩值。同一 CVE 若既有
+debian 又有 rpm 的 advisory，合并时按 confidence 排序取胜者，**不看该 advisory
+是否覆盖实际匹配到的主机 OS** —— 于是 rpm 主机可能被挂上 debian 的修复版本。
+
+已做（P0，已上生产）：清理侧加覆盖性守卫，只在该 CVE 对本机 OS 无覆盖行时才删；
+修复闸以 precheck 的主机真值为准，绕开 source 启发式。这两步止住了症状。
+
+未做：
+
+| 项 | 改动 | 位置 |
+|----|------|------|
+| **P1 根治** | `mergeByConfidence` 选 source/fixed_version 时，优先取覆盖已匹配主机 OS 的 advisory；并回填存量误标行 | `vulnsync/advisory/coordinator.go:390` |
+| **P2 展示一致** | host_vuln 视图与任务展示 per-host `fixed_version` | manager api + web |
+
+P2 的能力已经有了 —— `biz/fixed_version_lookup.go` 的 `ResolveFixedVersionForHost`
+在 precheck 链路（`precheck_cron.go` / `precheck_dispatcher.go`）已在用，
+但没接进 API 与界面，所以用户看到的仍是塌缩值。
+
+验证方式：P1 完成后回填，debian 标签挂在 rpm 主机上的链应归零；P2 完成后界面
+显示 el9 版本而不是 deb 版本。
+
+> 更彻底的长期方案：`host_vulnerabilities` 落地每主机匹配到的 source 与
+> fixed_version（该表已有 current_version），下游全读 per-host 真值，
+> 彻底摆脱 CVE 级塌缩。
+
 > 部署与升级相关的前置条件见 `local-reports/roadmap-internal.md`（不入库）。
 
 ---
