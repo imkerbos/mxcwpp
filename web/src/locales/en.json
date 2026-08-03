@@ -651,7 +651,9 @@
       "statHostInstances": "Host Vuln Instances",
       "statPatched": "Patched",
       "statUnpatched": "Unpatched",
-      "statRate": "Remediation Rate"
+      "statRate": "Remediation Rate",
+      "colCurrentVersion": "Current Version",
+      "colHostFixedVersion": "Applicable Fix"
     },
     "bulletins": {
       "statActive": "Active Bulletins",

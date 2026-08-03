@@ -178,19 +178,27 @@
 | race detector flaky | `plugins/lib/go` 的 zaptest logger 在测试结束后仍被后台 goroutine 使用。修掉后 race job 可改为阻塞 |
 | `UncoveredTechniques()` 未接门禁 | 已实现，缺「应覆盖技术清单」作为输入 |
 
-### 漏洞情报：跨发行版标签污染（未根治）
+### 漏洞情报：跨发行版标签污染（已根治，存量待回填）
 
-现象：一条 CVE 的 `source` 与 `fixed_version` 是 CVE 级的塌缩值。同一 CVE 若既有
-debian 又有 rpm 的 advisory，合并时按 confidence 排序取胜者，**不看该 advisory
-是否覆盖实际匹配到的主机 OS** —— 于是 rpm 主机可能被挂上 debian 的修复版本。
+CVE 的 `source` 与 `fixed_version` 是 CVE 级塌缩值。合并多来源 advisory 时，
+此前只按 confidence 挑赢家，**不看该 advisory 是否匹配到本环境的主机** ——
+一条毫不相关的 debian advisory 能把 rpm 主机的修复版本标成 deb 版本，
+运维照着修根本修不掉。
 
-已做（P0，已上生产）：清理侧加覆盖性守卫，只在该 CVE 对本机 OS 无覆盖行时才删；
-修复闸以 precheck 的主机真值为准，绕开 source 启发式。这两步止住了症状。
+已完成：
 
-未做：
+| 项 | 改动 |
+|----|------|
+| P0（早先上生产）| 清理侧加覆盖性守卫；修复闸以 precheck 的主机真值为准 |
+| **P1 根治** | `mergeByConfidence` 引入覆盖性判据：匹配到主机的 advisory 优先于 confidence 更高但不适用的（`coordinator.go` `betterMetadata`）|
+| **P2 展示** | 漏洞详情页的受影响主机表新增「当前版本 / 适用修复版本」两列，取 per-host 的 `matchedFixedVersion` 而非 CVE 级塌缩值 |
 
-| 项 | 改动 | 位置 |
-|----|------|------|
+**存量数据待回填**：`host_vulnerabilities` 共 15468 行，其中只有 264 行
+（1.7%）填了 `matched_fixed_version`。该字段只在 advisory 同步路径写入，
+历史行需要重跑一次同步才会补上。在那之前，详情页对多数主机显示「—」——
+这是如实的「未知」，好过继续显示一个可能错误的塌缩值。
+
+----|------|------|
 | **P1 根治** | `mergeByConfidence` 选 source/fixed_version 时，优先取覆盖已匹配主机 OS 的 advisory；并回填存量误标行 | `vulnsync/advisory/coordinator.go:390` |
 | **P2 展示一致** | host_vuln 视图与任务展示 per-host `fixed_version` | manager api + web |
 
