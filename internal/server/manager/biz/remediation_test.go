@@ -134,7 +134,7 @@ func TestGetAdvice(t *testing.T) {
 		Component:    "nginx",
 		FixedVersion: "1.25.1",
 		PURL:         "pkg:rpm/centos/nginx@1.24.0?arch=x86_64",
-		ReferenceUrl: "https://nvd.nist.gov/vuln/detail/CVE-2023-1234",
+		ReferenceURL: "https://nvd.nist.gov/vuln/detail/CVE-2023-1234",
 	}
 
 	advice := svc.GetAdvice(vuln)

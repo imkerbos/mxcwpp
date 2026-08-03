@@ -469,7 +469,7 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	var isContainer bool
 	var containerID string
 	var businessLine string
-	var runtimeType model.RuntimeType = model.RuntimeTypeVM // 默认为 VM
+	runtimeType := model.RuntimeTypeVM // 默认为 VM
 	var podName, podNamespace, podUID string
 	// EDR 引擎状态
 	var edrMode, edrCapabilities, edrHookType string

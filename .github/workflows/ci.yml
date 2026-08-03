@@ -62,11 +62,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # 暂设非阻塞：配置刚从 v1 迁到 v2，存量约 49 条风格类告警
-      # （QF1001/QF1003/QF1008/ST1005，无正确性问题）尚未清理。
-      # 清完后移除 continue-on-error，使其成为阻塞门禁。
+      # 阻塞门禁：存量告警已清零（2026-08-03）。
+      # 配置里排除了 staticcheck 的 QF（quickfix）类——那是编辑器交互式重构建议，
+      # 不指示缺陷，当门禁只会让人为过 CI 去改无关代码。
       - name: golangci-lint
-        continue-on-error: true
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest

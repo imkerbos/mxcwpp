@@ -98,10 +98,10 @@ func (c *Config) ValidateAgentCenter() error {
 // 仅由 Manager 专用初始化路径调用，不影响 Consumer/Engine 等共用 Config 的进程。
 func (c *Config) ValidateManager() error {
 	if err := ValidateInternalSecret(c.Server.InternalSecret); err != nil {
-		return fmt.Errorf("Manager 要求强 server.internal_secret（内部服务路由鉴权 + AC 命令下发）：%w", err)
+		return fmt.Errorf("manager 要求强 server.internal_secret（内部服务路由鉴权 + AC 命令下发）：%w", err)
 	}
 	if err := ValidateJWTSecret(c.Server.JWTSecret); err != nil {
-		return fmt.Errorf("Manager 要求强 server.jwt_secret（登录令牌签发/校验）：%w", err)
+		return fmt.Errorf("manager 要求强 server.jwt_secret（登录令牌签发/校验）：%w", err)
 	}
 	// 安全加固前提 fail-fast：登录限流 / JWT 黑名单均依赖 Redis，缺 Redis 时表面 enabled
 	// 实际不工作（静默半失效）。启用则要求配置了 Redis 端点。

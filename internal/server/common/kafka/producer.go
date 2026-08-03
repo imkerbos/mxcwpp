@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -86,7 +87,7 @@ type AsyncProducer struct {
 // NewAsyncProducer 初始化 Kafka 异步生产者
 func NewAsyncProducer(cfg config.KafkaConfig, logger *zap.Logger) (*AsyncProducer, error) {
 	if len(cfg.Brokers) == 0 {
-		return nil, fmt.Errorf("Kafka brokers 未配置")
+		return nil, errors.New("kafka brokers 未配置")
 	}
 
 	saramaCfg := sarama.NewConfig()

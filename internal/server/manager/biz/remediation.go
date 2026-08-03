@@ -54,8 +54,8 @@ func (s *RemediationService) GetAdvice(vuln *model.Vulnerability) *RemediationAd
 	advice.Commands = s.generateCommands(vuln)
 
 	// 提取参考链接
-	if vuln.ReferenceUrl != "" {
-		advice.References = strings.Split(vuln.ReferenceUrl, ",")
+	if vuln.ReferenceURL != "" {
+		advice.References = strings.Split(vuln.ReferenceURL, ",")
 		for i := range advice.References {
 			advice.References[i] = strings.TrimSpace(advice.References[i])
 		}

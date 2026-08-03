@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -373,11 +374,11 @@ func (h *NotificationsHandler) validateNotificationRequest(req *CreateNotificati
 	}
 
 	if req.Config.WebhookURL == "" {
-		return fmt.Errorf("Webhook URL 不能为空")
+		return errors.New("webhook URL 不能为空")
 	}
 	// 防 SSRF：拒绝指向内网/回环/云元数据的 Webhook 地址
 	if err := ssrf.ValidateURL(req.Config.WebhookURL); err != nil {
-		return fmt.Errorf("Webhook 地址不合法: %w", err)
+		return fmt.Errorf("webhook 地址不合法: %w", err)
 	}
 
 	return nil
@@ -522,7 +523,7 @@ func (h *NotificationsHandler) buildLarkCardMessage(
 func (h *NotificationsHandler) sendTestNotification(webhookURL string, body []byte) error {
 	// 防 SSRF：先校验地址，再用带 dial 期 IP 复查的安全客户端发送
 	if err := ssrf.ValidateURL(webhookURL); err != nil {
-		return fmt.Errorf("Webhook 地址不合法: %w", err)
+		return fmt.Errorf("webhook 地址不合法: %w", err)
 	}
 	client := ssrf.NewSafeClient(10 * time.Second)
 
@@ -554,15 +555,15 @@ func (h *NotificationsHandler) sendTestNotification(webhookURL string, body []by
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			// 4xx 错误是客户端错误，返回更友好的提示
 			if resp.StatusCode == 404 {
-				return fmt.Errorf("Webhook 地址不存在（404），请检查 URL 是否正确")
+				return errors.New("webhook 地址不存在（404），请检查 URL 是否正确")
 			}
 			if resp.StatusCode == 401 || resp.StatusCode == 403 {
-				return fmt.Errorf("Webhook 认证失败（%d），请检查 Secret 是否正确", resp.StatusCode)
+				return fmt.Errorf("webhook 认证失败（%d），请检查 Secret 是否正确", resp.StatusCode)
 			}
-			return fmt.Errorf("Webhook 返回错误（%d）: %s", resp.StatusCode, bodyStr)
+			return fmt.Errorf("webhook 返回错误（%d）: %s", resp.StatusCode, bodyStr)
 		}
 		// 5xx 错误是服务器错误
-		return fmt.Errorf("Webhook 服务器错误（%d）: %s", resp.StatusCode, bodyStr)
+		return fmt.Errorf("webhook 服务器错误（%d）: %s", resp.StatusCode, bodyStr)
 	}
 
 	return nil

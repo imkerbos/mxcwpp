@@ -438,23 +438,23 @@ func (m *Manager) diagnoseSystemEnv(pkgType string) {
 	}
 
 	if pkgType == "rpm" {
-		rpmDbPath := "/var/lib/rpm"
-		if stat, err := os.Stat(rpmDbPath); err != nil {
+		rpmDBPath := "/var/lib/rpm"
+		if stat, err := os.Stat(rpmDBPath); err != nil {
 			m.logger.Warn("rpm database directory not accessible",
-				zap.String("path", rpmDbPath),
+				zap.String("path", rpmDBPath),
 				zap.Error(err),
 			)
 		} else {
 			m.logger.Debug("rpm database directory status",
-				zap.String("path", rpmDbPath),
+				zap.String("path", rpmDBPath),
 				zap.String("mode", stat.Mode().String()),
 				zap.Bool("is_dir", stat.IsDir()),
 			)
 		}
 
-		if tmpFile, err := os.CreateTemp(rpmDbPath, "test-write-*"); err != nil {
+		if tmpFile, err := os.CreateTemp(rpmDBPath, "test-write-*"); err != nil {
 			m.logger.Error("rpm database directory is not writable",
-				zap.String("path", rpmDbPath),
+				zap.String("path", rpmDBPath),
 				zap.Error(err),
 				zap.String("hint", "check filesystem mount options with 'mount | grep /var'"),
 			)
