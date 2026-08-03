@@ -818,6 +818,55 @@ wait_healthy() {
 # ============================================================
 # 升级
 # ============================================================
+# check_agent_trust_migration 升级前确认 agent 信任链迁移已完成。
+#
+# 新版 AgentCenter 强制 mtls.enforce_agent_id=true：客户端证书 CN 与上报 AgentID
+# 不符的连接一律拒绝。存量 agent 持有的是全网共享证书（CN 为固定值），
+# 因此升级后会**立即全部掉线，且不会自愈**——agent 侧没有「被拒后重新 enroll」的逻辑。
+#
+# 迁移做法见 docs/roadmap.md。判定依据：still_shared 为仍在使用共享证书的 agent 数，
+# 由 AgentCenter 的 /internal/agent-cert-stats 汇总（CN != agent_id 即计入）。
+#
+# 确认迁移完成后，设置 AGENT_TRUST_MIGRATED=true 跳过本检查。
+check_agent_trust_migration() {
+    if [ "${AGENT_TRUST_MIGRATED:-false}" = "true" ]; then
+        log_info "已声明 agent 信任链迁移完成（AGENT_TRUST_MIGRATED=true），跳过检查"
+        return 0
+    fi
+
+    log_step "检查 agent 信任链迁移状态..."
+
+    local stats
+    stats=$(curl -sf --max-time 10 \
+        -H "X-Internal-Secret: ${INTERNAL_SECRET}" \
+        "http://127.0.0.1:${AC_HTTP_PORT:-8081}/internal/agent-cert-stats" 2>/dev/null || true)
+
+    if [ -z "$stats" ]; then
+        log_warn "无法获取 agent 证书统计（AgentCenter 未运行或接口不可用）"
+        log_warn "无法确认迁移状态时不自动放行：误升级会让存量 agent 全部掉线。"
+        log_warn "确认已迁移完成后，用 AGENT_TRUST_MIGRATED=true ./deploy.sh upgrade 继续。"
+        exit 1
+    fi
+
+    local shared
+    shared=$(echo "$stats" | grep -o '"still_shared":[0-9]*' | cut -d: -f2)
+    shared=${shared:-unknown}
+
+    if [ "$shared" = "unknown" ]; then
+        log_error "证书统计返回格式异常，无法判断迁移状态"
+        exit 1
+    fi
+
+    if [ "$shared" -gt 0 ]; then
+        log_error "仍有 ${shared} 台 agent 使用共享证书，升级 AgentCenter 会让它们全部掉线。"
+        log_error "请先完成信任链迁移（docs/roadmap.md 第四节），或确认后用："
+        log_error "    AGENT_TRUST_MIGRATED=true ./deploy.sh upgrade"
+        exit 1
+    fi
+
+    log_info "全部 agent 已换用单机证书，可以安全升级"
+}
+
 upgrade() {
     if [ ! -f "$ENV_FILE" ]; then
         log_error "未检测到已有部署，请使用 ./deploy.sh 进行首次部署"
@@ -825,6 +874,8 @@ upgrade() {
     fi
 
     source "$ENV_FILE"
+
+    check_agent_trust_migration
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

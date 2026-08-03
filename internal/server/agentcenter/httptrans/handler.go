@@ -40,6 +40,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup, internalSecret string) {
 	protected.POST("/command", h.SendCommand)
 	protected.POST("/command/batch", h.SendCommandBatch)
 	protected.POST("/dependency/install", h.SendDependencyInstall)
+	protected.GET("/agent-cert-stats", h.AgentCertStats)
 }
 
 // healthResp 是 /health 的响应体（仅最小 liveness，不含在线明细）。
@@ -218,4 +219,16 @@ func (h *Handler) SendDependencyInstall(c *gin.Context) {
 		return
 	}
 	ackStatus(c, http.StatusOK, "sent")
+}
+
+// AgentCertStats godoc
+// GET /agent-cert-stats
+//
+// 返回 agent 证书迁移进度，供部署脚本在升级 AgentCenter 前做闸门判断。
+//
+// 新版 AgentCenter 强制客户端证书 CN == AgentID。still_shared > 0 时升级，
+// 那些 agent 会在升级瞬间全部被拒且不会自愈（agent 侧无重新 enroll 的逻辑）。
+// deploy.sh 的 check_agent_trust_migration 读的就是这个接口。
+func (h *Handler) AgentCertStats(c *gin.Context) {
+	c.JSON(http.StatusOK, h.transfer.CertMigrationProgress())
 }

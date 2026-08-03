@@ -484,6 +484,35 @@
 
 ---
 
+## AgentCenter 内部接口
+
+需 `X-Internal-Secret` 头，绑定在 AC 管理端口（默认 8081），不经 manager 暴露。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/health` | 存活探测（匿名）|
+| GET | `/conn/stat` | 在线连接统计 |
+| GET | `/conn/list` | 在线 agent 明细 |
+| GET | `/agent-cert-stats` | **agent 证书迁移进度** |
+| POST | `/command` | 单机命令下发 |
+| POST | `/command/batch` | 批量命令下发 |
+| POST | `/dependency/install` | 依赖安装 |
+
+### agent-cert-stats
+
+```json
+{"online": 228, "per_agent": 228, "still_shared": 0, "shared_agent_ids": []}
+```
+
+`still_shared` 是仍在使用全网共享证书的在线 agent 数。
+**新版 AgentCenter 强制客户端证书 CN == AgentID，该值不为 0 时升级会让这些 agent
+全部掉线且不会自愈**（agent 侧没有被拒后重新 enroll 的逻辑）。
+`deploy.sh upgrade` 以此为闸门，详见 [路线图 · 第四节](roadmap.md)。
+
+只统计在线连接：离线 agent 的证书状态无从得知，把它们算作已迁移会给出偏乐观的结论。
+
+---
+
 ## ML 异常检测
 
 | 方法 | 路径 | 说明 |

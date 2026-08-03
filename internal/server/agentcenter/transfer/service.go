@@ -37,18 +37,22 @@ import (
 
 // Connection 表示一个 Agent 连接
 type Connection struct {
-	AgentID   string
-	Hostname  string
-	IPv4      []string
-	IPv6      []string
-	Version   string
-	LastSeen  time.Time
-	stream    grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
-	ctx       context.Context
-	cancel    context.CancelFunc
-	sendCh    chan *grpcProto.Command
-	workerSem chan struct{} // 限制异步 record 处理的并发数
-	mu        sync.RWMutex
+	AgentID  string
+	Hostname string
+	IPv4     []string
+	IPv6     []string
+	Version  string
+	LastSeen time.Time
+	// SharedCert 表示该连接用的仍是全网共享证书（CN != AgentID），尚未换成一机一证。
+	// 升级 AgentCenter 前必须先把这类连接清零：新版强制 CN==AgentID，
+	// 它们会在升级瞬间全部被拒且不会自愈。
+	SharedCert bool
+	stream     grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
+	ctx        context.Context
+	cancel     context.CancelFunc
+	sendCh     chan *grpcProto.Command
+	workerSem  chan struct{} // 限制异步 record 处理的并发数
+	mu         sync.RWMutex
 }
 
 // GetHostname 线程安全地获取主机名
@@ -301,6 +305,10 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	)
 
 	// 创建连接对象
+	// 有证书但 CN 不是自己的 AgentID = 仍在用全网共享证书，尚未迁移。
+	// 与下方 alreadyEnrolled 同一判断，此处留作迁移进度统计。
+	usingSharedCert := hasClientCert && leafCert.Subject.CommonName != agentID
+
 	conn := &Connection{
 		AgentID:  agentID,
 		Hostname: firstData.Hostname,
@@ -308,9 +316,11 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 		IPv6:     append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
 		Version:  firstData.Version,
 		LastSeen: time.Now(),
-		stream:   stream,
-		ctx:      ctx,
-		cancel:   cancel,
+		// 迁移进度统计用；见 SharedCert 字段说明。
+		SharedCert: usingSharedCert,
+		stream:     stream,
+		ctx:        ctx,
+		cancel:     cancel,
 		// sendCh 容量 100: precheck cron 单 host 单 tick 可投 200 条 task,
 		// 加上 plugin update/rule sync/heartbeat ack 共用此 ch,
 		// 容量过小(原 10)会导致 agent stream 短暂卡住时 SendCommand 立即 drop,
@@ -3200,4 +3210,45 @@ func (s *Service) getAgentRuntimeType(agentID string) model.RuntimeType {
 		return model.RuntimeTypeVM
 	}
 	return host.RuntimeType
+}
+
+// CertMigrationStats 是 agent 证书迁移进度。
+type CertMigrationStats struct {
+	// Online 当前在线连接数。
+	Online int `json:"online"`
+	// PerAgent 已换用一机一证（CN == AgentID）的连接数。
+	PerAgent int `json:"per_agent"`
+	// StillShared 仍在用全网共享证书的连接数。
+	//
+	// 这个数字必须归零才能升级 AgentCenter：新版强制 CN==AgentID，
+	// 这些连接会在升级瞬间被拒，且 agent 侧没有重新 enroll 的自愈逻辑。
+	StillShared int `json:"still_shared"`
+	// SharedAgentIDs 仍在用共享证书的 agent，便于逐台处理。
+	// 截断到前 100 个：迁移初期这个列表等于整个机群，全量返回没有意义。
+	SharedAgentIDs []string `json:"shared_agent_ids"`
+}
+
+// CertMigrationProgress 汇总当前在线连接的证书迁移进度。
+//
+// 只统计**在线**连接：离线 agent 的证书状态无从得知，
+// 把它们算成已迁移会给出一个偏乐观的结论，而这个结论一旦错了，
+// 代价是整个机群掉线。
+func (s *Service) CertMigrationProgress() CertMigrationStats {
+	const maxListed = 100
+	stats := CertMigrationStats{SharedAgentIDs: []string{}}
+
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+	for _, conn := range s.connections {
+		stats.Online++
+		if conn.SharedCert {
+			stats.StillShared++
+			if len(stats.SharedAgentIDs) < maxListed {
+				stats.SharedAgentIDs = append(stats.SharedAgentIDs, conn.AgentID)
+			}
+		} else {
+			stats.PerAgent++
+		}
+	}
+	return stats
 }
