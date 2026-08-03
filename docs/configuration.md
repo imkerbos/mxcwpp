@@ -172,7 +172,32 @@ server:
   manager_addr: "http://manager:8080"   # AC 向 Manager 注册使用的地址
   instance_id: ""           # 多实例部署时的实例标识（留空自动生成）
   external_url: ""          # 外网访问地址（如 https://mxcwpp.example.com），用于拼接 K8s Audit Webhook URL
+  internal_secret: "xxx"    # Manager↔AgentCenter 管理面鉴权共享密钥，≥32
+  security:
+    headers:
+      enabled: true
+      hsts: true            # 仅在 UI 走 HTTPS 时开启
+    login_rate_limit:       # 需要 Redis
+      enabled: true
+      rps: 10
+      burst: 5
+    jwt_blacklist:          # 需要 Redis
+      enabled: true
+    allow_custom_exec_rules: false            # 禁止**新增**自定义可执行规则
+    block_existing_custom_exec_rules: false   # 派发时是否拦截**存量**自定义可执行规则
 ```
+
+`jwt_secret` 与 `internal_secret` 均要求 ≥32 字符、非占位符、非常见弱值，否则 Manager 拒绝启动。`login_rate_limit` 与 `jwt_blacklist` 启用但未配置 Redis 时同样拒绝启动——避免出现「配置里写着 enabled、实际不生效」的静默半失效。
+
+`allow_custom_exec_rules` 控制自定义（非内置）基线规则能否携带 `command_exec` 检查与 `fix.command` 修复命令。这两处内容会**以 root 在全部目标主机执行**，因此放开等于把「基线配置权限」提权成「全舰队任意代码执行」。默认 `false`：规则创建、更新与策略导入三个写入口一律拒绝，内置规则（随发布同步，`builtin=true`）不受限制。
+
+该开关只作用于写入路径，**不影响存量规则**。存量清单见 `GET /api/v1/policies/custom-exec-rules`。
+
+`block_existing_custom_exec_rules` 才是管存量的：为 `true` 时，AgentCenter 与 Manager 在**派发阶段**跳过这类规则。默认 `false`——只记 `[AUDIT]` 审计不拦截。
+
+两个开关分开是刻意的：前者关的是「新增提权路径」，可以立即默认收紧而不改变任何现有行为；后者拦的是已经在跑的存量规则，默认打开会静默削减基线覆盖面，那是砍功能不是收紧。正确顺序是先用盘点接口逐条研判，再决定是否开启。
+
+判定按**本次实际下发的内容**算：检查任务会裁剪 `fix.command`，所以只有 `fix.command` 可执行的规则在检查态不算携带可执行内容，不会被误伤。
 
 ### database
 
@@ -340,16 +365,61 @@ metrics:
     timeout: 10s
 ```
 
+### alerting
+
+```yaml
+alerting:
+  notify_categories: []          # 灰度开启通知的类别，留空即全部不通知
+  min_severity: "high"           # 低于此等级不通知
+  suppress_window_minutes: 30    # 相同告警在窗口内只通知一次
+```
+
+控制检测产出经 `internal/server/alertbus` 发往通知渠道的行为。
+
+此前 ML 异常（`anomaly_alerts`）、行为基线（`behavior_alerts`）、关联事件（`incidents`）、
+K8s 基线告警（`kube_baseline_alerts`）四类检测**只入库、没有任何通知出口**——检测跑了、
+写进表了、值班不知道。现在它们统一经发布点出去。
+
+`notify_categories` 可填 `anomaly_alert` / `behavior_alert` / `incident` / `kube_alert`
+（以及既有的 `baseline_alert` 等）。**留空是默认值，即一条都不通知**，告警仍照常入库，
+列表与大屏可见。这是刻意的：这些链路从未通知过，一次全开会淹没值班（ML 异常曾一次
+产出数千条 critical 假信标）。确认某类误报已收敛后再逐个加入。
+
+开启前需在「系统 → 通知」为对应类别建好通知配置，否则发布点会记 `no_recipient`——
+类别开了却通不到人。
+
+指标 `mxcwpp_alert_publish_total{source,category,outcome}` 给出每条告警的去向：
+`notified` / `category_disabled` / `below_severity` / `suppressed` / `no_recipient` /
+`error` / `invalid` / `no_publisher`。收敛成成功率会让"类别没开"和"发送失败"无法区分。
+
+> 抑制状态保存在进程内，多副本部署时各副本独立抑制，同一告警最多被通知副本数次。
+> 灰度开启类别时需把副本数计入通知量预估。
+
+---
+
 ### mtls
 
 ```yaml
 mtls:
   ca_cert: "/etc/mxcwpp/certs/ca.crt"
+  ca_key: "/etc/mxcwpp/certs/ca.key"          # AgentCenter 按 AgentID 在线签发单机证书
   server_cert: "/etc/mxcwpp/certs/server.crt"
   server_key: "/etc/mxcwpp/certs/server.key"
+  enroll_token: "<openssl rand -hex 32>"      # Agent 首连引导令牌，≥32
+  per_agent_cert: true                        # 一机一证
+  enforce_agent_id: true                      # 强制客户端证书 CN == AgentID
+  insecure_dev_mode: false                    # 仅本地开发，要求 gRPC/HTTP 均绑回环
 ```
 
 mTLS 用于 Agent 与 AgentCenter 之间的双向认证通信。证书由 `deploy.sh` 的 `init` 命令调用 `scripts/generate-certs.sh` 自动生成。证书路径为容器内路径，通过 volume 挂载 `deploy/certs/` 目录映射。
+
+**AgentCenter 启动前置校验（不满足即拒绝启动）**：CA 与服务端证书必须存在、可读、在有效期内、私钥配对，服务端证书必须由该 CA 签发且含 `serverAuth` 用途；`enroll_token` 必须达到强度要求；`per_agent_cert` 与 `enforce_agent_id` 必须为 `true`。
+
+这些前置条件不是洁癖：任一不满足时，Agent 要么无法建立信任、要么能以伪造身份接入，而进程本身看起来是健康的。宁可启动失败，也不进入「看似健康、信任面失效」的状态。
+
+`insecure_dev_mode` 是唯一的放宽开关，且被限制为仅在 gRPC 与 HTTP **均绑定回环地址**时可用；官方部署脚本与集群渲染永不设置它。
+
+`server.crt` 的 SAN 必须覆盖 Agent 实际连接的地址（`deploy.sh` 会传入 `SERVER_IP`）。升级时若发现现有证书缺少 `serverAuth` 或 SAN 不匹配，`deploy.sh` 会**用原 CA 重签叶子证书**——CA 保持不变，已部署 Agent 的信任链不受影响。
 
 ### log
 
@@ -399,6 +469,48 @@ llm:
 ```
 
 启用后，Manager 可通过 LLM 对告警事件进行辅助分析，生成告警摘要和处置建议。未配置 `api_key` 时该功能自动禁用。
+
+---
+
+### pdf（报表导出）
+
+报表导出 PDF 依赖 Gotenberg 服务。**不配置时导出会产出损坏的 .pdf 文件**，
+且不会有明显报错——历史上踩过这个坑。
+
+```yaml
+pdf:
+  gotenberg_url: "http://gotenberg:3000"   # Gotenberg 服务地址（compose 网络内别名）
+  internal_url: "http://manager:8080"      # Gotenberg 回拉 manager 静态资源用
+```
+
+| 字段 | 说明 |
+|------|------|
+| `gotenberg_url` | Gotenberg 渲染服务地址。留空 = PDF 导出不可用 |
+| `internal_url` | 供 Gotenberg 反向拉取 manager 静态资源；须是 Gotenberg 容器可达的地址 |
+
+---
+
+### siem（CEF-over-syslog 外发）
+
+把告警以 CEF 格式转发到外部 SIEM。默认关闭。
+
+```yaml
+siem:
+  enabled: false
+  protocol: "tcp"          # tcp / udp
+  address: ""              # 如 siem.example.com:514
+  facility: 1
+```
+
+| 字段 | 说明 |
+|------|------|
+| `enabled` | 关闭时不建立任何连接 |
+| `protocol` | `tcp`（可靠，推荐）或 `udp`（丢包不可知）|
+| `address` | 目标 `host:port`；`enabled=true` 时必填 |
+| `facility` | syslog facility 编号 |
+
+> `udp` 下投递失败不会有任何反馈：SIEM 侧收不到而平台侧一切正常。
+> 对合规留存有要求时用 `tcp`。
 
 ---
 

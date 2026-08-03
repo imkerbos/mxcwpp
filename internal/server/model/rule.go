@@ -1,6 +1,9 @@
 package model
 
-import "database/sql/driver"
+import (
+	"database/sql/driver"
+	"strings"
+)
 
 // CheckConfig 检查配置（JSON 格式）
 type CheckConfig struct {
@@ -66,6 +69,32 @@ func (r *Rule) MatchesRuntimeType(runtimeType RuntimeType) bool {
 		}
 	}
 	return false
+}
+
+// ExecCheckerType 是会在目标主机上起 shell 的检查器类型。
+const ExecCheckerType = "command_exec"
+
+// HasCommandExecCheck 判断检查配置是否包含 command_exec。
+func (c CheckConfig) HasCommandExecCheck() bool {
+	for _, r := range c.Rules {
+		if strings.EqualFold(strings.TrimSpace(r.Type), ExecCheckerType) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasFixCommand 判断修复配置是否携带修复命令。
+func (f FixConfig) HasFixCommand() bool {
+	return strings.TrimSpace(f.Command) != ""
+}
+
+// HasExecContent 判断规则是否携带会在目标主机上以 root 执行的内容。
+//
+// 写入闸门（API）与派发闸门（AgentCenter）必须用同一判定，否则两侧对"什么算可执行规则"
+// 的理解一旦分叉，就会出现"写入被拒但同形态的存量规则照样下发"这类假防护。
+func (r *Rule) HasExecContent() bool {
+	return r.CheckConfig.HasCommandExecCheck() || r.FixConfig.HasFixCommand()
 }
 
 // TableName 指定表名

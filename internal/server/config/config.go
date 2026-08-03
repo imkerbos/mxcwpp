@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -29,6 +30,22 @@ type Config struct {
 	SIEM       SIEMConfig       `mapstructure:"siem"`
 	PDF        PDFConfig        `mapstructure:"pdf"`
 	Vuln       VulnConfig       `mapstructure:"vuln"`
+	Alerting   AlertingConfig   `mapstructure:"alerting"`
+}
+
+// AlertingConfig 控制检测产出经 alertbus 发往通知渠道的行为。
+//
+// 此前 ML 异常、行为基线、AD 审计、关联事件、K8s 基线告警五类检测只入库、无通知出口。
+// 接通它们必须配灰度开关：这些链路从未通知过，一次全开会淹没值班。
+type AlertingConfig struct {
+	// NotifyCategories 是已灰度开启通知的类别（anomaly_alert / behavior_alert /
+	// ad_audit_alert / incident / kube_alert）。**留空即全部不通知**，告警仍照常入库、
+	// 列表与大屏可见。确认某类误报已收敛后再逐个加入。
+	NotifyCategories []string `mapstructure:"notify_categories"`
+	// MinSeverity 低于此等级不通知，留空按 high。
+	MinSeverity string `mapstructure:"min_severity"`
+	// SuppressWindowMinutes 相同告警在此窗口内只通知一次，<=0 按 30 分钟。
+	SuppressWindowMinutes int `mapstructure:"suppress_window_minutes"`
 }
 
 // VulnConfig 漏洞数据相关配置。
@@ -115,6 +132,21 @@ type SecurityConfig struct {
 	Headers        SecurityHeadersConfig `mapstructure:"headers"`          // 安全响应头
 	LoginRateLimit RateLimitRuleConfig   `mapstructure:"login_rate_limit"` // 登录接口 IP 限流（防爆破）
 	JWTBlacklist   JWTBlacklistConfig    `mapstructure:"jwt_blacklist"`    // 登出 JWT 黑名单（需 Redis）
+	// AllowCustomExecRules 允许自定义（非内置）基线规则携带 command_exec 检查与
+	// fix.command 修复命令。默认 false。
+	//
+	// 这两个字段的内容会以 root 在全部目标主机上执行，因此"能编辑基线规则"等价于
+	// "能在全舰队执行任意代码"——对只应拥有基线配置权限的角色而言是提权。内置规则
+	// （builtin=true，随发布同步）不受此开关限制。
+	// 确有自定义可执行规则需求的环境才显式开启，且开启后每次执行都会留审计。
+	AllowCustomExecRules bool `mapstructure:"allow_custom_exec_rules"`
+	// BlockExistingCustomExecRules 控制**派发阶段**是否跳过存量的自定义可执行规则。
+	// 默认 false：只记审计不拦截。
+	//
+	// 与 AllowCustomExecRules 分开是刻意的：前者关的是"新增提权路径"，可以立即默认收紧
+	// 而不影响任何现有行为；后者拦的是已经在跑的存量规则，直接默认打开会静默削减基线覆盖面。
+	// 先用 GET /api/v1/policies/custom-exec-rules 盘点、逐条研判，再决定是否开启。
+	BlockExistingCustomExecRules bool `mapstructure:"block_existing_custom_exec_rules"`
 }
 
 // SecurityHeadersConfig 控制安全响应头中间件。
@@ -334,6 +366,10 @@ type MTLSConfig struct {
 	EnforceAgentID bool `mapstructure:"enforce_agent_id"`
 	// RevokedSerials 是已吊销的证书序列号（十进制字符串）列表，握手期拒绝。
 	RevokedSerials []string `mapstructure:"revoked_serials"`
+	// InsecureDevMode 是显式的不安全开发模式（默认 false）。仅供本地/回环开发放行
+	// “无 per-agent 证书 / 弱信任配置”场景；一旦开启，ValidateAgentCenter 要求 gRPC/HTTP
+	// 均绑定回环地址，且官方 prod/deploy/cluster 渲染绝不设置此项。
+	InsecureDevMode bool `mapstructure:"insecure_dev_mode"`
 }
 
 // LogConfig 是日志配置
@@ -627,19 +663,19 @@ func (c *Config) Validate() error {
 	}
 	if c.MTLS.ServerCert != "" {
 		if _, err := os.Stat(c.MTLS.ServerCert); os.IsNotExist(err) {
-			return fmt.Errorf("Server 证书文件不存在: %s", c.MTLS.ServerCert)
+			return fmt.Errorf("server 证书文件不存在: %s", c.MTLS.ServerCert)
 		}
 	}
 	if c.MTLS.ServerKey != "" {
 		if _, err := os.Stat(c.MTLS.ServerKey); os.IsNotExist(err) {
-			return fmt.Errorf("Server 私钥文件不存在: %s", c.MTLS.ServerKey)
+			return fmt.Errorf("server 私钥文件不存在: %s", c.MTLS.ServerKey)
 		}
 	}
 
 	// 验证 Prometheus 配置
 	if c.Metrics.Prometheus.Enabled {
 		if c.Metrics.Prometheus.QueryURL == "" && c.Metrics.Prometheus.RemoteWriteURL == "" && c.Metrics.Prometheus.PushgatewayURL == "" {
-			return fmt.Errorf("Prometheus 已启用但未配置 URL，请配置 query_url 或 remote_write_url")
+			return errors.New("prometheus 已启用但未配置 URL，请配置 query_url 或 remote_write_url")
 		}
 	}
 

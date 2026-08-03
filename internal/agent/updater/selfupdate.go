@@ -5,6 +5,7 @@ package updater
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -146,7 +147,7 @@ func runRemoteUpdate(opts SelfUpdateOptions) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Server 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+		return fmt.Errorf("server 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
 	var checkResp UpdateCheckResponse
@@ -155,7 +156,7 @@ func runRemoteUpdate(opts SelfUpdateOptions) error {
 	}
 
 	if checkResp.Data == nil {
-		return fmt.Errorf("Server 返回数据为空")
+		return errors.New("server 返回数据为空")
 	}
 
 	data := checkResp.Data

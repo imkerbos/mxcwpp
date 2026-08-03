@@ -23,15 +23,23 @@ const (
 	// ModeContext 上下文模式：落库 anomaly_alerts 供 SOC 分析上下文，
 	// 但严重度封顶 high（绝不 critical）、绝不进入自动响应。需显式配置才启用。
 	ModeContext Mode = "context"
+	// ModeRanking 排序模式：在 context 的基础上，额外让异常分参与**已有告警的排序**。
+	//
+	// 它不新建任何告警——只影响已因其他原因存在的告警的 risk_score，让分析师先看到
+	// 异常主机上的告警。这是 1.0 允许 ML 产生价值的唯一方式：**排序，不定罪**。
+	// 严重度与 context 一样封顶 high。
+	ModeRanking Mode = "ranking"
 	// ModeAlert 正式告警模式：允许 critical 定罪。仅在显式配置 + schema gate 通过时生效，
 	// schema 未就绪时由 EffectiveMode fail-closed 降级为 ModeShadow（只观测不落库，不是 context）。M0 默认不启用。
+	//
+	// 1.0 不开放：升档校验（mlquality.EvaluateModeChange）对该档硬拒。
 	ModeAlert Mode = "alert"
 )
 
 // normalizeMode 把外部字符串规整为合法 Mode；未知/空值回落 ModeShadow（安全默认：只观测不落库）。
 func normalizeMode(s string) Mode {
 	switch Mode(s) {
-	case ModeOff, ModeShadow, ModeContext, ModeAlert:
+	case ModeOff, ModeShadow, ModeContext, ModeRanking, ModeAlert:
 		return Mode(s)
 	default:
 		return ModeShadow

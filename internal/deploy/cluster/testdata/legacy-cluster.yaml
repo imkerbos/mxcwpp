@@ -22,6 +22,7 @@ network:
     port: 6751
 app:
   jwt_secret: test-jwt-secret-legacy-00001
+  internal_secret: f6e5d4c3b2a1098765432100abcdef12
   manager_http_port: 8080
   ac_http_port: 8081
   grpc_port: 6751

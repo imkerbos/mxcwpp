@@ -305,7 +305,7 @@ func insertVulnsCH(conn chdriver.Conn, rows []model.Vulnerability) error {
 			uint64(v.ID), v.CveID, v.OsvID, v.PURL, v.Severity, float32(v.CvssScore), v.Component, v.Description,
 			uint32(v.AffectedHosts), uint32(v.PatchedHosts), v.Status,
 			time.Time(v.DiscoveredAt), asTime(v.PatchedAt),
-			v.CurrentVersion, v.FixedVersion, v.ReferenceUrl,
+			v.CurrentVersion, v.FixedVersion, v.ReferenceURL,
 			v.CvssVector, v.AttackVector, v.VulnType, v.AffectedVersions, v.Source,
 			boolU8(v.PatchAvailable), float32(v.EpssScore), v.CweID, v.Confidence,
 			v.VulnCategory, v.RestartAction, v.VulnCategoryOverride, v.RestartActionOverride,

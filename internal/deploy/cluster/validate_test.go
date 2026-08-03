@@ -15,6 +15,7 @@ func baseHA() *Config {
 	c.Network.UI.Host = "ui.example.com"
 	c.Network.GRPC.Host = "grpc.example.com"
 	c.App.JWTSecret = "test-jwt-secret"
+	c.App.InternalSecret = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 	c.Infrastructure.MySQL.RootPassword = "root-pass"
 	c.Infrastructure.MySQL.Password = "user-pass"
 	c.Infrastructure.Kafka.BrokerPorts = []int{9092, 9094, 9095}
@@ -62,6 +63,7 @@ func TestValidateCoarseRolesStillOK(t *testing.T) {
 	c.Network.UI.Host = "ui.example.com"
 	c.Network.GRPC.Host = "grpc.example.com"
 	c.App.JWTSecret = "test-jwt-secret"
+	c.App.InternalSecret = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 	c.Infrastructure.MySQL.RootPassword = "root-pass"
 	c.Infrastructure.MySQL.Password = "user-pass"
 	c.Infrastructure.Kafka.BrokerPorts = []int{9092, 9094, 9095}

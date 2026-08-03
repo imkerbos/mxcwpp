@@ -11,9 +11,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 拆成独立 job 而不是一串 step，是为了避免「一处失败挡住其余全部」。
+#
+# 此前所有检查串在一个 job 里，顺序是 gofmt → lint → build → test。
+# 结果是某次 gofmt 失败后，后面的 build 和 test 根本没执行——包括所有文档同步门禁。
+# CI 因此长期显示红色，而没人知道测试到底过没过。
+# 一个永远红的构建等于没有构建。
 jobs:
-  go:
-    name: Go build / lint / test
+  test:
+    name: Build & Test（含文档同步门禁）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,20 +42,76 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Build
+        run: go build ./...
+
+      # 文档同步门禁（internal/deploy/docs_sync_test.go）、路由清单门禁、
+      # 告警覆盖门禁等都在这一步执行。它们必须独立于 lint 运行。
+      - name: Test
+        run: go test ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 阻塞门禁：存量告警已清零（2026-08-03）。
+      # 配置里排除了 staticcheck 的 QF（quickfix）类——那是编辑器交互式重构建议，
+      # 不指示缺陷，当门禁只会让人为过 CI 去改无关代码。
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
 
-      - name: Build
-        run: go build ./...
+  race:
+    name: Race detector（非阻塞）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
-      - name: Test
-        run: go test ./...
-
-      # 竞态检测暂设非阻塞：plugins/lib/go 存在已知 flaky race（zaptest logger 在测试
-      # 结束后仍被后台 goroutine 使用，纯测试问题非生产 race）。修复该泄漏后应移除
+      # plugins/lib/go 存在已知 flaky race（zaptest logger 在测试结束后仍被
+      # 后台 goroutine 使用，纯测试问题非生产 race）。修复该泄漏后应移除
       # continue-on-error 使其成为阻塞门禁。
-      - name: Test (race, advisory)
+      - name: Test (race)
         continue-on-error: true
         run: go test -race -short ./...
+
+  web:
+    name: Web 类型检查与测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 前端此前完全没有 CI 覆盖：类型错误、组件测试失败都要等人本地跑才发现。
+      - name: Type check
+        run: pnpm tsc --noEmit
+
+      - name: Test
+        run: pnpm test

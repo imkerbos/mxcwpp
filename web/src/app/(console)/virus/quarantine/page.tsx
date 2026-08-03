@@ -94,7 +94,7 @@ export default function QuarantinePage() {
   const queryClient = useQueryClient();
   const [params, setParams] = useUrlState({ page: 1, page_size: 20, keyword: "", status: "", severity: "" });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["quarantine-stats"],
     queryFn: () => virusApi.quarantineStatistics(),
   });
@@ -201,16 +201,17 @@ export default function QuarantinePage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("virus.quarantine.statQuarantined")} value={stats?.quarantined ?? 0} icon={Archive} tone="warning" />
+        <StatCard compact label={t("virus.quarantine.statQuarantined")} value={stats?.quarantined ?? 0} error={statsError} icon={Archive} tone="warning" />
         <StatCard
           compact
           label={t("virus.quarantine.statHighRisk")}
           value={(stats?.severity.critical ?? 0) + (stats?.severity.high ?? 0)}
+          error={statsError}
           icon={ShieldAlert}
           tone="danger"
         />
-        <StatCard compact label={t("virus.quarantine.statAffectedHosts")} value={stats?.affectedHosts ?? 0} icon={Server} tone="default" />
-        <StatCard compact label={t("virus.quarantine.statStorage")} value={formatFileSize(stats?.totalSize ?? 0)} icon={HardDrive} tone="success" />
+        <StatCard compact label={t("virus.quarantine.statAffectedHosts")} value={stats?.affectedHosts ?? 0} error={statsError} icon={Server} tone="default" />
+        <StatCard compact label={t("virus.quarantine.statStorage")} value={formatFileSize(stats?.totalSize ?? 0)} error={statsError} icon={HardDrive} tone="success" />
       </div>
 
       <div className="space-y-4">

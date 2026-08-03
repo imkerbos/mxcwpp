@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	acservice "github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kms"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
 	"github.com/matrixplusio/mxcwpp/internal/server/database"
@@ -52,10 +54,19 @@ func Initialize(configPath string) (*ManagerServices, error) {
 		return nil, err
 	}
 
-	// 2. 验证配置
+	// 2. 验证配置（通用规则 + Manager 专用强内部密钥校验）
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	// fail-fast：Manager 的内部服务路由始终强制 X-Internal-Secret，缺强密钥会导致
+	// AC 注册/命令下发永久 401，故启动前即拒绝，不留“健康但控制链路失效”状态。
+	if err := cfg.ValidateManager(); err != nil {
+		return nil, err
+	}
+
+	// 基线规则派发闸门是进程级策略。Manager 通过 TaskScheduler 走与 AgentCenter 同一条
+	// 派发链，故两个进程都要设置，否则同一份配置在两侧行为不一致。
+	acservice.SetBlockCustomExecRules(cfg.Server.Security.BlockExistingCustomExecRules)
 
 	// 3. 初始化日志
 	logger, err := serverLogger.Init(cfg.Log)
@@ -88,6 +99,16 @@ func Initialize(configPath string) (*ManagerServices, error) {
 		logger.Fatal("初始化数据库失败", zap.Error(err))
 		return nil, err
 	}
+
+	// 告警发布点：Manager 产出的关联事件与 K8s 基线告警经此走通知出口。
+	// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库、列表与大屏可见。
+	// SIEM 外发出口：Manager 产出关联事件与 K8s 基线告警，同样要进客户 SIEM。
+	siemEgress, _ := alertbus.NewSIEMEgress(logger.Named("siem"),
+		cfg.SIEM.Enabled, cfg.SIEM.Protocol, cfg.SIEM.Address, cfg.SIEM.Facility, 0)
+	alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
+		alertbus.FromConfig(cfg.Alerting.NotifyCategories,
+			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)).
+		WithEgress(siemEgress))
 
 	// 5.1 初始化默认数据（策略和规则）
 	// policyDir 传空字符串，让 InitDefaultData 自动检测生产/开发环境路径
@@ -159,7 +180,7 @@ func Initialize(configPath string) (*ManagerServices, error) {
 	}
 
 	// 5.8 初始化 Manager 侧任务调度器
-	acDispatcher := sd.NewACDispatcher(acRegistry, redisClient, logger)
+	acDispatcher := sd.NewACDispatcher(acRegistry, redisClient, logger, cfg.Server.InternalSecret)
 	taskScheduler := biz.NewTaskScheduler(db, acDispatcher, redisClient, logger)
 
 	// 5.9 初始化病毒库更新器

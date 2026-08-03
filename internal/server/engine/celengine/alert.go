@@ -10,8 +10,8 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/sanitize"
-	"github.com/matrixplusio/mxcwpp/internal/server/consumer/siem"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 	"github.com/matrixplusio/mxcwpp/internal/server/notify"
 )
@@ -30,16 +30,20 @@ const (
 
 // AlertGenerator 负责将 CEL 引擎匹配结果写入 alerts 表（去重模式）
 type AlertGenerator struct {
-	db            *gorm.DB
-	log           *zap.Logger
-	siemForwarder *siem.Forwarder // SIEM 转发器（可选）
-	throttler     *HitThrottler   // (host, rule) 频率限制器
+	db        *gorm.DB
+	log       *zap.Logger
+	throttler *HitThrottler // (host, rule) 频率限制器
 	// dbWhitelist 是 alert_whitelists 表中 exe/cmdline/host 维度条目的原子快照，
 	// 由 StartWhitelistReload 周期刷新；热路径零锁读，承接 P2-B 自动调优采纳的 exception。
 	dbWhitelist atomic.Pointer[[]model.AlertWhitelist]
 	// hostCreatedAt 是 host_id → created_at 的原子快照，由 StartHostGraceReload 周期刷新。
 	// created_at 不可变，缓存即可消除 hostInGrace 每事件一次的 DB 查（详见 host_grace.go）。
 	hostCreatedAt atomic.Pointer[map[string]time.Time]
+	// shadow 累计影子阶段规则的命中量，周期落库供晋级决策使用。
+	shadow *shadowRecorder
+	// mlRankCache 是 host_id → ML 排序加权的原子快照（详见 ml_rank.go）。
+	// 由 StartRiskCacheReload 周期刷新；只影响告警排序，不产生告警。
+	mlRankCache atomic.Pointer[map[string]float64]
 	// assetWeightCache（host_id → 资产权重）、correlationBoostCache（host_id → 关联加权）
 	// 是风险打分两项输入的原子快照，由 StartRiskCacheReload 周期刷新（详见 risk_cache.go）。
 	// 消除 computeRiskScore 每事件两次 DB 查（assetWeight / correlationBoost），engine CPU 高根因。
@@ -54,17 +58,15 @@ func NewAlertGenerator(db *gorm.DB, logger *zap.Logger) *AlertGenerator {
 		log:       logger,
 		throttler: NewHitThrottler(defaultHitBurstThreshold, defaultHitRefillWindow, defaultHitThrottleCapacity),
 	}
+	g.shadow = newShadowRecorder(db, logger)
+	g.shadow.StartShadowFlush(shadowFlushInterval)
 	// 启动时立即加载一次，后续由 StartWhitelistReload / StartHostGraceReload / StartRiskCacheReload 周期刷新
 	g.reloadDBWhitelist()
 	g.reloadHostCreatedAt()
 	g.reloadAssetWeightCache()
 	g.reloadCorrelationBoostCache()
+	g.reloadMLRankCache()
 	return g
-}
-
-// SetSIEMForwarder 设置 SIEM 转发器
-func (g *AlertGenerator) SetSIEMForwarder(f *siem.Forwarder) {
-	g.siemForwarder = f
 }
 
 // Generate 根据匹配的规则和事件字段生成或更新告警
@@ -81,6 +83,16 @@ func (g *AlertGenerator) Generate(hostID string, matchedRules []model.DetectionR
 		// 低保真单信号规则降级为 indicator：不独立出告警(否则在繁忙业务负载上刷屏,
 		// 实测高频外连/DNS/枚举类单条 hit 数十万)。事件仍经 anomaly/storyline 关联,
 		// 多信号关联命中才升级为告警(CrowdStrike IOA 模型)。
+		// 生命周期阶段先于一切其他判断：draft 不该被评估，shadow/context
+		// 不该独立告警。放在后面等于让未验证的规则先打扰到人再补救。
+		if !rule.AlertsIndependently() {
+			if rule.Stage == model.RuleStageShadow && g.shadow != nil {
+				// 影子命中必须留痕，否则它永远凑不齐晋级所需的观察数据，
+				// 会卡死在影子阶段。
+				g.shadow.record(fmt.Sprintf("cel-%d", rule.ID), hostID)
+			}
+			continue
+		}
 		if rule.IsLowFidelity() {
 			continue
 		}
@@ -283,22 +295,24 @@ func (g *AlertGenerator) sendNotification(alert *model.Alert) {
 
 // forwardToSIEM 将告警转发到 SIEM 系统
 func (g *AlertGenerator) forwardToSIEM(alert *model.Alert, fields map[string]string) {
-	if g.siemForwarder == nil {
-		return
-	}
-	go g.siemForwarder.SendAlert(siem.AlertEvent{
-		EventID:  "rule_match",
-		Name:     alert.Title,
-		Severity: alert.Severity,
-		HostID:   alert.HostID,
-		Hostname: fields["hostname"],
-		SourceIP: fields["src_ip"],
-		DestIP:   fields["dst_ip"],
-		PID:      fields["pid"],
-		Exe:      fields["exe"],
-		Cmdline:  fields["cmdline"],
-		RuleID:   alert.RuleID,
-		MITRE:    fields["mitre_id"],
+	// 统一走 alertbus 的外发出口，不再每条告警起一个 goroutine 去抢同一把锁——
+	// 告警风暴下那会堆出大量阻塞协程。外发本身是有界异步队列，满则丢弃并计量。
+	//
+	// EgressOnly：alerts 表这条链路的通知由 AgentCenter 内联与 Manager 定时器负责，
+	// 此处只保证客户 SIEM 收到记录，不重复通知。
+	alertbus.Publish(alertbus.Event{
+		Category:    model.NotifyCategoryDetection,
+		Source:      "cel_rule",
+		HostID:      alert.HostID,
+		Hostname:    fields["hostname"],
+		IP:          fields["src_ip"],
+		Severity:    alert.Severity,
+		Title:       alert.Title,
+		Description: alert.Description,
+		DedupKey:    alert.ResultID,
+		RefTable:    "alerts",
+		RefID:       alert.ResultID,
+		EgressOnly:  true,
 	})
 }
 

@@ -84,7 +84,7 @@ export default function BulletinsPage() {
     search: "",
   });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["bulletin-stats"],
     queryFn: () => vulnApi.bulletinStatistics(),
   });
@@ -181,10 +181,10 @@ export default function BulletinsPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
-        <StatCard compact label={t("vuln.bulletins.statActive")} value={stats?.active ?? 0} icon={Megaphone} tone="danger" />
-        <StatCard compact label={t("vuln.bulletins.statSlaBreached")} value={stats?.sla_breached ?? 0} icon={Clock} tone="warning" />
-        <StatCard compact label={t("vuln.bulletins.statP0")} value={byPriority.P0 ?? 0} icon={ShieldAlert} tone="danger" />
-        <StatCard compact label={t("vuln.bulletins.statP1")} value={byPriority.P1 ?? 0} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("vuln.bulletins.statActive")} value={stats?.active ?? 0} error={statsError} icon={Megaphone} tone="danger" />
+        <StatCard compact label={t("vuln.bulletins.statSlaBreached")} value={stats?.sla_breached ?? 0} error={statsError} icon={Clock} tone="warning" />
+        <StatCard compact label={t("vuln.bulletins.statP0")} value={byPriority.P0 ?? 0} error={statsError} icon={ShieldAlert} tone="danger" />
+        <StatCard compact label={t("vuln.bulletins.statP1")} value={byPriority.P1 ?? 0} error={statsError} icon={AlertTriangle} tone="warning" />
       </div>
 
       <div className="space-y-4">

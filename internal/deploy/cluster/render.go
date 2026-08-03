@@ -1,8 +1,10 @@
 package cluster
 
 import (
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +12,42 @@ import (
 	"text/template"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/matrixplusio/mxcwpp/internal/server/config"
 )
+
+// ensureEnrollToken 保证集群持有一个强 enroll token（与 internal_secret 同等处理）：
+//   - cfg.App.EnrollToken 已显式配置 → 校验强度后直接使用；
+//   - 否则复用 deploy/certs/enroll_token.secret（跨多次 render 稳定持久化）；
+//   - 仍无则以 crypto/rand 生成 32 字节 hex（64 字符）并持久化，权限 0600。
+func ensureEnrollToken(certsDir string, cfg *Config) error {
+	if strings.TrimSpace(cfg.App.EnrollToken) != "" {
+		if err := config.ValidateEnrollToken(cfg.App.EnrollToken); err != nil {
+			return err
+		}
+		return nil
+	}
+	tokenPath := filepath.Join(certsDir, "enroll_token.secret")
+	if b, err := os.ReadFile(tokenPath); err == nil {
+		if tok := strings.TrimSpace(string(b)); config.ValidateEnrollToken(tok) == nil {
+			cfg.App.EnrollToken = tok
+			return nil
+		}
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return fmt.Errorf("生成 enroll token 失败: %w", err)
+	}
+	tok := hex.EncodeToString(raw)
+	if err := os.MkdirAll(certsDir, 0o755); err != nil {
+		return fmt.Errorf("创建证书目录失败: %w", err)
+	}
+	if err := os.WriteFile(tokenPath, []byte(tok), 0o600); err != nil {
+		return fmt.Errorf("持久化 enroll token 失败: %w", err)
+	}
+	cfg.App.EnrollToken = tok
+	return nil
+}
 
 type RenderOptions struct {
 	ConfigPath string
@@ -93,11 +130,13 @@ type pdfDoc struct {
 }
 
 type serverDoc struct {
-	GRPC        endpointDoc `yaml:"grpc"`
-	HTTP        endpointDoc `yaml:"http"`
-	JWTSecret   string      `yaml:"jwt_secret"`
-	ManagerAddr string      `yaml:"manager_addr"`
-	InstanceID  string      `yaml:"instance_id"`
+	GRPC           endpointDoc `yaml:"grpc"`
+	HTTP           endpointDoc `yaml:"http"`
+	JWTSecret      string      `yaml:"jwt_secret"`
+	InternalSecret string      `yaml:"internal_secret"`
+	ManagerAddr    string      `yaml:"manager_addr"`
+	InstanceID     string      `yaml:"instance_id"`
+	Security       securityDoc `yaml:"security"`
 }
 
 type endpointDoc struct {
@@ -169,9 +208,35 @@ type prometheusDoc struct {
 }
 
 type mtlsDoc struct {
-	CACert     string `yaml:"ca_cert"`
-	ServerCert string `yaml:"server_cert"`
-	ServerKey  string `yaml:"server_key"`
+	CACert         string `yaml:"ca_cert"`
+	CAKey          string `yaml:"ca_key"`
+	ServerCert     string `yaml:"server_cert"`
+	ServerKey      string `yaml:"server_key"`
+	EnrollToken    string `yaml:"enroll_token"`
+	PerAgentCert   bool   `yaml:"per_agent_cert"`
+	EnforceAgentID bool   `yaml:"enforce_agent_id"`
+}
+
+type securityDoc struct {
+	Headers        securityHeadersDoc `yaml:"headers"`
+	LoginRateLimit rateLimitDoc       `yaml:"login_rate_limit"`
+	JWTBlacklist   toggleDoc          `yaml:"jwt_blacklist"`
+}
+
+type securityHeadersDoc struct {
+	Enabled bool   `yaml:"enabled"`
+	HSTS    bool   `yaml:"hsts"`
+	CSP     string `yaml:"csp,omitempty"`
+}
+
+type rateLimitDoc struct {
+	Enabled bool `yaml:"enabled"`
+	RPS     int  `yaml:"rps"`
+	Burst   int  `yaml:"burst"`
+}
+
+type toggleDoc struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type logDoc struct {
@@ -238,6 +303,11 @@ func RenderCluster(cfg *Config, opts RenderOptions) (*RenderResult, error) {
 			}
 			fmt.Fprintln(os.Stderr, "⚠️  server.crt SAN 已更新并重签（保 CA 不变）；deploy 后 AC 重启会断开当前 agent 长连接，agent 会自动重连（CA 不变兼容）")
 		}
+	}
+
+	// 保证强 enroll token（缺失则生成并持久化到 deploy/certs），随后注入各节点 server 配置。
+	if err := ensureEnrollToken(certsDir, cfg); err != nil {
+		return nil, fmt.Errorf("准备 enroll token 失败: %w", err)
 	}
 
 	result := &RenderResult{ClusterDir: clusterDir}
@@ -451,11 +521,19 @@ func renderTemplateFile(tmplPath, outputPath string, data any, mode os.FileMode)
 func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, managerHTTPPort int) error {
 	doc := serverConfigDoc{
 		Server: serverDoc{
-			GRPC:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
-			HTTP:        endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
-			JWTSecret:   cfg.App.JWTSecret,
-			ManagerAddr: fmt.Sprintf("http://localhost:%d", managerHTTPPort),
-			InstanceID:  assignment.Node.Name,
+			GRPC:           endpointDoc{Host: "0.0.0.0", Port: cfg.App.GRPCPort},
+			HTTP:           endpointDoc{Host: "0.0.0.0", Port: cfg.App.ManagerHTTPPort},
+			JWTSecret:      cfg.App.JWTSecret,
+			InternalSecret: cfg.App.InternalSecret,
+			ManagerAddr:    fmt.Sprintf("http://localhost:%d", managerHTTPPort),
+			InstanceID:     assignment.Node.Name,
+			// 生产默认启用安全加固：安全响应头（含 HSTS，UI 走 443 HTTPS）、登录限流、JWT 黑名单。
+			// 三者依赖 Redis（本配置已渲染 Redis），启用即生效，不会静默半失效。
+			Security: securityDoc{
+				Headers:        securityHeadersDoc{Enabled: true, HSTS: true},
+				LoginRateLimit: rateLimitDoc{Enabled: true, RPS: 10, Burst: 5},
+				JWTBlacklist:   toggleDoc{Enabled: true},
+			},
 		},
 		Database: databaseDoc{
 			Type: "mysql",
@@ -516,9 +594,13 @@ func writeServerConfig(path string, cfg *Config, assignment RoleAssignment, mana
 			},
 		},
 		MTLS: mtlsDoc{
-			CACert:     "/etc/mxcwpp/certs/ca.crt",
-			ServerCert: "/etc/mxcwpp/certs/server.crt",
-			ServerKey:  "/etc/mxcwpp/certs/server.key",
+			CACert:         "/etc/mxcwpp/certs/ca.crt",
+			CAKey:          "/etc/mxcwpp/certs/ca.key",
+			ServerCert:     "/etc/mxcwpp/certs/server.crt",
+			ServerKey:      "/etc/mxcwpp/certs/server.key",
+			EnrollToken:    cfg.App.EnrollToken,
+			PerAgentCert:   true,
+			EnforceAgentID: true,
 		},
 		Log: logDoc{
 			Level:     cfg.App.LogLevel,
@@ -565,6 +647,26 @@ func writeControlCerts(bundleDir string, certs *CertificateBundle) error {
 		}
 		if err := os.WriteFile(filepath.Join(bundleDir, "certs", name), content, mode); err != nil {
 			return fmt.Errorf("写入证书文件失败 %s: %w", name, err)
+		}
+	}
+
+	// nginx 只需要服务端证书对，单独放 certs/ssl 供只读挂载。
+	// 绝不把整个 certs 目录挂进 nginx 容器——那会把 CA 私钥、client.key、enroll_token.secret
+	// 一并暴露给一个直面公网的容器，等于把签发能力和 agent 引导令牌交出去。
+	sslDir := filepath.Join(bundleDir, "certs", "ssl")
+	if err := os.MkdirAll(sslDir, 0o755); err != nil {
+		return fmt.Errorf("创建 certs/ssl 目录失败: %w", err)
+	}
+	for name, content := range map[string][]byte{
+		"server.crt": certs.ServerCert,
+		"server.key": certs.ServerKey,
+	} {
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(name, ".key") {
+			mode = 0o600
+		}
+		if err := os.WriteFile(filepath.Join(sslDir, name), content, mode); err != nil {
+			return fmt.Errorf("写入 nginx TLS 文件失败 %s: %w", name, err)
 		}
 	}
 	return nil
@@ -615,6 +717,8 @@ func copyFile(src, dst string, mode os.FileMode) error {
 }
 
 func writeNginxConf(dst string, cfg *Config) error {
+	// HTTPS(443) 承载 UI/API/agent；HTTP(80) 仅本机健康探测 + 301 跳转，绝不承载 UI/API，
+	// 且不在明文端口发送 HSTS。TLS 复用集群 server 证书（含控制节点 SAN）。
 	conf := fmt.Sprintf(`# Manager 后端（host 网络模式，直接连 localhost）
 upstream mxcwpp-manager {
     least_conn;
@@ -622,15 +726,62 @@ upstream mxcwpp-manager {
     keepalive 32;
 }
 
+# HTTP(80)：仅本机/容器健康探测，其余 301 跳转 HTTPS。
 server {
     listen %d;
+    server_name _;
+
+    location = /health {
+        allow 127.0.0.1;
+        allow ::1;
+        allow 172.16.0.0/12;
+        allow 10.0.0.0/8;
+        deny all;
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok";
+    }
+
+    # Agent 插件包下载保留明文代理：agent 出厂 plugins.base_url 可能指向 80，且该路径
+    # 不承载凭据、内容有 SHA256 + 签名校验；301 到私有 CA HTTPS 会让全量 agent 下载失败。
+    location /api/v1/plugins/download {
+        proxy_pass http://mxcwpp-manager;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+    server_tokens off;
+}
+
+# HTTPS(443)：官方入口。
+server {
+    listen %d ssl;
+    http2 on;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
 
+    ssl_certificate     /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
     client_max_body_size 500M;
 
-    location /health {
+    location = /health {
         access_log off;
         return 200 "ok";
         add_header Content-Type text/plain;
@@ -664,7 +815,7 @@ server {
     }
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files $uri $uri.html $uri/ /index.html;
     }
 
     location ~* \.(js|css|png|jpg|gif|ico|svg|woff|woff2)$ {
@@ -674,9 +825,12 @@ server {
 
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     server_tokens off;
 }
-`, cfg.App.ManagerHTTPPort, cfg.App.HTTPPort)
+`, cfg.App.ManagerHTTPPort, cfg.App.HTTPPort, cfg.App.HTTPSPort)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

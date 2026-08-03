@@ -90,7 +90,7 @@ export default function KubeBaselineRulesPage() {
   const severityFormOptions = buildSeverityFormOptions(t);
   const matchPolicyOptions = buildMatchPolicyOptions(t);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["kube-baseline-rules", params],
     queryFn: () =>
       kubeApi.listBaselineRules({
@@ -100,6 +100,9 @@ export default function KubeBaselineRulesPage() {
         severity: params.severity || undefined,
       }),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const stats = data?.stats;
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -243,10 +246,10 @@ export default function KubeBaselineRulesPage() {
   return (
     <>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("kube.baselineRules.statTotalRules")} value={stats?.totalRules ?? 0} icon={ListChecks} tone="default" />
-        <StatCard compact label={t("kube.baselineRules.statEnabled")} value={stats?.enabled ?? 0} icon={ToggleRight} tone="success" />
-        <StatCard compact label={t("kube.baselineRules.statDisabled")} value={stats?.disabled ?? 0} icon={ToggleLeft} tone="warning" />
-        <StatCard compact label={t("kube.baselineRules.statBuiltin")} value={stats?.builtin ?? 0} icon={Lock} tone="default" />
+        <StatCard compact label={t("kube.baselineRules.statTotalRules")} value={stats?.totalRules ?? 0} {...statState} icon={ListChecks} tone="default" />
+        <StatCard compact label={t("kube.baselineRules.statEnabled")} value={stats?.enabled ?? 0} {...statState} icon={ToggleRight} tone="success" />
+        <StatCard compact label={t("kube.baselineRules.statDisabled")} value={stats?.disabled ?? 0} {...statState} icon={ToggleLeft} tone="warning" />
+        <StatCard compact label={t("kube.baselineRules.statBuiltin")} value={stats?.builtin ?? 0} {...statState} icon={Lock} tone="default" />
       </div>
 
       <div className="space-y-4">

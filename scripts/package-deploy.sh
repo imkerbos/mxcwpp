@@ -66,134 +66,55 @@ cp "$PROJECT_ROOT/deploy/config/"* "$PACKAGE_DIR/config/"
 
 chmod +x "$PACKAGE_DIR/deploy.sh"
 
-# 生成 docker-compose.yml（纯 image 模式，无 build）
+# SBOM：客户合规审计需要知道产品里装了哪些第三方组件。
+# 出现 Log4Shell 这类事件时，它决定的是十分钟答出有没有受影响，还是翻两天源码。
+if [ -x "$PROJECT_ROOT/scripts/gen-sbom.sh" ]; then
+    "$PROJECT_ROOT/scripts/gen-sbom.sh" "$PACKAGE_DIR/sbom.cdx.json" || \
+        echo "警告: SBOM 生成失败，发布包缺少物料清单" >&2
+fi
+
+# docker-compose.yml：直接复用官方拓扑，只把 image 换成发布镜像。
+#
+# 此前这里内嵌生成一份独立的 compose，服务集与 deploy/docker-compose.yml 不同——
+# 客户拿到的离线包里只有 mysql/agentcenter/manager/ui，没有 Kafka、ClickHouse、
+# Redis、Consumer，整条数据管道都不存在。装得起来，但什么都采不到。
+# 官方拓扑只能有一份，打包只做镜像前缀替换。
 if [ -n "$REGISTRY" ]; then
     IMAGE_PREFIX="${REGISTRY}/"
 else
     IMAGE_PREFIX=""
 fi
 
-cat > "$PACKAGE_DIR/docker-compose.yml" << EOF
-version: '3.8'
+cp "$PROJECT_ROOT/deploy/docker-compose.yml" "$PACKAGE_DIR/docker-compose.yml"
 
-services:
-  mysql:
-    image: mysql:8.0
-    container_name: mxcwpp-mysql
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: \${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: \${MYSQL_DATABASE:-mxcwpp}
-      MYSQL_USER: \${MYSQL_USER:-mxcwpp_user}
-      MYSQL_PASSWORD: \${MYSQL_PASSWORD}
-      TZ: \${TZ:-Asia/Shanghai}
-    volumes:
-      - \${DATA_DIR}/mysql:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ./config/mysql.cnf:/etc/mysql/conf.d/custom.cnf:ro
-      - \${DATA_DIR}/logs/mysql:/var/log/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p\${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks:
-      - mxcwpp-net
-    deploy:
-      resources:
-        limits:
-          memory: 4G
+# 去掉 build 段（发布包纯镜像模式），并按需加镜像仓库前缀。
+python3 - "$PACKAGE_DIR/docker-compose.yml" "$IMAGE_PREFIX" <<'PYEOF'
+import re, sys
 
-  agentcenter:
-    image: ${IMAGE_PREFIX}mxcwpp-agentcenter:\${VERSION:-${VERSION}}
-    container_name: mxcwpp-agentcenter
-    restart: always
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - "\${GRPC_PORT:-6751}:6751"
-    volumes:
-      - ./config/server.yaml:/etc/mxcwpp/server.yaml:ro
-      - ./certs:/etc/mxcwpp/certs:ro
-      - \${DATA_DIR}/logs/agentcenter:/var/log/mxcwpp
-      - \${DATA_DIR}/plugins:/opt/mxcwpp/plugins
-    environment:
-      TZ: \${TZ:-Asia/Shanghai}
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 6751 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    networks:
-      - mxcwpp-net
-    deploy:
-      resources:
-        limits:
-          memory: 4G
+path, prefix = sys.argv[1], sys.argv[2]
+src = open(path).read()
 
-  manager:
-    image: ${IMAGE_PREFIX}mxcwpp-manager:\${VERSION:-${VERSION}}
-    container_name: mxcwpp-manager
-    restart: always
-    depends_on:
-      mysql:
-        condition: service_healthy
-      agentcenter:
-        condition: service_healthy
-    ports:
-      - "\${MANAGER_PORT:-8080}:8080"
-    volumes:
-      - ./config/server.yaml:/etc/mxcwpp/server.yaml:ro
-      - ./certs:/etc/mxcwpp/certs:ro
-      - \${DATA_DIR}/logs/manager:/var/log/mxcwpp
-      - \${DATA_DIR}/plugins:/opt/mxcwpp/plugins:ro
-      - \${DATA_DIR}/uploads:/opt/mxcwpp/uploads
-    environment:
-      TZ: \${TZ:-Asia/Shanghai}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    networks:
-      - mxcwpp-net
-    deploy:
-      resources:
-        limits:
-          memory: 4G
+# 移除 build: 段（含其缩进子项），发布包不在客户机上构建。
+out, skip_indent = [], None
+for line in src.split("\n"):
+    stripped = line.lstrip()
+    indent = len(line) - len(stripped)
+    if skip_indent is not None:
+        if stripped and indent > skip_indent:
+            continue
+        skip_indent = None
+    if stripped.startswith("build:"):
+        skip_indent = indent
+        continue
+    out.append(line)
+src = "\n".join(out)
 
-  ui:
-    image: ${IMAGE_PREFIX}mxcwpp-ui:\${VERSION:-${VERSION}}
-    container_name: mxcwpp-ui
-    restart: always
-    depends_on:
-      manager:
-        condition: service_healthy
-    ports:
-      - "\${HTTP_PORT:-80}:80"
-      - "\${HTTPS_PORT:-443}:443"
-    volumes:
-      - ./config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs/ssl:/etc/nginx/ssl:ro
-      - \${DATA_DIR}/logs/nginx:/var/log/nginx
-    environment:
-      TZ: \${TZ:-Asia/Shanghai}
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - mxcwpp-net
+# mxcwpp 自有镜像加仓库前缀；第三方镜像（mysql/redis/gotenberg 等）不动。
+if prefix:
+    src = re.sub(r"(image:\s+)(mxcwpp-[\w.-]+:)", r"\1" + prefix + r"\2", src)
 
-networks:
-  mxcwpp-net:
-    driver: bridge
-EOF
+open(path, "w").write(src)
+PYEOF
 
 # 打包
 cd "$OUTPUT_DIR"

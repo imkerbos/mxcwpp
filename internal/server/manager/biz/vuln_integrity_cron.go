@@ -133,10 +133,10 @@ func (c *VulnIntegrityCron) Check(ctx context.Context) (*IntegrityReport, error)
 // 简化实现：检查 reference_url 是否可访问（200）+ 响应含 component/fixed_version 关键字。
 // 完整实现应解析上游 API JSON，按 source 路由 fetch advisory detail。
 func (c *VulnIntegrityCron) verifyOne(ctx context.Context, v *model.Vulnerability) (bool, error) {
-	if v.ReferenceUrl == "" {
+	if v.ReferenceURL == "" {
 		return false, fmt.Errorf("无 reference_url")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.ReferenceUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.ReferenceURL, nil)
 	if err != nil {
 		return false, err
 	}

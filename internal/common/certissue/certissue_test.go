@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,7 +76,7 @@ func TestSignAgentCertCNAndChain(t *testing.T) {
 	}
 }
 
-func TestFingerprintAndPin(t *testing.T) {
+func TestValidateFingerprint(t *testing.T) {
 	caCertPEM, _ := newTestCA(t)
 	fp, err := CAFingerprint(caCertPEM)
 	if err != nil {
@@ -84,28 +85,59 @@ func TestFingerprintAndPin(t *testing.T) {
 	if len(fp) != 64 {
 		t.Fatalf("sha256 hex 应 64 字符，实际 %d", len(fp))
 	}
-
-	caBlock, _ := pem.Decode(caCertPEM)
-	// 匹配（含冒号大写格式也应归一化通过）
-	if err := VerifyChainPinnedCA([][]byte{caBlock.Bytes}, fp); err != nil {
-		t.Fatalf("pin 应匹配: %v", err)
+	if err := ValidateFingerprint(fp); err != nil {
+		t.Fatalf("合法指纹应通过: %v", err)
 	}
+	// 冒号 / 大写格式归一化后仍合法
 	withColons := ""
 	for i := 0; i < len(fp); i += 2 {
 		if i > 0 {
 			withColons += ":"
 		}
-		withColons += fp[i : i+2]
+		withColons += strings.ToUpper(fp[i : i+2])
 	}
-	if err := VerifyChainPinnedCA([][]byte{caBlock.Bytes}, withColons); err != nil {
-		t.Fatalf("冒号格式 pin 应匹配: %v", err)
+	if err := ValidateFingerprint(withColons); err != nil {
+		t.Fatalf("冒号大写格式应归一化通过: %v", err)
 	}
+	for _, bad := range []string{"", "deadbeef", fp[:63], fp + "ab", "__PLACEHOLDER__"} {
+		if err := ValidateFingerprint(bad); err == nil {
+			t.Fatalf("非法指纹 %q 应被拒绝", bad)
+		}
+	}
+}
 
-	// 不匹配
-	if err := VerifyChainPinnedCA([][]byte{caBlock.Bytes}, "deadbeef"); err == nil {
-		t.Fatal("错误指纹应拒绝")
+// TestVerifyChainPinnedCA_FullVerification 覆盖完整 pinned-root 校验的正/负路径：
+//   - 正确链（leaf+CA）+ 正确 SAN → 通过；
+//   - 空链 / 非法指纹 → 拒绝；
+//   - 错误 SAN → 拒绝；
+//   - “把正确 CA 作为无关附加证书塞进伪造链”（evil-leaf + 正确 CA）→ 拒绝。
+func TestVerifyChainPinnedCA_FullVerification(t *testing.T) {
+	caPEM, _, caCert, caKey := buildCA(t)
+	fp, _ := CAFingerprint(caPEM)
+	leaf := serverLeaf(t, caCert, caKey) // Certificate = [leafDER, caDER]，SAN=ac.local
+
+	// 正确链 + 正确 SAN
+	if err := VerifyChainPinnedCA(leaf.Certificate, fp, "ac.local"); err != nil {
+		t.Fatalf("正确链应通过: %v", err)
 	}
-	if err := VerifyChainPinnedCA(nil, fp); err == nil {
+	// 空链
+	if err := VerifyChainPinnedCA(nil, fp, "ac.local"); err == nil {
 		t.Fatal("空链应拒绝")
+	}
+	// 非法指纹
+	if err := VerifyChainPinnedCA(leaf.Certificate, "deadbeef", "ac.local"); err == nil {
+		t.Fatal("非法指纹应拒绝")
+	}
+	// 错误 SAN
+	if err := VerifyChainPinnedCA(leaf.Certificate, fp, "evil.example"); err == nil {
+		t.Fatal("SAN 不符应拒绝")
+	}
+	// 攻击：evil-leaf 由 evilCA 签发，但把“正确 CA”作为无关附加证书塞进链尾。
+	// 指纹匹配到正确 CA，但 evil-leaf 无法由它验签 → 必须拒绝。
+	_, _, evilCA, evilKey := buildCA(t)
+	evilLeaf := serverLeaf(t, evilCA, evilKey)
+	forged := [][]byte{evilLeaf.Certificate[0], caCert.Raw}
+	if err := VerifyChainPinnedCA(forged, fp, "ac.local"); err == nil {
+		t.Fatal("把正确 CA 作为无关附加证书的伪造链应被拒绝")
 	}
 }

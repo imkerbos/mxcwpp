@@ -2,12 +2,13 @@
 package middleware
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
+	"github.com/matrixplusio/mxcwpp/internal/server/common/internalauth"
 )
 
 // Logger 是 Gin 日志中间件
@@ -65,19 +66,8 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 }
 
 // InternalAuth 内部服务通信认证中间件
-// 验证请求头 X-Internal-Secret 是否匹配共享密钥
+// 验证请求头 X-Internal-Secret 是否匹配共享密钥。
+// 实现委托给中立 common/internalauth，与 AgentCenter 共用同一常量时间比较逻辑。
 func InternalAuth(secret string) gin.HandlerFunc {
-	secretBytes := []byte(secret)
-	return func(c *gin.Context) {
-		provided := c.GetHeader("X-Internal-Secret")
-		if subtle.ConstantTimeCompare([]byte(provided), secretBytes) != 1 {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "unauthorized",
-			})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
+	return internalauth.Middleware(secret)
 }

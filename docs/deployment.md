@@ -35,7 +35,7 @@
 | 模式 | 配置文件 | 特点 | 适用场景 |
 |------|---------|------|---------|
 | 开发环境 | `docker-compose.dev.yml` | 源码热重载（Air），单 Kafka 节点，包含 engine/llmproxy/vulnsync 全 6 微服务 | 日常开发调试 |
-| 完整 v2 编排 | `docker-compose.v2.yml` | 预构建镜像，**完整 6 微服务**（manager + agentcenter + consumer + engine + llmproxy + vulnsync + ui）+ 基础设施 | 单机 v2 部署、验证联调 |
+| **官方单机部署** | `docker-compose.yml`（经 `deploy.sh`） | **唯一官方单机拓扑**：全部服务端微服务 + 基础设施 + gotenberg | 单机生产、POC、离线交付 |
 | 压测环境 | `docker-compose.pret.yml` | 预构建镜像，3 Kafka 节点，支持 `--scale` 多副本 | 性能压测、预发布验证 |
 | 生产环境 | `cluster.example.yaml` + `mxctl deploy` | 多节点角色分离，完整 HA | 正式生产部署 |
 
@@ -76,34 +76,6 @@ make web-dev             # 本机启动前端 (端口 3000, 热更新快)
 
 ---
 
-## v2 完整微服务编排
-
-`docker-compose.v2.yml` 提供 v2.0 完整六微服务架构的单机编排，可在单台机器上启动全部 6 个 mxcwpp 服务 + 基础设施，用于联调和功能验证。
-
-```bash
-cd deploy/
-cp env.example .env
-vim .env  # 修改密码、SERVER_IP 等
-
-docker compose -f docker-compose.v2.yml up -d
-```
-
-包含的 mxcwpp 服务：
-
-| 服务 | 端口 | 职责 |
-|------|------|------|
-| manager | 8080 | HTTP API + 控制台后端 |
-| agentcenter | 6751/6752 | Agent gRPC 接入 |
-| consumer | - | Kafka 持久化（无对外端口） |
-| engine | 8090 | 检测分析引擎（16 stages） |
-| llmproxy | 8091 | LLM 适配网关 |
-| vulnsync | 8092 | 漏洞情报融合 |
-| web | 3000 | Next.js (React) SPA, 静态导出 |
-
-基础设施服务：mysql / redis / kafka(KRaft) / clickhouse / prometheus / grafana。
-
----
-
 ## 压测环境
 
 压测环境采用 `docker-compose.pret.yml`，使用预构建镜像，配置 3 个 Kafka 节点，支持通过 `--scale` 参数启动多副本。
@@ -115,6 +87,33 @@ make pret-docker-down    # 停止压测环境
 ```
 
 ---
+
+## 唯一官方单机拓扑
+
+`deploy/docker-compose.yml` 是唯一的官方单机部署拓扑，`deploy.sh` 与离线发布包都用它。
+
+此前存在三份互不相同的拓扑：`docker-compose.yml`（缺 engine / vulnsync / llmproxy /
+gotenberg）、`docker-compose.v2.yml`，以及打包脚本内嵌生成的第三份（**只有
+mysql / agentcenter / manager / ui**，没有 Kafka、ClickHouse、Redis、Consumer）。
+客户拿到哪一份取决于走了哪条路径，而一键部署恰好用的是缺检测引擎那份——
+装得起来、界面能开，核心能力都不在。
+
+现在只有一份，打包只做镜像前缀替换（去 `build` 段、给 `mxcwpp-*` 镜像加仓库前缀，
+第三方镜像不动）。
+
+包含的服务：
+
+| 类别 | 服务 |
+|------|------|
+| 服务端微服务 | manager、agentcenter、consumer、engine、vulnsync、llmproxy |
+| 前端 | ui |
+| 支撑 | gotenberg（报告 PDF 渲染） |
+| 基础设施 | mysql、redis、kafka ×3、clickhouse |
+
+**闸门**：`internal/deploy/topology_test.go` 把 `cmd/server/*` 与本拓扑绑定——
+新增服务端微服务未加进部署即测试失败；打包脚本若改回内嵌生成也会失败。
+缺服务不是"少个容器"，而是该能力在客户环境里从未运行过。
+
 
 ## 生产部署
 
@@ -466,13 +465,36 @@ make certs
 
 ```
 deploy/certs/
-  ca.crt / ca.key            # CA 证书
-  server.crt / server.key    # AgentCenter 使用
+  ca.crt / ca.key            # CA 证书（ca.key 供 AC 在线签发单机证书）
+  server.crt / server.key    # AgentCenter 使用（必须含 serverAuth + 覆盖 SERVER_IP 的 SAN）
   agent.crt / agent.key      # Agent 使用
   client.crt / client.key    # agent.crt/key 的副本，兼容旧名称
+  ssl/server.crt,server.key  # 仅此子目录挂载给 nginx（443）
+  enroll_token.secret        # 集群渲染生成的 enroll 令牌，0600，不入库
 ```
 
-Agent 首次连接时 AgentCenter 自动下发证书，后续连接切换为正式 mTLS。
+> nginx 容器只挂载 `certs/ssl`。整个 `certs` 目录含 CA 私钥、client 私钥与 enroll 令牌，
+> 挂给一个直面公网的容器等于交出整条信任链。
+
+### Agent 接入（一机一证）
+
+Agent 首连不再使用共享客户端证书，而是凭 **enroll 令牌**换取按 AgentID 签发的单机证书：
+
+1. Agent 无客户端证书时只能走 enroll：提交合法 AgentID + enroll 令牌；
+2. AgentCenter 校验后现签 `CN=AgentID` 的单机证书并下发，随即结束该连接；
+3. Agent 携新证书重连，走完整 mTLS，且证书 CN 必须与上报 AgentID 一致。
+
+enroll 阶段不注册在线连接、不处理心跳、不下发插件任务，也无法访问其它 RPC。失陷主机可单独吊销，私钥泄露不影响他机。
+
+**安装时必须提供 enroll 令牌**（取自部署机 `deploy/.env` 的 `ENROLL_TOKEN`）：
+
+```bash
+MXCWPP_ENROLL_TOKEN=<token> bash -c "$(curl -fsSL http://SERVER_IP:8080/agent/install.sh)"
+```
+
+令牌写入 `/etc/mxcwpp-agent/agent.env`（root-only 0600），由 systemd 经 `EnvironmentFile` 注入，不出现在进程参数或 unit 文件中。**令牌不经 `/agent/install.sh` 下发**——该端点匿名可访问，注入即等于公开令牌。
+
+已持有单机证书的主机重装/升级无需再次提供令牌。生产构建（`PROD_BUILD=1`）的安装包只含 `ca.crt`，不再下发共享 client 证书。
 
 ---
 
@@ -534,6 +556,58 @@ journalctl -u mxcwpp-agent -f
 ```
 
 ---
+
+## 可复现构建与 SBOM
+
+同一份源码必须能构建出**逐字节相同**的二进制，否则客户拿到的包无法与源码对账，
+出问题时也无法确认"跑的到底是不是这份代码"。
+
+此前有两处破坏可复现，均已实测确认并修复：
+
+| 问题 | 后果 | 现在 |
+|---|---|---|
+| 缺 `-trimpath` | 二进制嵌入构建机绝对路径（实测 **3985 处**），跨机构建结果不同且泄露构建环境 | 三处 `go build` 与 Makefile 六处全部加上 |
+| `BUILD_TIME=$(date)` | 同一源码每次构建产出不同二进制 | 取 git 提交时间；支持 `SOURCE_DATE_EPOCH` 覆盖 |
+
+`gitCommit` 嵌入二进制，供交付后与源码对账。
+
+**SBOM**：`./scripts/gen-sbom.sh` 产出 CycloneDX 1.5 物料清单（439 个组件），
+打包时自动放进发布包。只用 Go 自带的 `go list -m`，不依赖 cyclonedx-gomod 等外部工具——
+离线环境与客户现场装不上额外工具很常见，多一个依赖就多一处装不上的理由。
+
+清单带 `go.sum` 校验和（可验证而非仅罗列），条目排序、时间戳取提交时间、
+serialNumber 由内容派生，因此 **SBOM 本身也是可复现的**：同一 commit 永远得到同一份文件。
+
+合规审计需要它；供应链事件（如 Log4Shell）发生时，它决定的是十分钟内答出有没有受影响，
+还是翻两天源码。
+
+
+## 备份、还原与回滚
+
+```bash
+./deploy.sh backup                    # 备份（校验后保留）
+./deploy.sh restore <备份文件>         # 从备份还原
+./deploy.sh rollback                  # 回退到升级前的版本
+```
+
+**备份会自我校验**。原实现是 `mysqldump | gzip > file` 且未开 `pipefail`：
+dump 失败时 gzip 依然成功，管道返回 0，于是留下一个二十几字节的文件并打印
+"备份完成"，升级照常进行。能骗人的备份比没有备份更危险——运维以为有退路。
+
+现在三关都过才算备份成功：gzip 完整性、解压后大小下限、内容确实含建表语句。
+任一不过即删除该文件并报错。大小阈值取**解压后**尺寸，因为 SQL 转储重复度极高，
+按压缩后大小设阈值会把正常备份误判为失败。
+
+**升级留回滚点**。`upgrade` 会把升级前的版本号与备份路径写入 `.env`
+（`PREV_VERSION` / `PREV_BACKUP`），备份失败则直接中止——没有退路就不往前走。
+结束时真的等待服务健康，而不是 `sleep 10` 后无条件打印"升级完成"；未就绪时
+明确给出回退命令并以非零码退出。
+
+**回滚默认不还原数据库**。升级后可能已写入新数据，一并回滚会把它们抹掉。
+版本回退与数据还原是两个独立决定，需要还原时显式执行 `restore`。
+
+**还原前会先备份当前库**。用一个坏备份覆盖掉还能用的数据是最坏结果，
+所以还原是先校验目标备份、再给现状留底、再停应用服务、最后导入。
 
 ## 升级
 

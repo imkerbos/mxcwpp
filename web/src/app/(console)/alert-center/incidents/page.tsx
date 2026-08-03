@@ -4,14 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useUrlState } from "@/hooks/useUrlState";
 import { incidentsApi } from "@/lib/api/incidents";
-import type { Incident, Severity } from "@/lib/api/types";
+import type { Incident, Severity, IncidentVerdict } from "@/lib/api/types";
 import { Card } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Pagination } from "@/components/ui/Pagination";
 import { FilterBar } from "@/components/ui/FilterBar";
 import { Select } from "@/components/ui/Select";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Drawer } from "@/components/ui/Drawer";
+import { ResolveDialog } from "./_components/ResolveDialog";
+import { IncidentTimeline } from "./_components/IncidentTimeline";
 import { Button } from "@/components/ui/Button";
 import { SeverityTag, StatusTag } from "@/components/ui/Tag";
 import { toast } from "@/components/ui/toast";
@@ -77,14 +78,42 @@ export default function IncidentsPage() {
     enabled: !!detailId,
   });
 
+  // 关闭必须带研判结论与原因——后端会拒绝缺任一项的请求。
   const resolveMutation = useMutation({
-    mutationFn: (id: string) => incidentsApi.resolve(id),
+    mutationFn: (v: { id: string; verdict: IncidentVerdict; reason: string }) =>
+      incidentsApi.resolve(v.id, v.verdict, v.reason),
     onSuccess: () => {
       invalidate();
       setResolving(null);
       toast.success(t("alerts.incident.resolved"));
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  // 认领是 MTTA 的终点，也是"这条有人在看"的唯一依据。
+  const ackMutation = useMutation({
+    mutationFn: (id: string) => incidentsApi.ack(id),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["incident-timeline"] });
+      queryClient.invalidateQueries({ queryKey: ["incident-detail"] });
+      toast.success(t("alerts.incident.acked"));
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const commentMutation = useMutation({
+    mutationFn: (v: { id: string; body: string; ref?: string }) =>
+      incidentsApi.comment(v.id, v.body, v.ref),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["incident-timeline"] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // 事件时间线：谁在什么时候基于什么做了什么，复盘唯一要看的东西。
+  const { data: timeline } = useQuery({
+    queryKey: ["incident-timeline", detailId],
+    queryFn: () => incidentsApi.timeline(detailId!),
+    enabled: !!detailId,
   });
 
   const columns: Column<Incident>[] = [
@@ -186,15 +215,26 @@ export default function IncidentsPage() {
         width={680}
         title={t("alerts.incident.detailTitle")}
         footer={
-          detail?.incident.status === "active" ? (
-            <Button
-              onClick={() => {
-                setResolving(detail.incident);
-                setDetailId(null);
-              }}
-            >
-              {t("alerts.incident.resolve")}
-            </Button>
+          detail && detail.incident.status !== "resolved" ? (
+            <div className="flex gap-2">
+              {!detail.incident.acked_at && (
+                <Button
+                  variant="ghost"
+                  disabled={ackMutation.isPending}
+                  onClick={() => ackMutation.mutate(detail.incident.incident_id)}
+                >
+                  {t("alerts.incident.ack")}
+                </Button>
+              )}
+              <Button
+                onClick={() => {
+                  setResolving(detail.incident);
+                  setDetailId(null);
+                }}
+              >
+                {t("alerts.incident.resolve")}
+              </Button>
+            </div>
           ) : undefined
         }
       >
@@ -277,15 +317,31 @@ export default function IncidentsPage() {
             </div>
           </div>
         ) : null}
+        {detail && (
+          <div className="mt-4 border-t border-line pt-4">
+            <div className="mb-2 text-sm font-semibold text-ink">
+              {t("alerts.incident.timeline")}
+            </div>
+            <IncidentTimeline
+              events={timeline?.items ?? []}
+              disabled={detail.incident.status === "resolved"}
+              submitting={commentMutation.isPending}
+              onComment={(body, ref) =>
+                commentMutation.mutate({ id: detail.incident.incident_id, body, ref })
+              }
+            />
+          </div>
+        )}
       </Drawer>
 
-      <ConfirmDialog
+      <ResolveDialog
         open={!!resolving}
-        title={t("alerts.incident.resolveTitle")}
-        desc={resolving ? t("alerts.incident.resolveConfirmDesc", { title: resolving.title }) : undefined}
-        loading={resolveMutation.isPending}
-        onConfirm={() => resolving && resolveMutation.mutate(resolving.incident_id)}
+        title={resolving?.title}
+        submitting={resolveMutation.isPending}
         onCancel={() => setResolving(null)}
+        onSubmit={(verdict, reason) =>
+          resolving && resolveMutation.mutate({ id: resolving.incident_id, verdict, reason })
+        }
       />
     </>
   );

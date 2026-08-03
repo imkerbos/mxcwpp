@@ -149,15 +149,23 @@ func handleScanTask(ctx context.Context, task *bridge.Task, scanEngine *engine.E
 	}
 
 	// 发送任务完成信号（DataType 7002）
+	//
+	// scan_status 区分"扫过且干净"与"根本没扫"：引擎不可用时此前同样上报
+	// status=completed、threat_count=0，服务端与界面把它当作主机干净。
+	// 没扫是覆盖缺口，不是结论。
+	outcome := scanEngine.LastOutcome()
+	engineReports, _ := json.Marshal(outcome.Reports)
 	completeRecord := &bridge.Record{
 		DataType:  engine.DataTypeScanComplete,
 		Timestamp: time.Now().UnixNano(),
 		Data: &bridge.Payload{
 			Fields: map[string]string{
-				"task_id":      req.TaskID,
-				"status":       "completed",
-				"threat_count": fmt.Sprintf("%d", len(results)),
-				"completed_at": time.Now().Format(time.RFC3339),
+				"task_id":        req.TaskID,
+				"status":         "completed",
+				"scan_status":    outcome.Status,
+				"engine_reports": string(engineReports),
+				"threat_count":   fmt.Sprintf("%d", len(results)),
+				"completed_at":   time.Now().Format(time.RFC3339),
 			},
 		},
 	}
@@ -167,6 +175,7 @@ func handleScanTask(ctx context.Context, task *bridge.Task, scanEngine *engine.E
 
 	logger.Info("scan task completed",
 		zap.String("task_id", req.TaskID),
+		zap.String("scan_status", outcome.Status),
 		zap.Int("threat_count", len(results)))
 
 	return nil

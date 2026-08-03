@@ -88,7 +88,7 @@ func (s *ImageScanner) GetScanByID(id uint) (*model.ImageScan, error) {
 func (s *ImageScanner) ScanRegistry(registryID uint) error {
 	var registry model.ImageRegistry
 	if err := s.db.First(&registry, registryID).Error; err != nil {
-		return fmt.Errorf("Registry 不存在: %w", err)
+		return fmt.Errorf("registry 不存在: %w", err)
 	}
 
 	s.logger.Info("开始扫描 Registry", zap.String("name", registry.Name), zap.String("url", registry.URL))

@@ -74,6 +74,8 @@ func Initialize(configPath string) (*AgentCenterServices, error) {
 	grpcProto.RegisterTransferServer(grpcServer, transferService)
 
 	// 7. 创建任务服务
+	// 派发阶段是否拦截存量自定义可执行规则（默认只记审计不拦截）。进程级策略，设一次。
+	service.SetBlockCustomExecRules(cfg.Server.Security.BlockExistingCustomExecRules)
 	taskService := service.NewTaskService(db, logger)
 
 	ctx, cancel := context.WithCancel(context.Background())

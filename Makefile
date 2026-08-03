@@ -1,4 +1,4 @@
-.PHONY: proto test test-ui test-all test-race security clean help build-server build-consumer build-engine build-vulnsync build-llmproxy build-all-services package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart web-dev pret-docker-up pret-docker-up-d pret-docker-down
+.PHONY: hooks proto test test-ui test-all test-race security clean help build-server build-consumer build-engine build-vulnsync build-llmproxy build-all-services package-agent package-agent-all package-plugins package-plugins-all package-all package-all-arch dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-restart web-dev pret-docker-up pret-docker-up-d pret-docker-down
 
 # 默认变量
 VERSION ?= 1.0.0
@@ -68,14 +68,14 @@ pret-docker-down:
 build-server:
 	@echo "Building server..."
 	@mkdir -p dist/server
-	@go build -ldflags "-s -w" -o dist/server/agentcenter ./cmd/server/agentcenter
-	@go build -ldflags "-s -w" -o dist/server/manager ./cmd/server/manager
+	@go build -trimpath -ldflags "-s -w" -o dist/server/agentcenter ./cmd/server/agentcenter
+	@go build -trimpath -ldflags "-s -w" -o dist/server/manager ./cmd/server/manager
 	@echo "Server binaries built: dist/server/"
 
 build-consumer:
 	@echo "Building consumer..."
 	@mkdir -p dist/server
-	@go build -ldflags "-s -w" -o dist/server/consumer ./cmd/server/consumer
+	@go build -trimpath -ldflags "-s -w" -o dist/server/consumer ./cmd/server/consumer
 	@echo "Consumer binary built: dist/server/consumer"
 
 # v2.0 六微服务新增二进制 (PR3 引入)
@@ -83,19 +83,19 @@ build-consumer:
 build-engine:
 	@echo "Building engine..."
 	@mkdir -p dist/server
-	@go build -ldflags "-s -w" -o dist/server/engine ./cmd/server/engine
+	@go build -trimpath -ldflags "-s -w" -o dist/server/engine ./cmd/server/engine
 	@echo "Engine binary built: dist/server/engine"
 
 build-vulnsync:
 	@echo "Building vulnsync..."
 	@mkdir -p dist/server
-	@go build -ldflags "-s -w" -o dist/server/vulnsync ./cmd/server/vulnsync
+	@go build -trimpath -ldflags "-s -w" -o dist/server/vulnsync ./cmd/server/vulnsync
 	@echo "VulnSync binary built: dist/server/vulnsync"
 
 build-llmproxy:
 	@echo "Building llmproxy..."
 	@mkdir -p dist/server
-	@go build -ldflags "-s -w" -o dist/server/llmproxy ./cmd/server/llmproxy
+	@go build -trimpath -ldflags "-s -w" -o dist/server/llmproxy ./cmd/server/llmproxy
 	@echo "LLMProxy binary built: dist/server/llmproxy"
 
 # 一键构建全部六微服务
@@ -121,6 +121,11 @@ package-all-arch:
 	@./scripts/build.sh all --arch=all --version=$(VERSION) --server=$(SERVER_HOST)
 
 # ============ 测试与质量 ============
+
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "已启用 .githooks/（提交前自动检查 gofmt / 冲突标记 / 明文令牌）"
+	@echo "跳过单次检查：git commit --no-verify"
 
 test:
 	go test ./...

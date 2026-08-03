@@ -88,7 +88,7 @@ export default function RemediationTasksPage() {
   const statusOptions = buildStatusOptions(t);
   const [params, setParams] = useUrlState({ page: 1, page_size: 20, status: "" });
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["remediation-task-stats"],
     queryFn: () => vulnApi.remediationTaskStats(),
   });
@@ -161,11 +161,11 @@ export default function RemediationTasksPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5 mb-5">
-        <StatCard compact label={t("vuln.remediationTasks.statTotal")} value={stats?.total ?? 0} icon={ListChecks} tone="default" />
-        <StatCard compact label={t("vuln.remediationTasks.statPending")} value={stats?.pending ?? 0} icon={Clock} tone="warning" />
-        <StatCard compact label={t("vuln.remediationTasks.statRunning")} value={stats?.running ?? 0} icon={Loader} tone="default" />
-        <StatCard compact label={t("vuln.remediationTasks.statSuccess")} value={stats?.success ?? 0} icon={CheckCircle} tone="success" />
-        <StatCard compact label={t("vuln.remediationTasks.statFailed")} value={stats?.failed ?? 0} icon={XCircle} tone="danger" />
+        <StatCard compact label={t("vuln.remediationTasks.statTotal")} value={stats?.total ?? 0} error={statsError} icon={ListChecks} tone="default" />
+        <StatCard compact label={t("vuln.remediationTasks.statPending")} value={stats?.pending ?? 0} error={statsError} icon={Clock} tone="warning" />
+        <StatCard compact label={t("vuln.remediationTasks.statRunning")} value={stats?.running ?? 0} error={statsError} icon={Loader} tone="default" />
+        <StatCard compact label={t("vuln.remediationTasks.statSuccess")} value={stats?.success ?? 0} error={statsError} icon={CheckCircle} tone="success" />
+        <StatCard compact label={t("vuln.remediationTasks.statFailed")} value={stats?.failed ?? 0} error={statsError} icon={XCircle} tone="danger" />
       </div>
 
       <div className="space-y-4">

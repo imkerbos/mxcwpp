@@ -55,7 +55,24 @@ PKG_DIR="dist/packages"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# BUILD_TIME 取 git 提交时间而非当前时间。
+#
+# 用 date 会让同一份源码每次构建产出不同的二进制：客户拿到的包无法与源码对账，
+# 出了问题也无法确认"跑的到底是不是这份代码"。提交时间对同一 commit 恒定，
+# 既保留了版本信息，又不破坏可复现。
+# SOURCE_DATE_EPOCH 是可复现构建的通行约定，允许外部覆盖。
+if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
+    BUILD_TIME=$(date -u -d "@${SOURCE_DATE_EPOCH}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+        || date -u -r "${SOURCE_DATE_EPOCH}" +"%Y-%m-%dT%H:%M:%SZ")
+elif GIT_TS=$(git log -1 --format=%cI 2>/dev/null) && [ -n "$GIT_TS" ]; then
+    BUILD_TIME="$GIT_TS"
+else
+    BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    echo "警告: 非 git 环境，回退到当前时间，本次构建不可复现" >&2
+fi
+
+# GIT_COMMIT 嵌入二进制，供交付后与源码对账。
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
 mkdir -p "$PKG_DIR"
 
@@ -96,10 +113,37 @@ get_archs() {
     esac
 }
 
+# compute_ca_fingerprint 计算 deploy/certs/ca.crt 的 SHA-256 指纹（小写 hex，无冒号），
+# 供 agent 首连 pin AC，杜绝中间人。无 CA 文件时输出空串。
+compute_ca_fingerprint() {
+    local ca="deploy/certs/ca.crt"
+    [ -f "$ca" ] || { echo ""; return; }
+    openssl x509 -in "$ca" -noout -fingerprint -sha256 2>/dev/null \
+        | sed 's/.*=//; s/://g' | tr 'A-Z' 'a-z'
+}
+
 # 打包 Agent
 package_agent() {
     local arch=$1
     echo -e "${GREEN}[PACKAGE] Agent ($arch)${NC}"
+
+    local ca_fingerprint
+    ca_fingerprint="$(compute_ca_fingerprint)"
+
+    # 生产构建 fail-fast：serverHost、CA 指纹、插件签名公钥缺一不可。
+    # （enroll 令牌不嵌入二进制/进程参数，改由 root-only systemd EnvironmentFile 注入
+    #  MXCWPP_ENROLL_TOKEN，见 deploy/.env.example；避免 strings/ps 泄漏，便于轮换。）
+    if [ "${PROD_BUILD:-0}" = "1" ]; then
+        if [ -z "${SERVER_HOST:-}" ] || [ "${SERVER_HOST}" = "localhost:6751" ]; then
+            echo "生产构建失败：SERVER_HOST 未设置或仍为默认 localhost:6751" >&2; exit 1
+        fi
+        if [ -z "$ca_fingerprint" ]; then
+            echo "生产构建失败：缺少 deploy/certs/ca.crt，无法嵌入 CA 指纹（首连 pin 必需）" >&2; exit 1
+        fi
+        if [ -z "${SIGN_PUBLIC_KEY:-}" ]; then
+            echo "生产构建失败：SIGN_PUBLIC_KEY 未设置（插件签名校验必需）" >&2; exit 1
+        fi
+    fi
 
     # 编译
     local bin="$TMP_DIR/mxcwpp-agent-$arch"
@@ -107,8 +151,12 @@ package_agent() {
     if [ -n "${SIGN_PUBLIC_KEY:-}" ]; then
         sign_flag="-X main.signPublicKey=$SIGN_PUBLIC_KEY"
     fi
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.serverHost=$SERVER_HOST -X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME $sign_flag -s -w" \
+    local fp_flag=""
+    if [ -n "$ca_fingerprint" ]; then
+        fp_flag="-X main.caFingerprint=$ca_fingerprint"
+    fi
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.serverHost=$SERVER_HOST -X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT $sign_flag $fp_flag -s -w" \
         -o "$bin" ./cmd/agent
 
     # 准备打包目录
@@ -127,10 +175,15 @@ package_agent() {
     mkdir -p "$pkg_tmp/usr/lib/systemd/system-preset"
     echo "enable mxcwpp-agent.service" > "$pkg_tmp/usr/lib/systemd/system-preset/90-mxcwpp.preset"
 
-    # 证书（如果存在）
+    # 证书：仅打包 CA（供 agent 校验 AC）。生产不下发共享 client.crt/key——agent 首连凭
+    # CA 指纹 pin + enroll 令牌换取一机一证（per_agent_cert）。共享 client key 仅 dev 便利，
+    # 生产构建（PROD_BUILD=1）绝不打入包内。
     local cert_dir="deploy/certs"
-    if [ -f "$cert_dir/ca.crt" ] && [ -f "$cert_dir/client.crt" ] && [ -f "$cert_dir/client.key" ]; then
-        cp "$cert_dir/ca.crt" "$cert_dir/client.crt" "$cert_dir/client.key" "$pkg_tmp/var/lib/mxcwpp-agent/certs/"
+    if [ -f "$cert_dir/ca.crt" ]; then
+        cp "$cert_dir/ca.crt" "$pkg_tmp/var/lib/mxcwpp-agent/certs/"
+    fi
+    if [ "${PROD_BUILD:-0}" != "1" ] && [ -f "$cert_dir/client.crt" ] && [ -f "$cert_dir/client.key" ]; then
+        cp "$cert_dir/client.crt" "$cert_dir/client.key" "$pkg_tmp/var/lib/mxcwpp-agent/certs/"
     fi
 
     # 脚本
@@ -160,6 +213,8 @@ if [ "$1" == "remove" ] || [ "$1" == "0" ]; then
     systemctl disable mxcwpp-agent || true
     # 清理 systemd drop-in 配置（如业务线配置）
     rm -rf /etc/systemd/system/mxcwpp-agent.service.d || true
+    # 清理信任链引导配置（含 enroll 令牌），避免卸载后令牌残留在磁盘
+    rm -rf /etc/mxcwpp-agent || true
     # 清理运行时数据（证书、插件、日志）
     rm -rf /var/lib/mxcwpp-agent || true
     rm -rf /var/log/mxcwpp-agent || true
@@ -169,18 +224,24 @@ fi
 SCRIPT
     chmod +x "$pkg_tmp/scripts/"*.sh
 
-    # 构建证书 contents 条目
+    # 构建证书 contents 条目：逐文件判断存在性。
+    # 生产构建只打 ca.crt（client.crt/key 不下发，agent 首连 enroll 换取一机一证），
+    # 若在此无条件引用 client.* 会让 nfpm 因源文件缺失直接打包失败。
     local cert_contents=""
-    if [ -f "$pkg_tmp/var/lib/mxcwpp-agent/certs/ca.crt" ]; then
-        cert_contents="  - src: $pkg_tmp/var/lib/mxcwpp-agent/certs/ca.crt
+    local cert_base="$pkg_tmp/var/lib/mxcwpp-agent/certs"
+    if [ -f "$cert_base/ca.crt" ]; then
+        cert_contents="  - src: $cert_base/ca.crt
     dst: /var/lib/mxcwpp-agent/certs/ca.crt
     file_info: { mode: 0644 }
-    type: config
-  - src: $pkg_tmp/var/lib/mxcwpp-agent/certs/client.crt
+    type: config"
+    fi
+    if [ -f "$cert_base/client.crt" ] && [ -f "$cert_base/client.key" ]; then
+        cert_contents="$cert_contents
+  - src: $cert_base/client.crt
     dst: /var/lib/mxcwpp-agent/certs/client.crt
     file_info: { mode: 0644 }
     type: config
-  - src: $pkg_tmp/var/lib/mxcwpp-agent/certs/client.key
+  - src: $cert_base/client.key
     dst: /var/lib/mxcwpp-agent/certs/client.key
     file_info: { mode: 0600 }
     type: config"
@@ -240,8 +301,8 @@ build_plugin() {
 
     # 编译二进制文件（注入版本号和构建时间）
     local output_name="${name}-linux-${arch}"
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT -s -w" \
         -o "$plugin_dir/$output_name" ./plugins/$name
 
     chmod +x "$plugin_dir/$output_name"
@@ -263,8 +324,8 @@ build_scanner() {
     rm -rf "$staging"
     mkdir -p "$staging/bin" "$staging/etc"
 
-    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -ldflags \
-        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -s -w" \
+    CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags \
+        "-X main.buildVersion=$VERSION -X main.buildTime=$BUILD_TIME -X main.gitCommit=$GIT_COMMIT -s -w" \
         -o "$staging/scanner" ./plugins/scanner
 
     chmod +x "$staging/scanner"

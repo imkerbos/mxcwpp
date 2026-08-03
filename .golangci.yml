@@ -1,44 +1,54 @@
-# golangci-lint 配置 (v2.0 代码质量基线 — v1 兼容)
-# 详见 docs/code-style.md / docs/contributing.md
-
-run:
-  timeout: 5m
-
-issues:
-  exclude-dirs:
-    - deploy/data
-    - deploy/data-perf
-    - dist
-    - tmp
-  exclude-rules:
-    # cmd/ 下所有 main 入口允许 fmt.Print* (CLI 启动信息/进度提示是合理的用户面向 stdout)
-    - path: ^cmd/
-      linters: [forbidigo]
-    # 部署 CLI 命令的进度输出
-    - path: ^internal/deploy/cluster/
-      linters: [forbidigo]
-    # Agent 自更新 CLI 输出 (mxcwpp-agent --update)
-    - path: ^internal/agent/updater/
-      linters: [forbidigo]
-    # 测试允许更宽松
-    - path: _test\.go$
-      linters: [errcheck, forbidigo]
-
+version: "2"
 linters:
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - misspell
     - forbidigo
-
-linters-settings:
-  forbidigo:
-    forbid:
-      # 强制使用 zap 日志,禁止 fmt.Println / log.Println / log.Printf
-      # 例外列表见 issues.exclude-rules
-      - '^fmt\.Print(ln|f)?$'
-      - '^log\.(Print|Println|Printf)$'
-    exclude_godoc_examples: true
+    - misspell
+  settings:
+    staticcheck:
+      # 排除 QF（quickfix）类：staticcheck 官方定位是「编辑器里的交互式重构建议」，
+      # 例如「这串 if-else 可以写成 switch」「这里能用德摩根律」。
+      # 它们不指示缺陷，把它们当门禁只会让人为了过 CI 去改无关代码，
+      # 顺手改坏的风险高于收益。SA（缺陷）/S（化简）/ST（约定）保持开启。
+      checks:
+        - all
+        - -QF*
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print(ln|f)?$
+        - pattern: ^log\.(Print|Println|Printf)$
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - forbidigo
+        path: ^cmd/
+      - linters:
+          - forbidigo
+        path: ^internal/deploy/cluster/
+      - linters:
+          - forbidigo
+        path: ^internal/agent/updater/
+      - linters:
+          - errcheck
+          - forbidigo
+        path: _test\.go$
+    paths:
+      - deploy/data
+      - deploy/data-perf
+      - dist
+      - tmp
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

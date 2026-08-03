@@ -59,7 +59,7 @@ func TestReadProcNetDev(t *testing.T) {
 // parseProcNetDevContent 将 /proc/net/dev 内容字符串解析为统计 map（供测试使用）
 // 注意：与 readProcNetDev() 逻辑完全一致，这里内联便于测试
 func parseProcNetDevContent(content string) map[string][4]uint64 {
-	import_strings := func(s string) []string {
+	importStrings := func(s string) []string {
 		var result []string
 		start := -1
 		for i, c := range s {
@@ -92,7 +92,7 @@ func parseProcNetDevContent(content string) map[string][4]uint64 {
 			continue
 		}
 		name := trimSpace(line[:idx])
-		fields := import_strings(line[idx+1:])
+		fields := importStrings(line[idx+1:])
 		if len(fields) < 9 {
 			continue
 		}

@@ -268,12 +268,12 @@ func writeBatch(ctx context.Context, conn chdriver.Conn, batch []mysqlRow) (int,
 			r.NetBytesSent, // net_out = bytes sent
 		); err != nil {
 			// Append 失败整批作废
-			return 0, fmt.Errorf("Append 失败: %w", err)
+			return 0, fmt.Errorf("append 失败: %w", err)
 		}
 	}
 
 	if err := b.Send(); err != nil {
-		return 0, fmt.Errorf("Send 失败: %w", err)
+		return 0, fmt.Errorf("send 失败: %w", err)
 	}
 	return len(batch), nil
 }

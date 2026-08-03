@@ -44,7 +44,7 @@ export default function ThreatIntelPage() {
   const [page, setPage] = useState(1);
   const pageSize = 20;
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["ti-stats"],
     queryFn: () => detectionApi.threatIntelStats(),
   });
@@ -111,11 +111,11 @@ export default function ThreatIntelPage() {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <StatCard compact label={t("detection.threatIntel.statIp")} value={stats?.ip ?? 0} icon={Network} tone="default" />
-        <StatCard compact label={t("detection.threatIntel.statHash")} value={stats?.hash ?? 0} icon={Hash} tone="default" />
-        <StatCard compact label={t("detection.threatIntel.statDomain")} value={stats?.domain ?? 0} icon={Globe} tone="default" />
-        <StatCard compact label={t("detection.threatIntel.statUrl")} value={stats?.url ?? 0} icon={Link2} tone="default" />
-        <StatCard compact label={t("detection.threatIntel.statTotal")} value={stats?.total ?? 0} icon={Database} tone="success" />
+        <StatCard compact label={t("detection.threatIntel.statIp")} value={stats?.ip ?? 0} error={statsError} icon={Network} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statHash")} value={stats?.hash ?? 0} error={statsError} icon={Hash} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statDomain")} value={stats?.domain ?? 0} error={statsError} icon={Globe} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statUrl")} value={stats?.url ?? 0} error={statsError} icon={Link2} tone="default" />
+        <StatCard compact label={t("detection.threatIntel.statTotal")} value={stats?.total ?? 0} error={statsError} icon={Database} tone="success" />
       </div>
 
       <Card>

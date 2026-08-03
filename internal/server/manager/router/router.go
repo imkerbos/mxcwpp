@@ -19,7 +19,6 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/kube"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/api"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz"
-	"github.com/matrixplusio/mxcwpp/internal/server/manager/biz/mssp"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/middleware"
 	"github.com/matrixplusio/mxcwpp/internal/server/manager/sd"
 	"github.com/matrixplusio/mxcwpp/internal/server/metrics"
@@ -106,23 +105,20 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	scannerWebhookHandler := api.NewKubeScannerHandler(db, logger, biz.NewKubeClientManager(db, logger), cfg)
 	router.POST("/api/v1/kube/scanner/report-webhook/:cluster_token", scannerWebhookHandler.ReceiveReportWebhook)
 
-	// AC 内部注册接口（不需要 JWT，AC 到 Manager 的内部调用）
+	// AC 内部注册接口（不走 JWT，AC→Manager 内部调用，强制 X-Internal-Secret）。
+	// 始终挂载中间件：空 secret 由中间件 fail-closed 返回 401，绝不匿名可达。
 	discoveryHandler := api.NewDiscoveryHandler(acRegistry, logger)
 	internalAC := router.Group("/api/v1/internal/ac")
-	if secret := cfg.Server.InternalSecret; secret != "" {
-		internalAC.Use(middleware.InternalAuth(secret))
-	}
+	internalAC.Use(middleware.InternalAuth(cfg.Server.InternalSecret))
 	internalAC.POST("/register", discoveryHandler.Register)
 	internalAC.POST("/heartbeat", discoveryHandler.Heartbeat)
 	internalAC.DELETE("/deregister", discoveryHandler.Deregister)
 
-	// Prometheus 告警 webhook（不走 JWT，仅可选 X-Internal-Secret 鉴权 + Prom IP 白名单）
-	// 接收 Prometheus alerting 配置中 webhook 推送的告警，入 mxcwpp alerts 表
+	// Prometheus 告警 webhook（不走 JWT，强制 X-Internal-Secret + Prom IP 白名单）。
+	// 同样始终挂载中间件，空 secret fail-closed。
 	promAlertsHandler := api.NewPrometheusAlertsHandler(db, logger)
 	internalAlerts := router.Group("/api/v1/internal/alerts")
-	if secret := cfg.Server.InternalSecret; secret != "" {
-		internalAlerts.Use(middleware.InternalAuth(secret))
-	}
+	internalAlerts.Use(middleware.InternalAuth(cfg.Server.InternalSecret))
 	internalAlerts.POST("/prometheus", promAlertsHandler.Ingest)
 
 	// API 路由
@@ -134,19 +130,27 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 
 	// 认证相关路由（不需要认证）
 	jwtSecret := cfg.Server.JWTSecret
-	if len(jwtSecret) < 32 {
-		logger.Fatal("JWT 密钥未配置或长度不足: 请在配置文件中设置 server.jwt_secret（至少 32 字符）")
+	// 强度校验：拒绝空/弱/占位符/短密钥（与 internal_secret 同策略、独立取值）。
+	if err := config.ValidateJWTSecret(jwtSecret); err != nil {
+		logger.Fatal("server.jwt_secret 校验失败", zap.Error(err))
 	}
 	authHandler := api.NewAuthHandler(db, logger, []byte(jwtSecret))
-	// 批4: 登出 JWT 黑名单（默认关，需 Redis）。启用后登出即吊销 token。
-	if cfg.Server.Security.JWTBlacklist.Enabled && redisClient != nil {
+	// 批4: 登出 JWT 黑名单（需 Redis）。启用但缺 Redis 时 fail-fast，避免“表面 enabled 实际不吊销”。
+	if cfg.Server.Security.JWTBlacklist.Enabled {
+		if redisClient == nil {
+			logger.Fatal("server.security.jwt_blacklist 已启用但 Redis 不可用，拒绝启动（避免登出/禁用不生效）")
+		}
 		authHandler.EnableJWTBlacklist(redisClient)
 		logger.Info("JWT 黑名单已启用（登出即吊销）")
 	}
 	apiV1.GET("/auth/captcha", authHandler.GetCaptcha)
 
-	// 批4: 登录接口 IP 限流（默认关，灰度开），防口令爆破。登录前置无 tenant，按 IP 限流。
+	// 批4: 登录接口 IP 限流（灰度开），防口令爆破。登录前置无 tenant，按 IP 限流。
+	// 启用但缺 Redis 时 fail-fast，避免限流规则静默失效。
 	if cfg.Server.Security.LoginRateLimit.Enabled {
+		if redisClient == nil {
+			logger.Fatal("server.security.login_rate_limit 已启用但 Redis 不可用，拒绝启动（避免登录限流静默失效）")
+		}
 		rps := cfg.Server.Security.LoginRateLimit.RPS
 		if rps <= 0 {
 			rps = 10
@@ -199,26 +203,21 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	apiV2.Use(authHandler.AuthMiddleware())
 	apiV2Admin := apiV2.Group("/admin")
 	apiV2Admin.Use(tenant.AdminMiddleware())
-	adminTenantsHandler := api.NewAdminTenantsHandler(db, logger)
-	apiV2Admin.GET("/tenants", adminTenantsHandler.ListTenants)
-	apiV2Admin.GET("/tenants/:id", adminTenantsHandler.GetTenant)
-	apiV2Admin.POST("/tenants", adminTenantsHandler.CreateTenant)
-	apiV2Admin.POST("/tenants/:id/suspend", adminTenantsHandler.SuspendTenant)
-	apiV2Admin.POST("/tenants/:id/resume", adminTenantsHandler.ResumeTenant)
+	// 单租户产品：多租户管理面（租户 CRUD / 停用恢复 / MSSP 跨租户视图）已移除。
+	// 底层 tenant_id 保留并统一传默认租户，见 docs/architecture.md「单租户收敛」。
 
-	// Sprint 2 PR38: /api/v2/system/mode (用户级查询) + /api/v2/admin/tenants/:id/mode (超管切换)
-	// MemoryResolver 启动时从 tenants 表加载初始 mode (后续 PR 加 Redis Pub/Sub 同步多副本)
+	// /api/v2/system/mode：运行模式查询。按租户切换随多租户管理面一并移除，
+	// 模式现在是部署级设置，由 MemoryResolver 持有默认值。
 	modeResolver := mode.NewMemoryResolver(mode.Observe)
 	loadTenantModes(db, modeResolver, logger)
 	systemModeHandler := api.NewSystemModeHandler(db, logger, modeResolver)
 
 	apiV2.GET("/system/mode", systemModeHandler.GetCurrentMode)
-	apiV2Admin.POST("/tenants/:id/mode", systemModeHandler.SetTenantMode)
-	apiV2Admin.GET("/tenants/modes", systemModeHandler.ListTenantModes)
 
 	// P1-1: 配置中心变更审批 /api/v2/config/change-requests/*
+	// 配置变更审批属管理动作，deny-by-default：仅 admin 可访问（此前仅需登录，是越权空洞）。
 	configChangeHandler := api.NewConfigChangeRequestHandler(db, logger)
-	configChangeGroup := apiV2.Group("/config/change-requests")
+	configChangeGroup := apiV2.Group("/config/change-requests", api.RoleMiddleware("admin"))
 	configChangeGroup.POST("", configChangeHandler.Create)
 	configChangeGroup.GET("", configChangeHandler.List)
 	configChangeGroup.GET("/sensitivity", configChangeHandler.GetSensitivity)
@@ -226,18 +225,6 @@ func Setup(db *gorm.DB, logger *zap.Logger, cfg *config.Config, scoreCache *biz.
 	configChangeGroup.POST("/:id/approve", configChangeHandler.Approve)
 	configChangeGroup.POST("/:id/reject", configChangeHandler.Reject)
 	configChangeGroup.POST("/:id/cancel", configChangeHandler.Cancel)
-
-	// A3: MSSP 控制台路由 /api/v2/mssp/*
-	msspSvc := mssp.NewService(db, logger)
-	msspHandler := api.NewMSSPHandler(msspSvc, logger)
-	msspGroup := apiV2.Group("/mssp")
-	msspGroup.GET("/dashboard", msspHandler.Dashboard)
-	msspGroup.GET("/child-tenants", msspHandler.ListChildTenants)
-	msspGroup.POST("/child-tenants", msspHandler.CreateChildTenant)
-	msspGroup.GET("/child-tenants/:id", msspHandler.GetChildTenant)
-	msspGroup.POST("/child-tenants/:id/suspend", msspHandler.SuspendChildTenant)
-	msspGroup.POST("/child-tenants/:id/resume", msspHandler.ResumeChildTenant)
-	msspGroup.GET("/alerts", msspHandler.CrossTenantAlerts)
 
 	return router
 }
@@ -272,7 +259,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupHostsAPI(router, db, logger, scoreCache, metricsService)
 	setupPolicyGroupsAPI(router, db, logger)
 	setupPoliciesAPI(router, db, logger)
-	setupRulesAPI(router, db, logger)
+	setupRulesAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupTasksAPI(router, db, logger, acDispatcher)
 	setupResultsAPI(router, db, logger)
 	setupFixAPI(router, db, logger, acDispatcher)
@@ -284,7 +271,7 @@ func setupAPIRoutes(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, cf
 	setupAlertsAPI(router, db, logger)
 	setupAlertWhitelistAPI(router, db, logger)
 	setupIncidentAPI(router, db, logger)
-	setupPolicyImportExportAPI(router, db, logger)
+	setupPolicyImportExportAPI(router, db, logger, cfg.Server.Security.AllowCustomExecRules)
 	setupInspectionAPI(router, db, logger)
 	setupFIMAPI(router, db, logger, chConn)
 	setupKubeAPI(router, db, logger, alarmService, cfg, consumerManager)
@@ -396,6 +383,13 @@ func setupAnomalyAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
 	router.GET("/anomalies", handler.ListAnomalies)
 	router.GET("/anomalies/stats", handler.GetAnomalyStats)
 	router.PUT("/anomalies/:id/resolve", handler.ResolveAnomaly)
+
+	// ML 检测质量与档位。走同一 /anomalies 前缀，因而沿用该模块权限。
+	// 档位决定 ML 信号是否落库、是否进入分析上下文，与规则晋级同级别，不该更容易。
+	quality := api.NewMLQualityHandler(db, logger)
+	router.GET("/anomalies/quality", quality.GetMLQuality)
+	router.GET("/anomalies/mode-readiness", quality.GetMLModeReadiness)
+	router.POST("/anomalies/mode", quality.SetMLMode)
 }
 
 // setupHostIsolationAPI 设置主机隔离 API 路由
@@ -403,6 +397,15 @@ func setupHostIsolationAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Log
 	handler := api.NewHostIsolationHandler(db, logger, acDispatcher)
 	router.POST("/hosts/isolate", handler.IsolateHost)
 	router.POST("/hosts/release", handler.ReleaseHost)
+
+	// 处置审批：隔离/解除隔离只提申请，执行必须经他人审批。
+	// 闸门不接线等于没建，所以隔离接口不再直接下发命令。
+	respHandler := api.NewResponseActionHandler(db, logger, acDispatcher)
+	router.GET("/response-actions", respHandler.ListResponseActions)
+	router.POST("/response-actions/:id/approve", respHandler.ApproveResponseAction)
+	router.POST("/response-actions/:id/reject", respHandler.RejectResponseAction)
+	router.POST("/response-actions/:id/execute", respHandler.ExecuteResponseAction)
+	router.POST("/response-actions/:id/rollback", respHandler.RollbackResponseAction)
 	router.GET("/hosts/:host_id/isolation-status", handler.GetIsolationStatus)
 	router.GET("/hosts/isolations", handler.ListIsolations)
 }
@@ -498,8 +501,11 @@ func setupPoliciesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 }
 
 // setupRulesAPI 设置规则 API 路由
-func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := api.NewRulesHandler(db, logger)
+func setupRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	handler := api.NewRulesHandler(db, logger, allowCustomExec)
+	// 存量自定义可执行规则盘点（必须在 /policies/:policy_id/rules 之前注册，
+	// 否则会被 :policy_id 通配吞掉）。
+	router.GET("/policies/custom-exec-rules", handler.ListCustomExecRules)
 	router.GET("/policies/:policy_id/rules", handler.ListRules)
 	router.POST("/policies/:policy_id/rules", handler.CreateRule)
 	router.GET("/rules/:rule_id", handler.GetRule)
@@ -715,6 +721,19 @@ func setupIncidentAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) 
 	handler := api.NewIncidentHandler(db, logger)
 	router.GET("/incidents", handler.ListIncidents)
 	router.GET("/incidents/:id", handler.GetIncident)
+	router.GET("/incidents/:id/timeline", handler.GetIncidentTimeline)
+
+	// 值班表：没有它，新事件永远无人负责，超时告警只会天天响而没人知道该找谁。
+	oncallHandler := api.NewOncallHandler(db, logger)
+	router.GET("/oncall/current", oncallHandler.CurrentOncall)
+	router.GET("/oncall/shifts", oncallHandler.ListShifts)
+	router.POST("/oncall/shifts", oncallHandler.SaveShift)
+
+	// 运营闭环：指派 → 认领 → 研判/证据 → 升级 → 带结论关闭。
+	router.POST("/incidents/:id/assign", handler.AssignIncident)
+	router.POST("/incidents/:id/ack", handler.AckIncident)
+	router.POST("/incidents/:id/comments", handler.CommentIncident)
+	router.POST("/incidents/:id/escalate", handler.EscalateIncident)
 	router.POST("/incidents/:id/resolve", handler.ResolveIncident)
 }
 
@@ -771,8 +790,8 @@ func setupComponentsAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger
 }
 
 // setupPolicyImportExportAPI 设置策略导入导出 API 路由
-func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	api.RegisterPolicyImportExportRoutes(router, db, logger)
+func setupPolicyImportExportAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	api.RegisterPolicyImportExportRoutes(router, db, logger, allowCustomExec)
 }
 
 // setupInspectionAPI 设置运维巡检 API 路由
@@ -1120,6 +1139,16 @@ func setupDetectionRulesAPI(router *gin.RouterGroup, db *gorm.DB, logger *zap.Lo
 	router.PUT("/detection-rules/:id", handler.UpdateRule)
 	router.DELETE("/detection-rules/:id", handler.DeleteRule)
 	router.POST("/detection-rules/:id/toggle", handler.ToggleRule)
+
+	// 规则生命周期与检测质量。
+	// 走同一 /detection-rules 前缀，因而沿用 detection 模块权限：
+	// 读→detection:view，晋级/降级→detection:manage。改变一条规则会不会打扰值班，
+	// 与改它的表达式是同级别的操作，不该更容易。
+	stage := api.NewRuleStageHandler(db, logger)
+	router.GET("/detection-rules/:id/quality", stage.GetRuleQuality)
+	router.GET("/detection-rules/:id/promotion", stage.GetPromotionReadiness)
+	router.POST("/detection-rules/:id/promote", stage.PromoteRule)
+	router.POST("/detection-rules/:id/demote", stage.DemoteRule)
 }
 
 // setupThreatIntelAPI 设置威胁情报 API 路由

@@ -67,10 +67,13 @@ export function EdrReport({ range }: Props) {
     low: t("common.severity.low"),
   };
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["reports-edr", range.start, range.end],
     queryFn: () => reportsApi.edrModule(range),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   function handleExportPdf() {
     void reportsApi.downloadPdf(
@@ -296,29 +299,34 @@ export function EdrReport({ range }: Props) {
       {/* === Section 1: Meta StatCards Row 1 — online hosts / enabled rules / total alerts / active / ignored === */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <StatCard
+          {...statState}
           label={t("operations.reports.edrOnlineHosts")}
           value={meta.onlineHosts}
           icon={Shield}
         />
         <StatCard
+          {...statState}
           label={`${t("operations.reports.edrEnabledRules")} / ${t("operations.reports.edrTotalRules")}`}
           value={`${meta.enabledRules} / ${meta.totalRules}`}
           icon={ShieldCheck}
           tone="success"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.edrTotalAlerts")}
           value={summary.totalAlerts}
           icon={AlertTriangle}
           tone="danger"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.edrActive")}
           value={summary.activeAlerts}
           icon={Activity}
           tone="warning"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.edrIgnoredAlerts")}
           value={summary.ignoredAlerts}
           icon={MinusCircle}
@@ -328,17 +336,20 @@ export function EdrReport({ range }: Props) {
       {/* === Section 1b: Meta StatCards Row 2 — affected hosts / stories / high-risk stories / trend === */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard
+          {...statState}
           label={t("operations.reports.edrAffectedHosts")}
           value={summary.affectedHosts}
           icon={Globe}
           tone="warning"
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.edrTotalStories")}
           value={summary.totalStories}
           icon={BookOpen}
         />
         <StatCard
+          {...statState}
           label={t("operations.reports.edrHighRiskStories")}
           value={summary.highRiskStories}
           icon={ShieldOff}
@@ -346,6 +357,7 @@ export function EdrReport({ range }: Props) {
         />
         {trend && (
           <StatCard
+            {...statState}
             label={t("operations.reports.edrTrend")}
             value={trendLabel}
             icon={trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus}
@@ -397,21 +409,25 @@ export function EdrReport({ range }: Props) {
           {/* 4 stat cards */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard
+              {...statState}
               label={t("operations.reports.edrTotalEvents")}
               value={rawEventStats.totalEvents.toLocaleString()}
               icon={Activity}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrUniqueHosts")}
               value={rawEventStats.uniqueHosts}
               icon={Cpu}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrAvgPerHost")}
               value={avgPerHost.toLocaleString()}
               icon={Eye}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrAlertConvRate")}
               value={alertConvRate === "—" ? "—" : `${alertConvRate}%`}
               icon={Zap}
@@ -469,24 +485,28 @@ export function EdrReport({ range }: Props) {
           </h3>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard
+              {...statState}
               label={t("operations.reports.edrNetworkBlocks")}
               value={autoResponseStats.networkBlocks}
               icon={Globe}
               tone="danger"
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrHostIsolations")}
               value={autoResponseStats.hostIsolations}
               icon={ShieldOff}
               tone="warning"
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrProcessKills")}
               value={autoResponseStats.processKills}
               icon={Zap}
               tone="warning"
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrAutoTotal")}
               value={autoResponseStats.total}
               icon={Activity}
@@ -503,11 +523,13 @@ export function EdrReport({ range }: Props) {
           </h3>
           <div className="flex flex-wrap gap-4">
             <StatCard
+              {...statState}
               label={t("operations.reports.edrIocSnapshots")}
               value={iocStats.iocSnapshots}
               icon={Eye}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrMemoryThreats")}
               value={iocStats.memoryThreats}
               icon={ShieldOff}
@@ -539,23 +561,27 @@ export function EdrReport({ range }: Props) {
           </h3>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard
+              {...statState}
               label={t("operations.reports.edrHitRules")}
               value={ruleEfficacy.hitRules}
               icon={ShieldCheck}
               tone="success"
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrEnabledRules")}
               value={ruleEfficacy.enabledRules}
               icon={Shield}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrZeroHitRules")}
               value={ruleEfficacy.zeroHitRules}
               icon={ShieldOff}
               tone={ruleEfficacy.zeroHitRules > 20 ? "danger" : "default"}
             />
             <StatCard
+              {...statState}
               label={t("operations.reports.edrHitRate")}
               value={`${ruleEfficacy.hitRate.toFixed(1)}%`}
               icon={Activity}

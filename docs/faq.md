@@ -99,7 +99,7 @@ mxcwpp-agent --update --file ./mxcwpp-agent-1.1.0.rpm
 ### 页面空白
 
 1. 检查浏览器 Console（F12）是否有 JavaScript 错误
-2. 确认前端构建成功：`cd ui && npm run build`
+2. 确认前端构建成功：`cd web && pnpm build`
 3. 检查 Nginx 静态文件路径配置
 
 ## 数据库

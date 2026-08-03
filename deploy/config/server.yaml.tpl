@@ -13,7 +13,20 @@ server:
   manager_addr: "__MANAGER_ADDR__"
   instance_id: "__INSTANCE_ID__"
   cors_origins: __CORS_ORIGINS__
+  # Manager↔AgentCenter 管理面鉴权密钥（deploy.sh 从 .env INTERNAL_SECRET 替换；留空自动生成）。
+  # AC 管理端口绑定 0.0.0.0 时必填且需足够强度，否则 fail-closed 拒绝启动。
   internal_secret: "__INTERNAL_SECRET__"
+  # 生产安全加固（依赖 Redis）：安全响应头(含 HSTS，UI 走 443 HTTPS)、登录限流、JWT 黑名单。
+  security:
+    headers:
+      enabled: true
+      hsts: true
+    login_rate_limit:
+      enabled: true
+      rps: 10
+      burst: 5
+    jwt_blacklist:
+      enabled: true
 
 database:
   type: "mysql"
@@ -76,8 +89,16 @@ metrics:
 
 mtls:
   ca_cert: "/etc/mxcwpp/certs/ca.crt"
+  # CA 私钥：AgentCenter 用它按 AgentID 在线签发一机一证（per_agent_cert）。
+  ca_key: "/etc/mxcwpp/certs/ca.key"
   server_cert: "/etc/mxcwpp/certs/server.crt"
   server_key: "/etc/mxcwpp/certs/server.key"
+  # Agent enroll 引导令牌（deploy.sh 从 .env ENROLL_TOKEN 替换；留空自动生成强令牌）。
+  # 生产（非 insecure_dev_mode）必填且需 ≥32 强度，否则 AgentCenter fail-closed 拒绝启动。
+  enroll_token: "__ENROLL_TOKEN__"
+  # 一机一证 + 强制客户端证书 CN==AgentID：生产强制开启，杜绝伪造 AgentID / 共享私钥。
+  per_agent_cert: true
+  enforce_agent_id: true
 
 log:
   level: "__LOG_LEVEL__"
@@ -93,3 +114,30 @@ agent:
 plugins:
   dir: "__PLUGINS_DIR__"
   base_url: "__PLUGINS_BASE_URL__"
+
+# PDF 服务端渲染（Gotenberg sidecar）
+#
+# 此前模板缺这一段：全新部署渲染出的配置没有 gotenberg_url，报告导出得到的是
+# 一个损坏的 .pdf 而不是明确报错——典型的静默失败。
+pdf:
+  gotenberg_url: "http://gotenberg:3000"   # 同 mxcwpp-net 网络内的服务别名
+  internal_url: "http://manager:8080"      # Gotenberg 回拉 manager 静态资源
+
+# 检测产出的通知灰度（见 docs/configuration.md「alerting」）
+#
+# 留空即全部类别不通知，告警仍照常入库、列表与大屏可见。
+# 这些链路此前从未通知过，一次全开会淹没值班，因此确认某类误报收敛后再逐个加入。
+alerting:
+  notify_categories: []
+  min_severity: "high"
+  suppress_window_minutes: 30
+
+# 客户自有 SIEM 外发（CEF over Syslog）
+#
+# 与通知渠道是两件事：通知叫醒人、可被抑制；外发是把记录交给客户日志系统，必须全量。
+# 未启用时不影响任何功能，告警照常入库并按 alerting 配置通知。
+siem:
+  enabled: false
+  protocol: "tcp"            # tcp / udp
+  address: ""                # 如 siem.example.com:514
+  facility: 1

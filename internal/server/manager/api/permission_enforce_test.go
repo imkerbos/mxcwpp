@@ -28,10 +28,22 @@ func TestRequiredPerm(t *testing.T) {
 		{"POST", "/api/v1/rootkit/scan", "virus:manage"},
 		{"POST", "/api/v1/policies", "baseline:manage"},
 		{"DELETE", "/api/v1/rules/:rule_id", "baseline:manage"},
-		// 未登记路由放行（读写均放行）
-		{"POST", "/api/v1/auth/login", ""},
-		{"GET", "/api/v1/something-unmapped", ""},
-		{"POST", "/api/v1/something-unmapped", ""},
+		// 新登记模块（deny-by-default 收口的历史空洞）
+		{"POST", "/api/v1/incidents/:id/resolve", "alerts:respond"},
+		{"POST", "/api/v1/monitor/service-alerts/:id/ack", "monitoring:manage"},
+		{"POST", "/api/v1/sbom/import", "vuln:manage"},
+		{"GET", "/api/v1/discovery/agentcenter", "monitoring:view"},
+		{"POST", "/api/v1/host-vulnerabilities/:id/precheck", "vuln:manage"},
+		{"PUT", "/api/v1/vuln-bulletins/:id/resolve", "vuln:manage"},
+		// 管理面路由（显式映射到对应模块；admin 另有超管通路）
+		{"POST", "/api/v1/users", "user_manage:manage"},
+		{"PUT", "/api/v1/rbac/roles/:role/permissions", "user_manage:manage"},
+		{"GET", "/api/v1/audit-logs", "audit_log:view"},
+		{"PUT", "/api/v1/feature-flags/:key", "system_config:manage"},
+		// 未登记路由 deny-by-default（返回哨兵，非放行）
+		{"POST", "/api/v1/auth/login", permDenyUnclassified},
+		{"GET", "/api/v1/something-unmapped", permDenyUnclassified},
+		{"POST", "/api/v1/something-unmapped", permDenyUnclassified},
 	}
 	for _, c := range cases {
 		if got := requiredPerm(c.method, c.path); got != c.want {

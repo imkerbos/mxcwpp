@@ -16,13 +16,16 @@ import (
 type PolicyImportExportHandler struct {
 	db     *gorm.DB
 	logger *zap.Logger
+	// allowCustomExec 见 server.security.allow_custom_exec_rules。
+	allowCustomExec bool
 }
 
 // NewPolicyImportExportHandler 创建策略导入导出处理器
-func NewPolicyImportExportHandler(db *gorm.DB, logger *zap.Logger) *PolicyImportExportHandler {
+func NewPolicyImportExportHandler(db *gorm.DB, logger *zap.Logger, allowCustomExec bool) *PolicyImportExportHandler {
 	return &PolicyImportExportHandler{
-		db:     db,
-		logger: logger,
+		db:              db,
+		logger:          logger,
+		allowCustomExec: allowCustomExec,
 	}
 }
 
@@ -137,6 +140,22 @@ func (h *PolicyImportExportHandler) ImportPolicy(c *gin.Context) {
 			return
 		}
 		policies = []PolicyExportFormat{singlePolicy}
+	}
+
+	// 导入的策略一律落为自定义规则（builtin=false），与 CreateRule/UpdateRule 同一把闸门：
+	// 不允许携带 command_exec / fix.command。否则"上传一个 JSON"即可在全舰队以 root 执行任意代码，
+	// 是比逐条创建规则更省事的同一条提权路径。整批拒绝，不做部分导入。
+	for i := range policies {
+		if err := guardImportedPolicy(h.allowCustomExec, &policies[i]); err != nil {
+			h.logger.Warn("[AUDIT] 拒绝导入含可执行内容的自定义策略",
+				zap.String("policy_id", policies[i].ID),
+				zap.String("actor", c.GetString("username")),
+				zap.Error(err))
+			auditExecRuleRejected(c, "baseline_policy.exec_content_rejected", policies[i].ID,
+				"import "+err.Error())
+			BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	// 获取导入模式
@@ -405,8 +424,8 @@ func (h *PolicyImportExportHandler) updatePolicy(existing *model.Policy, data *P
 }
 
 // RegisterPolicyImportExportRoutes 注册策略导入导出路由
-func RegisterPolicyImportExportRoutes(r *gin.RouterGroup, db *gorm.DB, logger *zap.Logger) {
-	handler := NewPolicyImportExportHandler(db, logger)
+func RegisterPolicyImportExportRoutes(r *gin.RouterGroup, db *gorm.DB, logger *zap.Logger, allowCustomExec bool) {
+	handler := NewPolicyImportExportHandler(db, logger, allowCustomExec)
 
 	// 导出路由
 	r.GET("/policies/export", handler.ExportAllPolicies)

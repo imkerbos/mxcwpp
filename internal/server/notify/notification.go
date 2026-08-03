@@ -159,9 +159,18 @@ type AlertResolvedData struct {
 // 注：此方法只在新告警创建时调用，已存在的告警由定期调度器处理
 // 返回值：是否成功发送了至少一个通知，以及错误信息
 func (s *NotificationService) SendAlertNotification(alertData *AlertData) (bool, error) {
-	// 查询所有启用的、类别为 baseline_alert 的通知配置
+	return s.SendCategoryAlertNotification(model.NotifyCategoryBaselineAlert, alertData)
+}
+
+// SendCategoryAlertNotification 按指定通知类别发送告警。
+//
+// 与 SendAlertNotification 的唯一区别是类别可指定：原实现把 baseline_alert 写死，
+// 于是 ML 异常、行为基线、AD 审计、关联事件这些检测产出即便写进了各自的表，
+// 也没有任何通道能把它们送出去。类别参数化是接通这些哑巴链路的前提。
+func (s *NotificationService) SendCategoryAlertNotification(category model.NotifyCategory, alertData *AlertData) (bool, error) {
+	// 查询所有启用的、指定类别的通知配置
 	var notifications []model.Notification
-	if err := s.db.Where("enabled = ? AND notify_category = ?", true, model.NotifyCategoryBaselineAlert).Find(&notifications).Error; err != nil {
+	if err := s.db.Where("enabled = ? AND notify_category = ?", true, category).Find(&notifications).Error; err != nil {
 		s.logger.Error("查询通知配置失败", zap.Error(err))
 		return false, err
 	}
@@ -2221,4 +2230,32 @@ func (s *NotificationService) BuildTestLarkCard(notification *model.Notification
 		// baseline_alert 和 agent_offline 使用原有逻辑
 		return nil
 	}
+}
+
+// ClaimAlertNotification 原子地占用一条告警的一次通知机会。
+//
+// alerts 有两个通知触发：AgentCenter 在告警产生时立即通知（首次），Manager 定时器
+// 补发从未通知成功的、并对仍活跃的做周期重复提醒。两者靠 last_notified_at 协调，
+// 但原先都是"先发送、后写回"，中间存在窗口：新告警的内联 goroutine 尚未写回时，
+// 定时器扫到 last_notified_at IS NULL 就会把同一条再发一次。
+//
+// 改为"先占用、后发送"：用带条件的 UPDATE 抢占，RowsAffected==0 表示已被另一方占走，
+// 直接跳过。占用后若发送失败，这次机会被消耗，但告警仍是 active，下个周期
+// last_notified_at 会早于 cutoff 而重新可被占用——退化成延迟一个周期，不会丢失。
+// 相比之下重复打扰值班是更难接受的一侧。
+//
+// notBefore 语义：仅当 last_notified_at 为空或早于该时刻时占用成功。
+func ClaimAlertNotification(db *gorm.DB, alertID uint, notBefore time.Time) (bool, error) {
+	now := model.Now()
+	res := db.Model(&model.Alert{}).
+		Where("id = ?", alertID).
+		Where("last_notified_at IS NULL OR last_notified_at < ?", notBefore).
+		Updates(map[string]interface{}{
+			"last_notified_at": &now,
+			"notify_count":     gorm.Expr("notify_count + 1"),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }

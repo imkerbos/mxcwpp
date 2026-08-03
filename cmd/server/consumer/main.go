@@ -15,12 +15,12 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/gctune"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
 	"github.com/matrixplusio/mxcwpp/internal/server/config"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer"
 	consumermetrics "github.com/matrixplusio/mxcwpp/internal/server/consumer/metrics"
-	"github.com/matrixplusio/mxcwpp/internal/server/consumer/siem"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/writer"
 	"github.com/matrixplusio/mxcwpp/internal/server/database"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/anomaly"
@@ -98,6 +98,21 @@ func main() {
 	}
 	defer database.Close()
 
+	// 6.1 SIEM 外发出口（可选）
+	//
+	// 原实现构造了 Forwarder、打印"已启动"，然后从未调用过它——日志说它在跑，
+	// 实际一条告警都发不出去。现在统一挂到 alertbus 的外发出口上。
+	siemEgress, closeSIEM := alertbus.NewSIEMEgress(logger.Named("siem"),
+		cfg.SIEM.Enabled, cfg.SIEM.Protocol, cfg.SIEM.Address, cfg.SIEM.Facility, 0)
+	defer closeSIEM()
+
+	// 4.1 告警发布点：Consumer 产出的行为基线偏离经此走通知出口。
+	// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库。
+	alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
+		alertbus.FromConfig(cfg.Alerting.NotifyCategories,
+			cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)).
+		WithEgress(siemEgress))
+
 	// 5. 初始化写入器
 	mysqlWriter := writer.NewMySQLWriter(db, logger)
 
@@ -152,20 +167,6 @@ func main() {
 	// Sprint 2 PR48: 分析模块可选启用 (默认 true 兼容 v1; v2 部署应设 false 由 Engine 服务承担)。
 	// 详见 docs/architecture.md §2.3 Consumer 职责: 只做 Kafka -> 存储幂等写入。
 	logger.Info("Consumer 仅 writer 路径 (v2 拆分: 检测由 Engine 服务承担)")
-
-	// 6.1 SIEM 转发器 (可选)
-	siemForwarder := siem.NewForwarder(logger, siem.Config{
-		Enabled:  cfg.SIEM.Enabled,
-		Protocol: cfg.SIEM.Protocol,
-		Address:  cfg.SIEM.Address,
-		Facility: cfg.SIEM.Facility,
-	})
-	if siemForwarder != nil {
-		defer siemForwarder.Close()
-		logger.Info("SIEM 转发器已启动",
-			zap.String("address", cfg.SIEM.Address),
-			zap.String("protocol", cfg.SIEM.Protocol))
-	}
 
 	// 6.2 上下文 (后续多个组件需要 ctx 控制生命周期)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -222,6 +223,13 @@ func main() {
 	// fail-closed（落库模式降级 shadow，只观测不落库），进程仍存活；就绪状态经 /readyz 暴露。
 	anomalyDet.SetMode(anomaly.LoadMode(db, logger.Named("anomaly")))
 	anomalyDet.VerifySchema()
+	// 恢复上次的参照基线。参照必须来自一段未被污染的历史，丢了就再也长不回来；
+	// 不恢复的话每次重启都以"无参照"运行，投毒防护静默失效。
+	anomalyDet.LoadState()
+	// 恢复上次训练出的模型。不恢复的话每次重启都要重新攒样本 + 等一个完整重训周期
+	// 才恢复评分能力，这段时间检测器照常运行却什么都发现不了。
+	anomalyDet.LoadActiveModel()
+	anomalyDet.LoadScoreThreshold(db)
 	consumermetrics.RegisterReadiness("anomaly_schema", func() bool {
 		return anomalyDet.Status().SchemaReady
 	})
@@ -233,6 +241,7 @@ func main() {
 		zap.String("effective_mode", string(st.EffectiveMode)),
 		zap.Bool("schema_ready", st.SchemaReady),
 		zap.Bool("dns_field_ready", st.DNSFieldReady),
+		zap.Bool("reference_baseline_ready", anomalyDet.HasReference()),
 	)
 
 	// ML 异常检测器状态指标：启动即初始化一次，随后周期刷新（trained/sample/host 会随消费变化）。

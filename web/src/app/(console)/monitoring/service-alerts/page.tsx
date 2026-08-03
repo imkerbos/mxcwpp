@@ -74,7 +74,7 @@ export default function ServiceAlertPage() {
     status: "",
   });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["mon-service-alerts", params],
     queryFn: () =>
       monitorApi.listServiceAlerts({
@@ -86,6 +86,9 @@ export default function ServiceAlertPage() {
         status: params.status || undefined,
       }),
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
 
   const ackMutation = useMutation({
     mutationFn: (id: string) => monitorApi.ackServiceAlert(id),
@@ -132,10 +135,10 @@ export default function ServiceAlertPage() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard compact label={t("monitoring.alerts.statCritical")} value={stats?.critical ?? 0} icon={AlertOctagon} tone="danger" />
-        <StatCard compact label={t("monitoring.alerts.statWarning")} value={stats?.warning ?? 0} icon={AlertTriangle} tone="warning" />
-        <StatCard compact label={t("monitoring.alerts.statInfo")} value={stats?.info ?? 0} icon={Bell} tone="default" />
-        <StatCard compact label={t("monitoring.alerts.statResolved")} value={stats?.resolved ?? 0} icon={CheckCircle2} tone="success" />
+        <StatCard compact label={t("monitoring.alerts.statCritical")} value={stats?.critical ?? 0} {...statState} icon={AlertOctagon} tone="danger" />
+        <StatCard compact label={t("monitoring.alerts.statWarning")} value={stats?.warning ?? 0} {...statState} icon={AlertTriangle} tone="warning" />
+        <StatCard compact label={t("monitoring.alerts.statInfo")} value={stats?.info ?? 0} {...statState} icon={Bell} tone="default" />
+        <StatCard compact label={t("monitoring.alerts.statResolved")} value={stats?.resolved ?? 0} {...statState} icon={CheckCircle2} tone="success" />
       </div>
 
       <FilterBar>

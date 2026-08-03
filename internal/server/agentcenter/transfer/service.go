@@ -24,6 +24,7 @@ import (
 
 	"github.com/matrixplusio/mxcwpp/api/proto/bridge"
 	grpcProto "github.com/matrixplusio/mxcwpp/api/proto/grpc"
+	"github.com/matrixplusio/mxcwpp/internal/common/certissue"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/agentcenter/service"
 	"github.com/matrixplusio/mxcwpp/internal/server/audit"
@@ -36,18 +37,22 @@ import (
 
 // Connection 表示一个 Agent 连接
 type Connection struct {
-	AgentID   string
-	Hostname  string
-	IPv4      []string
-	IPv6      []string
-	Version   string
-	LastSeen  time.Time
-	stream    grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
-	ctx       context.Context
-	cancel    context.CancelFunc
-	sendCh    chan *grpcProto.Command
-	workerSem chan struct{} // 限制异步 record 处理的并发数
-	mu        sync.RWMutex
+	AgentID  string
+	Hostname string
+	IPv4     []string
+	IPv6     []string
+	Version  string
+	LastSeen time.Time
+	// SharedCert 表示该连接用的仍是全网共享证书（CN != AgentID），尚未换成一机一证。
+	// 升级 AgentCenter 前必须先把这类连接清零：新版强制 CN==AgentID，
+	// 它们会在升级瞬间全部被拒且不会自愈。
+	SharedCert bool
+	stream     grpc.BidiStreamingServer[grpcProto.PackagedData, grpcProto.Command]
+	ctx        context.Context
+	cancel     context.CancelFunc
+	sendCh     chan *grpcProto.Command
+	workerSem  chan struct{} // 限制异步 record 处理的并发数
+	mu         sync.RWMutex
 }
 
 // GetHostname 线程安全地获取主机名
@@ -104,6 +109,10 @@ type Service struct {
 
 	// 优雅关闭标志：Server 自身重启时跳过离线通知，避免假告警
 	shutdownFlag atomic.Bool
+
+	// unroutedLogged 记录已就"未登记路由"报过错的 DataType，每种只报一次。
+	// 指标负责计量，日志只负责提示存在缺口——高频类型逐条打日志会撑爆磁盘。
+	unroutedLogged sync.Map
 
 	// P1-3: 异步通知 ctx + semaphore 限并发, 服务关闭时取消所有 dangling goroutine.
 	notifyCtx    context.Context
@@ -242,7 +251,6 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	}
 
 	// 身份校验：把 TLS 客户端证书 CN 与上报 AgentID 绑定，杜绝伪造 AgentID 顶替他机。
-	// EnforceAgentID=false 为观察模式（只告警不拒绝，供存量迁移），=true 为强制模式（步骤 6）。
 	leafCert, hasClientCert := peerLeafCert(stream.Context())
 	if hasClientCert && s.isRevokedSerial(leafCert.SerialNumber) {
 		s.logger.Warn("拒绝已吊销证书的连接",
@@ -251,24 +259,37 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 		)
 		return status.Errorf(codes.PermissionDenied, "客户端证书已吊销")
 	}
-	if s.cfg.MTLS.EnforceAgentID {
-		if hasClientCert {
-			if leafCert.Subject.CommonName != agentID {
-				s.logger.Warn("强制模式：拒绝 CN 与 AgentID 不符的连接",
-					zap.String("cert_cn", leafCert.Subject.CommonName),
-					zap.String("agent_id", agentID),
-				)
-				return status.Errorf(codes.PermissionDenied, "客户端证书 CN 与上报 AgentID 不符")
-			}
-		} else if !s.enrollTokenValid(enrollTokenFromCtx(stream.Context())) {
-			s.logger.Warn("强制模式：拒绝无有效客户端证书且 enroll 令牌无效的连接",
+
+	// AgentID 字符集/长度约束：非法即拒绝，避免未校验文本进入后续证书 CN / 存储 / 路径。
+	if err := certissue.ValidAgentID(agentID); err != nil {
+		return status.Errorf(codes.InvalidArgument, "非法 AgentID: %v", err)
+	}
+
+	// 无客户端证书：只允许走 enroll（提交合法 AgentID + enroll 令牌换取一机一证），签发后即结束该流、
+	// 要求带证书重连。绝不注册在线连接 / 处理心跳 records / 下发插件任务 / 进入其它业务面。
+	// 共享 client key 下发路径仅在显式 insecure_dev_mode（回环开发）可达，生产不可触达。
+	if !hasClientCert {
+		if s.cfg.MTLS.PerAgentCert {
+			return s.enrollOnly(ctx, stream, agentID)
+		}
+		if !s.cfg.MTLS.InsecureDevMode {
+			s.logger.Warn("拒绝无客户端证书连接（未开启 per_agent_cert 且非 insecure_dev_mode）",
+				zap.String("agent_id", agentID))
+			return status.Errorf(codes.Unauthenticated, "缺少有效客户端证书")
+		}
+		// insecure_dev_mode：回退旧的共享证书下发 + 完整注册（仅回环开发）。
+	}
+
+	// 有客户端证书：强制 CN==AgentID。EnforceAgentID=true 为生产强制（拒绝），
+	// =false 为迁移观察模式（降 Debug，不刷屏，真正拦截由强制模式兜底）。
+	if hasClientCert && leafCert.Subject.CommonName != agentID {
+		if s.cfg.MTLS.EnforceAgentID {
+			s.logger.Warn("强制模式：拒绝 CN 与 AgentID 不符的连接",
+				zap.String("cert_cn", leafCert.Subject.CommonName),
 				zap.String("agent_id", agentID),
 			)
-			return status.Errorf(codes.Unauthenticated, "缺少有效客户端证书，且 enroll 令牌无效")
+			return status.Errorf(codes.PermissionDenied, "客户端证书 CN 与上报 AgentID 不符")
 		}
-	} else if hasClientCert && leafCert.Subject.CommonName != agentID {
-		// 观察模式降 Debug：迁移期 500 台重连会高频命中，Warn 会刷屏。
-		// 真正该拦截的场景由强制模式（EnforceAgentID=true）的 Warn + 拒绝兜底。
 		s.logger.Debug("观察模式：客户端证书 CN 与上报 AgentID 不符（迁移期允许，强制后将拒绝）",
 			zap.String("cert_cn", leafCert.Subject.CommonName),
 			zap.String("agent_id", agentID),
@@ -284,6 +305,10 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 	)
 
 	// 创建连接对象
+	// 有证书但 CN 不是自己的 AgentID = 仍在用全网共享证书，尚未迁移。
+	// 与下方 alreadyEnrolled 同一判断，此处留作迁移进度统计。
+	usingSharedCert := hasClientCert && leafCert.Subject.CommonName != agentID
+
 	conn := &Connection{
 		AgentID:  agentID,
 		Hostname: firstData.Hostname,
@@ -291,9 +316,11 @@ func (s *Service) Transfer(stream grpc.BidiStreamingServer[grpcProto.PackagedDat
 		IPv6:     append(firstData.IntranetIpv6, firstData.ExtranetIpv6...),
 		Version:  firstData.Version,
 		LastSeen: time.Now(),
-		stream:   stream,
-		ctx:      ctx,
-		cancel:   cancel,
+		// 迁移进度统计用；见 SharedCert 字段说明。
+		SharedCert: usingSharedCert,
+		stream:     stream,
+		ctx:        ctx,
+		cancel:     cancel,
 		// sendCh 容量 100: precheck cron 单 host 单 tick 可投 200 条 task,
 		// 加上 plugin update/rule sync/heartbeat ack 共用此 ch,
 		// 容量过小(原 10)会导致 agent stream 短暂卡住时 SendCommand 立即 drop,
@@ -442,7 +469,7 @@ func (s *Service) handleHeartbeat(ctx context.Context, data *grpcProto.PackagedD
 	var isContainer bool
 	var containerID string
 	var businessLine string
-	var runtimeType model.RuntimeType = model.RuntimeTypeVM // 默认为 VM
+	runtimeType := model.RuntimeTypeVM // 默认为 VM
 	var podName, podNamespace, podUID string
 	// EDR 引擎状态
 	var edrMode, edrCapabilities, edrHookType string
@@ -1061,7 +1088,18 @@ func (s *Service) handleEncodedRecord(ctx context.Context, record *grpcProto.Enc
 			Version:      conn.GetVersion(),
 			ACID:         s.cfg.Server.InstanceID,
 		}
-		topic := kafka.RouteDataType(record.DataType, s.cfg.Kafka.TopicPrefix)
+		topic, routed := kafka.RouteDataTypeChecked(record.DataType, s.cfg.Kafka.TopicPrefix)
+		if !routed {
+			// 走兜底 = 消息进心跳 Topic 被消费者静默忽略，等于数据丢失。仍然投递（丢弃更糟），
+			// 但必须让它可见：指标持续计数，日志每种 DataType 只报一次以免高频类型刷爆磁盘。
+			metrics.IncUnroutedDataType(record.DataType)
+			if _, seen := s.unroutedLogged.LoadOrStore(record.DataType, struct{}{}); !seen {
+				s.logger.Error("DataType 未登记 Kafka 路由，已走心跳兜底（消费者会静默忽略，等同丢数据）",
+					zap.Int32("data_type", record.DataType),
+					zap.String("fallback_topic", topic),
+					zap.String("fix", "同步更新 kafka.RouteDataType 与 Consumer handleMessage，并登记 docs/datatype-allocation.md"))
+			}
+		}
 		// 基线任务完成信号（8001/8004）是控制面关键低频消息：被丢弃会导致主机永不计完成、
 		// 任务超时。改用 SendReliable（Input 满时有界阻塞→退降级队列重试），避免 eBPF 高频
 		// 遥测 burst 把完成信号首先挤丢。其余高频遥测仍用 Send（非阻塞）。
@@ -1622,20 +1660,30 @@ func (s *Service) sendAlertNotification(alert *model.Alert, conn *Connection) {
 
 	// 发送通知（异步，不阻塞）
 	go func() {
+		// 先原子占用这次通知机会，再发送。Manager 的定时补发会扫描
+		// last_notified_at IS NULL 的告警，若此处仍是"先发后写"，两边会把同一条发两次。
+		claimed, err := notify.ClaimAlertNotification(s.db, alert.ID, time.Now())
+		if err != nil {
+			s.logger.Warn("占用告警通知机会失败",
+				zap.Uint("alert_id", alert.ID), zap.Error(err))
+			return
+		}
+		if !claimed {
+			s.logger.Debug("告警通知已被定时补发占用，跳过内联通知",
+				zap.Uint("alert_id", alert.ID))
+			return
+		}
+
 		notificationService := notify.NewNotificationService(s.db, s.logger)
 		sent, err := notificationService.SendAlertNotification(alertData)
 		if err != nil {
-			s.logger.Warn("发送告警通知失败",
+			// 机会已消耗，但告警仍 active，下个周期会因 last_notified_at 早于 cutoff
+			// 而重新可被占用——退化为延迟一个周期，不会丢失。
+			s.logger.Warn("发送告警通知失败（已占用的通知机会将在下个周期重试）",
 				zap.Uint("alert_id", alert.ID),
 				zap.Error(err),
 			)
 		} else if sent {
-			// 只有实际发送了通知才更新通知时间和通知次数
-			now := model.Now()
-			s.db.Model(&model.Alert{}).Where("id = ?", alert.ID).Updates(map[string]interface{}{
-				"last_notified_at": &now,
-				"notify_count":     gorm.Expr("notify_count + 1"),
-			})
 			s.logger.Info("告警通知已发送",
 				zap.Uint("alert_id", alert.ID),
 				zap.String("host_id", alert.HostID),
@@ -2764,8 +2812,11 @@ func (s *Service) handleFIMEvent(ctx context.Context, record *grpcProto.EncodedR
 		}
 	}
 
+	// 与 Kafka 写入路径共用同一派生规则：插件的 event_id 每轮扫描重置，
+	// 直接当主键会让不同主机/不同扫描的同序号事件互相冲突而丢失。
 	fimEvent := &model.FIMEvent{
-		EventID:      eventID,
+		EventID: model.DeriveFIMEventID(
+			conn.AgentID, taskID, filePath, changeType, eventID, detectedAt.Time().Unix()),
 		HostID:       conn.AgentID,
 		Hostname:     conn.GetHostname(),
 		TaskID:       taskID,
@@ -3159,4 +3210,45 @@ func (s *Service) getAgentRuntimeType(agentID string) model.RuntimeType {
 		return model.RuntimeTypeVM
 	}
 	return host.RuntimeType
+}
+
+// CertMigrationStats 是 agent 证书迁移进度。
+type CertMigrationStats struct {
+	// Online 当前在线连接数。
+	Online int `json:"online"`
+	// PerAgent 已换用一机一证（CN == AgentID）的连接数。
+	PerAgent int `json:"per_agent"`
+	// StillShared 仍在用全网共享证书的连接数。
+	//
+	// 这个数字必须归零才能升级 AgentCenter：新版强制 CN==AgentID，
+	// 这些连接会在升级瞬间被拒，且 agent 侧没有重新 enroll 的自愈逻辑。
+	StillShared int `json:"still_shared"`
+	// SharedAgentIDs 仍在用共享证书的 agent，便于逐台处理。
+	// 截断到前 100 个：迁移初期这个列表等于整个机群，全量返回没有意义。
+	SharedAgentIDs []string `json:"shared_agent_ids"`
+}
+
+// CertMigrationProgress 汇总当前在线连接的证书迁移进度。
+//
+// 只统计**在线**连接：离线 agent 的证书状态无从得知，
+// 把它们算成已迁移会给出一个偏乐观的结论，而这个结论一旦错了，
+// 代价是整个机群掉线。
+func (s *Service) CertMigrationProgress() CertMigrationStats {
+	const maxListed = 100
+	stats := CertMigrationStats{SharedAgentIDs: []string{}}
+
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+	for _, conn := range s.connections {
+		stats.Online++
+		if conn.SharedCert {
+			stats.StillShared++
+			if len(stats.SharedAgentIDs) < maxListed {
+				stats.SharedAgentIDs = append(stats.SharedAgentIDs, conn.AgentID)
+			}
+		} else {
+			stats.PerAgent++
+		}
+	}
+	return stats
 }

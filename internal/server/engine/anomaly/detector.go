@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/model"
 )
 
@@ -74,11 +75,10 @@ const (
 	// retrainInterval is how often the forest is retrained from recent data.
 	retrainInterval = 30 * time.Minute
 
-	// sampleWindowSize is the max number of recent samples kept for training.
-	sampleWindowSize = 2000
-
-	// anomalyThreshold is the score above which a sample is flagged.
-	anomalyThreshold = 0.65
+	// defaultAnomalyThreshold is the default score above which a sample is flagged.
+	// 可经 feature flag anomaly.score_threshold 覆盖（见 threshold.go）——
+	// 不同环境的"正常"离散程度差别很大，写死一个数意味着某些环境必然长期误报或长期漏报。
+	defaultAnomalyThreshold = 0.65
 
 	// correlationThreshold is ratio threshold for a metric to be "elevated".
 	// 调整 2.0 → 3.0:prod 实际正常业务服务(db/mq)波动经常 >2x 均值,但 <3x。
@@ -105,10 +105,21 @@ type Detector struct {
 	chConn chdriver.Conn // 可为 nil；nil 时跳过 IOC 回查，仅写入 metric_snapshot
 	forest *IForest
 
-	mu           sync.Mutex
-	sampleBuffer [][]float64          // recent samples for training
+	mu sync.Mutex
+	// sampleBuffer 按主机分组的训练样本，每台主机配额受限（详见 sampling.go）。
+	// 原为一条全局 FIFO，高频主机会按样本数主导"什么算正常"。
+	sampleBuffer *hostSampleBuffer
 	hostMeans    map[string][]float64 // per-host running mean for z-score
 	hostCounts   map[string]int       // sample count per host
+	// reference 是不随滑动窗口移动的长期参照，用于识别环境漂移与训练投毒。
+	// 一经建立不再更新（见 drift.go）。
+	reference *referenceBaseline
+	// lastTrainedAt 上次成功训练的时间。拒绝重训不更新它，模型年龄因而能反映真实情况。
+	lastTrainedAt time.Time
+	// scores 累积每台主机的异常分供 ranking 档排序使用，周期落库（见 ranking.go）。
+	scores *scoreRecorder
+	// threshold 是可配置的异常分阈值（见 threshold.go）；未配置时用默认值。
+	threshold thresholdHolder
 	// persistMu synchronizes safety-mode/schema transitions with anomaly_alerts writes.
 	// A writer holds RLock through the DB upsert; SetMode/VerifySchema take Lock, so once
 	// a transition to off/shadow returns, no write admitted under the previous mode can remain in flight.
@@ -141,6 +152,8 @@ func NewDetector(db *gorm.DB, chConn chdriver.Conn, logger *zap.Logger) *Detecto
 		schemaReady: false,
 		dnsValid:    false,
 	}
+	d.sampleBuffer = newHostSampleBuffer()
+	d.scores = newScoreRecorder(db, logger)
 	d.suppress.reload(db, logger) // 启动即加载一次白名单 + 反馈抑制
 	return d
 }
@@ -220,7 +233,9 @@ func (d *Detector) effectiveModeLocked() Mode {
 }
 
 // officialCeilingLocked 返回当前允许的最高严重度：仅生效 alert 模式才允许 critical，
-// 其余（off/shadow/context 及降级）封顶 high —— 结构性禁止 ML 信号被当作正式高危定罪。
+// 其余（off/shadow/context/ranking 及降级）封顶 high —— 结构性禁止 ML 信号被当作正式高危定罪。
+//
+// ranking 档同样封顶 high：它只改变告警被看到的顺序，不改变告警的严重程度。
 func (d *Detector) officialCeilingLocked() string {
 	if d.effectiveModeLocked() == ModeAlert {
 		return "critical"
@@ -233,7 +248,23 @@ func (d *Detector) officialCeilingLocked() string {
 // persistAnomalyIfEligible，在 persistMu 保护下做最终检查，不能依赖早先的模式快照。
 func (d *Detector) persistEligibleLocked() bool {
 	em := d.effectiveModeLocked()
-	return em == ModeContext || em == ModeAlert
+	return em == ModeContext || em == ModeRanking || em == ModeAlert
+}
+
+// rankingEligibleLocked 判断异常分是否参与已有告警的排序。
+//
+// 仅 ranking / alert 两档为真。排序不新建告警，只改已存在告警的 risk_score——
+// 让分析师在异常主机上的告警先被看到。调用方必须持 d.mu。
+func (d *Detector) rankingEligibleLocked() bool {
+	em := d.effectiveModeLocked()
+	return em == ModeRanking || em == ModeAlert
+}
+
+// RankingEligible 报告异常分当前是否参与告警排序。
+func (d *Detector) RankingEligible() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.rankingEligibleLocked()
 }
 
 // persistAnomalyIfEligible 在真正写库前再次检查生效模式，并把检查与 upsert 放在同一个
@@ -267,7 +298,7 @@ func (d *Detector) Status() Status {
 		SchemaReady:   d.schemaReady,
 		DNSFieldReady: d.dnsValid,
 		Trained:       d.forest.Trained(),
-		SampleCount:   len(d.sampleBuffer),
+		SampleCount:   d.sampleBuffer.count(),
 		HostCount:     len(d.hostMeans),
 	}
 }
@@ -275,6 +306,11 @@ func (d *Detector) Status() Status {
 // StartRetrain begins periodic retraining in the background.
 // Call after Consumer startup.
 func (d *Detector) StartRetrain(stop <-chan struct{}) {
+	// 异常分落库与重训同一处启动：两者都是检测器的后台循环，
+	// 分开启动容易出现"重训在跑但分数没人落库"的半启动状态。
+	if d.scores != nil {
+		d.scores.StartScoreFlush(stop)
+	}
 	go func() {
 		ticker := time.NewTicker(retrainInterval)
 		defer ticker.Stop()
@@ -304,11 +340,8 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 		d.mu.Unlock()
 		return
 	}
-	// Add to sample buffer.
-	d.sampleBuffer = append(d.sampleBuffer, metrics)
-	if len(d.sampleBuffer) > sampleWindowSize {
-		d.sampleBuffer = d.sampleBuffer[len(d.sampleBuffer)-sampleWindowSize:]
-	}
+	// Add to sample buffer（按主机配额，单机无法主导训练集）。
+	d.sampleBuffer.add(hostID, metrics)
 
 	// Update per-host running mean (for correlation z-score).
 	d.updateHostMean(hostID, metrics)
@@ -324,7 +357,16 @@ func (d *Detector) Ingest(hostID, hostname string, metrics []float64) {
 	// 1. Isolation Forest scoring.
 	if d.forest.Trained() {
 		score := d.forest.Score(metrics)
-		if score >= anomalyThreshold {
+		// ranking 档：记录分数供已有告警排序。**所有评分都记**，不只是超阈值的——
+		// 排序需要知道"这台主机现在多正常"，只记异常的那些会让正常主机没有分数，
+		// 从而无法与异常主机比较。
+		d.mu.Lock()
+		rank := d.rankingEligibleLocked()
+		d.mu.Unlock()
+		if rank && d.scores != nil {
+			d.scores.record(hostID, score, time.Now())
+		}
+		if score >= d.scoreThreshold() {
 			d.emitForestAlert(hostID, hostname, metrics, score)
 		}
 	}
@@ -344,7 +386,7 @@ func (d *Detector) Trained() bool {
 func (d *Detector) SampleCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.sampleBuffer)
+	return d.sampleBuffer.count()
 }
 
 // HostCount returns the number of unique hosts tracked.
@@ -358,8 +400,8 @@ func (d *Detector) HostCount() int {
 
 func (d *Detector) retrain() {
 	d.mu.Lock()
-	data := make([][]float64, len(d.sampleBuffer))
-	copy(data, d.sampleBuffer)
+	data := d.sampleBuffer.flatten()
+	trainHosts := d.sampleBuffer.hosts()
 	d.mu.Unlock()
 
 	if len(data) < 64 {
@@ -368,10 +410,77 @@ func (d *Detector) retrain() {
 		return
 	}
 
+	// 首次积够样本时固定一份长期参照。它此后不再跟随滑动窗口移动——
+	// 一旦参照也跟着漂，就和被它监督的对象一起漂走了。
+	newRef := false
+	d.mu.Lock()
+	if d.reference == nil {
+		if ref := newReferenceBaseline(trimOutliers(data)); ref != nil {
+			d.reference = ref
+			d.logger.Info("已建立异常检测长期参照基线",
+				zap.Int("samples", ref.samples))
+			newRef = true
+		}
+	}
+	ref := d.reference
+	d.mu.Unlock()
+	if newRef {
+		// 参照一建立就落库：它必须来自一段未被污染的历史，丢了就再也长不回来。
+		d.SaveState()
+	}
+
+	driftSigma := 0.0
+	if ref != nil {
+		rep := ref.evaluateDrift(data)
+		driftSigma = rep.MaxDrift
+		for i, v := range rep.PerFeature {
+			anomalyDriftScore.WithLabelValues(featureName(i)).Set(v)
+		}
+		if rep.Poisoned {
+			// 拒绝用这批数据重训，继续使用旧模型。
+			//
+			// 滑窗重训的固有弱点是：攻击者只要把动作放慢到跨越多个窗口，
+			// 每一窗都只比上一窗高一点，最后攻击行为会成为基线。
+			// 这里宁可让模型变旧，也不要学一个可能已被污染的新模型。
+			anomalyRetrainRejected.WithLabelValues("drift").Inc()
+			d.recordRejectedRetrain()
+			d.logger.Warn("训练窗口偏离长期基线过大，已拒绝本轮重训（继续使用旧模型）",
+				zap.Float64("max_drift_sigma", rep.MaxDrift),
+				zap.String("worst_feature", featureName(rep.WorstFeature)),
+				zap.Float64("threshold_sigma", driftThreshold),
+				zap.Int("samples", len(data)))
+			d.publishModelAge()
+			return
+		}
+	}
+
 	d.forest.Train(data)
+	d.mu.Lock()
+	d.lastTrainedAt = time.Now()
+	d.mu.Unlock()
+	d.publishModelAge()
+	d.SaveState()
+	// 每次成功训练留一个可回滚版本。没有版本就没有退路：
+	// 某轮学坏了只能等下一个 30 分钟周期，而在那之前检测一直在用坏模型打分。
+	d.saveModelVersion(len(data), driftSigma)
 	d.logger.Info("IForest retrained",
 		zap.Int("samples", len(data)),
+		zap.Int("hosts", trainHosts),
 		zap.Bool("trained", d.forest.Trained()))
+}
+
+// publishModelAge 上报模型自上次成功训练以来的时长。
+//
+// 连续拒绝重训会让模型悄悄变旧，而"拒绝"本身在指标上表现为一个计数器增长，
+// 不看历史就看不出来。模型年龄让这件事随时可见。
+func (d *Detector) publishModelAge() {
+	d.mu.Lock()
+	last := d.lastTrainedAt
+	d.mu.Unlock()
+	if last.IsZero() {
+		return
+	}
+	anomalyModelAge.Set(time.Since(last).Seconds())
 }
 
 func (d *Detector) updateHostMean(hostID string, metrics []float64) {
@@ -439,7 +548,7 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 	d.mu.Unlock()
 
 	// 拼描述：让 UI drawer 至少有一行有意义内容，避免 v-if 空白
-	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, anomalyThreshold)
+	description := fmt.Sprintf("Isolation Forest 异常评分 %.2f（>=%.2f 触发告警）", score, d.scoreThreshold())
 	if topMetric != "" {
 		description = fmt.Sprintf("指标 %s 偏离主机历史均值，当前值 %.2f；Isolation Forest 异常评分 %.2f",
 			topMetric, topValue, score)
@@ -485,6 +594,21 @@ func (d *Detector) emitForestAlert(hostID, hostname string, metrics []float64, s
 		zap.Float64("score", score),
 		zap.String("top_metric", topMetric),
 		zap.String("severity", severity))
+
+	// 已落库的异常发往通知出口。anomaly_alerts 此前没有任何通知链路——检测跑了、
+	// 写进表了、值班不知道。默认类别未开启时这里只计量不发送。
+	// 抑制身份取 (host, 指标)：同一主机同一指标持续异常不重复打扰。
+	alertbus.Publish(alertbus.Event{
+		Category:    model.NotifyCategoryAnomalyAlert,
+		Source:      "anomaly",
+		HostID:      hostID,
+		Hostname:    hostname,
+		Severity:    severity,
+		Title:       "主机指标异常：" + topMetric,
+		Description: description,
+		DedupKey:    "anomaly|" + hostID + "|" + topMetric,
+		RefTable:    "anomaly_alerts",
+	})
 }
 
 // topDeviations 返回 metrics 与 mean 差异最大的 N 个指标。

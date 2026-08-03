@@ -5,6 +5,8 @@ import (
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/matrixplusio/mxcwpp/internal/server/config"
 )
 
 const (
@@ -77,6 +79,8 @@ type SANs struct {
 
 type App struct {
 	JWTSecret          string `yaml:"jwt_secret"`
+	InternalSecret     string `yaml:"internal_secret"` // Manager↔AgentCenter 管理面鉴权共享密钥
+	EnrollToken        string `yaml:"enroll_token"`    // Agent enroll 引导令牌；留空则 render 自动生成并持久化到 deploy/certs
 	LogLevel           string `yaml:"log_level"`
 	LogFormat          string `yaml:"log_format"`
 	HeartbeatInterval  int    `yaml:"heartbeat_interval"`
@@ -320,6 +324,10 @@ func (c *Config) Validate() error {
 	}
 	if c.App.JWTSecret == "" {
 		return fmt.Errorf("app.jwt_secret 不能为空")
+	}
+	// Manager 与所有 AC 渲染共用同一强内部密钥；生产强校验，拒绝空/模板/弱默认值。
+	if err := config.ValidateInternalSecret(c.App.InternalSecret); err != nil {
+		return fmt.Errorf("app.internal_secret 无效：%w", err)
 	}
 	if c.Infrastructure.MySQL.RootPassword == "" || c.Infrastructure.MySQL.Password == "" {
 		return fmt.Errorf("infrastructure.mysql.root_password 和 infrastructure.mysql.password 不能为空")

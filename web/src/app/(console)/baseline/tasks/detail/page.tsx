@@ -56,11 +56,14 @@ export default function BaselineTaskDetailPage() {
     setTaskId(new URLSearchParams(window.location.search).get("id") ?? "");
   }, []);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["bl-task-checks", taskId, resultFilter],
     queryFn: () => baselineApi.getTaskChecks(taskId, { result: resultFilter || undefined }),
     enabled: !!taskId,
   });
+  // 取不到就明说取不到：`?? 0` 会把"后端没答上来"渲染成 0，
+  // 看板上读起来像"环境干净"。
+  const statState = { error: isError, loading: isLoading };
   const task = data?.task;
   const statusMeta = task ? taskStatusMeta(t)[task.status] : null;
 
@@ -150,10 +153,10 @@ export default function BaselineTaskDetailPage() {
       )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard compact label={t("baseline.tasks.statTotalChecks")} value={data?.total ?? 0} icon={ListChecks} tone="default" />
-        <StatCard compact label={t("baseline.tasks.statPassed")} value={data?.passed ?? 0} icon={CheckCircle2} tone="success" />
-        <StatCard compact label={t("baseline.tasks.statFailed")} value={data?.failed ?? 0} icon={XCircle} tone="danger" />
-        <StatCard compact label={t("baseline.tasks.statPassRate")} value={fmtRate(data?.pass_rate)} icon={Percent} tone="success" />
+        <StatCard compact label={t("baseline.tasks.statTotalChecks")} value={data?.total ?? 0} {...statState} icon={ListChecks} tone="default" />
+        <StatCard compact label={t("baseline.tasks.statPassed")} value={data?.passed ?? 0} {...statState} icon={CheckCircle2} tone="success" />
+        <StatCard compact label={t("baseline.tasks.statFailed")} value={data?.failed ?? 0} {...statState} icon={XCircle} tone="danger" />
+        <StatCard compact label={t("baseline.tasks.statPassRate")} value={fmtRate(data?.pass_rate)} {...statState} icon={Percent} tone="success" />
       </div>
 
       {/* 任务元信息 */}

@@ -82,7 +82,7 @@ func InitRedis(cfg config.RedisConfig) (*redis.Client, error) {
 		if cfg.Sentinel {
 			mode = "Sentinel"
 		}
-		return nil, fmt.Errorf("Redis %s 连接失败: %w", mode, err)
+		return nil, fmt.Errorf("redis %s 连接失败: %w", mode, err)
 	}
 
 	globalRedis = client

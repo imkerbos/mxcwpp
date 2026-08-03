@@ -25,6 +25,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/config"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/gctune"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/mode"
@@ -100,6 +101,7 @@ func main() {
 		resolver := mode.NewMemoryResolver(mode.Mode(cfg.DefaultMode))
 
 		var stages []engine.Stage
+		var stageAlertWriter *engine.StageAlertWriter
 		dbDSN := cfg.Database.ResolveDSN()
 		if dbDSN != "" {
 			db, err := gorm.Open(mysql.Open(dbDSN), &gorm.Config{})
@@ -113,6 +115,20 @@ func main() {
 						sqlDB.SetConnMaxLifetime(d)
 					}
 				}
+				stageAlertWriter = engine.NewStageAlertWriter(db, logger.Named("stage_alert"))
+
+				// SIEM 外发出口：Engine 是检测告警的主要来源，缺了它客户 SIEM 会漏掉大头。
+				siemEgress, closeSIEM := alertbus.NewSIEMEgress(logger.Named("siem"),
+					cfg.SIEM.Enabled, cfg.SIEM.Protocol, cfg.SIEM.Address, cfg.SIEM.Facility, 0)
+				defer closeSIEM()
+
+				// 告警发布点：Engine 产出的 ML 异常经此走通知出口。
+				// 未在 alerting.notify_categories 列出的类别不通知，告警仍照常入库。
+				alertbus.SetDefault(alertbus.New(db, logger.Named("alertbus"),
+					alertbus.FromConfig(cfg.Alerting.NotifyCategories,
+						cfg.Alerting.MinSeverity, cfg.Alerting.SuppressWindowMinutes)).
+					WithEgress(siemEgress))
+
 				celEng, err := celengine.New(db, logger.Named("cel"))
 				if err != nil {
 					logger.Warn("celengine 初始化失败, 跳过 CelRuleStage", zap.Error(err))
@@ -170,7 +186,11 @@ func main() {
 			logger.Warn("Engine DB DSN 未配置, stages 为空, 仅 noop 跑通管线")
 		}
 
-		pipeline := engine.NewPipeline(producer, resolver, stages, logger)
+		// 注入 Stage 告警落库器：Privilege / RASP / AntiRootkit 等不自带落库的 Stage
+		// 此前只把告警推到 mxcwpp.engine.alert，而该 topic 无消费者——检测在跑但界面
+		// 永远看不到。alertWriter 为 nil（未配 DB）时保持原行为。
+		pipeline := engine.NewPipeline(producer, resolver, stages, logger).
+			WithStageAlertWriter(stageAlertWriter)
 
 		kc, err := engine.NewKafkaConsumer(cfg.Kafka.Brokers, cfg.Kafka.TopicPrefix, pipeline.Handler(), logger)
 		if err != nil {

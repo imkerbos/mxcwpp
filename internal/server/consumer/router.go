@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/matrixplusio/mxcwpp/internal/common/jsonx"
+	"github.com/matrixplusio/mxcwpp/internal/server/alertbus"
 	"github.com/matrixplusio/mxcwpp/internal/server/common/kafka"
 	consumermetrics "github.com/matrixplusio/mxcwpp/internal/server/consumer/metrics"
 	"github.com/matrixplusio/mxcwpp/internal/server/consumer/writer"
@@ -119,7 +120,20 @@ func (r *Router) flushAndCommit(session sarama.ConsumerGroupSession) {
 		return
 	}
 	if r.ch != nil {
-		r.ch.Flush()
+		if err := r.ch.Flush(); err != nil {
+			// 刷盘未成功即不推进 offset：提交了就等于宣布"这些消息已安全落盘"，
+			// 而实际 ClickHouse 里没有它们，消息又不会再被投递——证据永久消失且无人知晓。
+			// 不提交则这批消息会被重新消费，ClickHouse 侧可能多出重复行；
+			// 归档多几行远好过安全事件凭空不见。
+			//
+			// 注意：ClickHouse 长时间不可用会让 offset 持续不推进、lag 累积，
+			// 这是刻意的——它把"存储故障"变成一个看得见的运维问题，
+			// 而不是一段悄无声息的数据空洞。
+			r.logger.Error("ClickHouse 刷盘失败，暂停推进 offset（消息将被重新投递）",
+				zap.Int("pending_partitions", len(snap)),
+				zap.Error(err))
+			return
+		}
 	}
 	for tp, off := range snap {
 		// sarama 约定：标记"下一条待消费"位点 = 已处理 offset + 1。
@@ -633,6 +647,21 @@ func (r *Router) evaluateBDE(msg *kafka.MQMessage) {
 					}),
 				}).Create(&ba).Error; err != nil {
 					r.logger.Warn("写 behavior_alerts 失败", zap.Error(err))
+				} else {
+					// behavior_alerts 此前只入库、无通知出口。默认类别未开启时只计量不发送。
+					// 抑制身份取 (host, 指标)，与上面的 upsert 维度一致。
+					alertbus.Publish(alertbus.Event{
+						Category: model.NotifyCategoryBehaviorAlert,
+						Source:   "behavior",
+						HostID:   msg.AgentID,
+						Hostname: msg.Hostname,
+						Severity: bdeSeverity(result.RiskScore),
+						Title:    "行为基线偏离：" + dev.Metric,
+						Description: fmt.Sprintf("值 %.2f 偏离基线均值 %.2f（σ=%.2f, z=%.2f），风险分 %.1f",
+							dev.Value, dev.Mean, dev.Stddev, dev.ZScore, result.RiskScore),
+						DedupKey: "behavior|" + msg.AgentID + "|" + dev.Metric,
+						RefTable: "behavior_alerts",
+					})
 				}
 			}
 		}
@@ -693,5 +722,20 @@ func (r *Router) writeAgentACMapping(msg *kafka.MQMessage) {
 			zap.String("ac_id", msg.ACID),
 			zap.Error(err),
 		)
+	}
+}
+
+// bdeSeverity 把 BDE 风险分映射到通知等级。
+// 分档与 alertbus 的最低通知等级配合：默认只有 high 及以上才会打扰值班。
+func bdeSeverity(riskScore float64) string {
+	switch {
+	case riskScore >= 90:
+		return "critical"
+	case riskScore >= 70:
+		return "high"
+	case riskScore >= 40:
+		return "medium"
+	default:
+		return "low"
 	}
 }

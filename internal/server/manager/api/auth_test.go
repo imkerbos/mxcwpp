@@ -56,6 +56,11 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 	)`)
 	db.Exec(`INSERT INTO users (username, password, status, login_fail_count) VALUES (?, ?, ?, ?)`,
 		"admin", "irrelevant-bcrypt-mismatch", string(model.UserStatusActive), captchaFailThreshold)
+	// 供 AuthMiddleware.userActive 校验：seed 测试用到的 active 用户。
+	for _, u := range []string{"testuser", "normaluser"} {
+		db.Exec(`INSERT INTO users (username, password, status, login_fail_count) VALUES (?, ?, ?, 0)`,
+			u, "x", string(model.UserStatusActive))
+	}
 	return db
 }
 
@@ -208,6 +213,50 @@ func TestParseToken_AlgorithmConfusion(t *testing.T) {
 	h := newTestAuthHandler()
 	_, err := h.parseToken("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJ1c2VybmFtZSI6ImFkbWluIn0.")
 	assert.Error(t, err)
+}
+
+// TestParseToken_RejectsNonHS256 严格只接受 HS256：HS384/HS512 即使用同一密钥签名也拒绝。
+func TestParseToken_RejectsNonHS256(t *testing.T) {
+	h := newTestAuthHandler()
+	now := time.Now()
+	for _, method := range []jwt.SigningMethod{jwt.SigningMethodHS384, jwt.SigningMethodHS512} {
+		claims := Claims{
+			Username: "admin",
+			Role:     "admin",
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    jwtIssuer,
+				ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+				IssuedAt:  jwt.NewNumericDate(now),
+			},
+		}
+		tokenString, err := jwt.NewWithClaims(method, claims).SignedString(testSecret)
+		require.NoError(t, err)
+		if _, err := h.parseToken(tokenString); err == nil {
+			t.Fatalf("算法 %s 应被拒绝（仅接受 HS256）", method.Alg())
+		}
+	}
+}
+
+// TestAuthMiddleware_DisabledUser 被禁用/删除用户的旧 token 即使有效也应被拒绝。
+func TestAuthMiddleware_DisabledUser(t *testing.T) {
+	h := newTestAuthHandler()
+	// 禁用 testuser。
+	h.db.Exec(`UPDATE users SET status = ? WHERE username = ?`, "disabled", "testuser")
+	tokenString := generateValidToken("testuser", "user")
+
+	w := httptest.NewRecorder()
+	_, r := gin.CreateTestContext(w)
+	r.Use(h.AuthMiddleware())
+	r.GET("/protected", func(c *gin.Context) {
+		t.Fatal("禁用用户不应进入 handler")
+	})
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	r.ServeHTTP(w, req)
+
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, float64(CodeTokenExpired), resp["code"])
 }
 
 // --- AuthMiddleware 测试 ---

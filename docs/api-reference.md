@@ -6,7 +6,7 @@
 
 - **Base URL**:
   - `/api/v1` — v1 业务 API（向后兼容）
-  - `/api/v2` — v2 多租户 / 配置中心 / mode / MSSP / SOAR 等新功能
+  - `/api/v2` — 平台管理面：配置变更审批 / 运行模式 / SOAR 等
 - **认证方式**: JWT Bearer Token（公开接口除外）
 - **请求头**: `Authorization: Bearer <token>`，`Content-Type: application/json`
 - **OpenAPI 规范**: 见 [`docs/openapi/openapi.yaml`](openapi/openapi.yaml)（包含 v1+v2 全部端点的标准定义，是本文档的权威来源）
@@ -170,6 +170,11 @@
 | GET | `/api/v1/rules/:rule_id` | 规则详情 |
 | PUT | `/api/v1/rules/:rule_id` | 更新规则 |
 | DELETE | `/api/v1/rules/:rule_id` | 删除规则 |
+| GET | `/api/v1/policies/custom-exec-rules` | 自定义且携带可执行内容的规则清单 |
+
+创建、更新规则以及策略导入均**拒绝**自定义（非内置）规则携带 `command_exec` 检查或 `fix.command` 修复命令——这些内容会以 root 在全部目标主机执行。内置规则不受限；确需该能力由管理员开启 `server.security.allow_custom_exec_rules`（见 [配置](configuration.md)）。
+
+`/api/v1/policies/custom-exec-rules` 列出**存量**此类规则（写入闸门不回溯清理已有数据），含所属策略、可执行内容位于 check 还是 fix、以及截断后的修复命令，供逐条研判后停用或保留。
 
 ---
 
@@ -318,6 +323,58 @@
 
 ---
 
+## 处置审批
+
+处置动作（隔离主机等）**不再直接执行**，统一走申请 → 审批 → 执行 → 可回滚。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/hosts/isolate` | 提交隔离**申请**（须写明理由），不立即生效 |
+| POST | `/api/v1/hosts/release` | 提交解除隔离申请 |
+| GET | `/api/v1/response-actions` | 处置申请列表，可按 `status` 过滤 |
+| POST | `/api/v1/response-actions/:id/approve` | 审批通过（申请人不可自审批） |
+| POST | `/api/v1/response-actions/:id/reject` | 驳回（须写明原因） |
+| POST | `/api/v1/response-actions/:id/execute` | 执行已审批的处置 |
+| POST | `/api/v1/response-actions/:id/rollback` | 回滚已执行的处置 |
+
+隔离会切断业务流量。原实现是一次调用即刻生效，没有第二个人看过，事后也回答不了
+"这台机器当时为什么被隔离、谁批的"。
+
+`idempotency_key` 由调用方提供，同一键只产生一次执行——处置重复执行的后果不对称：
+多隔离一次可能切断本已恢复的业务。
+
+`system` / `auto` / `scheduler` 等系统身份**不得发起处置申请**：自动处置在申请入口
+即被拒绝，而不是依赖"目前没有自动路径"这种碰巧成立的状态。
+
+关联 `incident_id` 后，申请/审批/执行会作为证据写入该事件时间线。
+
+---
+
+## 安全事件与运营闭环
+
+事件（Incident）把同主机、同时间窗内的多源信号关联成一条攻击叙事，运营闭环建在其上。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/incidents` | 事件列表 |
+| GET | `/api/v1/incidents/:id` | 事件详情 |
+| GET | `/api/v1/incidents/:id/timeline` | 时间线（指派/认领/研判/证据/升级/关闭） |
+| POST | `/api/v1/incidents/:id/assign` | 指派负责人 |
+| POST | `/api/v1/incidents/:id/ack` | 认领事件（MTTA 终点） |
+| POST | `/api/v1/incidents/:id/comments` | 追加研判备注；带 `ref` 即记为证据 |
+| POST | `/api/v1/incidents/:id/escalate` | 升级（须指定 `to` 与 `reason`） |
+| POST | `/api/v1/incidents/:id/resolve` | 关闭（须给出 `verdict` 与 `reason`） |
+
+**关闭必须给出研判结论**：`true_positive` / `false_positive` / `benign_true_positive`，
+并写明原因。原实现关闭不需要任何理由、`resolved_by` 实际只会是 `auto`，于是无法回答
+"这条是不是真威胁"与"当时为什么关掉它"——前者是检测质量的唯一可信来源，后者是复盘的前提。
+
+`benign_true_positive`（检测正确但行为无害）单列一档：把它算进误报会让规则被错误地调松。
+
+指派与认领分开：被指派不等于有人开始看。重复认领不刷新时间戳，MTTA 记的是第一个真正开始看的人。
+
+---
+
 ## 告警管理
 
 | 方法 | 路径 | 说明 |
@@ -400,6 +457,113 @@
 | PUT | `/api/v1/detection-rules/:id` | 更新检测规则 |
 | DELETE | `/api/v1/detection-rules/:id` | 删除检测规则（内置规则不可删除） |
 | POST | `/api/v1/detection-rules/:id/toggle` | 启用或禁用规则 |
+| GET | `/api/v1/detection-rules/:id/quality` | 规则检测质量（由人工研判结论计算的精确率） |
+| GET | `/api/v1/detection-rules/:id/promotion` | 晋级条件评估：能否晋级，不能则给出差距 |
+| POST | `/api/v1/detection-rules/:id/promote` | 晋级规则一级（不满足条件时拒绝） |
+| POST | `/api/v1/detection-rules/:id/demote` | 降级规则（须写明原因） |
+
+### 规则生命周期
+
+规则按 `draft → shadow → context → alert` 逐级放开，只有 `alert` 阶段会独立产生告警。
+
+晋级门槛按跳区分，因为每一跳能拿到的证据不同：
+
+| 跳转 | 门槛 | 为什么 |
+|------|------|--------|
+| draft → shadow | 无 | 影子阶段本就是为了收集数据，要求它先有数据是循环依赖 |
+| shadow → context | 观察 ≥ 7 天且日均命中 ≤ 50 次 | 影子规则不告警，也就没有研判结论；这一跳先回答"它会响多少次" |
+| context → alert | 已研判 ≥ 20 条且精确率 ≥ 85% | 上下文阶段的命中参与事件聚合，因而有人工研判结论可依 |
+
+精确率只由人工研判结论计算（`true_positive` / `false_positive` / `benign_true_positive`），
+其中 `benign_true_positive`（检测正确但行为无害）计入分母但不算作错误。
+样本不足时精确率返回 `null` 表示"未知"，不是 0——缺失不等于不达标。
+
+降级不设证据门槛，只要求写明原因：噪声规则应能被立刻按下去，先止损再排查。
+
+存量规则一律回填为 `alert`，保持升级前的行为。
+
+---
+
+## AgentCenter 内部接口
+
+需 `X-Internal-Secret` 头，绑定在 AC 管理端口（默认 8081），不经 manager 暴露。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/health` | 存活探测（匿名）|
+| GET | `/conn/stat` | 在线连接统计 |
+| GET | `/conn/list` | 在线 agent 明细 |
+| GET | `/agent-cert-stats` | **agent 证书迁移进度** |
+| POST | `/command` | 单机命令下发 |
+| POST | `/command/batch` | 批量命令下发 |
+| POST | `/dependency/install` | 依赖安装 |
+
+### agent-cert-stats
+
+```json
+{"online": 228, "per_agent": 228, "still_shared": 0, "shared_agent_ids": []}
+```
+
+`still_shared` 是仍在使用全网共享证书的在线 agent 数。
+**新版 AgentCenter 强制客户端证书 CN == AgentID，该值不为 0 时升级会让这些 agent
+全部掉线且不会自愈**（agent 侧没有被拒后重新 enroll 的逻辑）。
+`deploy.sh upgrade` 以此为闸门，详见 [路线图 · 第四节](roadmap.md)。
+
+只统计在线连接：离线 agent 的证书状态无从得知，把它们算作已迁移会给出偏乐观的结论。
+
+---
+
+## ML 异常检测
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/anomalies` | 异常告警列表 |
+| GET | `/api/v1/anomalies/stats` | 异常统计 |
+| PUT | `/api/v1/anomalies/:id/resolve` | 研判异常（confirmed / false_positive）|
+| GET | `/api/v1/anomalies/quality` | ML 检测质量（由人工研判计算的精确率）+ 当前档位 |
+| GET | `/api/v1/anomalies/mode-readiness` | 档位变更可行性评估 |
+| POST | `/api/v1/anomalies/mode` | 变更 ML 档位 |
+
+### 档位与升档门槛
+
+ML 异常检测按 `off → shadow → context → alert` 分档：
+
+| 档位 | 行为 |
+|------|------|
+| off | 不消费、不打分 |
+| shadow | 打分并记录指标，**不落库** |
+| context | 落库供 SOC 分析上下文，不独立告警 |
+| alert | 独立告警 |
+
+**1.0 不开放 alert 档。** 无监督异常检测给出的是「少见」而不是「恶意」——
+季度结算、批量导数、临时扩容都少见。让它独立定罪的结果是值班被无害事件淹没，
+从此不再看告警。ML 的位置是排序与佐证。
+
+升到 context 档需要：已研判 ≥ 30 条、总体精确率 ≥ 70%，且**没有任何单个模式精确率低于 50%**。
+最后一条是必要的：总体精确率会掩盖单模式塌陷，而值班感受到的是那个模式在刷屏。
+
+精确率只由人工研判计算（`confirmed` / `false_positive`），未研判的 `open` 不计入。
+样本不足时返回 `null`（未知），不是 0。
+
+**降档（off / shadow）无条件允许，不需要任何证据**——出问题时必须能立刻按回去。
+
+### 模型漂移与训练投毒
+
+IForest 每 30 分钟用滑动窗口重训。这带来一个固有弱点：攻击者只要把动作放慢到
+跨越多个训练窗口，每窗只比上窗高一点，逐窗比较永远正常，最后攻击行为成为基线。
+
+对策是保留一份**不随滑窗移动**的长期参照基线，训练窗口偏离超过 3σ 时
+**拒绝本轮重训**，继续使用旧模型。相关指标：
+
+| 指标 | 含义 |
+|------|------|
+| `mxcwpp_anomaly_reference_baseline_ready` | 参照基线是否就绪（0 = 投毒防护未生效）|
+| `mxcwpp_anomaly_feature_drift` | 各维度相对参照的偏移（σ）|
+| `mxcwpp_anomaly_retrain_rejected_total` | 被拒绝的重训次数 |
+| `mxcwpp_anomaly_model_age_seconds` | 距上次成功训练的时长 |
+
+参照基线持久化在 `anomaly_model_states`，跨重启保留——它必须来自一段未被污染的历史，
+丢了就再也长不回来。
 
 ---
 
@@ -713,25 +877,16 @@ CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed /
 
 ---
 
-## v2 多租户与平台管理
+## v2 平台管理
 
 ### 系统模式（observe / protect）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET  | `/api/v2/system/mode` | 当前租户的模式（observe/protect） |
-| GET  | `/api/v2/admin/tenants/modes` | 列出全部租户的模式（超管） |
-| POST | `/api/v2/admin/tenants/:id/mode` | 切换租户模式（超管） |
+| GET  | `/api/v2/system/mode` | 当前生效的模式（observe/protect） |
 
-### 租户管理（超管）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET  | `/api/v2/admin/tenants` | 租户列表 |
-| GET  | `/api/v2/admin/tenants/:id` | 租户详情 |
-| POST | `/api/v2/admin/tenants` | 创建租户 |
-| POST | `/api/v2/admin/tenants/:id/suspend` | 暂停租户 |
-| POST | `/api/v2/admin/tenants/:id/resume` | 恢复租户 |
+> 单租户收敛后，按租户切换模式的接口已移除——模式是部署级设置。
+> 详见 [架构](architecture.md)「单租户收敛」。
 
 ### 配置变更审批
 
@@ -744,18 +899,6 @@ CycloneDX VEX 1.5 + CSAF 2.0 标准. 4 状态: not_affected / affected / fixed /
 | POST | `/api/v2/config/change-requests/:id/approve` | 审批通过 |
 | POST | `/api/v2/config/change-requests/:id/reject` | 审批拒绝 |
 | POST | `/api/v2/config/change-requests/:id/cancel` | 撤销请求 |
-
-### MSSP 控制台（多租户托管）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET  | `/api/v2/mssp/dashboard` | MSSP 总览面板 |
-| GET  | `/api/v2/mssp/child-tenants` | 子租户列表 |
-| POST | `/api/v2/mssp/child-tenants` | 创建子租户 |
-| GET  | `/api/v2/mssp/child-tenants/:id` | 子租户详情 |
-| POST | `/api/v2/mssp/child-tenants/:id/suspend` | 暂停子租户 |
-| POST | `/api/v2/mssp/child-tenants/:id/resume` | 恢复子租户 |
-| GET  | `/api/v2/mssp/alerts` | 跨租户告警视图 |
 
 ### 其它 v2 子领域
 

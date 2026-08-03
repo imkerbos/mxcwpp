@@ -31,7 +31,7 @@ func TestListVulnerabilitiesWithHostFilter(t *testing.T) {
 		DiscoveredAt:   now,
 		CurrentVersion: "1.25.0",
 		FixedVersion:   "1.25.1",
-		ReferenceUrl:   "https://example.com/CVE-2026-1234",
+		ReferenceURL:   "https://example.com/CVE-2026-1234",
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}).Error; err != nil {

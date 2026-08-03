@@ -161,8 +161,11 @@ func handleTask(ctx context.Context, task *bridge.Task, client *plugins.Client, 
 		return sendResult(client, payload.TaskID, 1, "", "修复命令为空", logger)
 	}
 
-	if err := validateCommand(payload.Command); err != nil {
-		logger.Warn("command rejected by safety check",
+	// 解析为 argv 并逐项对照允许集；执行时不经 shell，杜绝命令注入与
+	// "白名单程序 + 恶意参数"（rpm -i /tmp/x.rpm、dnf install -c /tmp/evil.conf 等）。
+	argv, err := parseRemediationArgv(payload.Command)
+	if err != nil {
+		logger.Warn("command rejected by exec policy",
 			zap.Uint("task_id", payload.TaskID),
 			zap.String("command", payload.Command),
 			zap.Error(err))
@@ -173,7 +176,7 @@ func handleTask(ctx context.Context, task *bridge.Task, client *plugins.Client, 
 	// 命令已通过安全白名单校验；component 是中文标签而非包名，不适用 per-package 的
 	// 包名校验与 3 阶段预检（无单一目标包）。直接执行整机更新命令并回报。
 	if strings.HasPrefix(payload.CveID, "HOST-") {
-		return runHostUpdate(ctx, client, &payload, logger)
+		return runHostUpdate(ctx, client, &payload, argv, logger)
 	}
 
 	// Component 会被拼入仓库查询命令(checkPkgInstalled/checkPkgAvailable 的 sh -c)，
@@ -246,7 +249,7 @@ func handleTask(ctx context.Context, task *bridge.Task, client *plugins.Client, 
 	execCtx, execCancel := context.WithTimeout(ctx, commandTimeout)
 	defer execCancel()
 
-	cmd := exec.CommandContext(execCtx, "/bin/sh", "-c", payload.Command)
+	cmd := exec.CommandContext(execCtx, argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 
 	output, err := cmd.CombinedOutput()
@@ -285,9 +288,9 @@ func handleTask(ctx context.Context, task *bridge.Task, client *plugins.Client, 
 }
 
 // runHostUpdate 执行主机级整机更新命令（dnf/yum upgrade --security -y 等），不做 per-package
-// 预检（无单一目标包）。命令已由调用方 validateCommand 通过安全白名单校验。
+// 预检（无单一目标包）。argv 已由调用方 parseRemediationArgv 校验并解析。
 // 内核类更新需主机下次重启后完全生效，本函数不触发重启。
-func runHostUpdate(ctx context.Context, client *plugins.Client, payload *taskPayload, logger *zap.Logger) error {
+func runHostUpdate(ctx context.Context, client *plugins.Client, payload *taskPayload, argv []string, logger *zap.Logger) error {
 	logger.Info("[AUDIT] host-level update accepted",
 		zap.Uint("task_id", payload.TaskID),
 		zap.String("cve_id", payload.CveID),
@@ -302,7 +305,7 @@ func runHostUpdate(ctx context.Context, client *plugins.Client, payload *taskPay
 	execCtx, execCancel := context.WithTimeout(ctx, commandTimeout)
 	defer execCancel()
 
-	cmd := exec.CommandContext(execCtx, "/bin/sh", "-c", payload.Command)
+	cmd := exec.CommandContext(execCtx, argv[0], argv[1:]...)
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 	output, err := cmd.CombinedOutput()
 	exitCode := 0
@@ -444,162 +447,6 @@ func sendResult(client *plugins.Client, taskID uint, exitCode int, stdout, stder
 		zap.Uint("task_id", taskID),
 		zap.Int("exit_code", exitCode))
 	return nil
-}
-
-// dangerousPatterns 危险命令模式黑名单
-// 这些命令可能导致系统不可恢复，即使 Server 下发也必须拒绝
-var dangerousPatterns = []string{
-	"rm -rf /",
-	"rm -rf /*",
-	"mkfs.",
-	"dd if=",
-	":(){:|:&};:", // fork bomb
-	"> /dev/sda",
-	"chmod -R 777 /",
-	"wget|sh",
-	"curl|sh",
-	"wget|bash",
-	"curl|bash",
-	"/dev/tcp/",
-	"bash -i",
-	"nc -e",
-	"ncat -e",
-	"python -c",
-	"python3 -c",
-	"perl -e",
-	"ruby -e",
-	"base64 -d",
-	"eval ",
-	"exec ",
-	"`",  // 反引号命令替换
-	"$(", // $() 命令替换
-}
-
-// allowedPrefixes 命令白名单前缀
-// 仅允许包管理器和必要的服务管理操作，不允许通用文件操作命令
-var allowedPrefixes = []string{
-	"yum update ",
-	"yum install ",
-	"yum upgrade ",
-	"yum downgrade ",
-	"dnf update ",
-	"dnf install ",
-	"dnf upgrade ",
-	"dnf downgrade ",
-	"apt-get install ",
-	"apt-get update",
-	"apt-get upgrade",
-	"apt-get dist-upgrade",
-	"dpkg -i ",
-	"rpm -U ",
-	"rpm -i ",
-	"pip install ",
-	"pip3 install ",
-	"systemctl restart ",
-	"systemctl reload ",
-}
-
-// validateCommand 校验修复命令是否安全
-func validateCommand(command string) error {
-	cmd := strings.TrimSpace(command)
-	cmdLower := strings.ToLower(cmd)
-
-	// 1. 长度限制
-	if len(cmd) > 4096 {
-		return fmt.Errorf("命令长度超过 4096 字符限制")
-	}
-
-	// 2. 拒绝命令替换和子 shell（防止引号内绕过）
-	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") {
-		return fmt.Errorf("命令包含命令替换（$() 或反引号），不允许")
-	}
-
-	// 3. 拒绝重定向写入（防止通过白名单命令写任意文件）
-	if strings.ContainsAny(cmd, "><") {
-		return fmt.Errorf("命令包含重定向操作符，不允许")
-	}
-
-	// 4. 危险命令黑名单
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(cmdLower, strings.ToLower(pattern)) {
-			return fmt.Errorf("命令匹配危险模式: %s", pattern)
-		}
-	}
-
-	// 5. 拒绝组合命令（不允许管道、分号、&&、|| 连接多条命令）
-	// 漏洞修复场景只需要单条包管理器命令，不需要组合命令
-	if containsShellOperator(cmd) {
-		return fmt.Errorf("不允许组合命令（管道、分号、&& 等），请使用单条命令")
-	}
-
-	// 6. 白名单前缀检查
-	if !matchesAllowedPrefix(cmd) {
-		return fmt.Errorf("命令不在白名单中: %s", truncate(cmd, 80))
-	}
-
-	return nil
-}
-
-// containsShellOperator 检查命令是否包含 shell 组合操作符
-// 感知引号内的操作符（忽略引号内的内容）
-func containsShellOperator(cmd string) bool {
-	inSingle := false
-	inDouble := false
-	runes := []rune(cmd)
-
-	for i := 0; i < len(runes); i++ {
-		ch := runes[i]
-
-		// 处理转义
-		if ch == '\\' && i+1 < len(runes) {
-			i++ // 跳过下一个字符
-			continue
-		}
-
-		// 切换引号状态
-		if ch == '\'' && !inDouble {
-			inSingle = !inSingle
-			continue
-		}
-		if ch == '"' && !inSingle {
-			inDouble = !inDouble
-			continue
-		}
-
-		// 仅在引号外检测操作符
-		if inSingle || inDouble {
-			continue
-		}
-
-		switch ch {
-		case ';':
-			return true
-		case '|':
-			return true
-		case '&':
-			return true
-		}
-	}
-	return false
-}
-
-// matchesAllowedPrefix 检查命令是否匹配白名单前缀
-func matchesAllowedPrefix(cmd string) bool {
-	cmdLower := strings.ToLower(strings.TrimSpace(cmd))
-	for _, prefix := range allowedPrefixes {
-		if strings.HasPrefix(cmdLower, strings.ToLower(prefix)) {
-			return true
-		}
-	}
-	return false
-}
-
-// truncate 截断字符串
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 // 历史 buildPrecheck/extractPackageArg 已被 3 阶段精确预检（detectPkgManager +

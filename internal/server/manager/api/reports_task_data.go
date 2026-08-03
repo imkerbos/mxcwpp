@@ -268,7 +268,7 @@ func (h *ReportsHandler) BuildTaskReportData(taskID string) gin.H {
 
 	// === 11. Meta 字段装配 ===
 	executedAt, completedAt := "-", "-"
-	var duration string = "-"
+	duration := "-"
 	if task.ExecutedAt != nil {
 		executedAt = time.Time(*task.ExecutedAt).Format("2006-01-02 15:04:05")
 	}

@@ -71,7 +71,7 @@ MxCwpp Platform 采用 **Agent + Plugin + 六服务后端** 分层架构。后�
 - 提供 100+ 个 REST API 端点，JWT 认证
 - 策略、规则、任务、告警、报告、用户等业务 CRUD
 - 漏洞管理：多源漏洞库同步（OSV.dev / NVD / Red Hat）+ 主机漏洞扫描
-- LLM 告警辅助分析（`internal/server/manager/biz/llm_assist.go`）
+- LLM 告警辅助分析（`internal/server/llmproxy/llm_assist.go`）
 - SBOM 导出（CycloneDX 格式，`internal/server/manager/api/sbom.go`）
 - 通知服务：告警通知推送与管理
 - 内嵌 AC Registry / SD 模块，负责 AgentCenter 注册、主动健康探测、服务发现
@@ -91,7 +91,7 @@ Agent 接入层，核心职责为连接管理与数据转发；同时依赖 MySQ
 - mTLS 支持 VerifyClientCertIfGiven（允许无证书首次连接以完成证书下发）
 - 将 Agent 上报数据按 DataType 路由到 Kafka Topic
 - Kafka 不可用时使用内存降级队列暂存，恢复后自动重放
-- HTTP 管理接口：`/health` `/conn/stat` `/conn/list` `/command` `/command/batch`
+- HTTP 管理接口：`/health`（匿名 liveness）+ `/conn/stat` `/conn/list` `/command` `/command/batch` `/dependency/install`（强制 `X-Internal-Secret` 内部鉴权，详见「安全与通信」）
 - 启动时向 Manager SD 注册（重试 3 次），15s 心跳（包含 ConnCount），优雅注销
 - 主机性能指标通过 `/metrics` 暴露给 Prometheus 抓取
 - 内置 6 个调度器（`internal/server/agentcenter/scheduler/`）：任务调度、心跳超时检测、告警调度、Agent 更新、插件更新、组件推送超时
@@ -107,7 +107,8 @@ Kafka 异步消费服务，**仅负责数据持久化**（v2.0 起检测能力�
 - 批量优化：ClickHouse 5000 条/10s
 - 写入失败进 Dead Letter Queue（`{sourceTopic}.dlq` Topic）
 - DLQ 消息保留原始消息体、错误信息、重试次数、失败时间
-- 不论成功失败均标记 offset，失败消息走 DLQ 而非重试阻塞
+- 消费失败走 DLQ 而非重试阻塞；但 **ClickHouse 刷盘失败时提交屏障不推进 offset**，
+  消息会被重新投递（宁可归档里多出重复行，也不能提交"已落盘"却其实没落盘）
 - Kafka ConsumerGroup 配置：RoundRobin rebalance 策略，OffsetNewest
 - 消费心跳时维护 Redis `agent:ac:{agentID}` 映射，检查 pending 任务触发补发
 - GCP Pub/Sub 消费（`internal/server/consumer/gcppubsub/`）：从 Cloud Logging 接收 GKE 审计日志
@@ -121,15 +122,21 @@ v2.0 新增的检测分析引擎，独立服务，与 Consumer 并行消费 Kafk
 - 订阅 `mxcwpp.agent.*` 全部业务 Topic（ConsumerGroup B "mxcwpp-engine"），与 Consumer 互不影响 offset
 - **16 个检测 Stage**（`internal/server/engine/stage_*.go`）：CEL / Sequence / Anomaly / ML / Audit / Honeypot / Intrusion / Kube / Privilege / RASP / Anti-Rootkit / Rootkit / Storyline / Webshell / Revshell+Priv / AbnormalLogin
 - 多层检测子包：
-  - `celengine/` — CEL 规则引擎，eBPF 事件实时匹配 + 自动响应触发
+  - `celengine/` — CEL 规则引擎，eBPF 事件实时匹配 + 自动响应触发。
+    规则按 `draft → shadow → context → alert` 分级，晋级门槛由人工研判结论决定
+    （见 [API · 规则生命周期](api-reference.md#规则生命周期)）；
+    ML 异常分经 `host_anomaly_scores` 参与告警排序，加权封顶 1.15，跨不过严重度档
   - `intrusion/` — 入侵检测合集（abnormal_login / reverse_shell / rootkit / webshell）
   - `adaudit/` — AD/LDAP 域控审计 7 条规则（DCSync / Kerberoasting / 暴破等）
   - `microseg/` — 微隔离流量识别 + 策略生成 + Kubernetes NetworkPolicy 推荐
   - `kube/` — K8s Audit Event 检测（PSS 等）
   - `rasp/` — RASP 事件汇聚（Java / Python / PHP / Node / Go）
   - `honeypot/` — 反勒索 / 蜜罐告警归并
-  - `ml/` — ONNX Runtime CPU 推理（IForest 等）
-  - `anomaly/` — 行为基线异常检测
+  - `ml/` — Go 原生 IForest + Registry。**未接线**（capability 清单 `ml_anomaly` = unwired），
+    且**没有 ONNX**：go.mod 无 onnxruntime 依赖，ONNX 适配仍是 TODO
+  - `anomaly/` — 行为基线异常检测（IForest + 多指标关联）。四档 `off/shadow/context/ranking`，
+    **1.0 不开放 alert 档**；含长期参照基线（抗训练投毒）、模型版本与回滚、按主机配额的训练采样。
+    详见 [ML 异常检测安全说明](ml-anomaly-safety.md)
   - `storyline/` — ATT&CK 攻击链关联与时间线
   - `ruleimport/` / `rulesync/` — Sigma/Falco/Tetragon 规则导入与同步
   - `scheduler/` — IOC 同步、规则同步、漏洞情报同步等调度器
@@ -164,7 +171,7 @@ v2.0 新增的漏洞情报融合服务，定时拉取 OS 厂商权威 advisory�
 > 注：Engine 对 `mxcwpp.vuln.advisory` 的 consumer 当前为 noop 占位；关联检测由后续 PR 引入。
 > NVD/KEV/EPSS 等元数据融合（3 级 confidence 仲裁）为后续工作，当前 VulnSync 聚焦 OS advisory 匹配路径。
 
-入口：`cmd/server/vulnsync/main.go`｜迁移记录：`docs/vulnsync-migration.md`
+入口：`cmd/server/vulnsync/main.go`
 
 ### Agent
 
@@ -284,7 +291,19 @@ Engine 与 Consumer 使用不同 ConsumerGroup，**offset 独立**，任一方�
 
 Partition Key 为 AgentID，保证同一 Agent 数据有序。Replication Factor = 2，`min.insync.replicas = 1`。
 
-各 Topic 配套 DLQ：`mxcwpp.agent.{topic-name}.dlq`。DLQ 消息结构包含原始消息体、错误描述、已重试次数和失败时间戳，便于事后排查和重放。
+各 Topic 配套 DLQ：`mxcwpp.agent.{topic-name}.dlq`。DLQ 消息结构包含原始消息体、错误描述、已重试次数和失败时间戳。
+
+**重放**：`cmd/tools/dlq-replay` 把 DLQ 消息投回原 Topic 交回正常消费链路。
+
+```bash
+dlq-replay -config /etc/mxcwpp/server.yaml -topic mxcwpp.agent.events           # 预演
+dlq-replay -config /etc/mxcwpp/server.yaml -topic mxcwpp.agent.events -apply    # 执行
+```
+
+刻意做成人工触发而非自动重放：DLQ 里既有下游临时故障导致、重放即可恢复的消息，
+也有字段非法这类重放多少次都会再失败的毒消息；自动重放会让后者在队列间无限循环。
+默认预演不投递也不推进位点，`-max-retry`（默认 3）之上的消息视为毒消息跳过，
+投递用同步生产者确认成功后才推进位点，中途失败可直接重跑。
 
 ## 存储分层
 
@@ -396,13 +415,284 @@ Redis 不可用时降级为无锁模式，依赖调度间隔的自然错开来�
 | 浏览器 <-> Nginx / Manager | HTTPS / REST | JWT |
 | Agent <-> AgentCenter | gRPC 双向流 | mTLS（VerifyClientCertIfGiven） |
 | Agent <-> Plugin | OS Pipe + Protobuf | 父子进程隔离 |
-| Manager <-> AgentCenter | HTTP 内部接口 | 内网调用 |
+| Manager <-> AgentCenter | HTTP 内部接口 | `X-Internal-Secret` 共享密钥（常量时间比较） |
 
-**mTLS 细节**：AgentCenter 的 TLS 配置使用 `VerifyClientCertIfGiven` 策略，允许 Agent 首次连接时不携带客户端证书（用于初始证书下发），后续连接切换为完整 mTLS 双向认证。
+**mTLS 细节**：AgentCenter 的 TLS 配置使用 `VerifyClientCertIfGiven` 策略——单一监听端口无法对 enroll 与正常流分别设置 `ClientAuth`，故用「TLS 放行 + 应用层强制」的组合：无客户端证书的连接只能走 Transfer 的 enroll 阶段，其余所有 RPC 由拦截器要求已验证的客户端证书。
 
 **gRPC Keepalive**：Time=60s（空闲后发 ping），Timeout=10s（ping 等待响应超时），MinTime=10s（客户端最短 ping 间隔）。
 
 证书生成：`scripts/generate-certs.sh`
+
+### AgentCenter 管理端口鉴权与网络边界（E-SEC-1）
+
+AC HTTP 管理端口承载高危接口，威胁模型与访问控制：
+
+| 接口 | 鉴权 | 说明 |
+|------|------|------|
+| `/command` `/command/batch` `/dependency/install` | 强制 `X-Internal-Secret` | 可向 Agent 下发任务，无凭据返回 401，handler 不执行 |
+| `/conn/stat` `/conn/list` | 强制 `X-Internal-Secret` | 泄漏在线 Agent 清单，同上保护 |
+| `/health` | 匿名 | 仅最小 liveness（`{"status":"ok"}`），不含在线明细；供 Manager SD 探活 |
+| `/metrics` | 匿名 | Prometheus 抓取；由部署拓扑保证仅受控网络可达，不发布到宿主公网 |
+
+- 共享逻辑在中立包 `internal/server/common/internalauth`（Manager 与 AC 共用；对提供值与密钥各做 SHA-256 归一为定长摘要后再 `subtle.ConstantTimeCompare`，避免长度侧信道；空密钥 fail-closed 一律拒绝；不记录密钥）。
+- Manager 侧命令分发 / 依赖安装（`sd.ACDispatcher`）精准路由与广播均携带同一密钥。
+- Manager 的内部服务路由 `/api/v1/internal/ac/*`、`/api/v1/internal/alerts/*` **始终挂载** `internalauth.Middleware`——空密钥时由中间件 fail-closed 返回 401，绝不匿名可达。
+- **启动 fail-fast（不留静默半失效）**：
+  - AgentCenter：`Config.ValidateAgentCenter()` 经 `ValidateInternalSecret` **无论绑定地址如何**都强制非空、非模板占位符、非弱默认值、长度 ≥32 的 `server.internal_secret`——空密钥下 AC 受保护接口全部 401、注册/命令下发永久失败，故 loopback 也拒绝空密钥启动；非 loopback 额外强调管理面裸奔风险。
+  - Manager：`Config.ValidateManager()` 在打开内部路由前强校验同一密钥，失败即退出（仅 Manager 专用初始化路径调用，不影响 Consumer/Engine 等共用 Config 的进程）。
+  - 集群部署（`internal/deploy/cluster`）在 `Config.Validate()` 强校验 `app.internal_secret`，Manager 与所有 AC 渲染同一密钥。
+- **Manager 与 AC 必须配置同一 `server.internal_secret`**（含本地开发；否则 AC↔Manager 注册与命令下发被 401 阻断）。
+- 密钥来源：`server.internal_secret`（deploy.sh 从 `.env` 的 `INTERNAL_SECRET` 生成/幂等持久化为唯一强行；集群从 `app.internal_secret` 渲染）。
+
+### 单租户收敛（E-TEN-1）
+
+产品定位是**单租户** Linux/K8s CWPP。曾存在的多租户/托管产品面已移除：
+
+| 已删除 | 说明 |
+|---|---|
+| `biz/billing`、`biz/federation` | 删除时均为零外部引用的死代码 |
+| `biz/mssp` + `/api/v2/mssp/*` | MSSP 跨租户控制台，属托管服务产品线 |
+| `/api/v2/admin/tenants/*` | 租户 CRUD、停用/恢复、按租户切换运行模式 |
+
+共移除 14 条路由。运行模式查询 `/api/v2/system/mode` 保留，但**不再按租户切换**——
+模式是部署级设置。
+
+**底层 `tenant_id` 刻意保留**：262 处过滤点统一传默认租户 `t-default`。删列是高风险
+数据迁移，收益只是少一个字段；收敛的是产品面，不是数据模型。将来若真要多租户，
+数据侧不必从头再来。
+
+`internal/server/manager/router/single_tenant_test.go` 守住这条边界：多租户路由或已删包重新出现即失败。
+
+### 事件运营闭环（E-OPS-1）
+
+事件此前只有 `active/investigating/resolved` 三态和一个 `resolved_by`（实际只会写
+`auto`）：**没有负责人、没有响应时限、没有研判结论、关闭不需要理由**。
+检测做得再准，产出的也只是越积越多、最后没人看的告警——发现问题的能力没有变成处理问题的能力。
+
+闭环长在既有 `Incident` 上，而不是另建平行的 Case 表：关联逻辑、风险聚合、成员告警
+都已在那里，两张表只会产生两份互相不同步的事实。
+
+| 环节 | 语义 |
+|---|---|
+| 指派 / 认领 | 分开记录。**被指派不等于有人开始看**，混为一谈会让 MTTA 失真；重复认领不刷新时间，MTTA 记的是第一个真正开始看的人 |
+| SLA | 事件创建时按严重级别算出认领与解决时限。一刀切要么低危把人拖垮、要么高危被淹没；未知级别退到最宽，不因拼写错误把人叫醒 |
+| 研判 | 关闭**必须**给出 `true_positive` / `false_positive` / `benign_true_positive` |
+| 升级 | 必须写明对象与原因，否则"已升级"事后无从追溯 |
+| 关闭 | **必须写明原因**，且记录真实操作人 |
+
+`incident_events` 单表承载状态变更、研判备注与证据引用。不拆成评论/审计/证据三张：
+调查过程本身是一条连续叙事，拆开后"谁在什么时候基于什么做了什么决定"需要跨表拼接，
+而这恰恰是复盘唯一要看的东西。状态变更与时间线记录同事务写入——状态变了却没有记录，
+等于事后无法解释这个决定是谁做的。
+
+**`benign_true_positive` 单列一档**很关键：检测正确但行为无害（如运维自己的操作），
+把它算进误报会让规则被错误地调松。
+
+研判结论同时是检测质量的唯一可信来源——precision 只能由它算出。拿 `resolved` 数量代替，
+会把"没人看所以批量关掉"算成检测准确。
+
+### 人工响应与硬禁自动处置（E-OPS-3）
+
+隔离主机会切断业务流量。原实现是**一次 API 调用即刻生效**：没有第二个人看过、
+没有幂等键、没有回滚记录，事后也回答不了"这台机器当时为什么被隔离、谁批的"。
+
+处置现在走完整生命周期：`pending → approved/rejected → executed/failed → rolled_back`。
+
+| 约束 | 理由 |
+|---|---|
+| **未审批不得执行** | 判断做成 `ResponseAction.Executable()` 而非散在调用方，新增执行入口不会"忘了检查审批" |
+| **申请人不得自审批** | 同一个人既提又批，审批就只是多点一次鼠标 |
+| **幂等键唯一索引** | 处置重复执行的后果不对称——多隔离一次可能切断本已恢复的业务。靠数据库挡并发重复，而不只是提交前查一次 |
+| **失败与未执行区分** | 前者要人去查为什么没生效，后者只是还没轮到 |
+| **驳回必须写原因** | 否则申请人不知道该改什么 |
+
+**硬禁自动处置的落点**是申请入口：`system` / `auto` / `scheduler` / 空身份一律拒绝。
+只靠"目前没有自动路径"是碰巧成立而非设计保证——`ShouldEnforce` 仅在 pipeline 填字段
+和未接线的 admission 出现，将来任何自动化想调用处置，都会在这道闸门上失败，
+而不是悄悄执行成功。
+
+处置全过程回流为事件时间线上的证据，带幂等键便于追溯：复盘要能顺着一条时间线
+看完"发现→研判→申请→审批→执行"，而不是去另一个页面拼。
+
+### 值班表与响应时限（E-OPS-2）
+
+事件闭环加了认领与解决时限，但**没有任何东西去读它们**——没人看的截止时间只是一列
+数据，与「埋了点没人告警」是同一种毛病。现在两侧都补齐：
+
+**值班表** `oncall_shifts` 按时间窗排班，分 `l1 / l2 / security` 三层。
+新事件创建时自动派给当班的一线值班人——不自动派单的话，事件默认无人负责，
+超时告警只会天天响而没人知道该找谁。
+
+排班按时间窗而非固定人：值班是轮换的，把负责人写死在配置里意味着换班要改配置。
+同一时段多人时取最早开始的那位——"大家都在班"等于"没人负责"。
+
+**无人值班不静默跳过**：留下一条时间线记录。排班缺口本身就是运维要处理的问题，
+藏起来只会让事件一直无主。派单失败也不影响事件落库——把创建和派单绑成一体，
+会让排班缺口变成"事件也没了"。
+
+**升级沿层级向上**，目标由值班表算出而非手工填写：让人在半夜三点自己想"升级给谁"
+是行不通的。已在最高层时明确报错，不假装升级成功。
+
+**超时检测**每 2 分钟一轮，只观测不改状态——自动把超时事件标记成别的状态会掩盖问题，
+超时该做的是让人知道，而不是让它从待办里消失。指标用 Gauge 而非 Counter：
+运维要问的是"现在有多少条没人管"，不是"历史上超时过几次"。
+
+| 指标 | 含义 |
+|---|---|
+| `mxcwpp_incident_sla_breached{kind,severity}` | 当前超过认领/解决时限的事件数 |
+| `mxcwpp_incident_unowned` | 无负责人的未关闭事件数（即将变成超时的前兆） |
+
+一条无人认领的高危事件，与一条未被检出的攻击，对客户来说结果是一样的。
+
+### 单一外发出口（E-DEL-4）
+
+`biz/outbound` 下有 9 个连接器（Splunk HEC、QRadar LEEF、Elastic、阿里云 SLS 等），
+**全部零外部引用**；`SetSIEMForwarder` 只有定义、零调用。Consumer 里确实构造了
+Forwarder 并打印"SIEM 转发器已启动"，然后**从未调用过它**——日志说它在跑，
+实际一条告警都发不出去。「可对接你现有 SIEM」此前是不成立的。
+
+现在只留一个出口：**CEF over Syslog**（`siem` 配置段，默认关闭）。9 个死连接器已删。
+
+**外发与通知是两件事**，这决定了它在流水线中的位置：
+
+| | 通知 | 外发 |
+|---|---|---|
+| 目的 | 叫醒人 | 把记录交给客户日志系统 |
+| 类别灰度 | 受限 | **不受限** |
+| 等级门槛 | 受限 | **不受限** |
+| 抑制窗口 | 受限 | **不受限** |
+
+抑制是为了少打扰人，不是为了让客户 SIEM 少收记录。若外发也走抑制，客户侧会出现
+平台单方面造成的缺口，而他们无从知道少了什么。因此外发发生在所有通知门槛**之前**。
+
+**覆盖全部告警源**。alerts 表那条链路（CEL/Sequence/IOC + Stage 告警）自带通知，
+接入时标记 `EgressOnly`：只外发、不重复通知。只导一部分比不导更危险——客户会以为
+自己收全了。
+
+**有界异步**。底层 `SendAlert` 持锁写 socket、超时 5 秒；原 CEL 路径是每条告警起一个
+goroutine 去抢同一把锁，告警风暴下会堆出大量阻塞协程。现在统一走有界队列，
+满则丢弃并计入 `mxcwpp_alert_egress_total{outcome="dropped_queue_full"}`——
+宁可外发缺条目也不拖慢检测，但丢弃必须可见。
+
+### 恶意文件扫描的结果复态（E-DEL-4）
+
+ClamAV / YARA 引擎不可用（未安装、内存不足）或执行出错时，扫描器此前返回
+`(nil, nil)`——调用方读到"零威胁、无错误"，任务上报 `status=completed`、
+`threat_count=0`。**一台根本没装 ClamAV 的主机，平台报告它没有恶意文件。**
+
+现在每个引擎给出执行回执（`scanned` / `unavailable` / `failed`），由回执推导整体结论：
+
+| 结论 | 含义 |
+|---|---|
+| `clean` | 所有引擎都跑了，未发现威胁 |
+| `infected` | 发现威胁（即便另一引擎未跑成，已确认的威胁不降级） |
+| `partial` | 部分引擎未跑或出错，覆盖不全，**不足以判定主机干净** |
+| `unavailable` | 无任何引擎可用，本次根本没有扫描发生 |
+
+任务完成信号带上 `scan_status` 与逐引擎回执；服务端把覆盖不全的主机计入
+`antivirus_scan_tasks.degraded_hosts`，非零即代表"任务显示扫完了，但这些主机没被扫过"。
+
+**没扫是覆盖缺口，不是结论**——这与"请求失败渲染成 0"是同一类问题：
+把"不知道"显示成"没问题"。
+
+### 可观测性与告警覆盖（E-OBS-1）
+
+平台此前的典型形态是"埋了点、没人报警"：agent 丢事件、engine 背压丢弃、Stage 报错
+三个指标一直在采集，图表上看得见，却没有任何规则会把人叫醒。数据在丢而无人知晓，
+与没有这些指标没有区别。
+
+关键指标必须有对应告警，由 `internal/deploy/alertcoverage_test.go` 把清单钉住——
+新增关键指标未补规则即失败：
+
+| 指标 | 含义 |
+|---|---|
+| `mxcwpp_agent_event_dropped_total` | Agent 丢事件 = 该主机检测盲区 |
+| `mxcwpp_engine_backpressure_drop_total` | Engine 背压丢弃 = 漏检 |
+| `mxcwpp_engine_stage_errors_total` | Stage 持续报错 = 该项能力静默失效 |
+| `mxcwpp_consumer_dlq_write_failures_total` | DLQ 写失败 = 消息不可恢复地丢失 |
+| `mxcwpp_consumer_ch_write_errors_total` | CH 写失败 = offset 暂停推进 |
+| `mxcwpp_ac_unrouted_datatype_total` | DataType 未登记路由 = 消息被静默忽略 |
+| `mxcwpp_vulnsync_last_success_timestamp_seconds` | 漏洞库停更 = 界面显示的是旧数据 |
+
+漏洞库新鲜度刻意计量"距上次成功多久"而非"跑了多少次"：后者在任务反复失败时同样
+在增长，只有前者能回答"我现在看到的漏洞数据可信到什么时候"。同步失败**不更新**
+该时间戳，否则停更时告警永远不会触发。
+
+### 运行时能力清单（E-WIRE-1）
+
+代码里有 19 个检测 Stage 构造器，实际接进流水线的只有 8 个；接进去的里面还有 3 个把
+告警发往 `mxcwpp.engine.alert`，而该 topic **无任何消费者**——跑了也到不了界面。
+"有代码"与"能力在跑"之间隔着两道口子，此前只能靠人工 grep 分辨，数字还互相对不上。
+
+`internal/server/engine/capability.go` 是权威清单，把每项能力归入三档之一：
+
+| 档位 | 含义 | 可否对外宣称 |
+|---|---|---|
+| `active` | 已接线且告警有实际去处 | ✅ |
+| `dead_end` | 已接线但告警无人消费 | ❌ 必须注明缺什么 |
+
+| `unwired` | 有构造器但从未接线 | ❌ |
+
+清单经 `GET /capabilities`（Engine HTTP）以 JSON 发布，供运维与交付流程核对。
+
+CI 闸 `capability_test.go` 双向比对清单与真实代码：新增构造器未登记、声明已接线
+但入口没接、声明未接线却接了，三种都会失败。`dead_end` 条目必须写明原因，且一旦
+`engine.alert` 出现消费者，测试会提示把状态改回 `active`——避免修好了却忘了更新清单。
+
+**对外宣称以清单为准**：只有 `active` 档的能力允许出现在方案、官网或 POC 中。
+
+### 单一告警落库链路（E-DET-1）
+
+流水线里每个 Stage 的告警都会发往 `mxcwpp.engine.alert`，而该 topic 至今无消费者。
+CEL / Sequence / IOC 之所以能出现在界面上，是因为它们额外挂了 `AlertGenerator`
+自行落库；Privilege / RASP / AntiRootkit 没挂——检测在跑、告警在发、界面永远看不到。
+
+现由流水线统一落库：不实现 `PersistsOwnAlerts()` 的 Stage，其告警经
+`StageAlertWriter` 写入 `alerts` 表，`result_id = engine-{ruleID}-{hostID}`（不含
+时间戳，重复命中累加 `hit_count` 而非刷行），已处置告警复发会回到活跃态。
+
+自带落库的 Stage 通过 `PersistsOwnAlerts()` 显式声明，流水线据此跳过，避免同一次
+命中被写两遍。不复用 `AlertGenerator` 是因为它与 CEL 深度耦合（数字 `rule.ID`、
+`cel-%d` 结果键、依赖规则字段的低保真与观察期判定），给硬编码 Stage 合成假规则
+会让它们伪装成 CEL 规则并误用只对 CEL 有意义的治理语义。
+
+### Agent 身份信任链（E-SEC-3）
+
+Agent 接入的信任建立在三段上，任一段缺失都会被 fail-closed 拒绝：
+
+1. **首连锁定 AC 身份**。本地无 CA 文件时，Agent 用构建期嵌入的 CA 指纹做完整 pinned-root 校验：指纹命中的证书必须确为 CA，叶子证书必须由该 CA 验签通过，且 SAN 命中目标主机名、用途含 `serverAuth`。仅「链中出现该 CA」是不够的——攻击者可以把公开的 CA 证书塞进伪造链。缺少合法指纹时**在连接前失败**，不回退无 pin 的 `InsecureSkipVerify`。
+2. **enroll 换一机一证**。无客户端证书的 Agent 只能 enroll：提交合法 AgentID 与 enroll 令牌（定长摘要 + 常量时间比较，空令牌一律无效），AC 现签 `CN=AgentID` 的单机证书并下发后即结束该流。enroll 期间不注册连接、不处理心跳、不下发插件任务。
+3. **稳态强制身份绑定**。持证连接强制客户端证书 CN == 上报 AgentID，吊销序列号在握手期拒绝；非 Transfer 的 RPC 一律要求已验证客户端证书。
+
+一机一证使失陷主机可单独吊销，且私钥泄露不波及他机。生产构建的安装包不再下发共享 client 证书。
+
+`insecure_dev_mode` 是唯一放宽通路，被限制为仅在 gRPC 与 HTTP 均绑定回环时可用，官方部署渲染永不设置。
+
+### 下发命令的执行边界（E-SEC-4）
+
+平台会把命令下发到 Agent 并以 root 执行，因此「谁能编辑内容」等价于「谁能在全舰队执行代码」。执行侧统一采用**结构化 argv + 显式允许集**，不再使用「危险词黑名单 + shell 字符串」：
+
+| 链路 | 边界 |
+|------|------|
+| 漏洞修复（`plugins/remediation`） | 命令切成 argv，逐项对照允许的程序 / 子命令 / 选项 / 操作数，**不经 shell** 执行；操作数不得为路径、URL 或包文件 |
+| 远程取证（`internal/agent/forensics`） | 只读取证程序白名单，同样 argv 化、不经 shell；排除 `find`（`-exec`/`-delete` 无法约束为只读）、解释器与下载工具 |
+| 基线 `command_exec` / `fix.command` | 自定义规则禁止**新增**（创建、更新、策略导入三个写入口一致）；**存量**由派发闸门按配置上报或拦截；内置规则不受限 |
+
+基线规则的信任来源是 `builtin` 标记：它只由服务端的规则文件同步与一次性迁移设置，任何用户请求都改不了它，因此已足以区分「随发布分发的官方规则」与「用户自建规则」，无需再叠一层 manifest 签名。
+
+存量自定义可执行规则的处置分两步：`GET /api/v1/policies/custom-exec-rules` 出清单供人工研判，确认可收紧后再开启 `server.security.block_existing_custom_exec_rules`。默认只记审计不拦截——默认拦截会静默削减既有基线覆盖面。派发闸门是**进程级**策略而非 TaskService 实例字段：该服务有 6 处构造点且多数拿不到 Config，做成实例字段等于埋下「某条派发路径漏设、闸门在那条路径上静默失效」的分叉。
+
+不采用前缀白名单的原因：前缀只约束第一个词，参数空间完全开放，而只要还经 `sh -c`，未被枚举的语法（换行分隔、命令替换、重定向）就都是缺口。共享校验位于 `internal/common/execpolicy`。
+
+`rpm` 与 `dpkg` 的安装操作只接受文件路径，而安装本地包必然以 root 运行包内维护者脚本——不存在安全的操作数形式，故整体移除；装包一律走包管理器按包名从已配置仓库取。
+
+### RBAC deny-by-default 与路由覆盖闸（E-SEC-2）
+
+- 所有 JWT 认证路由（`apiV1Auth`）走 `EnforcePermissions`：按「模块 × 动作」（view/manage/respond）校验；**未登记路由对非 admin 一律拒绝（deny-by-default）并记 `access.denied` 审计**，不再因空映射放行；admin 为显式超管通路。
+- `/api/v2` 管理面路由（`/admin`、`/config/change-requests`、`/mssp`）显式 admin 门禁；`/system/mode` 为登录即可的只读查询。
+- 路由分类权威表 `internal/server/manager/api/route_policy.go` 把每条注册路由归为 public / internal / authenticated-perm / authenticated-basic / admin 之一（public/basic 用**精确 method+path**，不用前缀吞并）。
+- **精确路由 golden manifest** `internal/server/manager/router/testdata/routes.golden` 逐条记录 `METHOD PATH CLASS PERM`。CI 测试 `route_manifest_test.go` 把**实际 `engine.Routes()`** 与 golden 双向比对：新增未登记路由、陈旧条目、class/permission 变化均失败（新增路由不会被宽泛 prefix 自动吞掉）。改动路由后用 `go test ./internal/server/manager/router/ -run TestRouteManifest -update-routes` 重新生成，由人工审查 diff（CI 不自增改 golden）。
+- 运行时门禁验证 `route_gating_test.go`：对 internal / authenticated / admin / public 各类代表路由发真实无凭据请求，断言在 handler 前被相应机制拦截（分类 = 实际门禁）。
 
 ## 与 Elkeid 的关键差异
 
@@ -438,7 +728,7 @@ internal/server/engine/celengine/       # CEL 规则引擎 + 端口扫描检测
 internal/server/engine/intrusion/       # 入侵检测 4 大类
 internal/server/engine/microseg/        # 微隔离 + K8s NetworkPolicy 推荐
 internal/server/engine/storyline/       # ATT&CK 攻击链时间线
-internal/server/engine/ml/              # ONNX ML 推理
+internal/server/engine/ml/              # Go 原生 IForest（未接线，无 ONNX）
 internal/server/engine/scheduler/       # IOC/规则/漏洞情报同步调度
 internal/server/llmproxy/        # LLMProxy: provider / router / cache / quota / audit
 internal/server/vulnsync/        # VulnSync: sources / leader / publisher

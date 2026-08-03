@@ -77,10 +77,11 @@ func (m *Manager) GetConnection(ctx context.Context) (*grpc.ClientConn, error) {
 		return nil, fmt.Errorf("failed to load TLS config: %w", err)
 	}
 
-	// 仅首次部署（证书文件不存在）时允许 InsecureSkipVerify
+	// 首次部署（证书文件不存在）走 CA 指纹完整 pin 校验（非无 pin 的 InsecureSkipVerify）。
 	if tlsConfig.InsecureSkipVerify {
-		m.logger.Warn("使用不安全模式进行首次连接（证书文件不存在）",
-			zap.String("hint", "连接建立后Server会下发证书，后续连接将使用正式证书"),
+		m.logger.Info("首次连接使用 CA 指纹 pin 校验 AC 身份（enroll 阶段）",
+			zap.String("server_name", tlsConfig.ServerName),
+			zap.String("hint", "enroll 成功后 Server 下发单机证书，后续连接使用正式证书走完整 mTLS"),
 		)
 	} else {
 		m.logger.Info("TLS configuration loaded successfully (using certificates)",
@@ -295,34 +296,37 @@ func (m *Manager) firstConnectTLSConfig(serverName, reason, path string) (*tls.C
 		}
 	}
 
+	// 无本地 CA 文件：必须有合法 64-hex CA 指纹才允许首连，且以完整 pinned-root 校验锁定 AC。
+	// 绝不回退无 pin 的 InsecureSkipVerify —— 缺指纹即在连接前失败（fail-closed）。
 	fp := m.cfg.Local.TLS.CAFingerprint
-	if fp != "" {
-		m.logger.Warn("首次连接(enroll)：本地证书不完整，使用 CA 指纹 pin 校验 AC 身份",
+	if err := certissue.ValidateFingerprint(fp); err != nil {
+		m.logger.Error("首次连接(enroll)缺少合法 CA 指纹，拒绝连接（不回退不安全模式）",
 			zap.String("reason", reason),
 			zap.String("path", path),
+			zap.Error(err),
+			zap.String("hint", "安装包必须下发 ca_fingerprint（64 位十六进制 SHA-256）以 pin 住 AC 杜绝中间人"),
 		)
-		return &tls.Config{
-			ServerName:         serverName,
-			InsecureSkipVerify: true, // 关闭默认链校验，改由 VerifyConnection 做 CA pin
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				raw := make([][]byte, 0, len(cs.PeerCertificates))
-				for _, c := range cs.PeerCertificates {
-					raw = append(raw, c.Raw)
-				}
-				if err := certissue.VerifyChainPinnedCA(raw, fp); err != nil {
-					m.logger.Error("AC CA 指纹 pin 校验失败，疑似中间人，拒绝连接", zap.Error(err))
-					return err
-				}
-				return nil
-			},
-		}, nil
+		return nil, fmt.Errorf("首次连接需要合法 CA 指纹（%s）: %w", reason, err)
 	}
-	m.logger.Warn("首次连接：未配置 CA 指纹，回退不安全模式（仅兼容期，受控内网）",
+	m.logger.Warn("首次连接(enroll)：本地证书不完整，使用 CA 指纹完整 pin 校验 AC 身份",
 		zap.String("reason", reason),
 		zap.String("path", path),
-		zap.String("hint", "建议安装包下发 ca_fingerprint，pin 住 AC 杜绝中间人"),
 	)
-	return &tls.Config{InsecureSkipVerify: true}, nil
+	return &tls.Config{
+		ServerName:         serverName,
+		InsecureSkipVerify: true, // 关闭默认链校验，改由 VerifyConnection 做完整 pinned-root 校验
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			raw := make([][]byte, 0, len(cs.PeerCertificates))
+			for _, c := range cs.PeerCertificates {
+				raw = append(raw, c.Raw)
+			}
+			if err := certissue.VerifyChainPinnedCA(raw, fp, serverName); err != nil {
+				m.logger.Error("AC CA 指纹 pin 校验失败，疑似中间人，拒绝连接", zap.Error(err))
+				return err
+			}
+			return nil
+		},
+	}, nil
 }
 
 // acInstanceInfo 是 Manager SD 返回的 AC 实例信息（仅解析需要的字段）

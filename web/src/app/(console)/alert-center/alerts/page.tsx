@@ -100,7 +100,7 @@ export default function AlertsPage() {
     ...(blData?.items ?? []).map((b) => ({ label: b.name, value: b.name })),
   ];
 
-  const { data: stats } = useQuery({
+  const { data: stats, isError: statsError } = useQuery({
     queryKey: ["alerts-stats"],
     queryFn: () => alertsApi.statistics(),
   });
@@ -227,10 +227,10 @@ export default function AlertsPage() {
   return (
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 mb-5">
-        <StatCard compact label={t("alerts.list.statTotal")} value={stats?.total ?? 0} icon={Bell} tone="default" />
-        <StatCard compact label={t("alerts.list.statActive")} value={stats?.active ?? 0} icon={AlertTriangle} tone="danger" />
-        <StatCard compact label={t("alerts.list.statResolved")} value={stats?.resolved ?? 0} icon={CheckCircle} tone="success" />
-        <StatCard compact label={t("alerts.list.statIgnored")} value={stats?.ignored ?? 0} icon={EyeOff} tone="warning" />
+        <StatCard compact label={t("alerts.list.statTotal")} value={stats?.total ?? 0} error={statsError} icon={Bell} tone="default" />
+        <StatCard compact label={t("alerts.list.statActive")} value={stats?.active ?? 0} error={statsError} icon={AlertTriangle} tone="danger" />
+        <StatCard compact label={t("alerts.list.statResolved")} value={stats?.resolved ?? 0} error={statsError} icon={CheckCircle} tone="success" />
+        <StatCard compact label={t("alerts.list.statIgnored")} value={stats?.ignored ?? 0} error={statsError} icon={EyeOff} tone="warning" />
       </div>
 
       <div className="space-y-4">

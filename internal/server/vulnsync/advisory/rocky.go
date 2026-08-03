@@ -129,13 +129,13 @@ func (r *RockySource) Fetch(ctx context.Context, since time.Time) ([]*Advisory, 
 		req.Header.Set("Accept", "application/json")
 		resp, err := DoWithBackoff(ctx, r.client, req, 3)
 		if err != nil {
-			return all, fmt.Errorf("Rocky errata HTTP: %w", err)
+			return all, fmt.Errorf("rocky errata HTTP: %w", err)
 		}
 		var resBody rockyResp
 		decErr := json.NewDecoder(resp.Body).Decode(&resBody)
 		resp.Body.Close()
 		if decErr != nil {
-			return all, fmt.Errorf("Rocky errata decode: %w", decErr)
+			return all, fmt.Errorf("rocky errata decode: %w", decErr)
 		}
 		if len(resBody.Advisories) == 0 {
 			break

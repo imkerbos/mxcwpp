@@ -145,10 +145,18 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		return fmt.Errorf("解析 FIM 事件失败: %w", err)
 	}
 
-	eventID := fields["event_id"]
-	if eventID == "" {
+	rawEventID := fields["event_id"]
+	if rawEventID == "" {
 		return fmt.Errorf("FIM 事件缺少 event_id")
 	}
+	detectedAt := msg.AgentTime
+
+	// 插件给的 event_id 是每轮扫描重置的局部计数器（evt-000001…），而 event_id 是
+	// fim_events 的全局主键、写入又 DoNothing 忽略冲突——直接用它会让全舰队每个序号
+	// 只留下第一条，其余静默丢弃。改用消息各维度推导的全局唯一键，详见 DeriveFIMEventID。
+	eventID := model.DeriveFIMEventID(
+		msg.AgentID, fields["task_id"], fields["file_path"],
+		fields["change_type"], rawEventID, detectedAt)
 
 	event := &model.FIMEvent{
 		EventID:    eventID,
@@ -159,7 +167,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		ChangeType: fields["change_type"],
 		Severity:   fields["severity"],
 		Category:   fields["category"],
-		DetectedAt: model.LocalTime(time.Unix(msg.AgentTime, 0)),
+		DetectedAt: model.LocalTime(time.Unix(detectedAt, 0)),
 	}
 
 	// 解析 change_detail（可选字段）
@@ -170,7 +178,7 @@ func (w *MySQLWriter) WriteFIMEvent(msg *kafka.MQMessage) error {
 		}
 	}
 
-	// 忽略重复插入（Consumer 重放时可能重复）
+	// 忽略重复插入：主键已是全局唯一派生键，此处只剩它原本的用途——Consumer 重放去重。
 	result := w.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "event_id"}},
 		DoNothing: true,
@@ -596,12 +604,31 @@ func (w *MySQLWriter) WriteScanTaskComplete(msg *kafka.MQMessage) error {
 	taskID, _ := strconv.ParseUint(fields["task_id"], 10, 64)
 	now := model.LocalTime(time.Now())
 
+	// scan_status 区分主机是真的扫过还是引擎根本不可用。
+	// clean/infected 才算扫过；partial/unavailable 说明覆盖不全，
+	// 把它们混进"已扫描"会让任务看起来全覆盖零威胁，而那些主机从未被扫。
+	scanStatus := fields["scan_status"]
+	degraded := scanStatus == "partial" || scanStatus == "unavailable"
+	if degraded {
+		w.logger.Warn("主机扫描覆盖不完整，结果不足以判定其干净",
+			zap.String("host_id", msg.AgentID),
+			zap.String("scan_status", scanStatus),
+			zap.String("engine_reports", fields["engine_reports"]))
+	}
+
 	return w.db.Transaction(func(tx *gorm.DB) error {
 		// 递增已扫描主机数
 		if err := tx.Model(&model.AntivirusScanTask{}).
 			Where("id = ?", taskID).
 			UpdateColumn("scanned_hosts", gorm.Expr("scanned_hosts + 1")).Error; err != nil {
 			return err
+		}
+		if degraded {
+			if err := tx.Model(&model.AntivirusScanTask{}).
+				Where("id = ?", taskID).
+				UpdateColumn("degraded_hosts", gorm.Expr("degraded_hosts + 1")).Error; err != nil {
+				return err
+			}
 		}
 
 		// 检查是否所有主机都已完成

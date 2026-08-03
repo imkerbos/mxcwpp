@@ -87,7 +87,7 @@ func (s *Syncer) Start(ctx context.Context) {
 func (s *Syncer) Sync() error {
 	// 1. 确保本地仓库存在
 	if err := s.ensureRepo(); err != nil {
-		return fmt.Errorf("Git 仓库操作失败: %w", err)
+		return fmt.Errorf("git 仓库操作失败: %w", err)
 	}
 
 	// 2. 检查是否有新 commit

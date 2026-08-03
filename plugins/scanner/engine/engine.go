@@ -15,6 +15,9 @@ type Engine struct {
 	yara        *YARAScanner
 	quarantine  *QuarantineManager
 	logger      *zap.Logger
+
+	// lastOutcome 最近一次扫描的整体结论，供上报层区分"扫过且干净"与"根本没扫"。
+	lastOutcome ScanOutcome
 }
 
 // NewEngine 创建扫描引擎
@@ -71,20 +74,32 @@ func (e *Engine) Scan(ctx context.Context, req *ScanRequest) ([]ScanResult, erro
 		zap.Int("path_count", len(paths)))
 
 	var allResults []ScanResult
+	var reports []EngineReport
 
 	// 1. ClamAV 扫描 (socket 优先, CLI 回退)
 	if e.clamdSocket != nil && e.clamdSocket.Available() {
 		sockResults := e.scanViaClamdSocket(ctx, paths)
 		allResults = append(allResults, sockResults...)
+		reports = append(reports, EngineReport{
+			Engine: "clamav", Outcome: OutcomeScanned, Threats: len(sockResults)})
 		e.logger.Info("clamd socket 扫描完成",
 			zap.Int("threats", len(sockResults)),
 			zap.Int("files", len(paths)))
+	} else if !e.clamav.Available() {
+		// 引擎不在就如实说不在。此前这里返回 (nil,nil)，与"扫过且干净"无法区分。
+		reports = append(reports, EngineReport{
+			Engine: "clamav", Outcome: OutcomeUnavailable, Reason: "clamscan 不可用"})
+		e.logger.Warn("ClamAV 不可用，本次未执行 ClamAV 扫描")
 	} else {
 		clamResults, err := e.clamav.Scan(ctx, paths, DefaultExcludePaths)
 		if err != nil {
+			reports = append(reports, EngineReport{
+				Engine: "clamav", Outcome: OutcomeFailed, Reason: err.Error()})
 			e.logger.Error("ClamAV CLI 扫描失败", zap.Error(err))
 		} else {
 			allResults = append(allResults, clamResults...)
+			reports = append(reports, EngineReport{
+				Engine: "clamav", Outcome: OutcomeScanned, Threats: len(clamResults)})
 			e.logger.Info("ClamAV CLI 扫描完成", zap.Int("threats", len(clamResults)))
 		}
 	}
@@ -97,23 +112,43 @@ func (e *Engine) Scan(ctx context.Context, req *ScanRequest) ([]ScanResult, erro
 	}
 
 	// 2. YARA-X 扫描
-	yaraResults, err := e.yara.Scan(ctx, paths)
-	if err != nil {
+	if !e.yara.Available() {
+		reports = append(reports, EngineReport{
+			Engine: "yara", Outcome: OutcomeUnavailable, Reason: "yara 引擎或规则不可用"})
+		e.logger.Warn("YARA 不可用，本次未执行 YARA 扫描")
+	} else if yaraResults, err := e.yara.Scan(ctx, paths); err != nil {
+		reports = append(reports, EngineReport{
+			Engine: "yara", Outcome: OutcomeFailed, Reason: err.Error()})
 		e.logger.Error("YARA 扫描失败", zap.Error(err))
 	} else {
 		allResults = append(allResults, yaraResults...)
+		reports = append(reports, EngineReport{
+			Engine: "yara", Outcome: OutcomeScanned, Threats: len(yaraResults)})
 		e.logger.Info("YARA 扫描完成", zap.Int("threats", len(yaraResults)))
 	}
 
 	// 去重：同一文件路径 + 同一引擎只保留一条
 	allResults = dedup(allResults)
 
+	e.lastOutcome = Summarize(reports, allResults)
 	e.logger.Info("扫描完成",
 		zap.String("task_id", req.TaskID),
+		zap.String("status", e.lastOutcome.Status),
 		zap.Int("total_threats", len(allResults)))
+	if e.lastOutcome.Status != "clean" && e.lastOutcome.Status != "infected" {
+		// 覆盖不全的结果不能被当成结论用，必须在日志里说清楚缺了什么。
+		e.logger.Warn("扫描覆盖不完整，结果不足以判定主机干净",
+			zap.String("task_id", req.TaskID),
+			zap.String("status", e.lastOutcome.Status),
+			zap.Any("engine_reports", reports))
+	}
 
 	return allResults, nil
 }
+
+// LastOutcome 返回最近一次扫描的整体结论，供上报层区分
+// "扫过且干净" 与 "根本没扫"。
+func (e *Engine) LastOutcome() ScanOutcome { return e.lastOutcome }
 
 // HandleQuarantine 处理隔离/删除请求
 func (e *Engine) HandleQuarantine(req *QuarantineRequest) (*QuarantineResult, error) {

@@ -62,12 +62,26 @@ rules:
     description: "检测读取系统密码文件操作"
 
   - name: "远程工具 - 可疑下载执行"
-    expression: '(exe.contains("wget") || exe.contains("curl")) && (cmdline.contains("/tmp/") || cmdline.contains("| bash") || cmdline.contains("| sh"))'
+    # 原表达式有两处反了：靠 exe 匹配下载器，于是 `sh -c "curl ... | bash"` 因 exe 是 /bin/sh 而漏掉；
+    # 同时把「下载到 /tmp」单独当作告警条件，于是每次从内网源下载安装包都误报。
+    # 结果是放过危险的、告警无害的。改为按 cmdline 匹配下载器，并要求下载结果被执行。
+    expression: '(cmdline.contains("wget") || cmdline.contains("curl")) && (cmdline.contains("| bash") || cmdline.contains("|bash") || cmdline.contains("| sh") || cmdline.contains("|sh") || cmdline.contains("| python") || cmdline.contains("|python") || cmdline.contains("| perl"))'
     severity: high
     category: execution
     mitre_id: "T1105"
     data_types: ["3000"]
-    description: "检测通过 wget/curl 下载到 /tmp 或直接管道执行的行为"
+    description: "检测下载内容被直接管道送入解释器执行（curl|bash 类）"
+
+  - name: "远程工具 - 下载到临时目录"
+    # 单独拆出并降为 indicator：下载到 /tmp 本身太常见（安装包、构建产物），
+    # 独立告警只会淹没值班。保留为低保真信号，与其他行为关联命中时才升级。
+    expression: '(cmdline.contains("wget") || cmdline.contains("curl")) && (cmdline.contains("/tmp/") || cmdline.contains("/dev/shm/"))'
+    severity: medium
+    category: execution
+    mitre_id: "T1105"
+    data_types: ["3000"]
+    fidelity: low
+    description: "下载文件到临时目录（低保真信号，需与执行行为关联）"
 
   - name: "持久化 - crontab 修改"
     expression: 'exe.contains("crontab") && cmdline.contains("-e")'
@@ -160,20 +174,55 @@ rules:
     description: "检测系统账号文件 /etc/passwd 或 /etc/shadow 被修改"
 
   - name: "SSH 配置异常修改"
-    expression: 'file_path == "/etc/ssh/sshd_config" || file_path.contains(".ssh/authorized_keys")'
+    # 原表达式对任意用户的 authorized_keys 变更都告警，而配置管理轮换密钥是日常操作，
+    # 因而长期误报。收窄到 sshd_config 与 root 的授权密钥：这两处的变更没有常规运维理由。
+    expression: 'file_path == "/etc/ssh/sshd_config" || file_path.startsWith("/root/.ssh/authorized_keys")'
     severity: high
     category: persistence
     mitre_id: "T1098.004"
     data_types: ["3001", "6001"]
-    description: "检测 SSH 配置或授权密钥文件修改，可能为后门植入"
+    description: "检测 sshd 配置或 root 授权密钥被修改，可能为后门植入"
+
+  - name: "SSH 授权密钥变更"
+    # 普通用户的 authorized_keys 变更降为 indicator：正常密钥轮换与后门植入在事件层面
+    # 无法区分，独立告警必然误报。作为关联信号保留，与可疑进程/外连同现时才有意义。
+    expression: 'file_path.contains(".ssh/authorized_keys") && !file_path.startsWith("/root/.ssh/")'
+    severity: medium
+    category: persistence
+    mitre_id: "T1098.004"
+    data_types: ["3001", "6001"]
+    fidelity: low
+    description: "用户 SSH 授权密钥变更（低保真信号，需与其他行为关联）"
+
+  - name: "持久化 - 定时任务写入回连"
+    # 语料回放暴露 T1053.003 完全无覆盖：写入定时任务是最常见的持久化手段之一，
+    # 此前一条规则都没有。只读列出（crontab -l）不算，写入才算。
+    expression: 'exe.contains("crontab") && (cmdline.contains("|") || cmdline.contains("echo") || cmdline.contains(">"))'
+    severity: high
+    category: persistence
+    mitre_id: "T1053.003"
+    data_types: ["3000"]
+    description: "检测通过管道或重定向写入 crontab 的行为，常用于植入定时回连"
+
+  - name: "Web 服务派生 shell"
+    # 语料回放暴露 T1505.003 完全无覆盖。Web 服务进程派生 shell 是 webshell 落地后的
+    # 标志性行为——正常的 Web 服务不需要执行 shell 命令。
+    expression: '(parent_exe.contains("nginx") || parent_exe.contains("httpd") || parent_exe.contains("apache") || parent_exe.contains("php-fpm") || parent_exe.contains("tomcat") || parent_exe.contains("java")) && (exe.endsWith("/sh") || exe.endsWith("/bash") || exe.endsWith("/dash") || exe.endsWith("/zsh") || exe.endsWith("/ksh"))'
+    severity: critical
+    category: persistence
+    mitre_id: "T1505.003"
+    data_types: ["3000"]
+    description: "检测 Web 服务进程派生 shell，webshell 命令执行的典型形态"
 
   - name: "系统启动项修改"
-    expression: 'file_path.contains("/etc/init.d/") || file_path.contains("/etc/systemd/system/") || file_path.contains("/etc/rc.local")'
+    # 排除包管理器：安装软件包时创建 systemd 单元是常态，原表达式对此一律告警。
+    # 攻击者投放持久化单元时用的是 shell 或脚本解释器，不是 dpkg/rpm。
+    expression: '(file_path.contains("/etc/init.d/") || file_path.contains("/etc/systemd/system/") || file_path.contains("/etc/rc.local")) && !(exe.contains("dpkg") || exe.contains("rpm") || exe.contains("apt") || exe.contains("yum") || exe.contains("dnf") || exe.contains("zypper"))'
     severity: high
     category: persistence
     mitre_id: "T1037"
     data_types: ["3001", "6001"]
-    description: "检测系统启动项或服务配置被修改"
+    description: "检测系统启动项或服务配置被非包管理器修改"
 
   - name: "sudoers 文件修改"
     expression: 'file_path.contains("/etc/sudoers") || file_path.contains("/etc/sudoers.d/")'

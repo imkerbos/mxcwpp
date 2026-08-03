@@ -124,6 +124,65 @@ groups:
           summary: "Consumer 错误率 > 5%"
           description: "{{ $value | humanizePercentage }} 消息处理失败或进入 DLQ。"
 
+      # DLQ 写入失败 = 数据保全的最后一米失守：消息处理失败已转 DLQ 保底，连 DLQ 也没写进去。
+      # 与错误率不同，这里没有阈值可言——任何一条都是不可恢复的丢失，出现即告警。
+      # ClickHouse 刷盘失败会让提交屏障暂停推进 offset（刻意如此：宁可重放produce重复行，
+      # 也不能提交"已落盘"却其实没落盘）。代价是 lag 会持续增长，必须能被看见。
+      # 事件超过认领时限仍无人认领。一条无人认领的高危事件与一条未被检出的攻击，
+      # 对客户来说结果是一样的——检测做到了，处置没接上。
+      - alert: MxCwppIncidentAckOverdue
+        expr: sum(mxcwpp_incident_sla_breached{kind="ack",severity=~"critical|high"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: manager
+        annotations:
+          summary: "有高危事件超过认领时限仍无人认领"
+          description: "当前 {{ $value }} 条 critical/high 事件已过认领时限；无人开始处置。"
+
+      # 无主事件堆积：还没到时限但已经没人认领，是即将变成超时的前兆。
+      - alert: MxCwppIncidentUnownedBacklog
+        expr: mxcwpp_incident_unowned > 20
+        for: 30m
+        labels:
+          severity: warning
+          service: manager
+        annotations:
+          summary: "无负责人的事件正在堆积"
+          description: "当前 {{ $value }} 条未关闭事件没有负责人。"
+
+      - alert: MxCwppConsumerCHFlushBlockingOffset
+        expr: increase(mxcwpp_consumer_ch_write_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: consumer
+        annotations:
+          summary: "ClickHouse 刷盘失败，Consumer offset 已暂停推进"
+          description: "op={{ $labels.op }} 持续写入失败；offset 不再推进以避免丢证据，lag 将增长直至 CH 恢复。"
+
+      - alert: MxCwppConsumerDLQWriteFailure
+        expr: increase(mxcwpp_consumer_dlq_write_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: consumer
+        annotations:
+          summary: "Consumer DLQ 写入失败，消息已丢失"
+          description: "dlq_topic={{ $labels.dlq_topic }} 近 5 分钟丢失 {{ $value }} 条，不可恢复。"
+
+      # AgentCenter 投递到未登记路由的 DataType：消息进心跳兜底 Topic，消费者不认识 → 静默丢弃。
+      # 非零即代表存在接线缺口（缺 RouteDataType 或缺 Consumer handler）。
+      - alert: MxCwppUnroutedDataType
+        expr: increase(mxcwpp_ac_unrouted_datatype_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: agentcenter
+        annotations:
+          summary: "存在未登记 Kafka 路由的 DataType"
+          description: "data_type={{ $labels.data_type }} 走了心跳兜底，会被消费者静默忽略；需补 RouteDataType 与 Consumer handler。"
+
       - alert: MxCwppConsumerNoMembers
         expr: mxcwpp_consumer_group_members == 0
         for: 2m
@@ -138,6 +197,52 @@ groups:
   - name: mxcwpp_saturation
     interval: 60s
     rules:
+      # Agent 侧丢事件：背压或 WAL 满时事件被丢弃。指标一直存在但从无告警——
+      # 数据在丢，图表上看得见，没人被叫醒。丢事件等于检测面出现盲区。
+      - alert: MxCwppAgentEventDrop
+        expr: sum(increase(mxcwpp_agent_event_dropped_total[10m])) by (host_id) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: agent
+        annotations:
+          summary: "Agent 丢弃事件，该主机存在检测盲区"
+          description: "host_id={{ $labels.host_id }} 近 10 分钟丢弃 {{ $value }} 条事件（背压或 WAL 满）。"
+
+      # Engine 背压丢弃：检测流水线来不及处理而主动丢事件。
+      - alert: MxCwppEngineBackpressureDrop
+        expr: increase(mxcwpp_engine_backpressure_drop_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          service: engine
+        annotations:
+          summary: "Engine 背压丢弃事件，检测出现漏检"
+          description: "近 10 分钟丢弃 {{ $value }} 条；被丢的事件不会经任何 Stage 检测。"
+
+      # Stage 报错：某个检测 Stage 持续异常，等于该项能力静默失效。
+      - alert: MxCwppEngineStageErrors
+        expr: sum(increase(mxcwpp_engine_stage_errors_total[10m])) by (stage) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: engine
+        annotations:
+          summary: "检测 Stage 持续报错"
+          description: "stage={{ $labels.stage }} 近 10 分钟报错 {{ $value }} 次；该能力可能已静默失效。"
+
+      # 漏洞库停更：同步挂了或上游拒服后，界面照常显示旧数据，看不出区别。
+      # 判据是"距上次成功多久"而非"跑了多少次"——后者在反复失败时同样在增长。
+      - alert: MxCwppVulnDataStale
+        expr: (time() - mxcwpp_vulnsync_last_success_timestamp_seconds) > 86400
+        for: 30m
+        labels:
+          severity: critical
+          service: vulnsync
+        annotations:
+          summary: "漏洞库超过 24 小时未成功同步"
+          description: "source={{ $labels.source }} 已 {{ $value | humanizeDuration }} 未成功同步；界面上的漏洞数据已停在那之前。"
+
       - alert: MxCwppHighCPU
         expr: 100 * rate(process_cpu_seconds_total{job=~"mxcwpp-.+"}[5m]) > 80
         for: 10m
@@ -277,3 +382,99 @@ groups:
         annotations:
           summary: "Kafka 生产者降级队列积压 ({{ $labels.instance }})"
           description: "降级队列长度 {{ $value }}，接近溢出阈值，生产者排空速率跟不上到达速率。"
+
+      # --- ML 异常检测：模型健康与投毒防护 ---
+      #
+      # 这几条监督的是"防护是否还在生效"，而不是"是否有攻击"。
+      # 防护失效与一切正常在外部表现完全一样，不主动告警就永远不会被发现。
+
+      - alert: MxCwppAnomalyReferenceBaselineMissing
+        expr: mxcwpp_anomaly_reference_baseline_ready == 0
+        for: 30m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测缺少参照基线（投毒防护未生效）"
+          description: |
+            长期参照基线未就绪，模型漂移与训练投毒防护当前不生效。
+            滑窗重训在无参照时会把任何缓慢变化学成新常态——攻击者放慢动作即可让
+            恶意行为成为基线。
+            刚部署时属正常（需积累样本），持续 30 分钟以上需排查：
+            anomaly_model_states 表是否可写、样本量是否长期不足。
+
+      - alert: MxCwppAnomalyRetrainRejected
+        expr: increase(mxcwpp_anomaly_retrain_rejected_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测拒绝重训（训练窗口偏离基线）"
+          description: |
+            过去 1 小时有 {{ $value }} 次重训被拒绝：训练窗口偏离长期参照超过 3σ。
+            两种可能，处理方式相反：
+              1. 业务确实变了（扩容/迁移/新业务上线）→ 需要人工重建参照基线；
+              2. 环境中正在发生持续异常 → 这是信号本身，应当排查。
+            模型此刻仍在用旧参数工作，不会漏报，但也学不进新数据。
+
+      - alert: MxCwppAnomalyModelStale
+        expr: mxcwpp_anomaly_model_age_seconds > 14400
+        for: 10m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常检测模型超过 4 小时未成功训练"
+          description: |
+            重训周期为 30 分钟，连续 8 次以上未训练成功说明这不是偶发。
+            模型仍在工作但已停止学习，对新出现的正常行为会逐渐开始误报。
+            结合 mxcwpp_anomaly_retrain_rejected_total 判断是被漂移闸拦下还是样本不足。
+
+      # --- ML 模型工程：版本、训练集、排序通路 ---
+
+      - alert: MxCwppAnomalyModelVersionStalled
+        # 版本号长时间不动 = 模型停止学习。它仍在打分，只是分数越来越不反映当前环境。
+        # 与「一切正常」在其它指标上看起来完全一样，不主动告警就不会被发现。
+        expr: changes(mxcwpp_anomaly_model_version[6h]) == 0 and mxcwpp_anomaly_model_version > 0
+        for: 30m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常模型 6 小时未产生新版本"
+          description: |
+            重训周期 30 分钟，6 小时内一个新版本都没有，说明训练持续没成功。
+            结合 mxcwpp_anomaly_retrain_rejected_total 判断：
+              非 0 → 被漂移闸拦下（环境变了或正在发生持续异常，两种处理方式相反）；
+              为 0 → 样本不足，检查 mxcwpp_anomaly_training_hosts 是否也在下降。
+            当前模型仍可用，但学到的是越来越旧的"正常"。
+
+      - alert: MxCwppAnomalyTrainingSetNarrowing
+        # 训练主机数骤降 = 模型正在向少数主机的行为收敛。
+        # 后果是其余主机的日常行为被判成异常——看起来像检测变敏感了，实际是训练集被带偏。
+        expr: mxcwpp_anomaly_training_hosts < 10 and mxcwpp_anomaly_training_hosts > 0
+        for: 1h
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 训练集主机数过少（当前 {{ $value }}）"
+          description: |
+            参与训练的主机不足 10 台时，"什么算正常"由这几台机器决定，
+            其余主机的正常行为会被判成异常。
+            排查：BDE 指标上报是否中断、agent 是否大面积离线。
+
+      - alert: MxCwppAnomalyScoreFlushFailing
+        # 异常分落库失败 = ranking 档静默退回"没有 ML 参与排序"，而界面上档位仍显示 ranking。
+        expr: increase(mxcwpp_anomaly_score_flush_failed_total[15m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "ML 异常分落库失败，告警排序未生效"
+          description: |
+            host_anomaly_scores 写入失败，ranking 档实际未参与告警排序，
+            但档位配置仍显示已启用——功能看起来在，实际不起作用。
+            排查 MySQL 可写性与 host_anomaly_scores 表结构。

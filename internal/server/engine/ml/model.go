@@ -1,6 +1,7 @@
 // Package ml 是 Engine 的本地机器学习推理抽象。
 //
-// 设计文档: docs/ml-models.md
+// 注意：本包**未接线**（capability 清单 ml_anomaly = unwired），线上跑的是
+// internal/server/engine/anomaly。此处的 Registry / ONNX 适配仍是规划，勿据此判断线上能力。
 //
 // 当前形态 (Sprint 3 PR51):
 //   - 定义统一 Model interface (Predict + Name + Version)

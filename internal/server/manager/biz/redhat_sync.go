@@ -116,7 +116,7 @@ func (v *VulnScanner) SyncRedHatWithSoftware(softwareByName map[string][]install
 			Status:         "unpatched",
 			DiscoveredAt:   model.LocalTime(time.Now()),
 			CurrentVersion: firstMatch.Version,
-			ReferenceUrl:   referenceURL,
+			ReferenceURL:   referenceURL,
 			Source:         "redhat",
 		}
 
@@ -196,7 +196,7 @@ func (v *VulnScanner) fetchRedHatCVEs() ([]redhatCVEItem, error) {
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			return nil, fmt.Errorf("Red Hat API 返回 %d: %s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("red Hat API 返回 %d: %s", resp.StatusCode, string(body))
 		}
 
 		var items []redhatCVEItem

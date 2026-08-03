@@ -30,9 +30,17 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 		var migrateErr error
 		for attempt := range 3 {
 			if attempt > 0 {
-				// 重试前探活连接，必要时让连接池重建
+				// 重试前必须真正清空连接池，否则重试拿到的还是那个已失效的连接。
+				//
+				// 原写法用 SetConnMaxLifetime(0)，注释说"强制回收旧连接"，但 database/sql
+				// 里 0 表示连接**永不因年龄被关闭**——语义正好相反，池子一条都没清掉。
+				// 实测：大表 ALTER（如 incidents 加列）结束后连接被服务端断开，
+				// 下一个模型迁移报 "invalid connection"，三次重试都在 1ms 内以同样方式失败，
+				// manager 直接 fatal 退出。表越大越容易触发。
+				//
+				// 用极小的 lifetime 让池中所有连接立即到期被关闭，Ping 建立新连接后再恢复。
 				if sqlDB, err := db.DB(); err == nil {
-					sqlDB.SetConnMaxLifetime(0) // 强制回收旧连接
+					sqlDB.SetConnMaxLifetime(time.Nanosecond)
 					_ = sqlDB.Ping()
 					sqlDB.SetConnMaxLifetime(time.Hour)
 				}
@@ -210,6 +218,9 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 	if err := migrateBackfillRuleEffectiveAt(db, logger); err != nil {
 		logger.Warn("回填规则 effective_at 失败", zap.Error(err))
 	}
+	if err := migrateBackfillRuleStage(db, logger); err != nil {
+		logger.Warn("检测规则生命周期阶段回填处理", zap.Error(err))
+	}
 
 	// 种入内置多步攻击链(序列)规则：序列引擎已实现但表空,补齐 IOA 攻击链检测
 	if err := seedBuiltinSequenceRules(db, logger); err != nil {
@@ -224,6 +235,28 @@ func Migrate(db *gorm.DB, logger *zap.Logger) error {
 //
 // detect-only 上线观察期(P3)新增 effective_at 列：新规则上线起 ruleGraceWindow 内降级 indicator。
 // 存量规则早已上线、不应进入观察期，回填为创建时间使其立即过窗，避免加列后全量规则被静默。
+// migrateBackfillRuleStage 为存量规则回填生命周期阶段。
+//
+// 存量规则一律置为 alert，保持它们迁移前的行为。
+//
+// 这个方向不能反：新加的阶段字段若让存量规则落到 shadow，整个已部署的规则集
+// 会在一次升级后集体停止告警——平台看起来一切正常，实际已经不再报警。
+// 宁可让存量规则维持现状再逐条降级，也不能靠一次迁移把检测能力清零。
+func migrateBackfillRuleStage(db *gorm.DB, logger *zap.Logger) error {
+	r := db.Model(&model.DetectionRule{}).
+		Where("stage IS NULL OR stage = ''").
+		Update("stage", model.RuleStageAlert)
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected > 0 {
+		logger.Info("已为存量检测规则回填生命周期阶段",
+			zap.Int64("count", r.RowsAffected),
+			zap.String("stage", model.RuleStageAlert))
+	}
+	return nil
+}
+
 // 幂等：仅回填 NULL（AutoMigrate 新加列对存量行为 NULL；新增规则由 BeforeCreate 置当前时间）。
 func migrateBackfillRuleEffectiveAt(db *gorm.DB, logger *zap.Logger) error {
 	r := db.Exec("UPDATE detection_rules SET effective_at = created_at WHERE effective_at IS NULL")

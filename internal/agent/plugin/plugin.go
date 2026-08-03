@@ -316,15 +316,15 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	}
 
 	// 4. 创建 Pipe
-	rx_r, rx_w, err := os.Pipe()
+	rxR, rxW, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rx pipe: %w", err)
 	}
 
-	tx_r, tx_w, err := os.Pipe()
+	txR, txW, err := os.Pipe()
 	if err != nil {
-		rx_r.Close()
-		rx_w.Close()
+		rxR.Close()
+		rxW.Close()
 		return nil, fmt.Errorf("failed to create tx pipe: %w", err)
 	}
 
@@ -336,10 +336,10 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	}
 	logDir := filepath.Join(filepath.Dir(agentLogFile), "plugins")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		rx_r.Close()
-		rx_w.Close()
-		tx_r.Close()
-		tx_w.Close()
+		rxR.Close()
+		rxW.Close()
+		txR.Close()
+		txW.Close()
 		return nil, fmt.Errorf("failed to create plugin log dir: %w", err)
 	}
 
@@ -358,17 +358,17 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 		rotatelogs.WithRotationCount(0),           // 不限制文件数量，由 MaxAge 控制
 	)
 	if err != nil {
-		rx_r.Close()
-		rx_w.Close()
-		tx_r.Close()
-		tx_w.Close()
+		rxR.Close()
+		rxW.Close()
+		txR.Close()
+		txW.Close()
 		return nil, fmt.Errorf("failed to create plugin log rotator: %w", err)
 	}
 
 	// 6. 启动插件进程
 	cmd := exec.CommandContext(ctx, execPath)
 	cmd.Dir = workDir
-	cmd.ExtraFiles = []*os.File{tx_r, rx_w} // 文件描述符 3 (tx_r), 4 (rx_w)
+	cmd.ExtraFiles = []*os.File{txR, rxW} // 文件描述符 3 (txR), 4 (rxW)
 	cmd.Stdout = logWriter
 	cmd.Stderr = logWriter
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -386,16 +386,16 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 
 	if err := cmd.Start(); err != nil {
 		logWriter.Close()
-		rx_r.Close()
-		rx_w.Close()
-		tx_r.Close()
-		tx_w.Close()
+		rxR.Close()
+		rxW.Close()
+		txR.Close()
+		txW.Close()
 		return nil, fmt.Errorf("failed to start plugin: %w", err)
 	}
 
 	// 关闭子进程端不需要的文件描述符
-	tx_r.Close()
-	rx_w.Close()
+	txR.Close()
+	rxW.Close()
 
 	// 6.5 应用资源限制（prlimit）
 	limits := parseResourceLimits(cfg.Detail)
@@ -406,8 +406,8 @@ func (m *Manager) loadPlugin(ctx context.Context, cfg *grpc.Config) (*Plugin, er
 	plugin := &Plugin{
 		Config:    cfg,
 		cmd:       cmd,
-		rx:        rx_r,
-		tx:        tx_w,
+		rx:        rxR,
+		tx:        txW,
 		logWriter: logWriter,
 		workDir:   workDir,
 		status:    StatusStarting,

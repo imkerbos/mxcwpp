@@ -241,7 +241,7 @@ type YourAsset struct {
 }
 ```
 
-3. **实现采集逻辑**（在 `handlers/your_handler.go` 中）：
+3. **实现采集逻辑**（在 `engine/handlers/` 下新建文件）：
 
 ```go
 type YourHandler struct {
@@ -291,6 +291,6 @@ case "your_type":
 
 ## 参考文档
 
-- [插件开发指南](../../docs/development/plugin-development.md)
-- [Agent 架构设计](../../docs/design/agent-architecture.md)
-- [Phase 2 开发计划](../../docs/PHASE2_PLAN.md)
+- [架构文档](../../docs/architecture.md)
+- [贡献指南](../../docs/contributing.md)
+- [代码规范](../../docs/code-style.md)
