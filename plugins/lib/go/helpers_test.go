@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/protobuf/proto"
 
@@ -78,6 +79,34 @@ func drainPongs(t *testing.T, r io.Reader, pongCount *atomic.Int32, stop <-chan 
 	}()
 }
 
+// startReceiveLoop 起 ReceiveTaskLoop 并保证测试结束前它已真正退出。
+//
+// 必须等，不能只 cancel：ReceiveTaskLoop 往 zaptest logger 写日志，
+// 而 zaptest 写的是 *testing.T。测试函数返回后 t 就不能再用，
+// 此时还在跑的 goroutine 一旦记一条日志，就与 testing 内部状态构成数据竞争。
+//
+// 这正是 CI 里 race job 长期 flaky 的原因——它取决于 goroutine 恰好在
+// 测试返回前还是返回后写那条日志。
+//
+// 用 t.Cleanup 而不是 defer：cleanup 在所有 defer 之后执行，
+// 因而排在 cancel() 后面，等待时 loop 已经收到停止信号。
+func startReceiveLoop(t *testing.T, ctx context.Context, client *Client,
+	taskCh chan *bridge.Task, logger *zap.Logger) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ReceiveTaskLoop(ctx, client, taskCh, logger)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("ReceiveTaskLoop 未在超时内退出，goroutine 泄漏")
+		}
+	})
+}
+
 // TestReceiveTaskLoopForwardsTask 基本流程：单条 Task 推到 taskCh
 func TestReceiveTaskLoopForwardsTask(t *testing.T) {
 	client, rxW, txR := newTestClient(t)
@@ -89,11 +118,7 @@ func TestReceiveTaskLoopForwardsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	done := make(chan struct{})
-	go func() {
-		ReceiveTaskLoop(ctx, client, taskCh, logger)
-		close(done)
-	}()
+	startReceiveLoop(t, ctx, client, taskCh, logger)
 
 	writeTask(t, rxW, 9101, "tok-1")
 
@@ -123,7 +148,7 @@ func TestReceiveTaskLoopAutoPong(t *testing.T) {
 	defer close(stop)
 	drainPongs(t, txR, &pongs, stop)
 
-	go ReceiveTaskLoop(ctx, client, taskCh, logger)
+	startReceiveLoop(t, ctx, client, taskCh, logger)
 
 	// 投 1 条 ping (DataType=9000) + 1 条业务任务
 	writeTask(t, rxW, 9000, "ping-1")
@@ -171,7 +196,7 @@ func TestReceiveTaskLoopNeverBlocksOnFullTaskCh(t *testing.T) {
 	defer close(stop)
 	drainPongs(t, txR, &pongs, stop)
 
-	go ReceiveTaskLoop(ctx, client, taskCh, logger)
+	startReceiveLoop(t, ctx, client, taskCh, logger)
 
 	// 故意不消费 taskCh，模拟业务卡住
 	// 投 5 条业务（应触发 deferred 投递）
