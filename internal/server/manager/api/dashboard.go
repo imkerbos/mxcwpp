@@ -458,7 +458,7 @@ func (h *DashboardHandler) computeSecurityScore(
 	criticalAlerts, highAlerts int64,
 	criticalVulns, highVulns int64,
 	vulnHosts, totalHosts int64,
-	baselineCompliance float64,
+	baselineCompliance *float64,
 ) float64 {
 	const dimMax = 25.0
 
@@ -470,15 +470,24 @@ func (h *DashboardHandler) computeSecurityScore(
 	vulnWeighted := float64(criticalVulns)*5 + float64(highVulns)
 	vulnScore := dimScoreFromDensity(vulnWeighted, totalHosts, dimMax)
 
-	// 3. 基线维度：合规率直接折算
-	baseline := baselineCompliance
-	if baseline < 0 {
-		baseline = 0
+	// 3. 基线维度：合规率直接折算。
+	//
+	// 合规率未知（从未扫过基线，或查询失败）时**不计入该维度**，
+	// 并把总分按剩余维度归一化。给一个没扫过基线的环境记满分，
+	// 与合规率显示 100% 是同一个欺骗换了个位置——总分会因为「没测过」而更高。
+	baselineScore := 0.0
+	dims := 3.0 // 告警 / 漏洞 / 暴露
+	if baselineCompliance != nil {
+		baseline := *baselineCompliance
+		if baseline < 0 {
+			baseline = 0
+		}
+		if baseline > 100 {
+			baseline = 100
+		}
+		baselineScore = baseline / 100.0 * dimMax
+		dims = 4.0
 	}
-	if baseline > 100 {
-		baseline = 100
-	}
-	baselineScore := baseline / 100.0 * dimMax
 
 	// 4. 暴露维度：1 - 受影响主机比例
 	exposureScore := dimMax
@@ -491,6 +500,9 @@ func (h *DashboardHandler) computeSecurityScore(
 	}
 
 	score := alertScore + vulnScore + baselineScore + exposureScore
+	// 缺维度时按实际计入的维度数归一化回百分制，
+	// 否则少一个维度就凭空少 25 分，看起来像安全状况恶化了。
+	score = score * 4.0 / dims
 	if score < 0 {
 		score = 0
 	}
@@ -587,9 +599,16 @@ func (h *DashboardHandler) calculateAgentChanges() (int, int) {
 	return onlineChange, offlineChange
 }
 
-// calculateBaselinePercentages 计算基线合规率和存在高危基线问题的主机百分比
-// 优化：单次聚合查询替代 5 条独立 COUNT
-func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
+// calculateBaselinePercentages 计算基线合规率和存在高危基线问题的主机百分比。
+//
+// 返回 nil 表示**无法计算**——一条基线扫描结果都没有，或查询失败。
+// 此前这两种情况都返回 100%，于是新部署、扫描从未跑过、表被清空，
+// 大屏统统显示「完全合规」。零数据与全部通过在界面上无法区分，
+// 而这两者要做的事完全相反：前者该去查为什么没扫，后者不用管。
+//
+// 用指针而非 0 或 -1：调用方无法把 nil 误当成一个数字，
+// 而哨兵值迟早会被某处忘记判断，然后当成真实百分比渲染出去。
+func (h *DashboardHandler) calculateBaselinePercentages() (*float64, *float64) {
 	var result struct {
 		PassCount           int64 `gorm:"column:pass_count"`
 		FailCount           int64 `gorm:"column:fail_count"`
@@ -597,7 +616,9 @@ func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 	}
 	// 合规率反映「当前状态」：每主机每规则只取最新一次扫描结果，避免历史复扫被重复计数
 	// （复合主键含 task_id，每次复扫追加整套新行；全表 SUM 会把同一主机扫 N 次算 N 倍）。
-	h.db.Raw(`
+	// 查询错误必须区别于「查到 0 条」：忽略 err 会让 result 保持零值，
+	// 与空库走进同一个分支，数据库故障因而被呈现为「合规率 100%」。
+	if err := h.db.Raw(`
 		SELECT
 			SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) AS pass_count,
 			SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
@@ -608,11 +629,15 @@ func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 			FROM scan_results
 		) ranked
 		WHERE rn = 1
-	`).Scan(&result)
+	`).Scan(&result).Error; err != nil {
+		h.logger.Error("查询基线合规率失败，返回未知而非数字", zap.Error(err))
+		return nil, nil
+	}
 
 	totalResults := result.PassCount + result.FailCount
 	if totalResults == 0 {
-		return 100.0, 0.0
+		// 没有任何扫描结果 ≠ 全部通过。
+		return nil, nil
 	}
 
 	// 整体合规率 = 通过项 / 总检查项
@@ -624,7 +649,7 @@ func (h *DashboardHandler) calculateBaselinePercentages() (float64, float64) {
 	// 基线不合规率 = 中危及以上失败项 / 总检查项
 	noncomplianceRate := float64(result.MediumPlusFailCount) / float64(totalResults) * 100.0
 
-	return complianceRate, noncomplianceRate
+	return &complianceRate, &noncomplianceRate
 }
 
 // getBaselineRisksTop3 获取基线风险 Top 3
