@@ -260,3 +260,87 @@ func TestConfigKeysDocumented(t *testing.T) {
 			strings.Join(missing, ", "))
 	}
 }
+
+// TestRoadmapNumbersMatchReality 校验路线图里的规模数字与代码实际一致。
+//
+// 状态文档里的数字是最容易悄悄过期的东西：加一个服务、接一个 Stage、
+// 加一份基线策略，代码里改了，文档里那个数字不会自己变。
+// 而读文档的人拿它当事实——对外报「30 个基线策略」时尤其如此。
+//
+// 只校验能从代码可靠数出来的量。像「已上生产的能力」这种需要人判断的，
+// 无法自动核对，只能靠 §八 的维护约定。
+func TestRoadmapNumbersMatchReality(t *testing.T) {
+	root := repoRootFromDeploy(t)
+	data, err := os.ReadFile(filepath.Join(root, "docs", "roadmap.md"))
+	if err != nil {
+		t.Fatalf("读取 roadmap.md 失败: %v", err)
+	}
+	body := string(data)
+
+	// --- 服务数 ---
+	entries, err := os.ReadDir(filepath.Join(root, "cmd", "server"))
+	if err != nil {
+		t.Fatalf("读取 cmd/server 失败: %v", err)
+	}
+	services := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			services++
+		}
+	}
+	assertRoadmapNumber(t, body, `后端服务 \| (\d+)`, services, "后端服务数")
+
+	// --- 检测能力：总数 / 已接线 / 未接线 ---
+	capSrc, err := os.ReadFile(filepath.Join(root,
+		"internal", "server", "engine", "capability.go"))
+	if err != nil {
+		t.Fatalf("读取 capability.go 失败: %v", err)
+	}
+	capRe := regexp.MustCompile(`\{Name: "[a-z_0-9]+",\s*Constructor: "\w+",\s*Status: (\w+)`)
+	var total, active, unwired int
+	for _, m := range capRe.FindAllStringSubmatch(string(capSrc), -1) {
+		total++
+		switch m[1] {
+		case "StatusActive":
+			active++
+		case "StatusUnwired":
+			unwired++
+		}
+	}
+	assertRoadmapNumber(t, body, `(\d+) 定义`, total, "检测能力总数")
+	assertRoadmapNumber(t, body, `\*\*(\d+) 已接线`, active, "已接线能力数")
+	assertRoadmapNumber(t, body, `已接线，(\d+) 未接线`, unwired, "未接线能力数")
+
+	// --- 插件数 ---
+	pluginEntries, err := os.ReadDir(filepath.Join(root, "plugins"))
+	if err != nil {
+		t.Fatalf("读取 plugins 失败: %v", err)
+	}
+	plugins := 0
+	for _, e := range pluginEntries {
+		if e.IsDir() {
+			plugins++
+		}
+	}
+	assertRoadmapNumber(t, body, `Agent 插件 \| (\d+)`, plugins, "插件数")
+}
+
+// assertRoadmapNumber 比对路线图里的一处数字断言。
+func assertRoadmapNumber(t *testing.T, body, pattern string, want int, what string) {
+	t.Helper()
+	m := regexp.MustCompile(pattern).FindStringSubmatch(body)
+	if m == nil {
+		t.Errorf("roadmap.md 里找不到「%s」的数字断言（正则 %s）。"+
+			"删掉断言不等于文档正确——它只是变得无法核对。", what, pattern)
+		return
+	}
+	got, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Errorf("「%s」的数字无法解析: %q", what, m[1])
+		return
+	}
+	if got != want {
+		t.Errorf("roadmap.md 的「%s」写的是 %d，代码里实际是 %d。\n"+
+			"  改了代码就要改这个数字——它是对外说明规模的依据。", what, got, want)
+	}
+}
