@@ -167,7 +167,7 @@ func TestComputeSecurityScore(t *testing.T) {
 				tt.criticalAlerts, tt.highAlerts,
 				tt.criticalVulns, tt.highVulns,
 				tt.vulnHosts, tt.totalHosts,
-				tt.baselineCompliance,
+				&tt.baselineCompliance,
 			)
 			if got < tt.wantMin || got > tt.wantMax {
 				t.Fatalf("computeSecurityScore() = %v, want range [%v, %v]", got, tt.wantMin, tt.wantMax)
@@ -208,7 +208,7 @@ func TestDimScoreFromDensity(t *testing.T) {
 func TestSecurityScoreMonotonic(t *testing.T) {
 	h := &DashboardHandler{}
 	base := func(crit int64) float64 {
-		return h.computeSecurityScore(crit, 0, 0, 0, 0, 100, 80.0)
+		return h.computeSecurityScore(crit, 0, 0, 0, 0, 100, ptrF(80.0))
 	}
 	prev := math.Inf(1)
 	for _, c := range []int64{0, 1, 10, 100, 1000, 10000} {
@@ -223,4 +223,48 @@ func TestSecurityScoreMonotonic(t *testing.T) {
 func TestSanitizeDashboardValue(t *testing.T) {
 	// 保留原测试占位
 	_ = gin.H{}
+}
+
+// ptrF 取浮点字面量的地址，供 computeSecurityScore 的可空合规率参数使用。
+func ptrF(v float64) *float64 { return &v }
+
+// 合规率未知时不得按满分计入基线维度。
+//
+// 从没扫过基线的环境，总分不该因为「没测过」而更高——那与合规率显示 100%
+// 是同一个欺骗换了个位置。该维度应被排除，总分按剩余维度归一化。
+func TestSecurityScore_UnknownBaselineIsNotFullMarks(t *testing.T) {
+	h := &DashboardHandler{}
+
+	// 同样的告警/漏洞/暴露情况，只有基线合规率一个变量
+	const ca, ha, cv, hv = int64(2), int64(10), int64(5), int64(30)
+	const vh, th = int64(3), int64(10)
+
+	full := h.computeSecurityScore(ca, ha, cv, hv, vh, th, ptrF(100.0))
+	unknown := h.computeSecurityScore(ca, ha, cv, hv, vh, th, nil)
+	zero := h.computeSecurityScore(ca, ha, cv, hv, vh, th, ptrF(0.0))
+
+	if unknown >= full {
+		t.Fatalf("合规率未知时的评分 %.2f 不该达到满分合规时的 %.2f——"+
+			"没扫过基线不是好消息", unknown, full)
+	}
+	if unknown <= zero {
+		t.Fatalf("合规率未知时的评分 %.2f 不该低于合规率为 0 时的 %.2f——"+
+			"未知不等于最差，那会让没扫过的环境看起来像已经失守", unknown, zero)
+	}
+	t.Logf("满分合规 %.2f / 未知 %.2f / 零合规 %.2f", full, unknown, zero)
+}
+
+// 缺维度时按剩余维度归一化，不能凭空少 25 分。
+//
+// 直接少算一个维度会让总分骤降，看起来像安全状况恶化，
+// 而实际只是少了一项测量。
+func TestSecurityScore_MissingDimensionIsNormalized(t *testing.T) {
+	h := &DashboardHandler{}
+
+	// 其余维度全满：无告警、无漏洞、无受影响主机
+	unknown := h.computeSecurityScore(0, 0, 0, 0, 0, 10, nil)
+	if unknown < 95.0 {
+		t.Fatalf("其余维度全满、仅基线未知时评分为 %.2f，"+
+			"说明缺失维度被当成扣分而不是归一化", unknown)
+	}
 }
