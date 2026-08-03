@@ -15,7 +15,8 @@ export interface DashboardStats {
   securityScore: number;
   onlineAgents: number; offlineAgents: number;
   pendingAlerts: number; pendingVulnerabilities: number;
-  baselineHardeningPercent: number;
+  /** 基线合规率。null = 未知（从未扫过基线或查询失败），不是 0，更不是 100。 */
+  baselineHardeningPercent: number | null;
   criticalAlerts: number; highAlerts: number; mediumAlerts: number; lowAlerts: number;
   alertTrend: AlertTrendItem[];
   latestAlerts: LatestAlert[];

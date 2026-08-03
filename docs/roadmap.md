@@ -178,24 +178,6 @@
 | race detector flaky | `plugins/lib/go` 的 zaptest logger 在测试结束后仍被后台 goroutine 使用。修掉后 race job 可改为阻塞 |
 | `UncoveredTechniques()` 未接门禁 | 已实现，缺「应覆盖技术清单」作为输入 |
 
-### 合规率在没有数据时显示 100%
-
-`manager/api/dashboard.go:615`：一条基线扫描结果都没有时，合规率返回 **100%**。
-
-新部署、扫描任务从未跑过、或表被清空，大屏都会显示「完全合规」。零数据与
-全部通过在界面上无法区分，而这两者的处置完全相反——前者要去查为什么没扫，
-后者不用管。
-
-同一处还忽略了查询错误：`.Scan(&result)` 的返回值未检查，数据库查询失败时
-`result` 保持零值，同样走到 100% 分支。
-
-修法与 E-DQ-1 一致：区分「没有数据」与「数据是 0」，前者向上返回不可用状态，
-由前端渲染成占位符而不是数字。`web/src/lib/utils/stat.ts` 的 `statFromQuery`
-已经是这个模式，缺的是后端把「无数据」如实表达出来。
-
-> 相关但已修复：`plugins/scanner/engine/engine.go:88` 曾在引擎缺失时返回
-> (nil, nil)，与「扫过且干净」无法区分；现在会如实报 `OutcomeUnavailable`。
-
 ### 漏洞情报：跨发行版标签污染（未根治）
 
 现象：一条 CVE 的 `source` 与 `fixed_version` 是 CVE 级的塌缩值。同一 CVE 若既有
