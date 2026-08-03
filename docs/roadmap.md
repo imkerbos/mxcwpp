@@ -15,7 +15,7 @@
 | 维度 | 数量 |
 |------|------|
 | 后端服务 | 7（manager / agentcenter / consumer / engine / vulnsync / llmproxy / scanner）|
-| 检测能力（Stage）| 19 定义，**8 已接线，11 未接线** |
+| 检测能力（Stage）| 14 定义，**8 已接线，6 未接线** |
 | Agent 插件 | 12 |
 | 前端页面 | 83 |
 | 基线策略 | 30 个 / 614 条规则 |
@@ -69,14 +69,20 @@
 `UncoveredTechniques()` 已实现但尚未接入「应覆盖技术清单」作为 CI 门禁。
 回放只覆盖 CEL 规则，未覆盖 sequence / IOC / 行为引擎。
 
-### 5.3 未接线代码（需决策：接上还是删掉）
+### 5.3 未接线代码
+
+2026-08-03 清理了一批：删掉 `engine/honeypot`（空 Detector，对 7020-7029 段事件
+无条件产 critical 告警，接上即刷屏）、`stage_kube`（永远返回 nil alerts 的旁路）、
+`engine/ml` 与 `stage_ml`（与在跑的 `engine/anomaly` 重复）、`engine/scheduler`
+（零调用方，实际跑的是 `agentcenter/scheduler`）、`stage_audit` 与 `manager/biz/audit`
+（死生产者-死消费者配对；在跑的是 `internal/server/audit`）。
+
+剩余未接线：
 
 | 位置 | 状态 |
 |------|------|
-| `internal/server/engine/scheduler/` | 零调用方；实际运行的是 `agentcenter/scheduler/` |
-| `internal/server/manager/biz/mlmodel/` | 零路由、零调用方，整块死代码 |
-| `internal/server/engine/ml/` | capability 清单标记 unwired，且无 ONNX 依赖 |
-| engine 其余 11 个 Stage | 见 capability 清单 |
+| 6 个入侵检测 Stage | 爆破 / 反弹 shell / 提权 / webshell / rootkit / 异常登录。底层 `engine/intrusion/` 有真实算法，**已决定接线**，进度见下 |
+| `internal/server/manager/biz/mlmodel/` | 模型分发链路（上传/审批/订阅/下发）完整实现，零路由零调用方。**保留待接线**；连带 `model/ml_model.go` 的 3 张表 |
 
 ---
 
