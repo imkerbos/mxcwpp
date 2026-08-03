@@ -15,7 +15,7 @@
 | 维度 | 数量 |
 |------|------|
 | 后端服务 | 7（manager / agentcenter / consumer / engine / vulnsync / llmproxy / scanner）|
-| 检测能力（Stage）| 14 定义，**8 已接线，6 未接线** |
+| 检测能力（Stage）| 14 定义，**13 已接线，1 未接线** |
 | Agent 插件 | 12 |
 | 前端页面 | 83 |
 | 基线策略 | 30 个 / 614 条规则 |
@@ -81,7 +81,7 @@
 
 | 位置 | 状态 |
 |------|------|
-| 6 个入侵检测 Stage | 爆破 / 反弹 shell / 提权 / webshell / rootkit / 异常登录。底层 `engine/intrusion/` 有真实算法，**已决定接线**，进度见下 |
+| `abnormal_login` | **暂不接线**。画像是进程内空 map 起步，冷启动时每台主机的第一次正常登录都会同时命中「新国家 + 新 IP 段 + 新用户」——机群有多少台就报多少条，且每次 engine 重启重演。需先做画像持久化或引入学习期（可参照 ML 异常检测的 shadow 档）。已有测试记录该行为 |
 | `internal/server/manager/biz/mlmodel/` | 模型分发链路（上传/审批/订阅/下发）完整实现，零路由零调用方。**保留待接线**；连带 `model/ml_model.go` 的 3 张表 |
 
 ---
