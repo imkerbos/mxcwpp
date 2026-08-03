@@ -180,6 +180,29 @@ func main() {
 				stages = append(stages, engine.NewAntiRootkitStage(logger))
 				// PR63 RASP read-only (DataType 4000-4099)
 				stages = append(stages, engine.NewRASPStage(logger))
+
+				// 入侵检测：逐个接线，按误报风险从低到高。
+				// 每个都先用标注语料的正常样本验证过零误命中
+				// （见 internal/server/engine/intrusion/corpus_fp_test.go）。
+				//
+				// rootkit：LKM / LD_PRELOAD / cron / systemd / root 授权密钥。
+				// 已排除包管理器写 systemd 与 cron 的常规行为。
+				stages = append(stages, engine.NewRootkitStage(nil, logger))
+				// reverse_shell：bash /dev/tcp、nc -e、解释器反连等已知形态。
+				stages = append(stages, engine.NewReverseShellStage(nil, logger))
+				// priv_escalation：已验证不把日常 sudo 当信号。
+				stages = append(stages, engine.NewPrivEscalationStage(nil, logger))
+				// brute_force：5 分钟窗口内 5 次失败才告警，成功登录清零计数，
+				// 用户输错一次密码不会触发。
+				stages = append(stages, engine.NewBruteForceStage(nil, logger))
+				// webshell：文件内容特征匹配，正常语料零误命中。
+				stages = append(stages, engine.NewWebshellStage(nil, logger))
+				//
+				// abnormal_login 暂不接线：画像是进程内空 map 起步，
+				// 冷启动时每台主机的第一次正常登录都会同时命中
+				// 「新国家 + 新 IP 段 + 新用户」，机群有多少台就报多少条，
+				// 且每次 engine 重启重演。见 intrusion/corpus_fp_test.go 的冷启动用例。
+				// 修复方向：画像持久化，或引入学习期（参照 ML 异常检测的 shadow 档）。
 				logger.Info("Engine stages 已注入", zap.Int("stages_count", len(stages)))
 			}
 		} else {

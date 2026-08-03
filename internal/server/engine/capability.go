@@ -77,22 +77,19 @@ var Capabilities = []Capability{
 		Note: "落库路径已通；检出逻辑本身尚未经端到端验证"},
 
 	// --- 有代码但从未接线 ---
-	{Name: "ml_anomaly", Constructor: "NewMLStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "ML 走 consumer 侧独立路径写 anomaly_alerts，本 Stage 未接入"},
-	{Name: "honeypot", Constructor: "NewHoneypotStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "config_change_audit", Constructor: "NewConfigChangeAuditStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "quarantine_audit", Constructor: "NewQuarantineAuditStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "abnormal_login", Constructor: "NewAbnormalLoginStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "webshell", Constructor: "NewWebshellStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "S2 场景依赖项，需接线并补 E2E"},
-	{Name: "brute_force", Constructor: "NewBruteForceStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "reverse_shell", Constructor: "NewReverseShellStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "S2 场景依赖项，需接线并补 E2E"},
-	{Name: "priv_escalation", Constructor: "NewPrivEscalationStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "S3 场景依赖项"},
-	{Name: "kube_audit", Constructor: "NewKubeAuditStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "K8s 审计另有 manager 侧路径在跑，本 Stage 未接入"},
-	{Name: "rootkit", Constructor: "NewRootkitStage", Status: StatusUnwired, Sink: SinkNone},
+	{Name: "abnormal_login", Constructor: "NewAbnormalLoginStage", Status: StatusUnwired, Sink: SinkNone,
+		Note: "暂不接线：画像内存起步，冷启动时每台主机首次正常登录必告警，" +
+			"机群规模=告警条数且每次重启重演。需先做画像持久化或学习期"},
+	{Name: "webshell", Constructor: "NewWebshellStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；正常语料零误命中"},
+	{Name: "brute_force", Constructor: "NewBruteForceStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；5 分钟窗口 5 次失败阈值，成功登录清零计数"},
+	{Name: "reverse_shell", Constructor: "NewReverseShellStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；正常语料零误命中，检出侧尚未做端到端验证"},
+	{Name: "priv_escalation", Constructor: "NewPrivEscalationStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；正常语料零误命中（不把日常 sudo 当信号）"},
+	{Name: "rootkit", Constructor: "NewRootkitStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；已排除包管理器写 systemd/cron 的常规行为，正常语料零误命中"},
 }
 
 // CapabilitySummary 是清单的统计摘要。

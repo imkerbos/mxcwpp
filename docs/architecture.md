@@ -120,7 +120,11 @@ Kafka 异步消费服务，**仅负责数据持久化**（v2.0 起检测能力�
 v2.0 新增的检测分析引擎，独立服务，与 Consumer 并行消费 Kafka。
 
 - 订阅 `mxcwpp.agent.*` 全部业务 Topic（ConsumerGroup B "mxcwpp-engine"），与 Consumer 互不影响 offset
-- **16 个检测 Stage**（`internal/server/engine/stage_*.go`）：CEL / Sequence / Anomaly / ML / Audit / Honeypot / Intrusion / Kube / Privilege / RASP / Anti-Rootkit / Rootkit / Storyline / Webshell / Revshell+Priv / AbnormalLogin
+- **检测 Stage**（`internal/server/engine/stage_*.go`）：清单以 `capability.go` 为准，
+  当前 14 个定义中 **13 个已接入流水线**——CEL / Sequence / IOC / PortScan / Storyline /
+  Privilege / RASP / Anti-Rootkit / Rootkit / ReverseShell / PrivEscalation /
+  BruteForce / Webshell。
+  仅 `abnormal_login` 未接线（画像冷启动会对每台主机的首次登录误报，见路线图）
 - 多层检测子包：
   - `celengine/` — CEL 规则引擎，eBPF 事件实时匹配 + 自动响应触发。
     规则按 `draft → shadow → context → alert` 分级，晋级门槛由人工研判结论决定
