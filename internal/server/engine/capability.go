@@ -77,11 +77,6 @@ var Capabilities = []Capability{
 		Note: "落库路径已通；检出逻辑本身尚未经端到端验证"},
 
 	// --- 有代码但从未接线 ---
-	{Name: "ml_anomaly", Constructor: "NewMLStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "ML 走 consumer 侧独立路径写 anomaly_alerts，本 Stage 未接入"},
-	{Name: "honeypot", Constructor: "NewHoneypotStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "config_change_audit", Constructor: "NewConfigChangeAuditStage", Status: StatusUnwired, Sink: SinkNone},
-	{Name: "quarantine_audit", Constructor: "NewQuarantineAuditStage", Status: StatusUnwired, Sink: SinkNone},
 	{Name: "abnormal_login", Constructor: "NewAbnormalLoginStage", Status: StatusUnwired, Sink: SinkNone},
 	{Name: "webshell", Constructor: "NewWebshellStage", Status: StatusUnwired, Sink: SinkNone,
 		Note: "S2 场景依赖项，需接线并补 E2E"},
@@ -90,8 +85,6 @@ var Capabilities = []Capability{
 		Note: "S2 场景依赖项，需接线并补 E2E"},
 	{Name: "priv_escalation", Constructor: "NewPrivEscalationStage", Status: StatusUnwired, Sink: SinkNone,
 		Note: "S3 场景依赖项"},
-	{Name: "kube_audit", Constructor: "NewKubeAuditStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "K8s 审计另有 manager 侧路径在跑，本 Stage 未接入"},
 	{Name: "rootkit", Constructor: "NewRootkitStage", Status: StatusUnwired, Sink: SinkNone},
 }
 
