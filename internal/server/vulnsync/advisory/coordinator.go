@@ -370,6 +370,9 @@ type mergedVuln struct {
 	advisory   *Advisory
 	confidence Confidence
 	source     string
+	// covers 记录当前 metadata 所属 advisory 是否匹配到了本环境的主机。
+	// 选 source / fixed_version 时它优先于 confidence——见 mergeByConfidence。
+	covers bool
 
 	// 受影响主机：所有 source 的并集（去重）。
 	// 关键：同 CVE 在 RHSA(rhel,10) 和 Rocky(rocky,9) 各自 match 不同 host，
@@ -402,6 +405,9 @@ func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSof
 				needs = append(needs, a)
 			}
 		}
+		// 这条 advisory 是否覆盖了本环境的主机。
+		covers := len(needs) > 0
+
 		for _, cveID := range item.advisory.CVEIDs {
 			existing, ok := out[cveID]
 			if !ok {
@@ -409,6 +415,7 @@ func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSof
 					advisory:      item.advisory,
 					confidence:    item.confidence,
 					source:        item.sourceName,
+					covers:        covers,
 					affectedHosts: needs,
 					allAdvisories: []sourcedAdvisory{item},
 				}
@@ -417,11 +424,12 @@ func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSof
 			// 受影响主机并集（不论 confidence）
 			existing.affectedHosts = append(existing.affectedHosts, needs...)
 			existing.allAdvisories = append(existing.allAdvisories, item)
-			// metadata 仅在严格更高 confidence 时覆盖
-			if confidenceRank(item.confidence) > confidenceRank(existing.confidence) {
+
+			if betterMetadata(item, covers, existing) {
 				existing.advisory = item.advisory
 				existing.confidence = item.confidence
 				existing.source = item.sourceName
+				existing.covers = covers
 			}
 		}
 	}
@@ -430,6 +438,23 @@ func mergeByConfidence(items []sourcedAdvisory, matcher Matcher, hosts []HostSof
 		mv.affectedHosts = dedupAffectedHosts(mv.affectedHosts)
 	}
 	return out
+}
+
+// betterMetadata 判断 item 是否应取代 existing 成为该 CVE 的 metadata 来源。
+//
+// CVE 的 source 与 fixed_version 是 CVE 级的塌缩值，只能有一个赢家。
+// 此前只比 confidence，完全不看这条 advisory 有没有匹配到本环境的主机——
+// 于是一条毫不相关的 debian advisory 能把 rpm 主机的修复版本标成 deb 版本，
+// 运维照着修根本修不掉。
+//
+// 覆盖性因此优先于 confidence：一条针对本环境 OS、给出可用版本号的 advisory，
+// 比一条 confidence 更高但压根不适用的更有价值。两者覆盖性相同时才比 confidence。
+func betterMetadata(item sourcedAdvisory, covers bool, existing *mergedVuln) bool {
+	if covers != existing.covers {
+		// 覆盖了主机的胜出，无论 confidence 高低
+		return covers
+	}
+	return confidenceRank(item.confidence) > confidenceRank(existing.confidence)
 }
 
 // dedupAffectedHosts 按 (HostID, PkgName) 去重，保留首条

@@ -651,7 +651,9 @@
       "statHostInstances": "主机漏洞总数",
       "statPatched": "已修复",
       "statUnpatched": "未修复",
-      "statRate": "修复率"
+      "statRate": "修复率",
+      "colCurrentVersion": "当前版本",
+      "colHostFixedVersion": "适用修复版本"
     },
     "bulletins": {
       "statActive": "活跃通报",

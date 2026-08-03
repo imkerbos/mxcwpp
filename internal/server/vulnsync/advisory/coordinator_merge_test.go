@@ -103,3 +103,93 @@ func TestDedupAffectedHosts(t *testing.T) {
 		t.Errorf("expected 3, got %d: %+v", len(out), out)
 	}
 }
+
+// 选 metadata 时必须看该 advisory 是否真的覆盖了匹配到的主机。
+//
+// CVE 的 source 与 fixed_version 是 CVE 级的塌缩值。此前只按 confidence 挑赢家，
+// 完全不看这条 advisory 有没有匹配到任何主机——于是一条对本环境毫不相关的
+// debian advisory，只要 confidence 不低于 rpm 那条，就能把 rpm 主机的修复版本
+// 标成 deb 的版本。
+//
+// 生产实测：debian 标签挂在 rpm 主机上，运维照着修根本修不掉。
+func TestMergeByConfidence_PrefersAdvisoryCoveringMatchedHosts(t *testing.T) {
+	cve := "CVE-2026-88888"
+
+	// 该环境里只有 rocky 主机
+	rockyHost := HostSoftware{
+		HostID: "host-rocky9", OSFamily: "rocky", OSMajor: "9",
+		PkgName: "openssl", PkgEpoch: "1", PkgVerRaw: "3.5.1", PkgRelease: "3.el9",
+		PkgManager: "rpm",
+	}
+
+	// debian advisory：同 confidence，但匹配不到本环境任何主机
+	debAdv := &Advisory{
+		AdvisoryID:   "DSA-2026-1",
+		CVEIDs:       []string{cve},
+		OSFamily:     "debian",
+		OSMajorVer:   "12",
+		AffectedPkgs: []PkgFix{{Name: "openssl", FixedVersion: "3.0.11-1~deb12u2"}},
+	}
+	// rocky advisory：匹配到了主机
+	rockyAdv := &Advisory{
+		AdvisoryID:   "RLSA-2026:8888",
+		CVEIDs:       []string{cve},
+		OSFamily:     "rocky",
+		OSMajorVer:   "9",
+		AffectedPkgs: []PkgFix{{Name: "openssl", FixedVersion: "1:3.5.1-7.el9_7"}},
+	}
+
+	// debian 排在前面（同 confidence 时顺序即胜负），复现最坏情况
+	items := []sourcedAdvisory{
+		{sourceName: "debian", advisory: debAdv, confidence: ConfidenceHigh},
+		{sourceName: "rocky-apollo", advisory: rockyAdv, confidence: ConfidenceHigh},
+	}
+	merged := mergeByConfidence(items, &DefaultMatcher{}, []HostSoftware{rockyHost})
+
+	mv, ok := merged[cve]
+	if !ok {
+		t.Fatalf("CVE %s 不在合并结果里", cve)
+	}
+	if mv.source == "debian" {
+		t.Fatalf("选中了 debian advisory，但它匹配不到本环境任何主机；"+
+			"rocky 主机会被标上 deb 的修复版本 %q，照着修根本修不掉",
+			debAdv.AffectedPkgs[0].FixedVersion)
+	}
+	if mv.source != "rocky-apollo" {
+		t.Fatalf("应选中覆盖了匹配主机的 rocky advisory，实际 source=%q", mv.source)
+	}
+	if got := mv.advisory.AffectedPkgs[0].FixedVersion; got != "1:3.5.1-7.el9_7" {
+		t.Fatalf("fixed_version 应取 rocky 的 el9 版本，实际 %q", got)
+	}
+}
+
+// 都没匹配到主机时退回原有的 confidence 规则。
+//
+// 没有覆盖信息可用时不该凭空改变行为——那只会把一个确定的选择换成另一个。
+func TestMergeByConfidence_FallsBackToConfidenceWhenNoCoverage(t *testing.T) {
+	cve := "CVE-2026-77777"
+	// 环境里没有任何相关主机
+	var noHosts []HostSoftware
+
+	low := &Advisory{
+		AdvisoryID: "NVD-1", CVEIDs: []string{cve}, OSFamily: "debian", OSMajorVer: "12",
+		AffectedPkgs: []PkgFix{{Name: "openssl", FixedVersion: "1.0"}},
+	}
+	high := &Advisory{
+		AdvisoryID: "RLSA-1", CVEIDs: []string{cve}, OSFamily: "rocky", OSMajorVer: "9",
+		AffectedPkgs: []PkgFix{{Name: "openssl", FixedVersion: "2.0"}},
+	}
+	items := []sourcedAdvisory{
+		{sourceName: "nvd", advisory: low, confidence: ConfidenceLow},
+		{sourceName: "rocky-apollo", advisory: high, confidence: ConfidenceHigh},
+	}
+	merged := mergeByConfidence(items, &DefaultMatcher{}, noHosts)
+
+	mv := merged[cve]
+	if mv == nil {
+		t.Fatal("CVE 不在合并结果里")
+	}
+	if mv.source != "rocky-apollo" {
+		t.Fatalf("无覆盖信息时应按 confidence 选高者，实际 source=%q", mv.source)
+	}
+}

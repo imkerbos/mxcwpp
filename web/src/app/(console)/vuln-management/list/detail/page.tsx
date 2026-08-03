@@ -18,6 +18,12 @@ interface AffectedHost {
   hostId: string;
   hostname: string;
   ip: string;
+  /** 该主机实际适用的修复版本。CVE 级的 fixedVersion 是跨发行版塌缩值，
+   *  对具体主机未必正确——rpm 主机可能被标上 deb 的版本号。 */
+  matchedFixedVersion?: string;
+  /** 该主机上实际匹配到的包名。同一 CVE 在不同发行版里包名可能不同。 */
+  matchedComponent?: string;
+  currentVersion?: string;
 }
 
 type Tone = "success" | "warning" | "danger" | "info" | "neutral";
@@ -95,6 +101,21 @@ export default function VulnDetailPage() {
       key: "ip",
       title: "IP",
       render: (r) => <span className="font-mono text-xs text-muted tabular-nums">{r.ip || "—"}</span>,
+    },
+    {
+      key: "currentVersion",
+      title: t("vuln.list.colCurrentVersion"),
+      render: (r) => <span className="font-mono text-xs text-muted">{r.currentVersion || "—"}</span>,
+    },
+    {
+      // 按主机显示适用版本，而不是详情页顶部那个 CVE 级塌缩值。
+      // 同一 CVE 影响多种发行版时，塌缩值对多数主机是错的，
+      // 运维照着它修根本修不掉。
+      key: "matchedFixedVersion",
+      title: t("vuln.list.colHostFixedVersion"),
+      render: (r) => (
+        <span className="font-mono text-xs text-ink">{r.matchedFixedVersion || "—"}</span>
+      ),
     },
   ];
 
