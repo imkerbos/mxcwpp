@@ -57,12 +57,14 @@ make lint            # 代码检查
 - 配置从配置文件读取，禁止硬编码
 - 测试命名：`TestXxx_描述`，使用 table-driven tests
 
-### TypeScript / Vue
+### TypeScript / React（Next.js）
 
-- API 调用统一封装在 `ui/src/api/` 目录，禁止直接调用 axios
+- API 调用统一封装在 `web/src/lib/api/` 目录，禁止组件内直接调用 axios
 - 定义接口类型，使用 TypeScript 严格模式
-- 所有 API 调用必须有 try-catch 错误处理
+- 数据请求统一走 TanStack Query，不在组件里手写 loading/error 状态机
 - 组件命名 PascalCase，函数 camelCase，常量 UPPER_CASE
+- 请求失败要显式呈现，**不要渲染成 0 或空白**——
+  用户分不清「值就是 0」和「没取到」，而这两者的处置完全不同
 
 ### 通用
 
@@ -85,24 +87,33 @@ make lint            # 代码检查
 
 ### 前端
 
-| 检查项 | 说明 |
-|--------|------|
-| ESLint | `npm run lint`，JavaScript / TypeScript 代码规范检查 |
-| TypeScript 类型检查 | `npm run build`（内含 vue-tsc），确保类型安全 |
+前端为 Next.js + TypeScript，包管理用 **pnpm**（不是 npm）。
+
+| 检查项 | 命令 | 说明 |
+|--------|------|------|
+| 类型检查 | `pnpm lint` | 实际执行 `tsc --noEmit` |
+| 单元测试 | `pnpm test` | vitest |
+| 端到端测试 | `pnpm test:e2e` | playwright，需先起服务 |
+| 构建 | `pnpm build` | next build |
 
 建议在提交前按顺序执行：
 
 ```bash
 # 后端
 make fmt
-make lint
 go vet ./...
-make test
+make test        # 含文档同步、路由清单、告警覆盖等门禁
 
-# 前端（在 ui/ 目录下）
-npm run lint
-npm run build    # 包含 vue-tsc 类型检查
+# 前端（在 web/ 目录下）
+pnpm lint        # tsc --noEmit
+pnpm test
 ```
+
+> `make lint`（golangci-lint）当前在 CI 中为非阻塞，存量 37 条风格告警待清理，
+> 详见 [路线图 · 已知问题](roadmap.md#六已知问题)。
+>
+> 装 `make hooks` 后，提交前会自动拦下未格式化的文件——
+> gofmt 是 CI 的第一步，它失败会让后面的测试与门禁全部不执行。
 
 ## 数据库迁移指南
 
@@ -166,7 +177,7 @@ make dev-docker-up
 
 ### 联调要点
 
-- 前端 API 定义在 `ui/src/api/` 目录，新增接口时先定义类型再实现调用
+- 前端 API 定义在 `web/src/lib/api/` 目录，新增接口时先定义类型再实现调用
 - 后端接口定义后，前端可通过浏览器开发者工具的 Network 面板查看实际请求和响应
 - 如遇跨域问题，检查 Nginx 配置（`deploy/` 目录下的 Docker Compose 配置）
 

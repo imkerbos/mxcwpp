@@ -208,3 +208,7 @@ deploy/certs/*.srl
 
 # generated & persisted agent enroll token (secret, do not commit)
 deploy/certs/enroll_token.secret
+
+# golangci-lint migrate 产生的备份；旧配置在 git 历史里可回溯，不需要留副本
+.golangci.bck.yml
+*.bck.yml
