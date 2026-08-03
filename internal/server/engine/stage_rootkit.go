@@ -59,6 +59,9 @@ func (s *RootkitStage) Process(ctx context.Context, ev PipelineEvent) ([]Alert, 
 		Source:  source,
 		Content: content,
 		UID:     atoi32(fields["uid"]),
+		// 必须带上执行体：detector 靠它排除包管理器写 systemd 单元 / cron
+		// 这类常规行为。不传的话排除逻辑形同虚设，每次装包都会报持久化后门。
+		ExePath: fields["exe"],
 	}
 	payload, hit := s.detector.Scan(ctx, ie)
 	if !hit {
