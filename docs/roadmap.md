@@ -3,7 +3,7 @@
 > **这份文档是交付状态的唯一权威来源。** 与代码或其它文档冲突时以本文档为准，
 > 并当场修正落后的那一份。
 >
-> 最后核实：2026-08-03
+> 最后核实：2026-08-04
 >
 > 本仓库公开。涉及具体部署环境的迁移步骤、主机规模与运维细节不在此文档，
 > 留在 `local-reports/`（不入库）。
@@ -18,7 +18,7 @@
 | 维度 | 数量 |
 |------|------|
 | 后端服务 | 7（manager / agentcenter / consumer / engine / vulnsync / llmproxy / scanner）|
-| 检测能力（Stage）| 14 定义，**13 已接线，1 未接线** |
+| 检测能力（Stage）| 14 定义，**14 已接线，0 未接线** |
 | Agent 插件 | 12 |
 | 前端页面 | 83 |
 | 基线策略 | 30 个 / 614 条规则 |
@@ -26,8 +26,6 @@
 
 > 「未接线」= 有构造器但从未接入流水线。清单见 `internal/server/engine/capability.go`，
 > 有 CI 门禁校验清单与代码一致。**不要按未接线的代码去理解线上行为。**
-
----
 
 ---
 
@@ -80,14 +78,20 @@
 （零调用方，实际跑的是 `agentcenter/scheduler`）、`stage_audit` 与 `manager/biz/audit`
 （死生产者-死消费者配对；在跑的是 `internal/server/audit`）。
 
+2026-08-04 接线 `abnormal_login`，Stage 侧不再有未接线项。它的两个阻塞都已解除：
+冷启动刷屏由每主机学习期治住（默认 7 天且 ≥10 次登录，两个条件都满足才退出），
+画像落 `host_login_profile_states`（启动恢复 + 5 分钟 checkpoint），重启后学习期不重来。
+学习期是静默的，`mxcwpp_engine_abnormal_login_hosts_learning / _hosts_graduated /
+_suppressed_total` 三个指标一并导出，并配了「8 天无一台毕业」的告警——
+否则「一切正常」和「检测没生效」在告警面上都是零条。
+接线同时收窄了事件面：`pam_unix(sudo:session)` / `(cron:session)` 等本地会话不再当登录，
+它们的量比真实登录高几个数量级，会让主机靠噪声凑够样本毕业。
+
 剩余未接线：
 
 | 位置 | 状态 |
 |------|------|
-| `abnormal_login` | **暂不接线**。画像是进程内空 map 起步，冷启动时每台主机的第一次正常登录都会同时命中「新国家 + 新 IP 段 + 新用户」——机群有多少台就报多少条，且每次 engine 重启重演。需先做画像持久化或引入学习期（可参照 ML 异常检测的 shadow 档）。已有测试记录该行为 |
 | `internal/server/manager/biz/mlmodel/` | 模型分发链路（上传/审批/订阅/下发）完整实现，零路由零调用方。**保留待接线**；连带 `model/ml_model.go` 的 3 张表 |
-
----
 
 ---
 
@@ -101,8 +105,6 @@
 | Kafka → detector 事件通路 | 本地容器网络限制，未跑通 |
 | 前端交互行为 | 只验了页面可加载、接口字段匹配、i18n key 存在；**没有浏览器实际点击验证** |
 | ML recall | 完全没有测量（见 §5.1）|
-
----
 
 ---
 
@@ -146,8 +148,6 @@
 
 ---
 
----
-
 ## 六、待办清单（backlog）
 
 > 标「需前置条件」的，等的不是工时。
@@ -156,8 +156,7 @@
 
 | 项 | 说明 |
 |----|------|
-| 三个未接线包的去留 | `engine/scheduler`、`biz/mlmodel` 零 import；`engine/ml` 仅被同样未接线的 `stage_ml.go` 引用。接上要做端到端验证，删掉要确认无外部依赖 |
-| 11 个未接线 Stage | 见 `capability.go`。逐个决定接线或删除 |
+| `biz/mlmodel` 接线 | 模型分发链路已完整实现，零路由零调用方。接上要做端到端验证并补路由文档；见 §5.3 |
 
 ### 需前置条件
 
@@ -173,6 +172,7 @@
 | Agent 装机链路验证 | 需真实 Linux 靶机走完 `install.sh` → systemd → 启动 |
 | Kafka → detector 通路 | 本地容器网络限制，未跑通 |
 | 前端交互验证 | 已验页面可加载、接口字段匹配、i18n key 齐全；交互行为需浏览器实际点击 |
+| `abnormal_login` 真实误报面 | 已接线，标注语料的正常运维登录零命中，但语料是构造的。真实机群头 7 天全静默，第 8 天起看 `mxcwpp_engine_abnormal_login_suppressed_total` 与实际告警量，再判要不要收窄 |
 
 ### 工程债
 
@@ -200,16 +200,8 @@ CVE 的 `source` 与 `fixed_version` 是 CVE 级塌缩值。合并多来源 advi
 历史行需要重跑一次同步才会补上。在那之前，详情页对多数主机显示「—」——
 这是如实的「未知」，好过继续显示一个可能错误的塌缩值。
 
-----|------|------|
-| **P1 根治** | `mergeByConfidence` 选 source/fixed_version 时，优先取覆盖已匹配主机 OS 的 advisory；并回填存量误标行 | `vulnsync/advisory/coordinator.go:390` |
-| **P2 展示一致** | host_vuln 视图与任务展示 per-host `fixed_version` | manager api + web |
-
-P2 的能力已经有了 —— `biz/fixed_version_lookup.go` 的 `ResolveFixedVersionForHost`
-在 precheck 链路（`precheck_cron.go` / `precheck_dispatcher.go`）已在用，
-但没接进 API 与界面，所以用户看到的仍是塌缩值。
-
-验证方式：P1 完成后回填，debian 标签挂在 rpm 主机上的链应归零；P2 完成后界面
-显示 el9 版本而不是 deb 版本。
+验证方式：重跑同步回填后，debian 标签挂在 rpm 主机上的链应归零，
+详情页对 rpm 主机显示 el9 版本而不是 deb 版本。
 
 > 更彻底的长期方案：`host_vulnerabilities` 落地每主机匹配到的 source 与
 > fixed_version（该表已有 current_version），下游全读 per-host 真值，

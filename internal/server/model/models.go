@@ -268,6 +268,7 @@ var (
 		&SequenceRule{},
 		&BehaviorAlert{},
 		&HostBaselineState{},
+		&HostLoginProfileState{},
 		&BDEMetricTuning{},
 		&Storyline{},
 		&StorylineEvent{},

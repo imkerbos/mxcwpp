@@ -44,6 +44,12 @@ func (s *AbnormalLoginStage) Process(ctx context.Context, ev PipelineEvent) ([]A
 	if !containsStr(logMsg, "Accepted") && !containsStr(logMsg, "session opened") {
 		return nil, nil
 	}
+	// 本地会话不是登录。sudo 每执行一条命令、cron 每分钟起一次任务，PAM 都会打
+	// 一行 "session opened"，量比真实登录高几个数量级。喂进画像的后果是主机靠
+	// 这些噪声凑够样本毕业、时段分布被 cron 填平，真正的异常登录反而淹掉。
+	if isLocalPAMSession(logMsg) {
+		return nil, nil
+	}
 
 	login := intrusion.SuccessfulLogin{
 		HostID:    ev.HostID,
@@ -67,6 +73,19 @@ func (s *AbnormalLoginStage) Process(ctx context.Context, ev PipelineEvent) ([]A
 			WouldAction:    payload,
 		},
 	}, nil
+}
+
+// localPAMServices 是会打 "session opened" 但不代表一次登录的 PAM 服务。
+// sudo / su 的提权由 priv_escalation 覆盖，cron 与 systemd 用户会话是系统自身行为。
+var localPAMServices = []string{"(cron:", "(sudo:", "(su:", "(systemd-user:", "(runuser:"}
+
+func isLocalPAMSession(logMsg string) bool {
+	for _, svc := range localPAMServices {
+		if containsStr(logMsg, svc) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsStr(s, sub string) bool {

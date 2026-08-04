@@ -32,6 +32,7 @@ import (
 	"github.com/matrixplusio/mxcwpp/internal/server/common/observability"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/celengine"
+	"github.com/matrixplusio/mxcwpp/internal/server/engine/intrusion"
 	"github.com/matrixplusio/mxcwpp/internal/server/engine/storyline"
 )
 
@@ -197,12 +198,17 @@ func main() {
 				stages = append(stages, engine.NewBruteForceStage(nil, logger))
 				// webshell：文件内容特征匹配，正常语料零误命中。
 				stages = append(stages, engine.NewWebshellStage(nil, logger))
-				//
-				// abnormal_login 暂不接线：画像是进程内空 map 起步，
-				// 冷启动时每台主机的第一次正常登录都会同时命中
-				// 「新国家 + 新 IP 段 + 新用户」，机群有多少台就报多少条，
-				// 且每次 engine 重启重演。见 intrusion/corpus_fp_test.go 的冷启动用例。
-				// 修复方向：画像持久化，或引入学习期（参照 ML 异常检测的 shadow 档）。
+				// abnormal_login：每主机学习期（7 天且 ≥10 次登录）内静默喂画像，
+				// 画像落 host_login_profile_states，重启后接着用，学习期不重来。
+				// 学习期是静默的，指标必须一起接，否则「正常」和「没生效」看起来一样。
+				loginDet := intrusion.NewAbnormalLoginDetectorWithStore(db, logger.Named("abnormal_login"))
+				loginDet.LoadFromDB()
+				loginDet.StartCheckpoint(ctx, 0)
+				if err := loginDet.RegisterMetrics(nil); err != nil {
+					logger.Warn("异常登录学习期指标注册失败", zap.Error(err))
+				}
+				stages = append(stages, engine.NewAbnormalLoginStage(loginDet, logger))
+
 				logger.Info("Engine stages 已注入", zap.Int("stages_count", len(stages)))
 			}
 		} else {

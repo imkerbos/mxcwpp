@@ -330,16 +330,13 @@ func TestBruteForceDetector_ThresholdBehaviour(t *testing.T) {
 
 // AbnormalLoginDetector 的冷启动行为。
 //
-// 它按主机维护画像（国家 / 时段 / IP 段 / 用户），任何「首次见到」都算异常。
-// 问题在于画像是内存里的空 map 起步：进程启动后每台主机的第一次登录，
-// 都会同时命中「新国家 + 新 IP 段 + 新用户」三条。
+// 它按主机维护画像（国家 / 时段 / IP 段 / 用户），任何「首次见到」都算异常，
+// 而画像是进程内空 map 起步。没有学习期时，engine 启动后每台主机的第一次登录
+// 都会同时命中「新国家 + 新 IP 段 + 新用户」三条 —— 机群有多少台就报多少条，
+// 且每次重启重演。
 //
-// 也就是说接线的瞬间，机群有多少台主机就会产生多少条告警，
-// 而它们全部是正常的日常登录。engine 每次重启都重演一遍。
-//
-// 本测试记录这个行为，作为「暂不接线」的依据。修复方向是画像持久化
-// 或引入学习期（参照 ML 异常检测的 shadow 档）。
-func TestAbnormalLoginDetector_ColdStartFlagsEveryFirstLogin(t *testing.T) {
+// 学习期把这段静默掉：期内照常喂画像，不产告警。
+func TestAbnormalLoginDetector_ColdStartIsSilentDuringLearning(t *testing.T) {
 	d := NewAbnormalLoginDetector()
 	ctx := context.Background()
 
@@ -352,18 +349,201 @@ func TestAbnormalLoginDetector_ColdStartFlagsEveryFirstLogin(t *testing.T) {
 		Timestamp: time.Date(2026, 8, 4, 14, 30, 0, 0, time.UTC), // 下午 2 点半
 	}
 
-	_, hit := d.Ingest(ctx, login)
-	if !hit {
-		t.Skip("冷启动行为已改变，本测试的前提失效——请重新评估接线条件")
-	}
-
-	// 同一主机同一来源再次登录：画像已建立，不该再告警
 	if _, hit := d.Ingest(ctx, login); hit {
-		t.Error("第二次相同登录仍告警，说明画像没有生效")
+		t.Fatal("冷启动首次登录仍告警：学习期没生效，接线即刷屏")
+	}
+	if _, hit := d.Ingest(ctx, login); hit {
+		t.Error("第二次相同登录告警，画像没生效")
 	}
 
-	// 记录事实：冷启动首次登录必然告警。
-	// 机群规模 = 接线瞬间的告警条数，且每次 engine 重启重演。
-	t.Log("确认：冷启动时每台主机的首次正常登录都会告警" +
-		"（新国家 + 新 IP 段 + 新用户三条同时命中）")
+	if st := d.Stats(); st.HostsLearning != 1 || st.HostsGraduated != 0 {
+		t.Errorf("学习期统计不对: %+v", st)
+	}
+}
+
+// 走完学习期之后，检测必须真的生效——否则「不误报」是靠彻底不告警换来的。
+func TestAbnormalLoginDetector_AlertsAfterLearningWindow(t *testing.T) {
+	d := NewAbnormalLoginDetector()
+	ctx := context.Background()
+	base := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC)
+
+	// 学习期内的日常登录：同一用户、同一网段、工作时间，每天一次
+	for i := 0; i < DefaultLearningMinSamples; i++ {
+		login := SuccessfulLogin{
+			HostID:    "h1",
+			Username:  "deploy",
+			SourceIP:  "10.0.0.5",
+			Country:   "CN",
+			Timestamp: base.Add(time.Duration(i) * 24 * time.Hour),
+		}
+		if _, hit := d.Ingest(ctx, login); hit {
+			t.Fatalf("学习期第 %d 次登录告警了", i+1)
+		}
+	}
+
+	// 学习期已过（样本数与时长都满足）：来自陌生国家、陌生网段的凌晨登录
+	evil := SuccessfulLogin{
+		HostID:    "h1",
+		Username:  "root",
+		SourceIP:  "203.0.113.9",
+		Country:   "RU",
+		Timestamp: base.Add(DefaultLearningWindow + 5*time.Hour), // 凌晨 3 点
+	}
+	payload, hit := d.Ingest(ctx, evil)
+	if !hit {
+		t.Fatal("学习期结束后仍不告警：检测等于没接")
+	}
+	if len(payload) == 0 {
+		t.Error("告警 payload 为空")
+	}
+
+	if st := d.Stats(); st.HostsGraduated != 1 {
+		t.Errorf("主机应已走完学习期: %+v", st)
+	}
+}
+
+// 时长与样本数是「都要满足」，各堵一种误报。
+func TestAbnormalLoginDetector_LearningNeedsBothTimeAndSamples(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC)
+
+	// 样本够但时长不够：一天内登录 20 次的机器，画像还没见过周末形态
+	t.Run("samples enough, window not elapsed", func(t *testing.T) {
+		d := NewAbnormalLoginDetectorWithWindow(7*24*time.Hour, 5)
+		for i := 0; i < 20; i++ {
+			login := SuccessfulLogin{
+				HostID: "h1", Username: "deploy", SourceIP: "10.0.0.5", Country: "CN",
+				Timestamp: base.Add(time.Duration(i) * time.Minute),
+			}
+			d.Ingest(ctx, login)
+		}
+		evil := SuccessfulLogin{
+			HostID: "h1", Username: "root", SourceIP: "203.0.113.9", Country: "RU",
+			Timestamp: base.Add(time.Hour),
+		}
+		if _, hit := d.Ingest(ctx, evil); hit {
+			t.Error("时长未到就告警了")
+		}
+	})
+
+	// 时长够但样本不够：一周只登录两次的低频机器，画像太稀疏
+	t.Run("window elapsed, samples too few", func(t *testing.T) {
+		d := NewAbnormalLoginDetectorWithWindow(7*24*time.Hour, 10)
+		for i := 0; i < 2; i++ {
+			login := SuccessfulLogin{
+				HostID: "h1", Username: "deploy", SourceIP: "10.0.0.5", Country: "CN",
+				Timestamp: base.Add(time.Duration(i) * 72 * time.Hour),
+			}
+			d.Ingest(ctx, login)
+		}
+		normal := SuccessfulLogin{
+			HostID: "h1", Username: "ops", SourceIP: "10.0.9.7", Country: "CN",
+			Timestamp: base.Add(10 * 24 * time.Hour),
+		}
+		if _, hit := d.Ingest(ctx, normal); hit {
+			t.Error("样本不足就告警了：低频主机的第三次登录被当成异常")
+		}
+	})
+}
+
+// 学习期不允许被配置成零，那等同于回到冷启动刷屏。
+func TestAbnormalLoginDetector_RejectsZeroLearningWindow(t *testing.T) {
+	d := NewAbnormalLoginDetectorWithWindow(0, 0)
+	ctx := context.Background()
+	login := SuccessfulLogin{
+		HostID: "h1", Username: "deploy", SourceIP: "10.0.0.5", Country: "CN",
+		Timestamp: time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC),
+	}
+	if _, hit := d.Ingest(ctx, login); hit {
+		t.Error("学习期被配置成零后冷启动又刷屏了")
+	}
+}
+
+// 接线前的最后一道闸：走完学习期的主机，日常运维登录必须零告警。
+//
+// 这个检测每命中一次就是一条 medium 告警送到值班面前。若日常登录也报，
+// 结果不是「多发现威胁」，而是值班从此不看这个告警源——EDR 那笔账已经付过一次。
+func TestAbnormalLoginDetector_BenignOpsLoginsAfterGraduation(t *testing.T) {
+	d := NewAbnormalLoginDetector()
+	ctx := context.Background()
+	base := time.Date(2026, 8, 4, 14, 0, 0, 0, time.UTC) // 周二下午 2 点
+
+	for i := 0; i < DefaultLearningMinSamples; i++ {
+		if _, hit := d.Ingest(ctx, SuccessfulLogin{
+			HostID: "h1", Username: "deploy", SourceIP: "10.0.0.5", Country: "CN",
+			Timestamp: base.Add(time.Duration(i) * 24 * time.Hour),
+		}); hit {
+			t.Fatalf("学习期第 %d 次登录告警了", i+1)
+		}
+	}
+	after := base.Add(DefaultLearningWindow + 3*24*time.Hour)
+
+	benign := []struct {
+		name  string
+		note  string
+		login SuccessfulLogin
+	}{
+		{
+			name:  "同一运维、同一出口 IP 的例行登录",
+			note:  "画像里已有的全部维度",
+			login: SuccessfulLogin{Username: "deploy", SourceIP: "10.0.0.5", Country: "CN", Timestamp: after},
+		},
+		{
+			name:  "同一出口网段换了台跳板机",
+			note:  "IP 维按 /24 聚合，末位变化属常态",
+			login: SuccessfulLogin{Username: "deploy", SourceIP: "10.0.0.87", Country: "CN", Timestamp: after.Add(time.Hour)},
+		},
+		{
+			name:  "周末值班登录",
+			note:  "时间维只看小时，不看星期几",
+			login: SuccessfulLogin{Username: "deploy", SourceIP: "10.0.0.5", Country: "CN", Timestamp: after.Add(4 * 24 * time.Hour)},
+		},
+		{
+			name:  "加班到晚上 11 点",
+			note:  "工作时间之外但不在 0-5 点，不该报",
+			login: SuccessfulLogin{Username: "deploy", SourceIP: "10.0.0.5", Country: "CN", Timestamp: after.Add(9 * time.Hour)},
+		},
+		{
+			name:  "清早 7 点上线窗口",
+			note:  "紧邻 0-5 点边界，边界必须是闭区间之外",
+			login: SuccessfulLogin{Username: "deploy", SourceIP: "10.0.0.5", Country: "CN", Timestamp: after.Add(17 * time.Hour)},
+		},
+	}
+
+	for _, c := range benign {
+		login := c.login
+		login.HostID = "h1"
+		if payload, hit := d.Ingest(ctx, login); hit {
+			t.Errorf("日常运维登录被判异常：%s\n  为什么它是正常的：%s\n  告警：%s",
+				c.name, c.note, payload)
+		}
+	}
+}
+
+// 0-5 点登录是有意保留的信号，但对常态化的夜间运维会自己闭嘴。
+//
+// 这是这个检测已知的误报面：值班第一次凌晨登录会报。代价可接受的前提是它
+// 不会一直报——同一时段第 3 次之后画像认了这个习惯。
+func TestAbnormalLoginDetector_NightLoginHabituates(t *testing.T) {
+	d := NewAbnormalLoginDetector()
+	ctx := context.Background()
+	base := time.Date(2026, 8, 4, 3, 0, 0, 0, time.UTC) // 凌晨 3 点
+
+	// 学习期内的夜间运维：静默，但画像照常记住这个时段。
+	for i := 0; i < DefaultLearningMinSamples; i++ {
+		if _, hit := d.Ingest(ctx, SuccessfulLogin{
+			HostID: "h1", Username: "oncall", SourceIP: "10.0.0.5", Country: "CN",
+			Timestamp: base.Add(time.Duration(i) * 24 * time.Hour),
+		}); hit {
+			t.Fatalf("学习期第 %d 次夜间登录告警了", i+1)
+		}
+	}
+
+	// 毕业后同一时段的夜间登录不该再报——习惯已被画像认下。
+	if payload, hit := d.Ingest(ctx, SuccessfulLogin{
+		HostID: "h1", Username: "oncall", SourceIP: "10.0.0.5", Country: "CN",
+		Timestamp: base.Add(DefaultLearningWindow + 5*24*time.Hour),
+	}); hit {
+		t.Errorf("常态化的夜间值班登录仍在告警，值班会被这条噪声淹没：%s", payload)
+	}
 }

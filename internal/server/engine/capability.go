@@ -76,10 +76,10 @@ var Capabilities = []Capability{
 	{Name: "anti_rootkit", Constructor: "NewAntiRootkitStage", Status: StatusActive, Sink: SinkAlertsTable,
 		Note: "落库路径已通；检出逻辑本身尚未经端到端验证"},
 
-	// --- 有代码但从未接线 ---
-	{Name: "abnormal_login", Constructor: "NewAbnormalLoginStage", Status: StatusUnwired, Sink: SinkNone,
-		Note: "暂不接线：画像内存起步，冷启动时每台主机首次正常登录必告警，" +
-			"机群规模=告警条数且每次重启重演。需先做画像持久化或学习期"},
+	{Name: "abnormal_login", Constructor: "NewAbnormalLoginStage", Status: StatusActive, Sink: SinkAlertsTable,
+		Note: "已接线；每主机学习期（7 天且 ≥10 次登录）内静默，画像持久化在 " +
+			"host_login_profile_states，重启后学习期不重来。学习期规模见 " +
+			"mxcwpp_engine_abnormal_login_hosts_learning / _hosts_graduated"},
 	{Name: "webshell", Constructor: "NewWebshellStage", Status: StatusActive, Sink: SinkAlertsTable,
 		Note: "已接线；正常语料零误命中"},
 	{Name: "brute_force", Constructor: "NewBruteForceStage", Status: StatusActive, Sink: SinkAlertsTable,

@@ -478,3 +478,23 @@ groups:
             host_anomaly_scores 写入失败，ranking 档实际未参与告警排序，
             但档位配置仍显示已启用——功能看起来在，实际不起作用。
             排查 MySQL 可写性与 host_anomaly_scores 表结构。
+
+      # --- 异常登录：学习期是否走得出去 ---
+
+      - alert: MxCwppAbnormalLoginNeverGraduates
+        # 学习期内检测静默不告警，和"检测根本没生效"在告警面上完全一样：都是零条。
+        # 学习期是 7 天且 ≥10 次登录，全机群一台都毕业不了说明画像没在积累——
+        # 常见原因是画像落库失败（每次重启从零开始）或登录事件根本没进 engine。
+        expr: mxcwpp_engine_abnormal_login_hosts_graduated == 0 and mxcwpp_engine_abnormal_login_hosts_learning > 0
+        for: 8d
+        labels:
+          severity: warning
+          service: engine
+        annotations:
+          summary: "异常登录检测无一台主机走完学习期"
+          description: |
+            有 {{ $value }} 台主机在学习期内，却没有任何一台毕业。学习期是 7 天且
+            ≥10 次登录，这里等到第 8 天才判，正常上线不会触发。
+            排查顺序：host_login_profile_states 是否在增长（落库失败则每次重启归零）→
+            engine 是否真的收到成功登录事件 → 机群登录频率是否低于 10 次/7 天
+            （真低频则这条检测对它本就不生效，属预期）。
