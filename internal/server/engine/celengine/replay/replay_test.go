@@ -1,6 +1,8 @@
 package replay_test
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -184,5 +186,86 @@ func TestNoTechniqueIsCompletelyUndetected(t *testing.T) {
 			}
 		}
 		t.Fatalf("以下技术一条都没检出: %v", zero)
+	}
+}
+
+// requiredTechniquesFile 是「必须被语料覆盖」的技术清单。
+const requiredTechniquesFile = "testdata/required_techniques.json"
+
+// loadRequiredTechniques 读清单里的技术 ID。
+func loadRequiredTechniques(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(requiredTechniquesFile)
+	if err != nil {
+		t.Fatalf("读取技术清单失败: %v", err)
+	}
+	var doc struct {
+		Techniques []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"techniques"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("解析技术清单失败: %v", err)
+	}
+	if len(doc.Techniques) == 0 {
+		t.Fatal("技术清单为空：清空它等于删掉这道门禁")
+	}
+	ids := make([]string, 0, len(doc.Techniques))
+	for _, tech := range doc.Techniques {
+		if tech.ID == "" {
+			t.Fatalf("技术清单里有条目缺 id: %+v", tech)
+		}
+		ids = append(ids, tech.ID)
+	}
+	return ids
+}
+
+// 清单里的技术必须仍被语料覆盖。
+//
+// UncoveredTechniques 此前已实现却没有输入，等于没接。缺了输入，
+// 「某个技术已经没有样本在测了」这件事不会有任何人发现——
+// 总召回率反而会因为少测一类而变好看。
+//
+// 这道门禁挡的是倒退：删语料、改标注、或规则改到某类技术不再被覆盖，都会红。
+// 它不给覆盖率定目标，还没覆盖的技术记在 roadmap，不放进清单。
+func TestRequiredTechniquesRemainCovered(t *testing.T) {
+	c, err := replay.Load(corpusDir)
+	if err != nil {
+		t.Fatalf("加载语料失败: %v", err)
+	}
+	rep, err := replay.Run(c, newMatcher(t))
+	if err != nil {
+		t.Fatalf("回放失败: %v", err)
+	}
+
+	want := loadRequiredTechniques(t)
+	if missing := rep.UncoveredTechniques(want); len(missing) > 0 {
+		t.Fatalf("以下技术已无语料覆盖: %v\n"+
+			"  它们的召回率现在是「未知」，不是 100%%。\n"+
+			"  要么补回样本，要么把这几行从 %s 删掉并在 docs/roadmap.md §5.1 记下缺口——\n"+
+			"  但不要让清单和语料悄悄脱节。", missing, requiredTechniquesFile)
+	}
+}
+
+// 清单不许写没覆盖的技术：那样门禁会长期红着，然后被所有人忽略。
+func TestRequiredTechniquesListHasNoAspirationalEntries(t *testing.T) {
+	c, err := replay.Load(corpusDir)
+	if err != nil {
+		t.Fatalf("加载语料失败: %v", err)
+	}
+	rep, err := replay.Run(c, newMatcher(t))
+	if err != nil {
+		t.Fatalf("回放失败: %v", err)
+	}
+
+	for _, tech := range loadRequiredTechniques(t) {
+		ts, ok := rep.ByTechnique[tech]
+		if !ok {
+			continue // 由上面那个用例负责报
+		}
+		if ts.Caught == 0 {
+			t.Errorf("清单里的 %s 有样本但一条都没检出——清单是覆盖现状，不是愿望清单", tech)
+		}
 	}
 }
